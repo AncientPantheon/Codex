@@ -1,0 +1,37 @@
+{
+  "name": "@ancientpantheon/codex-core",
+  "version": "0.0.1",
+  "description": "Chain-agnostic Codex substrate: the CK-wrapping vault + encryption model, the CodexAdapter storage interface, the CodexSnapshot data model, the ForeignChainAdapter registry seam, the foreignKeys keyring model, and the headless resolver factory. No React, no Ouronet, no Pact.",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rimraf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AncientPantheon/Codex.git",
+    "directory": "packages/codex-core"
+  },
+  "license": "UNLICENSED"
+}

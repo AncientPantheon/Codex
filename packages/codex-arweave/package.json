@@ -1,0 +1,37 @@
+{
+  "name": "@ancientpantheon/codex-arweave",
+  "version": "0.0.1",
+  "description": "The Arweave Codex module: the foreignKeys JWK keyring integration, the sibling RSA signer, the upload/library feature, and the Arweave UI tab. Builds on @ancientpantheon/arweave-core + codex-core.",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rimraf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AncientPantheon/Codex.git",
+    "directory": "packages/codex-arweave"
+  },
+  "license": "UNLICENSED"
+}

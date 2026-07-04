@@ -1,0 +1,60 @@
+{
+  "name": "@ancientpantheon/codex",
+  "version": "0.0.1",
+  "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./provider": {
+      "types": "./dist/provider/index.d.ts",
+      "import": "./dist/provider/index.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
+    },
+    "./ouronet": {
+      "types": "./dist/ouronet/index.d.ts",
+      "import": "./dist/ouronet/index.js"
+    },
+    "./arweave": {
+      "types": "./dist/arweave/index.d.ts",
+      "import": "./dist/arweave/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rimraf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AncientPantheon/Codex.git",
+    "directory": "packages/codex"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "license": "UNLICENSED"
+}

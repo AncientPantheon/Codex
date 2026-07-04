@@ -1,0 +1,44 @@
+{
+  "name": "@ancientpantheon/arweave-core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic Arweave protocol library — chain-native primitives for wallets, signing, and permanent-storage uploads, with no UI or framework dependencies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "arweave": "^1.15.7",
+    "@ardrive/turbo-sdk": "^1.42.0"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rimraf dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AncientPantheon/Codex.git",
+    "directory": "packages/arweave-core"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "license": "UNLICENSED"
+}

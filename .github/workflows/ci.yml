@@ -1,0 +1,59 @@
+name: Build & Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      # main only — deliberate deviation from the sibling stoa-js workflow
+      # (which also builds master); Codex standardizes on a single main branch.
+      - main
+
+# Least-privilege default token. PR runs execute PR-influenced code; a
+# read-only contents scope means a compromised build step cannot push commits,
+# create releases, or mutate the repo with the auto-provided GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Typecheck + Build + Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # No git-persisted token: nothing in this workflow pushes to the repo,
+          # so a leftover credential in .git/config would only be attack surface.
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # npm install (not npm ci) while local and CI npm versions differ;
+        # tighten to npm ci once environments align. --ignore-scripts is
+        # intentionally NOT added here: the build relies on lifecycle scripts
+        # of the toolchain, and CI runs no publish credential on disk, so the
+        # install-time exfiltration vector that motivates it in publish.yml
+        # does not apply.
+        run: npm install --prefer-offline --no-audit --no-fund
+
+      # Non-blocking advisory gate. `|| true` keeps a transitive advisory from
+      # bricking the pipeline while still surfacing the report in the run log as
+      # evidence. A non-clean audit is a maintainer decision, not an automatic
+      # build failure.
+      - name: Dependency advisory audit (non-blocking)
+        run: npm audit --audit-level=high --workspace=@ancientpantheon/arweave-core || true
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

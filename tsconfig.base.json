@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+
+    "noEmit": true,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+
+    "baseUrl": ".",
+    "paths": {
+      "@ancientpantheon/arweave-core": ["./packages/arweave-core/src/index.ts"],
+      "@ancientpantheon/codex-core": ["./packages/codex-core/src/index.ts"],
+      "@ancientpantheon/codex-ui": ["./packages/codex-ui/src/index.ts"],
+      "@ancientpantheon/codex-ouronet": ["./packages/codex-ouronet/src/index.ts"],
+      "@ancientpantheon/codex-arweave": ["./packages/codex-arweave/src/index.ts"],
+      "@ancientpantheon/codex": ["./packages/codex/src/index.ts"],
+      "@ancientpantheon/codex/provider": ["./packages/codex/src/provider/index.ts"],
+      "@ancientpantheon/codex/hooks": ["./packages/codex/src/hooks/index.ts"],
+      "@ancientpantheon/codex/ui": ["./packages/codex/src/ui/index.ts"],
+      "@ancientpantheon/codex/ouronet": ["./packages/codex/src/ouronet/index.ts"],
+      "@ancientpantheon/codex/arweave": ["./packages/codex/src/arweave/index.ts"]
+    }
+  }
+}

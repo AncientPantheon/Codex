@@ -1,0 +1,287 @@
+name: Publish to npmjs.org
+
+# Triggered by pushing a version tag (e.g. v0.0.1).
+#
+# Smart per-package publish. A single shared tag `vX.Y.Z` triggers this
+# workflow, which detects which of the two PUBLIC packages
+# (@ancientpantheon/arweave-core, @ancientpantheon/codex) have a
+# `package.json` version matching the tag and publishes only those. The
+# four internal packages (codex-core, codex-ui, codex-ouronet,
+# codex-arweave) are `"private": true` and never enter the publish queue.
+#
+# Use cases:
+#   - Atomic release (both public packages bump): tag both at vX.Y.Z,
+#     both publish.
+#   - arweave-core-only release: bump only packages/arweave-core, tag
+#     vX.Y.Z. Only arweave-core publishes.
+#   - codex-only release: same shape, mirrored.
+#
+# At least one public package MUST match the tag — otherwise the tag is
+# wrong and the workflow fails before npm sees a single byte.
+#
+# Doc gates (README + CHANGELOG version-parity) only apply to packages in
+# the publish queue. A non-published package's docs are untouched.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Smart per-package publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The default GITHUB_TOKEN has read-only `contents` scope. Creating a
+    # Release via `gh release create` requires `contents: write`.
+    # `id-token: write` is required for npm publish's `--provenance` flag —
+    # npm uses the OIDC token GitHub Actions issues via this permission to
+    # mint a SLSA attestation linking the published tarball to the exact
+    # workflow run that produced it.
+    permissions:
+      contents: write
+      id-token: write
+
+    # Inert until the `npm-publish` environment is created in repo Settings →
+    # Environments, at which point a required-reviewer protection rule and any
+    # environment-scoped secrets take effect. Harmless before then; see
+    # .github/SECURITY-CHECKLIST.md for the settings-side setup this expects.
+    environment: npm-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # No git-persisted token: the release step authenticates via GH_TOKEN
+          # env, and a token left in .git/config would be readable by every
+          # transitive lifecycle/test path — combined with tag-push publish that
+          # is a repo-write vector this job never needs.
+          persist-credentials: false
+
+      # Plain Node setup — no registry-url here so setup-node doesn't write
+      # its own scoped .npmrc. We write the root .npmrc ourselves later, right
+      # before publish, so the token is not on disk during install/build/test.
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # npm ci uses the committed lockfile (present by tag time) so the
+        # published dist/ is built from the locked, reviewed toolchain — this
+        # is also what --provenance attests over. --ignore-scripts blocks
+        # transitive lifecycle scripts from executing during install; combined
+        # with writing the .npmrc token only after this gate, no dependency
+        # script ever runs while the publish credential is on disk.
+        run: npm ci --ignore-scripts
+
+      # Belt-and-suspenders: typecheck + build + tests gate the publish so a
+      # broken package never reaches the registry. The root scripts iterate
+      # over all six workspaces.
+      #
+      # ORDER: typecheck → build → test. Build precedes test so future tests
+      # resolving `exports`-map → `dist/` bare specifiers work on fresh
+      # checkouts. On a CI fresh checkout `dist/` is absent until the build
+      # step creates it; a test importing a package by its bare specifier
+      # before build would hit ERR_MODULE_NOT_FOUND.
+      - name: Typecheck + Build + Test (all packages)
+        run: |
+          npm run typecheck
+          npm run build
+          npm test
+
+      # ------------------------------------------------------------------
+      # Per-package publish-queue detection (the smart bit)
+      # ------------------------------------------------------------------
+      # Build a queue of the two PUBLIC packages whose `package.json`
+      # version equals the tag. Subsequent steps run for each queued
+      # package only. The queue is exposed via step outputs:
+      #   - PUBLISH_ARWEAVE_CORE ("true" | "false")
+      #   - PUBLISH_CODEX        ("true" | "false")
+      #
+      # If neither matches, fail the workflow — the tag is wrong.
+      - name: Detect publish queue (which packages match the tag?)
+        id: queue
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          ARWEAVE_CORE_VERSION=$(node -p "require('./packages/arweave-core/package.json').version")
+          CODEX_VERSION=$(node -p "require('./packages/codex/package.json').version")
+          echo "Tag version: $TAG_VERSION"
+          echo "arweave-core version: $ARWEAVE_CORE_VERSION"
+          echo "codex version: $CODEX_VERSION"
+
+          PUBLISH_ARWEAVE_CORE="false"
+          PUBLISH_CODEX="false"
+
+          if [ "$TAG_VERSION" = "$ARWEAVE_CORE_VERSION" ]; then
+            PUBLISH_ARWEAVE_CORE="true"
+          fi
+          if [ "$TAG_VERSION" = "$CODEX_VERSION" ]; then
+            PUBLISH_CODEX="true"
+          fi
+
+          if [ "$PUBLISH_ARWEAVE_CORE" = "false" ] && [ "$PUBLISH_CODEX" = "false" ]; then
+            echo "::error::Tag $TAG_VERSION matches NEITHER public package's version (arweave-core=$ARWEAVE_CORE_VERSION, codex=$CODEX_VERSION)"
+            echo "::error::Tags must match at least one public package's version. Bump packages/{arweave-core,codex}/package.json to $TAG_VERSION before tagging."
+            exit 1
+          fi
+
+          echo "PUBLISH_ARWEAVE_CORE=$PUBLISH_ARWEAVE_CORE" >> "$GITHUB_OUTPUT"
+          echo "PUBLISH_CODEX=$PUBLISH_CODEX"               >> "$GITHUB_OUTPUT"
+          echo "TAG_VERSION=$TAG_VERSION"                   >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "── Publish queue ──"
+          echo "  @ancientpantheon/arweave-core: $PUBLISH_ARWEAVE_CORE"
+          echo "  @ancientpantheon/codex:        $PUBLISH_CODEX"
+
+      # ------------------------------------------------------------------
+      # Per-queued-package README + CHANGELOG version-parity gate
+      # ------------------------------------------------------------------
+      # Each published package has its own README + CHANGELOG visible on
+      # npmjs.com — both must reference the version being shipped, ON THE
+      # PACKAGE THAT IS SHIPPING. A package not in the publish queue is
+      # skipped (its docs still reflect the version that IS on npmjs.com).
+      # The three grep regexes below are the load-bearing contract the
+      # skeleton READMEs/CHANGELOGs are authored against.
+      - name: Verify README + CHANGELOG of queued packages mention the publish version
+        run: |
+          TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
+          PUBLISH_ARWEAVE_CORE="${{ steps.queue.outputs.PUBLISH_ARWEAVE_CORE }}"
+          PUBLISH_CODEX="${{ steps.queue.outputs.PUBLISH_CODEX }}"
+
+          QUEUED=()
+          [ "$PUBLISH_ARWEAVE_CORE" = "true" ] && QUEUED+=("packages/arweave-core")
+          [ "$PUBLISH_CODEX" = "true" ] && QUEUED+=("packages/codex")
+
+          for PKG_DIR in "${QUEUED[@]}"; do
+            PKG_NAME=$(node -p "require('./${PKG_DIR}/package.json').name")
+            echo "── Validating ${PKG_NAME} ──"
+
+            # README: ## Status block must reference the version
+            if ! grep -qE "\`${TAG_VERSION}\`[[:space:]]+on public npmjs" "${PKG_DIR}/README.md"; then
+              echo "::error::${PKG_DIR}/README.md ## Status block does not lead with version ${TAG_VERSION}"
+              echo "::error::Expected: a line containing \`${TAG_VERSION}\` on public npmjs"
+              exit 1
+            fi
+            echo "✓ ${PKG_DIR}/README.md ## Status block references ${TAG_VERSION}"
+
+            # README: version history must contain a **vX.Y.Z** entry
+            if ! grep -qE "^\*\*v${TAG_VERSION}\*\*[[:space:]]" "${PKG_DIR}/README.md"; then
+              echo "::error::${PKG_DIR}/README.md version history is missing a **v${TAG_VERSION}** paragraph"
+              exit 1
+            fi
+            echo "✓ ${PKG_DIR}/README.md version history contains **v${TAG_VERSION}** entry"
+
+            # CHANGELOG: first ## heading must be the version
+            FIRST_HEADING=$(grep -m1 '^## ' "${PKG_DIR}/CHANGELOG.md")
+            if ! echo "$FIRST_HEADING" | grep -qE "^## ${TAG_VERSION}[[:space:]]"; then
+              echo "::error::${PKG_DIR}/CHANGELOG.md's first ## heading does not match version ${TAG_VERSION}"
+              echo "::error::First heading found: ${FIRST_HEADING}"
+              exit 1
+            fi
+            echo "✓ ${PKG_DIR}/CHANGELOG.md leads with: ${FIRST_HEADING}"
+          done
+          echo "All documentation gates passed for queued packages at v${TAG_VERSION}."
+
+      # Non-blocking advisory gate, run BEFORE publish so the release log
+      # records the supply-chain state of what is about to ship. `|| true`
+      # keeps a transitive advisory from bricking a release; a non-clean audit
+      # is a maintainer decision, not an automatic publish abort.
+      - name: Dependency advisory audit (non-blocking)
+        run: npm audit --audit-level=high --workspace=@ancientpantheon/arweave-core || true
+
+      # ------------------------------------------------------------------
+      # Credential on disk ONLY from here on — after install/build/test.
+      # ------------------------------------------------------------------
+      # The .npmrc (token) is written now, after the gate and immediately
+      # before publish, so the token is never present while dependency install
+      # or test/build code runs (the ~/.npmrc exfiltration vector). Explicit
+      # .npmrc at the repo root so npm picks it up regardless of working
+      # directory. `always-auth` + the registry-specific _authToken line is the
+      # canonical pattern npm documents for CI publishing. The token comes from
+      # the AncientPantheon org secret NPM_TOKEN; its value is never echoed —
+      # only a redacted structure print is emitted.
+      - name: Write .npmrc with auth token
+        run: |
+          cat > .npmrc <<EOF
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          @ancientpantheon:registry=https://registry.npmjs.org
+          always-auth=true
+          EOF
+          echo "--- .npmrc structure (token redacted) ---"
+          sed 's|=.*|=***|' .npmrc
+
+      # Fail-fast auth gate. A bare `npm whoami` (no `|| echo` fallback) so a
+      # missing or expired NPM_TOKEN hard-fails the job here — before any
+      # publish is attempted. This step needs only the .npmrc written above.
+      - name: Verify npm auth
+        run: |
+          echo "Checking npm whoami..."
+          npm whoami
+
+      # ------------------------------------------------------------------
+      # Idempotent publish — skip if the version already exists on npm
+      # ------------------------------------------------------------------
+      # If this workflow re-runs after a partial failure (e.g. a manual
+      # re-tag-push), `npm publish` would fail with "version already
+      # published". Pre-check via `npm view` and skip — the registry is the
+      # source of truth.
+      #
+      # PUBLISH ORDER: arweave-core first, then codex. This is a
+      # forward-looking aggregation-direction convention — the protocol
+      # layer lands before the consumer-facing aggregator that will
+      # eventually build on it. In this skeleton phase there are no
+      # cross-package registry deps (internal members are private), so the
+      # order is an ordering convention, not a present peer-dep constraint.
+
+      - name: Publish @ancientpantheon/arweave-core to npmjs.org
+        if: steps.queue.outputs.PUBLISH_ARWEAVE_CORE == 'true'
+        run: |
+          TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
+          if npm view @ancientpantheon/arweave-core@${TAG_VERSION} version >/dev/null 2>&1; then
+            echo "@ancientpantheon/arweave-core@${TAG_VERSION} already on npm — skipping (idempotent)."
+          else
+            npm publish --workspace=@ancientpantheon/arweave-core --access public --provenance
+          fi
+
+      - name: Publish @ancientpantheon/codex to npmjs.org
+        if: steps.queue.outputs.PUBLISH_CODEX == 'true'
+        run: |
+          TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
+          if npm view @ancientpantheon/codex@${TAG_VERSION} version >/dev/null 2>&1; then
+            echo "@ancientpantheon/codex@${TAG_VERSION} already on npm — skipping (idempotent)."
+          else
+            npm publish --workspace=@ancientpantheon/codex --access public --provenance
+          fi
+
+      # ------------------------------------------------------------------
+      # GitHub Release creation (single Release per tag, regardless of
+      # which packages it shipped)
+      # ------------------------------------------------------------------
+      # The Release body is the annotated-tag message, which the
+      # release-author writes to cover whichever packages this tag ships.
+      # Per-package granular history lives in packages/{pkg}/CHANGELOG.md
+      # and on npmjs.com.
+      - name: Create GitHub Release for the pushed tag
+        env:
+          # Prefer a user-supplied PAT (RELEASE_TOKEN) when present —
+          # bypasses any org-level "Workflow permissions" lockdown that caps
+          # the auto-provided GITHUB_TOKEN at read-only. Falls back to
+          # GITHUB_TOKEN when the org policy allows write or when the secret
+          # is unset.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Skip if Release already exists (idempotent — supports manual re-runs).
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release for $TAG already exists — skipping."
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-from-tag \
+              --latest
+            echo "Created GitHub Release for $TAG."
+          fi
