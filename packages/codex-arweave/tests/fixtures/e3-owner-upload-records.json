@@ -1,0 +1,29 @@
+[
+  {
+    "id": "rec00000000000000000000000000000000000AAAAA",
+    "tags": [
+      { "name": "App-Name", "value": "AncientPantheon-Codex" },
+      { "name": "Content-Type", "value": "text/plain" },
+      { "name": "Codex-Item-Id", "value": "item-aaaa-1111" },
+      { "name": "Codex-Owner", "value": "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4" }
+    ]
+  },
+  {
+    "id": "rec00000000000000000000000000000000000BBBBB",
+    "tags": [
+      { "name": "App-Name", "value": "AncientPantheon-Codex" },
+      { "name": "Content-Type", "value": "image/png" },
+      { "name": "Codex-Item-Id", "value": "item-bbbb-2222" },
+      { "name": "Codex-Owner", "value": "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4" }
+    ]
+  },
+  {
+    "id": "rec00000000000000000000000000000000000CCCCC",
+    "tags": [
+      { "name": "App-Name", "value": "AncientPantheon-Codex" },
+      { "name": "Content-Type", "value": "application/x.arweave-manifest+json" },
+      { "name": "Codex-Item-Id", "value": "item-cccc-3333" },
+      { "name": "Codex-Owner", "value": "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4" }
+    ]
+  }
+]

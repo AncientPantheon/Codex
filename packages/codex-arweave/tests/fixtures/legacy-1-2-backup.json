@@ -1,0 +1,39 @@
+{
+  "version": "1.2",
+  "exportedAt": "2024-11-02T09:14:33.000Z",
+  "kadenaWallets": [
+    {
+      "id": "seed-legacy-1",
+      "name": "Prime Codex Seed",
+      "seedType": "koala",
+      "isPrime": true,
+      "secret": "ENCRYPTED::legacy-seed-ciphertext-aaaa"
+    }
+  ],
+  "ouronetWallets": [
+    {
+      "id": "ouro-legacy-1",
+      "name": "CodexPrime",
+      "isSmart": false,
+      "isPrime": true,
+      "parentSeedId": "seed-legacy-1"
+    }
+  ],
+  "addressBook": [
+    { "id": "ab-1", "label": "Faucet", "address": "k:abcdef0123456789", "chain": "kadena" }
+  ],
+  "uiSettings": {
+    "dockPosition": "left",
+    "passwordCacheMinutes": 15
+  },
+  "pureKeypairs": [
+    {
+      "id": "pk-legacy-1",
+      "label": "CodexGuard",
+      "publicKey": "1111111111111111111111111111111111111111111111111111111111111111",
+      "encryptedPrivateKey": "ENCRYPTED::legacy-pk-ciphertext-bbbb",
+      "createdAt": "2024-10-01T00:00:00.000Z",
+      "isCodexGuard": true
+    }
+  ]
+}

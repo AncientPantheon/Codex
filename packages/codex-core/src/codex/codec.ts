@@ -25,6 +25,7 @@ import type {
   PlaintextCodex,
 } from "./types.js";
 import { isForeignKeyEntry, type ForeignKeysBlock } from "./foreignKeys.js";
+import { isPureKeypairEntry } from "./pureKeypairs.js";
 import { CodexError, CodexUnknownFieldError } from "./errors.js";
 
 /**
@@ -51,13 +52,20 @@ const FOREIGN_KEYS_BLOCK_SCHEMA_VERSION = 1;
  * writer wraps pre-encrypted blobs, exactly like `kadenaWallets[i].secret`; it
  * never encrypts). When the source has no foreign keys the property is OMITTED
  * entirely — no mandatory empty block.
+ *
+ * `pureKeypairs` (FIX-2 — the D2 revisit) is EMITTED only when the source codex
+ * carries pure keypairs, as a BARE ARRAY passed through UNCHANGED (it is NOT
+ * block-wrapped like `foreignKeys` — it was already a bare array in the old
+ * `BackupFileV12Plus` hook format the `useCodexBackup` rewire replaces). When
+ * the source has no pure keypairs the property is OMITTED — matching the
+ * foreignKeys omission discipline so a keypair-free codex stays clean.
  */
 export function buildCodexExport<
   KS, OA, PK, AB, UI,
 >(
   codex: PlaintextCodex<KS, OA, PK, AB, UI>,
-): CodexExportV1_2<KS, OA, AB, UI> | CodexExportV1_3<KS, OA, AB, UI> {
-  const base: CodexExportV1_3<KS, OA, AB, UI> = {
+): CodexExportV1_2<KS, OA, AB, UI> | CodexExportV1_3<KS, OA, AB, UI, PK> {
+  const base: CodexExportV1_3<KS, OA, AB, UI, PK> = {
     version: "1.3",
     exportedAt: new Date().toISOString(),
     kadenaWallets: codex.kadenaWallets,
@@ -65,14 +73,19 @@ export function buildCodexExport<
     addressBook: codex.addressBook,
     uiSettings: codex.uiSettings,
   };
-  if (codex.foreignKeys === undefined) {
-    return base;
-  }
-  const foreignKeys: ForeignKeysBlock = {
-    schemaVersion: FOREIGN_KEYS_BLOCK_SCHEMA_VERSION,
-    keys: codex.foreignKeys,
+  const withKeyrings: CodexExportV1_3<KS, OA, AB, UI, PK> = {
+    ...base,
+    ...(codex.foreignKeys !== undefined
+      ? {
+          foreignKeys: {
+            schemaVersion: FOREIGN_KEYS_BLOCK_SCHEMA_VERSION,
+            keys: codex.foreignKeys,
+          } satisfies ForeignKeysBlock,
+        }
+      : {}),
+    ...(codex.pureKeypairs.length > 0 ? { pureKeypairs: codex.pureKeypairs } : {}),
   };
-  return { ...base, foreignKeys };
+  return withKeyrings;
 }
 
 /**
@@ -96,6 +109,12 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   "addressBook",
   "uiSettings",
   "foreignKeys",
+  // FIX-2 (the D2 revisit): the `useCodexBackup` rewire routes a backup carrying
+  // `pureKeypairs` through this reader. It is allow-listed alongside
+  // `foreignKeys` so a fresh 1.3 backup is RESTORABLE — a genuinely-unknown
+  // field still throws below. The set is widened for these two keyrings ONLY,
+  // never wide-open.
+  "pureKeypairs",
 ]);
 
 // Strict-equality membership only. No trim/normalize/prefix matching: a version
@@ -134,6 +153,27 @@ function validateForeignKeysBlock(block: unknown): void {
 }
 
 /**
+ * Structurally validate a present `pureKeypairs` array — SHAPE only, never
+ * decrypts. Unlike `foreignKeys` (a `{ schemaVersion, keys }` block), this is a
+ * BARE ARRAY on the wire, so the validator asserts array-ness at the top level
+ * and entry shape per element. Throws a `CodexError` naming the offending PATH
+ * (`pureKeypairs[0]`) but never echoing any entry value, because a malformed
+ * entry could carry the user's only copy of a pure-key ciphertext.
+ */
+function validatePureKeypairs(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new CodexError("deserializeCodex: pureKeypairs must be an array");
+  }
+  value.forEach((entry, i) => {
+    if (!isPureKeypairEntry(entry)) {
+      throw new CodexError(
+        `deserializeCodex: pureKeypairs[${i}] is not a valid pure-keypair entry`,
+      );
+    }
+  });
+}
+
+/**
  * Parse a codex-export JSON string. Does NOT decrypt any enclosed blobs — the
  * returned object's `kadenaWallets[i].secret` and `foreignKeys.keys[i].encryptedKeyfile`
  * are still ciphertext. Caller decrypts them with the codex password once the
@@ -141,8 +181,10 @@ function validateForeignKeysBlock(block: unknown): void {
  *
  * Throws on: invalid JSON, non-object payload, unsupported `version` (anything
  * but exact "1.2" / "1.3"), an unknown top-level field, a non-array collection,
- * a non-object `uiSettings`, or a malformed `foreignKeys` block. A "1.2" file
- * round-trips with `foreignKeys` ABSENT — no default is injected.
+ * a non-object `uiSettings`, a malformed `foreignKeys` block, or a malformed
+ * `pureKeypairs` array. A "1.2" file round-trips with both `foreignKeys` and
+ * `pureKeypairs` ABSENT — no default is injected. `pureKeypairs` is validated as
+ * a BARE ARRAY of entries (it is not block-wrapped like `foreignKeys`).
  *
  * Shape-validation errors NAME the offending field/path but never echo its
  * value — a codex envelope carries encrypted secrets and account addresses, and
@@ -190,6 +232,9 @@ export function deserializeCodex<
   }
   if (parsed.foreignKeys !== undefined) {
     validateForeignKeysBlock(parsed.foreignKeys);
+  }
+  if (parsed.pureKeypairs !== undefined) {
+    validatePureKeypairs(parsed.pureKeypairs);
   }
   return parsed as
     | CodexExportV1_2<KS, OA, AB, UI>

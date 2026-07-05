@@ -31,6 +31,11 @@ export {
   type ForeignKeysBlock,
 } from "./codex/foreignKeys.js";
 
+export {
+  isPureKeypairEntry,
+  type PureKeypairEntry,
+} from "./codex/pureKeypairs.js";
+
 // ----- typed error family -----
 
 export {

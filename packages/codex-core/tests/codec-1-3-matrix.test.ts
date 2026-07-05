@@ -281,13 +281,40 @@ describe("(5b) 1.3 POPULATED foreignKeys WRITER — the single most funds-critic
 
 // ─── (6) UNKNOWN FIELD THROWS ─────────────────────────────────────────────────
 
-describe("(6) UNKNOWN FIELD — a 1.3 envelope with bogusField throws CodexUnknownFieldError naming it", () => {
+// INVARIANT: the allow-list is widened for `foreignKeys` AND `pureKeypairs` ONLY
+// (still rejects a third unknown field). E1 (T11.7, FIX-2) added `pureKeypairs`
+// alongside `foreignKeys` because the `useCodexBackup` rewire routes a backup
+// carrying `pureKeypairs` through this reader — a fresh 1.3 backup that carried
+// `pureKeypairs` would otherwise throw `CodexUnknownFieldError` and be
+// UNRESTORABLE (funds loss). DO NOT narrow this back to "foreignKeys ONLY":
+// deleting `pureKeypairs` from the accepted set re-breaks the rewire. The
+// accepted keyring set the reader tolerates is {foreignKeys, pureKeypairs}; any
+// OTHER top-level field still throws.
+describe("(6) UNKNOWN FIELD — allow-list widened for foreignKeys AND pureKeypairs ONLY (still rejects a third unknown field)", () => {
   it("throws CodexUnknownFieldError and names bogusField", () => {
     const env = make13Envelope();
     env.bogusField = "x";
     const json = JSON.stringify(env);
     expect(() => deserializeCodex(json)).toThrow(CodexUnknownFieldError);
     expect(() => deserializeCodex(json)).toThrow(/bogusField/);
+  });
+
+  it("accepts pureKeypairs (a bare array) as a KNOWN field — it does NOT throw CodexUnknownFieldError (FIX-2 gate)", () => {
+    const env = make13Envelope();
+    env.pureKeypairs = [
+      { id: "pk-1", publicKey: "a".repeat(64), encryptedPrivateKey: "ENC::pk", createdAt: "2025-01-01T00:00:00.000Z" },
+    ];
+    // No throw: pureKeypairs is in the widened allow-list alongside foreignKeys.
+    expect(() => deserializeCodex(JSON.stringify(env))).not.toThrow();
+  });
+
+  it("still throws for a third unknown field even when both foreignKeys AND pureKeypairs are present (widened, not wide-open)", () => {
+    const env = make13Envelope({ schemaVersion: 1, keys: [] });
+    env.pureKeypairs = [];
+    env.thirdUnknown = "nope";
+    const json = JSON.stringify(env);
+    expect(() => deserializeCodex(json)).toThrow(CodexUnknownFieldError);
+    expect(() => deserializeCodex(json)).toThrow(/thirdUnknown/);
   });
 });
 

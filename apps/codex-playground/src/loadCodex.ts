@@ -10,7 +10,8 @@
 //   - mode-1 (encrypted backup JSON): the App mounts an EMPTY adapter under
 //     <CodexProvider>, then delegates the restore to the REAL
 //     useCodexBackup().importFromCloud — the single-reader restore path. That
-//     hook owns the version-"1.2" gate, the wire→snapshot field map, the
+//     hook owns the version gate (accepts BOTH "1.2" AND the E1-rewired "1.3"
+//     codec envelope — reader-before-writer), the wire→snapshot field map, the
 //     synthesized lastUpdatedAt, and the current-device re-stamp. This module
 //     holds NO React hook call itself; importFromCloud is injected by the App.
 //
@@ -59,7 +60,8 @@ export async function hydrateFromPlaintextSnapshot(
  *
  * The App passes `useCodexBackup().importFromCloud` (bound to the mounted,
  * empty adapter) plus the uploaded backup text. That hook owns the whole
- * restore: parse + version-"1.2" gate + shape checks + wire→snapshot field map
+ * restore: parse + version gate ({1.2, 1.3} — E1 rewired the writer onto the
+ * "1.3" codec; the reader still accepts old "1.2" backups) + shape checks + wire→snapshot field map
  * + synthesized lastUpdatedAt + current-device re-stamp + saveAll + store init.
  *
  * This wrapper adds NOTHING to the restore — it neither parses the backup by

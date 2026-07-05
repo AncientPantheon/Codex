@@ -13,6 +13,7 @@ import type {
 } from "../types/entities.js";
 import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
 import type { CodexAdapter, CodexSnapshot } from "../adapters/types.js";
+import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import {
   CodexLockedError,
   CodexPrimeProtectedError,
@@ -215,6 +216,11 @@ export interface CodexStoreState {
   watchList: WatchListEntry[];
   uiSettings: UiSettings;
   consumerSettings: Record<string, IConsumerSettings>;
+  /** Seedless foreign-chain keyring (E-02). Each entry carries a PRE-ENCRYPTED
+   *  `encryptedKeyfile` (ciphertext at rest, independently encrypted per key —
+   *  N-07); the slice never holds plaintext key material. Mirrors the
+   *  `pureKeypairs` slice shape but persists via `saveAll` (FIX-5). */
+  foreignKeys: ForeignKeyEntry[];
   /** The codex's double-Apollo identity (v0.3.0+). `undefined` for v0.2
    *  codices and fresh codices that haven't run kickstart yet; the public
    *  `getCodexIdentity()` getter coalesces this to `null`. IMMUTABLE once set. */
@@ -301,6 +307,19 @@ export interface CodexStoreActions {
    *  protected keys. */
   renamePureKeypair(id: string, newLabel: string): Promise<void>;
   deletePureKeypair(id: string): Promise<void>;
+
+  // ----- foreign keys (E-02) -----
+  /** Append a PRE-ENCRYPTED foreign-key entry to the keyring. The slice NEVER
+   *  encrypts — the `encryptedKeyfile` ciphertext arrives already-encrypted from
+   *  the codex-arweave keyring logic. Persists via the complete-snapshot
+   *  `saveAll` route (FIX-5), not a per-slice saver. */
+  addForeignKey(entry: ForeignKeyEntry): Promise<void>;
+  /** Relabel a foreign-key entry (labelless entries are valid). A missing id is
+   *  a silent no-op. Persists via `saveAll`. */
+  renameForeignKey(id: string, newLabel: string): Promise<void>;
+  /** Remove a foreign-key entry. A missing id is a silent no-op. Persists via
+   *  `saveAll`. */
+  deleteForeignKey(id: string): Promise<void>;
 
   // ----- codex guard (v0.3.0+) -----
   /** Get the active CodexGuard's public key. Returns `null` for legacy/fresh
@@ -402,6 +421,39 @@ export interface CodexStoreActions {
   migrateToCurrent(): Promise<void>;
 }
 
+/**
+ * Build a COMPLETE `CodexSnapshot` from live store state, carrying every slice
+ * the Ouronet sharding adapter persists PLUS the updated `foreignKeys`.
+ *
+ * FUNDS-CRITICAL: the foreign-key slice persists via the full-snapshot `saveAll`
+ * (FIX-5), which is a FULL overwrite re-sharding EVERY field. Omitting a slice
+ * here would overwrite its on-disk shard with `undefined`/stale values — a
+ * foreign-key mutation could WIPE the Kadena seeds, the double-Apollo
+ * `codexIdentity`, or the `consumerSettings`. Every field on `CodexSnapshot`
+ * MUST be included (cascade rule — mirrors `migrateToCurrent`'s inline builder).
+ */
+function buildForeignKeySnapshot(
+  state: CodexStoreState,
+  foreignKeys: ForeignKeyEntry[]
+): CodexSnapshot {
+  return {
+    kadenaSeeds: state.kadenaSeeds,
+    ouroAccounts: state.ouroAccounts,
+    pureKeypairs: state.pureKeypairs,
+    addressBook: state.addressBook,
+    watchList: state.watchList,
+    uiSettings: state.uiSettings,
+    consumerSettings: state.consumerSettings,
+    // Threaded from live state so a foreign-key write never overwrites the
+    // on-disk identity/settings shards with a stale/undefined value.
+    codexIdentity: state.codexIdentity,
+    foreignKeys,
+    schemaVersion: state.schemaVersion,
+    lastUpdatedAt: state.lastUpdatedAt,
+    lastUpdatedDevice: state.lastUpdatedDevice,
+  };
+}
+
 const initialState: Omit<CodexStoreState, "actions"> = {
   ready: false,
   initError: null,
@@ -415,6 +467,7 @@ const initialState: Omit<CodexStoreState, "actions"> = {
   watchList: [],
   uiSettings: { ...DEFAULT_UI_SETTINGS },
   consumerSettings: {},
+  foreignKeys: [],
   // Explicit undefined keeps initialState shape-complete (matches the
   // lastUpdatedAt: null precedent); value-type slot, undefined is its resting
   // state.
@@ -831,6 +884,11 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // leaves it undefined (Phase 8's interactive flow populates it
             // later). No `?? {}` — this is a value-type slot, undefined is valid.
             codexIdentity: snap.codexIdentity,
+            // Seedless foreign-key keyring (Arweave et al.). Absent on codices
+            // written before the keyring shipped; coalesce to []. Threading it
+            // through the migration builder keeps a foreign-key mutation/restore
+            // from silently dropping the key on the next load (funds-critical).
+            foreignKeys: snap.foreignKeys ?? [],
             schemaVersion: snap.schemaVersion,
             lastUpdatedAt: snap.lastUpdatedAt,
             lastUpdatedDevice: snap.lastUpdatedDevice,
@@ -870,6 +928,11 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // state slot stays undefined-typed; the getter does the null
             // coalesce at the public boundary.
             codexIdentity: migrated.codexIdentity,
+            // Hydrate the foreign-key keyring into live state so a restored (or
+            // adapter-persisted) Arweave key is in memory after init — without
+            // this the key rides the backup and the adapter but never reappears
+            // in the store, silently lost on the next export (funds-critical).
+            foreignKeys: migrated.foreignKeys ?? [],
             schemaVersion: migrated.schemaVersion,
             lastUpdatedAt: migrated.lastUpdatedAt,
             lastUpdatedDevice: migrated.lastUpdatedDevice,
@@ -1216,6 +1279,58 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         const next = get().pureKeypairs.filter((k) => k.id !== id);
         set({ pureKeypairs: next });
         await persistAndTouch((a) => a.savePureKeypairs(next));
+      },
+
+      // ----- foreign keys (E-02) -----
+      //
+      // FIX-5 (deliberate divergence): the foreign-key slice persists via the
+      // full-snapshot `saveAll`, NOT a per-slice `saveForeignKeys`. WHY — adding
+      // a `saveForeignKeys` method would extend the D5-owned `CodexAdapter`
+      // interface (a scope-fence violation), so the slice reuses the existing
+      // `saveAll` slot, which the Ouronet sharding adapter routes through the
+      // `foreignKeys` shard. The tradeoff (a full-snapshot write per low-frequency
+      // keyring change) is accepted.
+      //
+      // COMPLETE-SNAPSHOT SAFETY (funds-critical): `saveAll` is a FULL overwrite
+      // that re-shards EVERY snapshot field, so a partial snapshot would WIPE the
+      // other shards (the Kadena seeds, the double-Apollo `codexIdentity`, the
+      // `consumerSettings`) on disk. `buildForeignKeySnapshot` therefore builds a
+      // COMPLETE snapshot from live `get()` state carrying ALL slices plus the
+      // updated `foreignKeys` — mirroring `migrateToCurrent`'s every-field builder.
+
+      async addForeignKey(entry: ForeignKeyEntry) {
+        const next = [
+          ...get().foreignKeys.filter((k) => k.id !== entry.id),
+          entry,
+        ];
+        set({ foreignKeys: next });
+        await persistAndTouch((a) =>
+          a.saveAll(buildForeignKeySnapshot(get(), next))
+        );
+      },
+
+      async renameForeignKey(id: string, newLabel: string) {
+        const target = get().foreignKeys.find((k) => k.id === id);
+        if (!target) {
+          // Missing id is a silent no-op (mirrors deleteForeignKey).
+          return;
+        }
+        const next = get().foreignKeys.map((k) =>
+          k.id === id ? { ...k, label: newLabel } : k
+        );
+        set({ foreignKeys: next });
+        await persistAndTouch((a) =>
+          a.saveAll(buildForeignKeySnapshot(get(), next))
+        );
+      },
+
+      async deleteForeignKey(id: string) {
+        // Missing id falls through to a no-op filter (silent-no-op semantics).
+        const next = get().foreignKeys.filter((k) => k.id !== id);
+        set({ foreignKeys: next });
+        await persistAndTouch((a) =>
+          a.saveAll(buildForeignKeySnapshot(get(), next))
+        );
       },
 
       // ----- codex guard (v0.3.0+) -----

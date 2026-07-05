@@ -10,6 +10,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./adapter": {
+      "types": "./dist/adapter/index.d.ts",
+      "import": "./dist/adapter/index.js"
+    },
+    "./keyring": {
+      "types": "./dist/keyring/index.d.ts",
+      "import": "./dist/keyring/index.js"
+    },
+    "./library": {
+      "types": "./dist/library/index.d.ts",
+      "import": "./dist/library/index.js"
     }
   },
   "files": [
@@ -20,6 +32,14 @@
   "sideEffects": false,
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@ancientpantheon/arweave-core": "*",
+    "@ancientpantheon/codex-core": "*",
+    "@ancientpantheon/codex-ouronet": "*"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

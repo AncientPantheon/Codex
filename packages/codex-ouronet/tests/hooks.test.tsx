@@ -430,7 +430,7 @@ describe("useGetKeypair", () => {
 // --------------------------------------------------------------------
 
 describe("useCodexBackup", () => {
-  it("exportForCloud returns a parseable v1.2-plus-pureKeypairs JSON", async () => {
+  it("exportForCloud emits the 1.3 codec envelope with pureKeypairs as a bare array (E-02 rewire)", async () => {
     const adapter = new MemoryCodexAdapter("dev");
     const { result } = renderHook(
       () => ({
@@ -452,8 +452,10 @@ describe("useCodexBackup", () => {
       json = await result.current.backup.exportForCloud();
     });
     const parsed = JSON.parse(json);
-    expect(parsed.version).toBe("1.2");
+    // The rewire routes the export through buildCodexExport → "1.3" envelope.
+    expect(parsed.version).toBe("1.3");
     expect(parsed.kadenaWallets).toHaveLength(1);
+    expect(Array.isArray(parsed.pureKeypairs)).toBe(true);
     expect(parsed.pureKeypairs).toHaveLength(1);
     expect(parsed.pureKeypairs[0].id).toBe("p1");
   });

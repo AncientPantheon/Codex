@@ -13,6 +13,7 @@ import {
   type IConsumerSettings,
   type ICodexIdentity,
 } from "../types/entities.js";
+import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { CodexAdapter, CodexSnapshot } from "./types.js";
 import { emptySnapshot } from "./types.js";
 
@@ -40,6 +41,10 @@ import { emptySnapshot } from "./types.js";
  *   - "codexIdentity"          double-Apollo codex identity (JSON object,
  *                              v0.3.0+; absent/"null" on v0.2 codices →
  *                              undefined)
+ *   - "foreignKeys"            seedless foreign-chain keyring (JSON array of
+ *                              ForeignKeyEntry; each `encryptedKeyfile` is
+ *                              ciphertext at rest; absent on pre-keyring
+ *                              codices → [])
  *   - "codex_schema_version"   in-band schema version (string -> int)
  *   - "codex_last_updated"     ISO timestamp
  *   - "codex_device"           "dev" | "main"
@@ -81,6 +86,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       const uiSettings = this.loadUiSettingsPlain();
       const consumerSettings = this.loadConsumerSettings();
       const codexIdentity = this.loadCodexIdentity();
+      const foreignKeys = this.parseArray<ForeignKeyEntry>("foreignKeys");
       const schemaVersion = this.loadSchemaVersion();
       const lastUpdatedAt = window.localStorage.getItem("codex_last_updated");
       const lastUpdatedDevice = this.loadDeviceVariant();
@@ -94,6 +100,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         uiSettings,
         consumerSettings,
         codexIdentity,
+        foreignKeys,
         schemaVersion,
         lastUpdatedAt,
         lastUpdatedDevice,
@@ -120,6 +127,13 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       window.localStorage.setItem(
         "codexIdentity",
         JSON.stringify(snapshot.codexIdentity ?? null)
+      );
+      // Seedless foreign-chain keyring shard. Dropping this silently loses the
+      // Arweave key on restore (funds-critical) — an absent field coalesces to
+      // an empty array so pre-keyring codices round-trip cleanly.
+      window.localStorage.setItem(
+        "foreignKeys",
+        JSON.stringify(snapshot.foreignKeys ?? [])
       );
       window.localStorage.setItem("codex_schema_version", String(snapshot.schemaVersion));
       if (snapshot.lastUpdatedAt) {
@@ -298,6 +312,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         "uiSettings_enc",
         "consumerSettings",
         "codexIdentity",
+        "foreignKeys",
         "codex_schema_version",
         "codex_last_updated",
         "codex_device",

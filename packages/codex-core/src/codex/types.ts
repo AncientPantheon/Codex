@@ -14,6 +14,7 @@
  */
 
 import type { ForeignKeyEntry, ForeignKeysBlock } from "./foreignKeys.js";
+import type { PureKeypairEntry } from "./pureKeypairs.js";
 
 /**
  * PlaintextCodex — the portable shape of an Ouronet user's in-memory
@@ -85,10 +86,15 @@ export interface PlaintextCodex<
  *
  * A codex backup is a subset of PlaintextCodex: no schemaVersion /
  * lastUpdatedAt / lastUpdatedDevice (those are device-local), and no
- * pureKeypairs in this historical shape (they ship inside `cloud-backup`
+ * pureKeypairs in this historical shape (they shipped inside `cloud-backup`
  * alongside user settings — see the `downloadAsJson` → `exportForCloud`
  * split in OuronetUI's LocalStorageCodexAdapter). The `"1.2"` label
  * stays because a bump would break every existing user's recovery file.
+ *
+ * Note: the CURRENT `useCodexBackup` writer emits the "1.3" shape, which DOES
+ * carry `pureKeypairs` (see `CodexExportV1_3`) so a fresh backup is restorable.
+ * The "1.2" shape above stays pureKeypairs-free because it is READ-ONLY — no
+ * writer emits it anymore.
  */
 export interface CodexExportV1_2<
   KadenaSeed       = unknown,
@@ -115,14 +121,22 @@ export interface CodexExportV1_2<
  * empty block. A historical "1.2" file has no `foreignKeys` and restores with
  * the property absent (no default is injected on the 1.2 path).
  *
- * `ForeignKeysBlock` is imported from the single-owner `foreignKeys` model — it
- * is never re-declared here.
+ * `pureKeypairs` (added for the `useCodexBackup` rewire, FIX-2) rides the
+ * envelope as a BARE ARRAY of `PureKeypairEntry` — NOT a `{ schemaVersion, keys }`
+ * block like `foreignKeys`. WHY the divergence: pureKeypairs was already a bare
+ * array in the old `BackupFileV12Plus` hook format the rewire replaces, and it
+ * carries no per-block schema version. Like `foreignKeys`, it is OMITTED when the
+ * source carries no pure keypairs (no mandatory empty array on the wire).
+ *
+ * `ForeignKeysBlock` and `PureKeypairEntry` are imported from their single-owner
+ * models — never re-declared here.
  */
 export interface CodexExportV1_3<
   KadenaSeed       = unknown,
   OuroAccount      = unknown,
   AddressBookEntry = unknown,
   UiSettings       = unknown,
+  PureKeypair      = PureKeypairEntry,
 > {
   readonly version: "1.3";
   readonly exportedAt: string;
@@ -131,4 +145,5 @@ export interface CodexExportV1_3<
   readonly addressBook: AddressBookEntry[];
   readonly uiSettings: UiSettings;
   readonly foreignKeys?: ForeignKeysBlock;
+  readonly pureKeypairs?: PureKeypair[];
 }

@@ -7,18 +7,20 @@
  *   - exportForCloud()              returns the JSON string (for /google-drive)
  *   - importFromCloud(string)       applies a cloud-fetched JSON string
  *
- * On-disk format: the v1.2 codex file format from
- * @stoachain/ouronet-core/codex, EXTENDED with a `pureKeypairs` array
- * (OuronetUI v1.0.9 fix). The base codec is frozen at v1.2 and rejects
- * unknown top-level fields, so this hook serializes/deserializes the
- * augmented format directly rather than going through `serializeCodex` /
- * `deserializeCodex`. Imports tolerate pureKeypairs being absent
- * (existing pre-v1.0.9 backups), so we don't break older codices.
+ * On-disk format: the canonical codex codec (`buildCodexExport` /
+ * `deserializeCodex` from @ancientpantheon/codex-core) emitting a `"1.3"`
+ * envelope. The export rides BOTH keyrings: `foreignKeys` as a
+ * `{ schemaVersion, keys }` BLOCK (funds-critical — the Arweave key travels
+ * inside the encrypted backup) and `pureKeypairs` as a BARE ARRAY (the codec
+ * allow-lists it since the D2 revisit). No secret ever leaves plaintext: each
+ * entry's `secret` / `encryptedKeyfile` / `encryptedPrivateKey` is a
+ * pre-encrypted ciphertext blob the codec wraps but never touches.
  *
- * Why pureKeypairs and NOT watchList: spec §G1 explicitly adds
- * pureKeypairs to the export per the v1.0.9 hotfix. Adding watchList
- * would be silent scope-creep — codified to wait for Phase 9 OuronetUI
- * migration where the gap will surface concretely.
+ * READER-BEFORE-WRITER (funds-loss-critical): the restore path accepts BOTH the
+ * OLD augmented-`"1.2"` backups (which OuronetUI wrote before this rewire — they
+ * restore FOREVER, with `foreignKeys` naturally absent) AND the new `"1.3"`
+ * shape. Emitting a version the reader rejects (or narrowing the reader to
+ * `"1.3"`-only) would make a user's own fresh backup unrestorable — never do it.
  *
  * Browser dependency: downloadAsJson uses window.URL.createObjectURL +
  * document.createElement + <a>.click. SSR consumers should call
@@ -27,21 +29,35 @@
 
 import { useCallback } from "react";
 import { useCodexStore } from "../provider/index.js";
+import {
+  buildCodexExport,
+  deserializeCodex,
+  type ForeignKeyEntry,
+} from "@ancientpantheon/codex-core";
 import type { CodexSnapshot } from "@ancientpantheon/codex-ouronet/types";
 import { CodexImportError } from "./errors.js";
 
-// Wire-shape of the augmented v1.2-plus-pureKeypairs file the package
-// reads/writes. Matches OuronetUI v1.0.9's downloadAsJson output.
-interface BackupFileV12Plus {
-  version: "1.2";
-  exportedAt: string;
+/** The `foreignKeys` block shape on the wire — a `{ schemaVersion, keys }`
+ *  object, NOT a bare array (unlike `pureKeypairs`). The reader unwraps
+ *  `.keys` back to the bare `ForeignKeyEntry[]` the store/adapter expect. */
+interface ForeignKeysWireBlock {
+  schemaVersion: number;
+  keys: ForeignKeyEntry[];
+}
+
+/** The subset of the `"1.2"`/`"1.3"` codec envelope this hook reads back into a
+ *  CodexSnapshot. `deserializeCodex` has already validated the shape + version;
+ *  this only narrows the fields the restore path consumes. */
+interface ParsedBackup {
+  version: "1.2" | "1.3";
   kadenaWallets: CodexSnapshot["kadenaSeeds"];
   ouronetWallets: CodexSnapshot["ouroAccounts"];
   addressBook: CodexSnapshot["addressBook"];
   uiSettings: CodexSnapshot["uiSettings"];
-  /** v1.0.9 extension — device-local pure keypairs. Optional on import
-   *  for backwards-compat with pre-v1.0.9 backups. */
+  /** Bare array on the wire (absent on pre-v1.0.9 backups). */
   pureKeypairs?: CodexSnapshot["pureKeypairs"];
+  /** `{ schemaVersion, keys }` BLOCK on the wire (absent on "1.2" backups). */
+  foreignKeys?: ForeignKeysWireBlock;
 }
 
 export interface CodexBackupView {
@@ -53,59 +69,45 @@ export interface CodexBackupView {
   clearDirty: () => void;
 }
 
-function buildBackupPayload(snapshot: CodexSnapshot): BackupFileV12Plus {
-  return {
-    version: "1.2",
-    exportedAt: new Date().toISOString(),
+/**
+ * Build the `"1.3"` codec envelope from a snapshot. Threads BOTH keyrings onto
+ * the PlaintextCodex-shaped source `buildCodexExport` reads: `foreignKeys` as a
+ * bare array (the codec wraps it into a `{ schemaVersion, keys }` block on emit)
+ * and `pureKeypairs` as a bare array (the codec carries it through unchanged).
+ * Omitting either wire here would silently drop the corresponding keyring from
+ * the backup — a funds-loss bug for `foreignKeys`.
+ */
+function buildBackupPayload(snapshot: CodexSnapshot): unknown {
+  return buildCodexExport({
     kadenaWallets: snapshot.kadenaSeeds,
     ouronetWallets: snapshot.ouroAccounts,
     addressBook: snapshot.addressBook,
-    uiSettings: snapshot.uiSettings,
     pureKeypairs: snapshot.pureKeypairs,
-  };
+    uiSettings: snapshot.uiSettings,
+    schemaVersion: snapshot.schemaVersion,
+    lastUpdatedAt: snapshot.lastUpdatedAt,
+    lastUpdatedDevice: snapshot.lastUpdatedDevice,
+    foreignKeys: snapshot.foreignKeys,
+  });
 }
 
-function parseBackupFile(json: string): BackupFileV12Plus {
-  let parsed: unknown;
+/**
+ * Parse a backup JSON string through the canonical codec. `deserializeCodex`
+ * accepts BOTH `"1.2"` and `"1.3"` (reader-before-writer), validates the
+ * `foreignKeys` block + `pureKeypairs` array shapes, and rejects any unknown
+ * top-level field — its throws are re-wrapped as this package's local
+ * `CodexImportError` so the hook's throwing contract is unchanged.
+ */
+function parseBackupFile(json: string): ParsedBackup {
   try {
-    parsed = JSON.parse(json);
+    return deserializeCodex(json) as unknown as ParsedBackup;
   } catch (e) {
-    throw new CodexImportError("parse", "JSON is malformed", e);
+    if (e instanceof SyntaxError) {
+      throw new CodexImportError("parse", "JSON is malformed", e);
+    }
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new CodexImportError("shape", detail, e);
   }
-  if (!parsed || typeof parsed !== "object") {
-    throw new CodexImportError("shape", "top-level is not an object");
-  }
-  const p = parsed as Record<string, unknown>;
-  if (p.version !== "1.2") {
-    throw new CodexImportError(
-      "shape",
-      `unsupported version ${String(p.version)} — expected "1.2"`
-    );
-  }
-  if (!Array.isArray(p.kadenaWallets)) {
-    throw new CodexImportError("shape", "kadenaWallets must be an array");
-  }
-  if (!Array.isArray(p.ouronetWallets)) {
-    throw new CodexImportError("shape", "ouronetWallets must be an array");
-  }
-  if (!Array.isArray(p.addressBook)) {
-    throw new CodexImportError("shape", "addressBook must be an array");
-  }
-  if (
-    typeof p.uiSettings !== "object" ||
-    p.uiSettings === null ||
-    Array.isArray(p.uiSettings)
-  ) {
-    throw new CodexImportError("shape", "uiSettings must be an object");
-  }
-  // pureKeypairs is optional (pre-v1.0.9 backups); validate only if present.
-  if (p.pureKeypairs !== undefined && !Array.isArray(p.pureKeypairs)) {
-    throw new CodexImportError(
-      "shape",
-      "pureKeypairs must be an array if present"
-    );
-  }
-  return p as unknown as BackupFileV12Plus;
 }
 
 export function useCodexBackup(): CodexBackupView {
@@ -122,6 +124,11 @@ export function useCodexBackup(): CodexBackupView {
       addressBook: s.addressBook,
       watchList: s.watchList,
       uiSettings: s.uiSettings,
+      // Carry the seedless foreign-key keyring so the Arweave key rides the
+      // backup export (funds-critical — omitting it silently drops the key).
+      foreignKeys: s.foreignKeys,
+      consumerSettings: s.consumerSettings,
+      codexIdentity: s.codexIdentity,
       schemaVersion: s.schemaVersion,
       lastUpdatedAt: s.lastUpdatedAt,
       lastUpdatedDevice: s.lastUpdatedDevice,
@@ -173,17 +180,28 @@ export function useCodexBackup(): CodexBackupView {
       const parsed = parseBackupFile(json);
       const current = buildSnapshotFromState();
 
-      // Hydrate into a CodexSnapshot. Adopt the parsed file's data;
-      // preserve current schemaVersion (it's a runtime-only counter,
-      // not part of the wire format).
+      // Hydrate into a CodexSnapshot. Adopt the parsed file's data; preserve
+      // current schemaVersion (a runtime-only counter, not part of the wire
+      // format).
       const next: CodexSnapshot = {
         kadenaSeeds: parsed.kadenaWallets,
         ouroAccounts: parsed.ouronetWallets,
         pureKeypairs: parsed.pureKeypairs ?? [],
         addressBook: parsed.addressBook,
-        // watchList stays current (not in the v1.2 wire format).
+        // watchList stays current (not in the wire format).
         watchList: current.watchList,
         uiSettings: parsed.uiSettings,
+        // BLOCK → BARE-ARRAY UNWRAP (funds-critical): the wire `foreignKeys` is a
+        // `{ schemaVersion, keys }` block; the store/adapter expect a bare
+        // `ForeignKeyEntry[]`. Assigning the whole block into an array-typed
+        // field would make the slice/adapter `.map`/`.find` on a non-array →
+        // the Arweave key is silently lost on restore = funds loss.
+        foreignKeys: parsed.foreignKeys?.keys ?? [],
+        // PRESERVE the double-Apollo identity + per-consumer settings the
+        // sharding adapter shards: the wire format omits them, and a full
+        // `saveAll` overwrite would otherwise WIPE them from disk (N-09).
+        consumerSettings: current.consumerSettings,
+        codexIdentity: current.codexIdentity,
         schemaVersion: current.schemaVersion,
         lastUpdatedAt: new Date().toISOString(),
         lastUpdatedDevice: current.lastUpdatedDevice,

@@ -340,7 +340,7 @@ describe("useActiveWallet", () => {
 });
 
 describe("useCodexBackup", () => {
-  it("exportForCloud returns a parseable v1.2-plus-pureKeypairs JSON", async () => {
+  it("exportForCloud emits the 1.3 codec envelope with pureKeypairs as a bare array (E-02 rewire; no longer the bypassed 1.2 format)", async () => {
     const adapter = new MemoryCodexAdapter("dev");
     const { result } = renderHook(
       () => ({
@@ -362,10 +362,72 @@ describe("useCodexBackup", () => {
       json = await result.current.backup.exportForCloud();
     });
     const parsed = JSON.parse(json);
-    expect(parsed.version).toBe("1.2");
+    // The rewire routes the export through buildCodexExport → "1.3" envelope.
+    expect(parsed.version).toBe("1.3");
     expect(parsed.kadenaWallets).toHaveLength(1);
+    // pureKeypairs travels as a BARE ARRAY (unlike the foreignKeys block).
+    expect(Array.isArray(parsed.pureKeypairs)).toBe(true);
     expect(parsed.pureKeypairs).toHaveLength(1);
     expect(parsed.pureKeypairs[0].id).toBe("p1");
+  });
+
+  it("foreignKeys round-trip: a 1.3 import unwraps the block to the store's bare array, and a re-export re-wraps it into a block (funds-critical: the Arweave key rides the backup, never silently lost)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        codex: useCodex(),
+      }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const fkEntry = {
+      id: "ar-1",
+      chainId: "arweave" as const,
+      label: "AR key",
+      encryptedKeyfile: "ENC::arweave-ciphertext",
+    };
+    // A 1.3 backup on the wire carries foreignKeys as a BLOCK.
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-05-25T10:00:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+      foreignKeys: { schemaVersion: 1, keys: [fkEntry] },
+    });
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // BLOCK → BARE-ARRAY UNWRAP: the in-memory store holds a bare ForeignKeyEntry[]
+    // (not the {schemaVersion,keys} object). A non-unwrapped bug would leave a
+    // non-array here → the Arweave key silently lost = funds loss.
+    const restoredFk = await adapter.loadAll();
+    expect(Array.isArray(restoredFk.foreignKeys)).toBe(true);
+    expect(restoredFk.foreignKeys).toEqual([fkEntry]);
+
+    // Re-export re-wraps the bare array into a block (writer discipline).
+    let json = "";
+    await act(async () => {
+      json = await result.current.backup.exportForCloud();
+    });
+    const parsed = JSON.parse(json);
+    expect(parsed.version).toBe("1.3");
+    expect(Array.isArray(parsed.foreignKeys)).toBe(false);
+    expect(parsed.foreignKeys.keys).toEqual([fkEntry]);
+    expect(parsed.foreignKeys.keys[0].encryptedKeyfile).toBe(fkEntry.encryptedKeyfile);
   });
 
   it("importFromCloud rehydrates seeds + ouroAccounts + pureKeypairs", async () => {
@@ -403,6 +465,83 @@ describe("useCodexBackup", () => {
     expect(result.current.codex.ouroAccounts).toHaveLength(1);
     expect(result.current.codex.pureKeypairs).toHaveLength(1);
     expect(result.current.codex.uiSettings.passwordCacheMinutes).toBe(99);
+  });
+
+  it("importFromCloud PRESERVES codexIdentity + consumerSettings (a restore must NOT wipe the double-Apollo identity when the backup omits them, N-09)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    // Pre-seed the adapter so the provider's init hydrates a codexIdentity +
+    // consumerSettings into live store state BEFORE the import runs.
+    const identity = { apolloA: "AAA", apolloB: "BBB", totalWordCount: 24 };
+    const settings = { library: { schemaVersion: 1, settings: {} } };
+    await adapter.saveCodexIdentity(identity as never);
+    await adapter.saveConsumerSettings(settings as never);
+
+    const { result } = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        codex: useCodex(),
+      }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    // A backup that carries NO codexIdentity / consumerSettings.
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-05-25T10:00:00.000Z",
+      kadenaWallets: [seedFx("imported-seed")],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    });
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // The restore must PRESERVE the live identity/settings, not wipe them to
+    // undefined/{} just because the backup file omitted them.
+    const snap = await adapter.loadAll();
+    expect(snap.codexIdentity).toEqual(identity);
+    expect(snap.consumerSettings).toEqual(settings);
+  });
+
+  it("importFromCloud accepts a 1.3 backup (READER-BEFORE-WRITER: the reader takes BOTH 1.2 and the emitted 1.3)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-05-25T10:00:00.000Z",
+      kadenaWallets: [seedFx("v13-seed")],
+      ouronetWallets: [],
+      addressBook: [],
+      pureKeypairs: [pureFx("v13-pure")],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    });
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+    expect(result.current.codex.kadenaSeeds).toHaveLength(1);
+    expect(result.current.codex.pureKeypairs.map((p) => p.id)).toEqual(["v13-pure"]);
   });
 
   it("importFromCloud tolerates missing pureKeypairs (pre-v1.0.9 backups)", async () => {
