@@ -2,7 +2,7 @@
   "name": "@ancientpantheon/codex-ui",
   "version": "0.0.1",
   "private": true,
-  "description": "React/browser interface layer of the Codex family — the DOM-facing package hosting future <CodexProvider>, hooks, and headless components.",
+  "description": "React/browser interface layer of the Codex family — the chain-generic DOM shell: <CodexProvider> (injected store/resolver/zbom-toast seams), the 16 hooks + their *View types, the generic slot-driven shell components, and the ui.css stylesheet. No value @stoachain, no value Ouronet import (type-only OK).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,11 +10,35 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./provider": {
+      "types": "./dist/provider/index.d.ts",
+      "import": "./dist/provider/index.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./ui.css": "./dist/ui.css"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "files": [
     "dist",
+    "dist/ui.css",
     "CHANGELOG.md",
     "README.md"
   ],
@@ -22,11 +46,34 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run copy:ui-css",
+    "copy:ui-css": "node -e \"require('fs').copyFileSync('src/ui/tokens.css','dist/ui.css')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "clean": "rimraf dist"
+  },
+  "peerDependencies": {
+    "lucide-react": ">=0.400.0",
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
+  "dependencies": {
+    "@ancientpantheon/codex-core": "*",
+    "zustand": "^5.0.0"
+  },
+  "_devDependenciesComment": "react/react-dom/lucide-react are mirrored here at peer-satisfying ranges so the workspace install materializes them (npm does not auto-install a package's own peerDeps). @ancientpantheon/codex-ouronet AND @stoachain/stoa-core are TYPE-ONLY: codex-ui `import type`s the byte-stable entity View types from '@ancientpantheon/codex-ouronet/types' and the Kadena signing View types (IKadenaKeypair, PactClient, CodexSigningStrategy) from '@stoachain/stoa-core/signing' — both erased at runtime under verbatimModuleSyntax, so they stay out of `dependencies`, but are declared here so the emitted .d.ts are self-contained (a downstream/isolated tsc can resolve the referenced types). @stoachain/stoa-core is NOT hoisted to the workspace root (it lives in codex-ouronet/node_modules), so codex-ui must declare it for its own tsc to resolve the type-only import.",
+  "devDependencies": {
+    "@ancientpantheon/codex-ouronet": "*",
+    "@stoachain/stoa-core": ">=4.3.0",
+    "@testing-library/jest-dom": "^6.6.4",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^29.0.0",
+    "lucide-react": "^0.483.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "repository": {
     "type": "git",

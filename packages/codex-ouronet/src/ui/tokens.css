@@ -1,0 +1,82 @@
+/*
+ * @ancientpantheon/codex-ouronet/ui — design-token contract.
+ *
+ * The `--codex-*` custom properties below are the single themeable surface for
+ * every assembled component shipped from the `./ui` subpath. Components style
+ * exclusively via `style={{ color: "var(--codex-text)" }}` — there is NO
+ * Tailwind/utility build. To reskin, a consumer overrides any `--codex-*` var
+ * (on `.codex-ui`, on `:root`, or on a per-instance wrapper).
+ *
+ * Defaults mirror OuronetUI's dark "Ouronet Codex" page so the OuronetUI
+ * consumer needs near-zero overrides. Hex values are lifted verbatim from
+ * OuronetUI's StoicTagDisplay / OuroAccountList / settings route.
+ *
+ * The token block is declared twice on purpose:
+ *   - `:root`     — global fallback, so tokens resolve even if a stray
+ *                   component renders outside a `.codex-ui` boundary.
+ *   - `.codex-ui` — the scoped contract applied by `<CodexUiRoot>`; lets a
+ *                   consumer confine Codex theming to one subtree.
+ */
+
+/*
+ * Web fonts for the assembled components. `@import` MUST be the first statement
+ * (CSS hoists it above all rules), so it sits ahead of the token blocks below:
+ *   - Cinzel       — inscription/display surfaces (StoicTag pillar, CodexID prefix)
+ *   - JetBrains Mono — the high-tech monospace for the DALOS glyph string + key input
+ *   - Inter        — default `--codex-font` UI copy
+ * OuronetUI loads the same families in app.css; importing here keeps the `./ui`
+ * package self-sufficient when a consumer hasn't already loaded them.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root,
+.codex-ui {
+  /* ── Surfaces ─────────────────────────────────────────────── */
+  --codex-bg: #0a0a0a;          /* page/base */
+  --codex-surface: #18181b;     /* cards, stat bars, active rows */
+  --codex-surface-2: #111111;   /* nested cards / inputs */
+  --codex-border: #262626;      /* default 1px borders, dividers */
+
+  /* ── Text ─────────────────────────────────────────────────── */
+  --codex-text: #d2d3d4;        /* primary copy + headings */
+  --codex-text-dim: #888888;    /* labels, secondary copy */
+
+  /* ── Accent (CodexPrime gold) ─────────────────────────────── */
+  --codex-accent: #ceac5f;          /* primary action / CodexPrime gold */
+  --codex-accent-strong: #f59e0b;   /* amber emphasis (sync shimmer) */
+
+  /* ── Status ───────────────────────────────────────────────── */
+  --codex-success: #22c55e;     /* active / matches-chain (bright: #4ade80) */
+  --codex-error: #c0392b;       /* inactive / mismatch / foreign */
+  --codex-warning: #f97316;     /* experimental / observational (APOLLO) */
+
+  /* ── Radii ────────────────────────────────────────────────── */
+  --codex-radius: 8px;          /* buttons, small cards (rounded-lg) */
+  --codex-radius-lg: 16px;      /* large panel cards (rounded-2xl) */
+
+  /* ── Elevation ────────────────────────────────────────────── */
+  --codex-shadow: 0 14px 44px rgba(0, 0, 0, 0.65);
+
+  /* ── Fonts ────────────────────────────────────────────────── */
+  --codex-font: "Inter", system-ui, -apple-system, sans-serif;
+  --codex-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  --codex-font-display: "Cinzel", serif;
+}
+
+/*
+ * Global spinner keyframes — used by loading affordances across the assembled
+ * components (matches the rotation OuronetUI applies to RotateCw / sync icons).
+ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/*
+ * Pulsed glow for the CodexID half prefixes (₱. / Π.). The glow color is the
+ * element's own `currentColor`, so each side glows in its own accent.
+ */
+@keyframes codex-glow-pulse {
+  0%, 100% { text-shadow: 0 0 4px currentColor, 0 0 8px currentColor; opacity: 0.92; }
+  50%      { text-shadow: 0 0 12px currentColor, 0 0 22px currentColor; opacity: 1; }
+}

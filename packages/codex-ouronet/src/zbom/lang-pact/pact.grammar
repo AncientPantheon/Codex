@@ -1,0 +1,90 @@
+// Pact language Lezer grammar
+// Based on codemirror/lang-example grammar + Pact syntax from
+// kadena-community/pact-vscode TextMate grammar + pact-language.readthedocs.io
+
+@top Program { expression* }
+
+@skip { space | LineComment }
+
+expression {
+  Keyword |
+  DefKeyword |
+  TypeKeyword |
+  Boolean |
+  Number |
+  Decimal |
+  String |
+  Symbol |
+  Identifier |
+  MetaTag |
+  Operator |
+  Application { "(" expression* ")" } |
+  List { "[" expression* "]" } |
+  Object { "{" (PropertyName ":" expression ","?)* "}" }
+}
+
+// Use @specialize to derive keywords from Identifier token
+// This ensures "defun" is only highlighted as keyword when it is
+// the full token, not as a substring of "my-defun-helper"
+kw<word> { @specialize<Identifier, word> }
+
+// Boolean uses @specialize too, so it doesn't overlap with Identifier
+boolLit<word> { @specialize<Identifier, word> }
+
+Keyword {
+  kw<"if"> | kw<"let"> | kw<"let*"> | kw<"lambda"> | kw<"cond"> |
+  kw<"use"> | kw<"namespace"> | kw<"implements"> | kw<"bless"> |
+  kw<"with-read"> | kw<"with-default-read"> | kw<"with-capability"> |
+  kw<"bind"> | kw<"step"> | kw<"step-with-rollback"> |
+  kw<"resume"> | kw<"yield"> | kw<"enforce"> | kw<"enforce-one"> |
+  kw<"enforce-keyset"> | kw<"enforce-guard"> |
+  kw<"require-capability"> | kw<"compose-capability"> |
+  kw<"read"> | kw<"write"> | kw<"update"> | kw<"select"> | kw<"where"> |
+  kw<"and"> | kw<"or"> | kw<"not"> | kw<"try"> |
+  kw<"format"> | kw<"map"> | kw<"fold"> | kw<"filter"> |
+  kw<"define-keyset"> | kw<"define-namespace">
+}
+
+DefKeyword {
+  kw<"defun"> | kw<"defcap"> | kw<"defconst"> | kw<"defpact"> |
+  kw<"defschema"> | kw<"deftable"> | kw<"module"> | kw<"interface"> |
+  kw<"defproperty">
+}
+
+TypeKeyword {
+  kw<"integer"> | kw<"decimal"> | kw<"time"> | kw<"bool"> |
+  kw<"string"> | kw<"list"> | kw<"value"> | kw<"keyset"> |
+  kw<"guard"> | kw<"object"> | kw<"table">
+}
+
+Boolean {
+  boolLit<"true"> | boolLit<"false">
+}
+
+@tokens {
+  Identifier { $[a-zA-Z_] $[a-zA-Z0-9_\-\.%#+&$@<>=?*!|/]* }
+
+  PropertyName { $[a-zA-Z_\-"] $[a-zA-Z0-9_\-"]* }
+
+  String { '"' (!["\\] | "\\" _)* '"' }
+
+  @precedence { Decimal, Number, Operator }
+
+  Number { @digit+ }
+
+  Decimal { @digit+ "." @digit+ }
+
+  Symbol { "'" $[a-zA-Z_\-] $[a-zA-Z0-9_\-]* }
+
+  MetaTag { "@" $[a-zA-Z_] $[a-zA-Z0-9_\-]* }
+
+  Operator { ":=" | "::" | $[+\-*/=<>!] "="? }
+
+  LineComment { ";;" ![\n]* }
+
+  space { $[ \t\n\r]+ }
+
+  "(" ")" "[" "]" "{" "}" ":" ","
+}
+
+@detectDelim
