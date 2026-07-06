@@ -1,8 +1,29 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { alias, dedupe } from "./resolve.shared";
+
+// Resolve this app's dev port from the central LocalHost registry
+// (D:/_Claude/LocalHost/registry.json — key "codex") so it never collides with
+// the other _Claude localhost sites and the LocalHost aggregator dashboard binds
+// the same port it starts. Falls back to Vite's default if the registry is
+// absent, so the playground still runs standalone. Nested one level deeper than
+// the StoaOuronet Vite apps, hence four `..` up to the _Claude root.
+function localhostPort(key: string, fallback: number): number {
+  try {
+    const reg = JSON.parse(
+      readFileSync(
+        resolve(__dirname, "../../../../LocalHost/registry.json"),
+        "utf8",
+      ),
+    ) as { projects?: Array<{ key: string; port: number }> };
+    const port = reg.projects?.find((p) => p.key === key)?.port;
+    return typeof port === "number" ? port : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 // Vite plugin: DEV-ONLY CJS-interop shim for the sibling stoa-js `@stoachain/*`
 // packages. Those packages ship a dual TS build — an ESM `dist/**/index.js` that
@@ -85,6 +106,12 @@ const streamShim = resolve(__dirname, "stream.shim.ts").replace(/\\/g, "/");
 
 export default defineConfig({
   plugins: [stoachainCjsInterop(), react()],
+  // Bind the port assigned by the central LocalHost registry (key "codex" → 3009).
+  // strictPort fails loudly on a collision instead of silently hopping ports.
+  server: {
+    port: localhostPort("codex", 5173),
+    strictPort: true,
+  },
   // `define: { global: "globalThis" }` — D6 was Kadena-only and never bundled
   // the Node-oriented Arweave/Turbo libs, which reference a bare `global`. Vite
   // does NOT auto-polyfill `global` for the browser, so any real-toggle path that

@@ -65,6 +65,8 @@ export { ExperimentalCurvesCard } from "./settings/ExperimentalCurvesCard.js";
 export type { ExperimentalCurvesCardProps } from "./settings/ExperimentalCurvesCard.js";
 export { GasSettingsCard } from "./settings/GasSettingsCard.js";
 export type { GasSettingsCardProps } from "./settings/GasSettingsCard.js";
+export { NetworkSettingsCard } from "./settings/NetworkSettingsCard.js";
+export type { NetworkSettingsCardProps } from "./settings/NetworkSettingsCard.js";
 export { PasswordCacheCard } from "./settings/PasswordCacheCard.js";
 export type { PasswordCacheCardProps } from "./settings/PasswordCacheCard.js";
 

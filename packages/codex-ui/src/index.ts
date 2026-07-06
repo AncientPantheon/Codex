@@ -111,6 +111,7 @@ export {
   DownloadCodexCard,
   ExperimentalCurvesCard,
   GasSettingsCard,
+  NetworkSettingsCard,
   PasswordCacheCard,
   StyledRotatePaymentKeyModal,
   StyledRotateGuardModal,
@@ -137,6 +138,7 @@ export type {
   DownloadCodexCardProps,
   ExperimentalCurvesCardProps,
   GasSettingsCardProps,
+  NetworkSettingsCardProps,
   PasswordCacheCardProps,
   InjectedRotateModal,
 } from "./ui/index.js";

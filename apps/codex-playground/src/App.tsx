@@ -40,26 +40,34 @@ import {
 } from "react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { CodexUiRoot, CodexTabs } from "@ancientpantheon/codex-ouronet/ui";
+import { NetworkSettingsCard } from "@ancientpantheon/codex-ui/ui";
 import {
   useCodex,
   useCodexAuth,
   useCodexBackup,
 } from "@ancientpantheon/codex-ouronet/hooks";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
 
 import { UnlockScreen } from "./UnlockScreen";
 // The E5 app-side wiring of the generic Foreign Chains tab to the concrete
 // Arweave panel. Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
 import { ForeignChainsWiring } from "./ForeignChainsWiring";
-import {
-  ArweaveModeToggle,
-  DEFAULT_GATEWAY_URL,
-} from "./ArweaveModeToggle";
+import { ArweaveModeToggle } from "./ArweaveModeToggle";
 import {
   ARWEAVE_WIRING_MODE_MOCK,
   type ArweaveWiringMode,
 } from "./ForeignChainsWiring";
+import {
+  loadNetworkSettings,
+  saveNetworkSettings,
+  resolveNetworkModel,
+  STOACHAIN_CHAIN_ID,
+  ARWEAVE_CHAIN_ID,
+  type NetworkSettings,
+} from "./networkSettings";
 import "./app.css";
 
 /** What the App is currently rendering: the load screen, or a mounted codex. */
@@ -79,15 +87,69 @@ export function Dashboard({
   onReset?: () => void;
 } = {}): ReactElement {
   const { downloadAsJson } = useCodexBackup();
+  const { isReady } = useCodex();
+  const store = useCodexStore();
+
+  // The surfaced, editable, UNLOCKED network config (CL-13): the Kadena node +
+  // Arweave gateway, restored from localStorage (defaults to the local/testnet
+  // endpoints). Standalone → both chains are LOCAL, editable rows.
+  const [network, setNetwork] = useState<NetworkSettings>(() => loadNetworkSettings());
 
   // The Arweave path defaults to MOCK + OFFLINE (funds-safety, N-11): the app
   // boots mock; the user must explicitly opt into real via the toggle. The
   // toggle owns the mode + gateway-URL UI and reports them upward here, so the
   // wiring below only constructs the real E1-E3 stack once mode === "real".
+  // The gateway seed comes from the surfaced network state so the Network card
+  // and the toggle read one source of truth.
   const [arweaveMode, setArweaveMode] = useState<ArweaveWiringMode>(
     ARWEAVE_WIRING_MODE_MOCK,
   );
-  const [gatewayUrl, setGatewayUrl] = useState<string>(DEFAULT_GATEWAY_URL);
+  const gatewayUrl = network.arweaveGatewayUrl;
+  const setGatewayUrl = useCallback(
+    (url: string) => setNetwork((prev) => ({ ...prev, arweaveGatewayUrl: url })),
+    [],
+  );
+
+  // Persist the surfaced config on every edit so it survives a reload.
+  useEffect(() => {
+    saveNetworkSettings(network);
+  }, [network]);
+
+  // Push the Kadena node into uiSettings (selectedNode:"custom"/customNodeUrl —
+  // the Phase-3 seam the dashboard's signing/reads follow). Gated on `isReady`:
+  // updateUiSettings persists through the adapter, which is wired only after the
+  // provider's init effect runs — writing earlier throws "no adapter wired".
+  useEffect(() => {
+    if (!isReady) return;
+    void store
+      .getState()
+      .actions.updateUiSettings({
+        selectedNode: "custom",
+        customNodeUrl: network.kadenaNodeUrl,
+      });
+  }, [isReady, network.kadenaNodeUrl, store]);
+
+  // Build the per-chain NetworkSettingsModel off the surfaced state (async
+  // resolve — the resolver probes coverage; standalone has no global so it
+  // resolves both chains local without a network round-trip).
+  const [networkModel, setNetworkModel] = useState<NetworkSettingsModel | null>(null);
+  useEffect(() => {
+    let live = true;
+    void resolveNetworkModel(network).then((model) => {
+      if (live) setNetworkModel(model);
+    });
+    return () => {
+      live = false;
+    };
+  }, [network]);
+
+  const setChainUrl = useCallback((chainId: string, url: string) => {
+    setNetwork((prev) => {
+      if (chainId === STOACHAIN_CHAIN_ID) return { ...prev, kadenaNodeUrl: url };
+      if (chainId === ARWEAVE_CHAIN_ID) return { ...prev, arweaveGatewayUrl: url };
+      return prev;
+    });
+  }, []);
 
   return (
     <div className="cxpg-shell">
@@ -124,6 +186,19 @@ export function Dashboard({
           {/* The Arweave path — the generic Foreign Chains tab wired to the
               concrete ArweavePanel via the app (codex-ui stays Arweave-free). The
               mock ⇄ real toggle drives the wiring mode; default is mock+offline. */}
+          <section className="cxpg-foreign" aria-label="Network">
+            <h2 className="cxpg-foreign-title">Network</h2>
+            {networkModel ? (
+              <NetworkSettingsCard
+                model={networkModel}
+                urls={{
+                  [STOACHAIN_CHAIN_ID]: network.kadenaNodeUrl,
+                  [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
+                }}
+                onSetChainUrl={setChainUrl}
+              />
+            ) : null}
+          </section>
           <section className="cxpg-foreign" aria-label="Foreign chains">
             <h2 className="cxpg-foreign-title">Foreign chains</h2>
             <ArweaveModeToggle
