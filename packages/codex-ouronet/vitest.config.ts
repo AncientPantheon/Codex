@@ -102,6 +102,11 @@ export default defineConfig({
       { find: /^@ancientpantheon\/codex-ouronet\/ui$/, replacement: `${codexOuronetSrc}/ui/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/zbom$/, replacement: `${codexOuronetSrc}/zbom/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/state$/, replacement: `${codexOuronetSrc}/state/index.ts` },
+      // Connection subpath (Phase 3): the Kadena connection helper barrel. Phase 4
+      // resolves the injected connection through this path. Internal deep imports
+      // (the stoaNetwork shim, resolverProvider) stay relative in tests — not
+      // surfaced as public subpaths.
+      { find: /^@ancientpantheon\/codex-ouronet\/connection$/, replacement: `${codexOuronetSrc}/connection/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet$/, replacement: `${codexOuronetSrc}/index.ts` },
       // Cross-package: the sibling headless base. Subpath before bare-root so the
       // most-specific match wins first (F-BUG-003 — the resolver rewire consumes

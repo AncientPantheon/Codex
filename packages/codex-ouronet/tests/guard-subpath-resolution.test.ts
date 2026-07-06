@@ -3,7 +3,7 @@
  *
  * Two forward-carried CI invariants converge here:
  *
- *   CI-001 (build-verification pillar): the package PUBLIC surface — the 12
+ *   CI-001 (build-verification pillar): the package PUBLIC surface — the 13
  *   importable JS modules declared in package.json exports plus the produced
  *   ui.css static file — must actually RESOLVE from the BUILT dist, not from
  *   src. The vitest config aliases every codex-ouronet subpath specifier back
@@ -48,13 +48,14 @@ const distDir = resolve(pkgRoot, "dist");
 const distEntry = (subdir: string): string => resolve(distDir, subdir, "index.js");
 const distRootEntry = resolve(distDir, "index.js");
 
-// The 12 importable JS modules = bare root + the 11 JS subpaths from the exports
+// The 13 importable JS modules = bare root + the 12 JS subpaths from the exports
 // map. `./ui.css` is excluded (it is a static file, asserted separately).
 const JS_SUBPATHS = [
   "adapters",
   "provider",
   "hooks",
   "components",
+  "connection",
   "resolver",
   "errors",
   "codex-identity",
@@ -95,7 +96,7 @@ describe("T4.1 build precondition", () => {
   });
 });
 
-describe("CI-001 · 12 importable modules resolve from the BUILT dist", () => {
+describe("CI-001 · 13 importable modules resolve from the BUILT dist", () => {
   it("resolves the bare root (`.`) as a module object — empty `export {};` barrel, exports NOT required", async () => {
     // The root is an intentional byte-faithful stub. Prove it resolves without a
     // module-resolution throw; do NOT demand exports (that would false-fail).

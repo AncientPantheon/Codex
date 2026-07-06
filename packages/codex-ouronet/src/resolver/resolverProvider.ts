@@ -19,6 +19,7 @@
 import { createClient } from "@stoachain/kadena-stoic-legacy/client";
 import { CodexSigningStrategy } from "@stoachain/stoa-core/signing";
 import { getPactUrl, KADENA_CHAIN_ID } from "@stoachain/stoa-core/constants";
+import { setNodeConfig } from "@stoachain/stoa-core/network";
 import type { IKadenaKeypair } from "@stoachain/stoa-core/signing";
 
 import type { CodexStore } from "../state/index.js";
@@ -71,11 +72,35 @@ export function createOuronetResolverProvider(
       // Same construction the pre-carve `useSignTransaction` did inline: a
       // per-strategy resolver (so the foreign-key callback is honoured) + the
       // provider's signing-client override, or the lazy default client keyed on
-      // the selected node. selectedNode/customNodeUrl reach chain URL selection
-      // via getPactUrl's stoa-core network module (consumer-side glue).
+      // the selected node.
       const strategyResolver = new InternalCodexResolver(strategyStore, {
         requestForeignKey: options.requestForeignKey,
       });
+
+      // Apply the selected node to stoa-core's failover global BEFORE reading the
+      // Pact URL. This is what actually routes the node URL: `getPactUrl` (used
+      // here for signing AND by the Accounts-tab balance reads) reads the same
+      // module-global active host that `setNodeConfig` mutates, so one call
+      // redirects both. Pre-Phase-3 these fields were forwarded but never
+      // applied, pinning every read/signature to the node2 default regardless of
+      // the user's selection. Omitting selectedNode leaves the global untouched
+      // (node2 default) — backward-compatible with callers that never forwarded
+      // the node fields.
+      // A "custom" selection with no URL yet (the UI can flip the toggle before
+      // the user types one — customNodeUrl defaults to "") must NOT reach
+      // setNodeConfig: it throws a TypeError on an empty custom URL and would
+      // crash strategy construction. Treat that as "no custom node yet" and
+      // leave the default global in place.
+      const hasCustomUrl =
+        typeof options.customNodeUrl === "string" &&
+        options.customNodeUrl.length > 0;
+      if (options.selectedNode === "custom" ? hasCustomUrl : !!options.selectedNode) {
+        setNodeConfig(
+          options.selectedNode as "node1" | "node2" | "custom",
+          options.customNodeUrl,
+        );
+      }
+
       const pactClient =
         options.clientOverride ?? createClient(getPactUrl(KADENA_CHAIN_ID));
       return new CodexSigningStrategy(strategyResolver, pactClient as never);
