@@ -94,3 +94,26 @@ export type {
   PureKeypairLike,
   KadenaSeedType,
 } from "./resolver/index.js";
+
+// ----- headless connection layer (Phase 1: CL-01..CL-05, N-01) -----
+
+export {
+  createPythiaConnection,
+  createDirectNodeConnection,
+  createConnectionResolver,
+} from "./connection/index.js";
+
+export type {
+  ChainConnection,
+  ConnectionHealth,
+  ConnectionPollResult,
+  FetchLike,
+  PythiaConnectionOptions,
+  DirectNodeConnectionOptions,
+  DirectNodeTransport,
+  ConnectionResolver,
+  ConnectionResolverOptions,
+  NetworkSettingsModel,
+  ChainConnectionRow,
+  ChainConnectionStatus,
+} from "./connection/index.js";

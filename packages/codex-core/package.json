@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Chain-agnostic Codex substrate: the CK-wrapping vault + encryption model, the CodexAdapter storage interface, the CodexSnapshot data model, the ForeignChainAdapter registry seam, the foreignKeys keyring model, and the headless resolver factory. No React, no Ouronet, no Pact.",
   "private": true,
   "type": "module",
