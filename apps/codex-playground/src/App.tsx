@@ -50,6 +50,17 @@ import {
 
 import { UnlockScreen } from "./UnlockScreen";
 import { hydrateFromPlaintextSnapshot } from "./loadCodex";
+// The E5 app-side wiring of the generic Foreign Chains tab to the concrete
+// Arweave panel. Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
+import { ForeignChainsWiring } from "./ForeignChainsWiring";
+import {
+  ArweaveModeToggle,
+  DEFAULT_GATEWAY_URL,
+} from "./ArweaveModeToggle";
+import {
+  ARWEAVE_WIRING_MODE_MOCK,
+  type ArweaveWiringMode,
+} from "./ForeignChainsWiring";
 // The T10.3 committed throwaway fixtures — CONSUMED here (not created).
 import { emptySnapshot, populatedKadenaSnapshot } from "../fixtures";
 
@@ -65,12 +76,35 @@ type LoadedState =
  */
 function Dashboard(): ReactElement {
   const { downloadAsJson } = useCodexBackup();
+
+  // The Arweave path defaults to MOCK + OFFLINE (funds-safety, N-11): the app
+  // boots mock; the user must explicitly opt into real via the toggle. The
+  // toggle owns the mode + gateway-URL UI and reports them upward here, so the
+  // wiring below only constructs the real E1-E3 stack once mode === "real".
+  const [arweaveMode, setArweaveMode] = useState<ArweaveWiringMode>(
+    ARWEAVE_WIRING_MODE_MOCK,
+  );
+  const [gatewayUrl, setGatewayUrl] = useState<string>(DEFAULT_GATEWAY_URL);
+
   return (
     <CodexUiRoot>
       <button type="button" onClick={() => void downloadAsJson()}>
         Export codex to JSON
       </button>
       <CodexTabs />
+      {/* The Arweave path — the generic Foreign Chains tab wired to the concrete
+          ArweavePanel via the app (codex-ui stays Arweave-free). The mock ⇄ real
+          toggle drives the wiring mode; default is mock+offline (funds-safety). */}
+      <section aria-label="Foreign chains">
+        <h2>Foreign chains</h2>
+        <ArweaveModeToggle
+          initialMode={arweaveMode}
+          initialGatewayUrl={gatewayUrl}
+          onModeChange={setArweaveMode}
+          onGatewayUrlChange={setGatewayUrl}
+        />
+        <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
+      </section>
     </CodexUiRoot>
   );
 }

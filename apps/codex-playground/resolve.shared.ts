@@ -15,6 +15,7 @@ const codexCoreSrc = `${packages}/codex-core/src`;
 const codexUiSrc = `${packages}/codex-ui/src`;
 const codexUiSrcIndex = `${codexUiSrc}/index.ts`;
 const codexOuronetSrc = `${packages}/codex-ouronet/src`;
+const codexArweaveSrc = `${packages}/codex-arweave/src`;
 
 // The app's OWN React 19.2.7 copy — the canonical single instance every module
 // (the aliased package sources, zustand, @testing-library/react, the shell
@@ -76,6 +77,17 @@ export const alias = [
   // live). The file-upload adapter imports the snapshot type from this subpath.
   { find: /^@ancientpantheon\/codex-ouronet\/(.*)$/, replacement: `${codexOuronetSrc}/$1/index.ts` },
   { find: /^@ancientpantheon\/codex-ouronet$/, replacement: `${codexOuronetSrc}/index.ts` },
+
+  // codex-arweave: PREFIX/regex alias so the bare `.` root, `/panel`, AND
+  // `/address-book` all fall through to the package SOURCE (hot-reloadable, single
+  // React copy via the react aliases above) instead of the package `exports` → built
+  // `dist`. The captured `$1` is `""` (bare), `/panel`, or `/address-book`; the
+  // replacement points at the matching src directory whose `index.ts` barrel Vite
+  // resolves by directory-index. A bare exact-match file alias would NOT redirect the
+  // `/panel` + `/address-book` subpaths (they would fall through to `exports`/dist and
+  // break hot-reload-from-src + duplicate React). The panel's hooks resolve to the
+  // app's single React because the react/react-dom aliases above precede this.
+  { find: /^@ancientpantheon\/codex-arweave(\/.*)?$/, replacement: `${codexArweaveSrc}$1` },
 
   // codex-ui JS SUBPATH barrels → src (single codex-ui module copy + single React).
   // WHY (T10.4 blocker): codex-ouronet's src re-exports from `@ancientpantheon/codex-ui/hooks`
