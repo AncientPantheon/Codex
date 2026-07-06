@@ -33,15 +33,42 @@ export function UnlockScreen(): ReactElement {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <label htmlFor="codex-unlock-password">Password</label>
-      <input
-        id="codex-unlock-password"
-        type="password"
-        value={password}
-        onChange={(event) => setPassword(event.target.value)}
-      />
-      <button type="submit">Unlock</button>
-    </form>
+    <div className="cxpg-app cxpg-landing">
+      <div className="cxpg-card">
+        <div className="cxpg-logo" aria-hidden="true">
+          🔒
+        </div>
+        <h1 className="cxpg-title">Unlock your Codex</h1>
+        <p className="cxpg-subtitle">
+          Enter your password to decrypt this codex on this device.
+        </p>
+
+        <form className="cxpg-form" onSubmit={handleSubmit}>
+          <label htmlFor="codex-unlock-password" className="cxpg-field-label">
+            Password
+          </label>
+          <input
+            id="codex-unlock-password"
+            className="cxpg-input"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Your codex password"
+            autoComplete="current-password"
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="cxpg-btn cxpg-btn--primary cxpg-btn--block"
+          >
+            Unlock
+          </button>
+        </form>
+
+        <p className="cxpg-note">
+          Your password never leaves this device.
+        </p>
+      </div>
+    </div>
   );
 }
