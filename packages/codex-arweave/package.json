@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-arweave",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "The Arweave Codex module: the foreignKeys JWK keyring integration, the sibling RSA signer, the upload/library feature, and the Arweave UI tab. Builds on @ancientpantheon/arweave-core + codex-core.",
   "private": true,
   "type": "module",

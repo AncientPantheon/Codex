@@ -93,11 +93,22 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 /**
  * Module-internal Arweave instance used ONLY for the OFFLINE `createTransaction`
- * build. With `last_tx` and `reward` both supplied, `createTransaction` issues
- * zero network calls (verified arweave-js fact), so this instance never touches
- * a gateway. The host is nominal.
+ * build.
+ *
+ * NOT A NETWORK CONNECTION POINT. With `last_tx` and `reward` both supplied,
+ * `createTransaction` issues zero network calls (verified arweave-js fact +
+ * vestigial-host probe), so this instance never touches a gateway. The real
+ * anchor/price/post I/O goes through the per-endpoint client built from the
+ * INJECTED pool endpoint (`endpointClient.ts`), never this instance. The host is
+ * therefore an INERT placeholder, deliberately NOT `arweave.net`, so no reachable
+ * gateway default is baked in (N-03).
  */
-const builder = Arweave.init({ host: "arweave.net", protocol: "https", port: 443 });
+const BUILDER_INERT_HOST = "offline-build.invalid";
+const builder = Arweave.init({
+  host: BUILDER_INERT_HOST,
+  protocol: "https",
+  port: 443,
+});
 
 /**
  * Build the default arweave-js-backed gateway-API factory: each per-endpoint

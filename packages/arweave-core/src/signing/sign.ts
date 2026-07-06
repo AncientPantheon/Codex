@@ -36,10 +36,22 @@ import { importKeyfile } from "../keys/keyfile.js";
 
 /**
  * Module-internal Arweave instance used ONLY for its local signing routine.
- * The host is nominal — `transactions.sign` issues zero network calls, so this
- * instance never touches a gateway. Never reuse it for reads or posts.
+ *
+ * NOT A NETWORK CONNECTION POINT. `transactions.sign` is a fully local RSA-PSS
+ * deep-hash (verified: build+sign issue zero fetches — see the `signing.test.ts`
+ * offline guarantee and the vestigial-host probe), so no gateway is ever
+ * contacted through this instance. The host is therefore an INERT placeholder,
+ * deliberately NOT `arweave.net`, so no reachable gateway default is baked in
+ * (N-03): a caller that (incorrectly) tried to read/post through this instance
+ * would hit the unroutable placeholder, not the public gateway. Never reuse this
+ * instance for reads or posts — those go through the injected pool endpoint.
  */
-const signer = Arweave.init({ host: "arweave.net", protocol: "https", port: 443 });
+const SIGNING_INERT_HOST = "signing.invalid";
+const signer = Arweave.init({
+  host: SIGNING_INERT_HOST,
+  protocol: "https",
+  port: 443,
+});
 
 /**
  * Thrown when the consensus-critical arweave-js sign path fails for a keyfile
