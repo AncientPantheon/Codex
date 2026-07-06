@@ -1,7 +1,45 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { alias, dedupe } from "./resolve.shared";
+
+// Vite plugin: DEV-ONLY CJS-interop shim for the sibling stoa-js `@stoachain/*`
+// packages. Those packages ship a dual TS build — an ESM `dist/**/index.js` that
+// re-exports named CommonJS symbols via `export * from "./x.cjs"` (a star-re-export
+// OVER a CommonJS file) plus a sibling CommonJS `dist/**/index.cjs` barrel that uses
+// `__exportStar(require("./x.cjs"), exports)`. Their `exports` map points BOTH the
+// `import` AND `require` conditions at the ESM `index.js`. Node's ESM↔CJS interop
+// forwards the CJS names fine, but Vite's DEV pre-bundler (esbuild) cannot STATICALLY
+// resolve names through an `export *`-over-CJS chain, so every named import
+// (`import { hexToBin } from "@stoachain/kadena-stoic-legacy/cryptography-utils"`,
+// and the ~30 other `@stoachain/*` subpath imports the real Kadena dashboard makes)
+// fails at runtime with "does not provide an export named ..." and the app renders a
+// BLANK page. The `.cjs` barrels' `__exportStar(require(...))` pattern IS understood
+// by Vite's cjs-module-lexer, so redirecting the ESM entry onto its `.cjs` sibling
+// exposes the named exports. This is a DEV-ONLY gap: `vite build` (Rollup) and the
+// vitest suite interop CJS correctly, so both pass while `vite dev` alone breaks —
+// which is why 69 green tests + a green `vite build` did not catch it. Only touches
+// `@stoachain/*`; redirects only when a `.cjs` sibling actually exists.
+function stoachainCjsInterop(): Plugin {
+  return {
+    name: "stoachain-cjs-interop",
+    enforce: "pre",
+    async resolveId(source, importer, options) {
+      if (!source.startsWith("@stoachain/")) return null;
+      const resolved = await this.resolve(source, importer, {
+        ...options,
+        skipSelf: true,
+      });
+      if (!resolved) return null;
+      const cjs = resolved.id.replace(/index\.js$/, "index.cjs");
+      if (cjs !== resolved.id && existsSync(cjs)) {
+        return { ...resolved, id: cjs };
+      }
+      return resolved;
+    },
+  };
+}
 
 // A transitive dep (@stoachain/stoa-core's signing path) does
 // `import { Buffer } from "node:buffer"`. Vite externalizes Node builtins for the
@@ -46,7 +84,7 @@ const cryptoShim = resolve(__dirname, "crypto.shim.ts").replace(/\\/g, "/");
 const streamShim = resolve(__dirname, "stream.shim.ts").replace(/\\/g, "/");
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [stoachainCjsInterop(), react()],
   // `define: { global: "globalThis" }` — D6 was Kadena-only and never bundled
   // the Node-oriented Arweave/Turbo libs, which reference a bare `global`. Vite
   // does NOT auto-polyfill `global` for the browser, so any real-toggle path that
