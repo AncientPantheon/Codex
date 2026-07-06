@@ -56,7 +56,7 @@ describe("UnlockScreen — the minimal mode-1 unlock path", () => {
     const user = userEvent.setup();
     render(<UnlockScreen />);
 
-    const input = screen.getByLabelText(/password/i);
+    const input = screen.getByLabelText(/^password$/i);
     expect(input).toHaveAttribute("type", "password"); // masked, not plaintext
 
     await user.type(input, SECRET);
@@ -76,7 +76,7 @@ describe("UnlockScreen — the minimal mode-1 unlock path", () => {
     const user = userEvent.setup();
     render(<UnlockScreen />);
 
-    await user.type(screen.getByLabelText(/password/i), "definitely-the-wrong-password");
+    await user.type(screen.getByLabelText(/^password$/i), "definitely-the-wrong-password");
     await user.click(screen.getByRole("button", { name: /unlock/i }));
 
     expect(authenticate).toHaveBeenCalledTimes(1);
@@ -104,7 +104,7 @@ describe("UnlockScreen — the minimal mode-1 unlock path", () => {
     const user = userEvent.setup();
     const { container } = render(<UnlockScreen />);
 
-    await user.type(screen.getByLabelText(/password/i), SECRET);
+    await user.type(screen.getByLabelText(/^password$/i), SECRET);
     await user.click(screen.getByRole("button", { name: /unlock/i }));
 
     // The password must never appear in any console channel...

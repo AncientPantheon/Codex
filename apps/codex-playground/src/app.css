@@ -318,3 +318,43 @@
   font-size: 14.5px;
   margin-top: 4px;
 }
+
+/* Password field with a reveal (eye) toggle. */
+.cxpg-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.cxpg-input--eye {
+  padding-right: 46px;
+}
+
+.cxpg-eye {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--cxpg-text-dim);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.cxpg-eye:hover {
+  color: var(--cxpg-text);
+  background: #ffffff12;
+}
+
+.cxpg-eye:active {
+  color: var(--cxpg-accent);
+}

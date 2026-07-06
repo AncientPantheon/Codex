@@ -95,7 +95,7 @@ describe("App — encrypted backup: load screen → upload → restore → unloc
     // After restore-into-the-mounted-store, the UNLOCK screen gates the dashboard
     // (the secrets are still encrypted). The dashboard's tab strip is NOT yet
     // shown — the sequence is mount → restore → unlock → (authenticate) → dashboard.
-    const passwordInput = await screen.findByLabelText(/password/i);
+    const passwordInput = await screen.findByLabelText(/^password$/i);
     expect(passwordInput).toHaveAttribute("type", "password");
     expect(screen.queryByRole("tab", { name: /seed words/i })).toBeNull();
 
