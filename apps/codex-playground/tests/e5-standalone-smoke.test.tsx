@@ -1,17 +1,22 @@
 // ============================================================================
 // STANDALONE SMOKE (T15.7 — PG-03) — the self-contained local Codex composes.
 //
-// This is a BOUNDED mount-smoke: it asserts the full standalone shell mounts
-// and exposes ALL the pieces reachable in ONE app — the real dashboard, both
-// load affordances (mode-1 encrypted backup + mode-2 plaintext fixture), the
-// Foreign Chains tab, and the mock/real Arweave mode toggle — in the DEFAULT
-// mock+offline mode, WITHOUT error.
+// This is a BOUNDED mount-smoke: it asserts (a) the single product load screen
+// renders a clean "Load your Codex" upload (no demo/fixture shortcuts), and
+// (b) the full dashboard shell composes ALL the pieces reachable in ONE app —
+// the real dashboard, the export affordance, the Foreign Chains tab, and the
+// mock/real Arweave mode toggle — in the DEFAULT mock+offline mode, WITHOUT
+// error.
+//
+// The dashboard is mounted DIRECTLY against a plaintext-hydrated store (the
+// hydrateFromPlaintextSnapshot test/dev seam) rather than through the encrypted
+// upload+unlock round-trip — the product UI only loads a real encrypted codex,
+// but the smoke needs a deterministic mounted store to assert the composition.
 //
 // It also pins the NO-CLOUD boundary (N-11): the standalone playground uses
 // uploaded-JSON + local stores ONLY — no cloud adapter, no cloud login, no
 // remote-storage call. The App composes MemoryCodexAdapter (a local in-memory
-// store) and never imports a cloud adapter / login surface, and mounting +
-// entering the dashboard opens no network socket (window.fetch is never called).
+// store) and never imports a cloud adapter / login surface.
 //
 // It deliberately does NOT re-test the T15.4 (5 panel areas) or T15.6 (toggle
 // state/warning transitions) rows — those live in their own suites. This file
@@ -20,47 +25,51 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
+import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 
-import { App } from "../src/App";
+import { App, Dashboard } from "../src/App";
+import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import { DEFAULT_GATEWAY_URL } from "../src/ArweaveModeToggle";
+import { populatedKadenaSnapshot } from "../fixtures";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-describe("PG-03 standalone — the landing shell exposes BOTH load affordances", () => {
-  it("mounts the landing picker with the plaintext-fixture entry AND the encrypted-backup upload — both load modes reachable from one shell", () => {
+describe("PG-03 standalone — the load screen is a single clean upload (no demo shortcuts)", () => {
+  it("renders the 'Load your Codex' upload affordance and NO demo/fixture buttons", () => {
     render(<App />);
-    // mode-2: the plaintext-fixture load affordance (no error thrown on mount).
+    // The single product entry point: upload the exported codex .json.
+    expect(screen.getByLabelText(/load your codex/i)).toBeInTheDocument();
+    // The old demo/fixture shortcuts are gone — you always load a real codex.
     expect(
-      screen.getByRole("button", { name: /load populated.*fixture/i }),
-    ).toBeInTheDocument();
-    // mode-1: the encrypted-backup upload affordance (backup + password path).
-    expect(screen.getByLabelText(/backup.*json/i)).toBeInTheDocument();
+      screen.queryByRole("button", { name: /fixture/i }),
+    ).toBeNull();
   });
 });
 
 describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains tab + the Arweave mode toggle in one shell", () => {
-  async function enterDashboard() {
-    const user = userEvent.setup();
-    render(<App />);
-    // Enter via mode-2 (no unlock) so the composed dashboard is reachable.
-    await user.click(
-      screen.getByRole("button", { name: /load populated.*fixture/i }),
+  async function mountDashboard() {
+    // Mount the exported Dashboard against a plaintext-hydrated store (the
+    // dev/test seam) so the composed shell is deterministically reachable
+    // without the encrypt/unlock round-trip.
+    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
     );
     // The REAL dashboard mounted (a shipped STAY tab is present).
     await screen.findByRole("tab", { name: /seed words/i });
-    return { user };
   }
 
   it("renders the real codex dashboard, the export affordance, the Foreign Chains section, and the Arweave subtab together (no error)", async () => {
-    await enterDashboard();
+    await mountDashboard();
 
     // view/edit/export: the real export-to-JSON affordance is present.
     expect(
@@ -77,7 +86,7 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
   });
 
   it("mounts the mock/real Arweave mode toggle defaulting to mock+offline, gateway seeded to the testnet/local default (funds-safety)", async () => {
-    await enterDashboard();
+    await mountDashboard();
 
     // The mode toggle (T15.6) is composed next to the Foreign Chains tab: it
     // boots in mock+offline (default), so NO real-mode funds warning is shown,
@@ -109,10 +118,9 @@ describe("PG-03 standalone — the NO-CLOUD boundary (N-11): uploaded-JSON + loc
     expect(appSource).not.toMatch(
       /Cloud[A-Za-z]*Adapter|cloudLogin|CloudLogin|RemoteStorage|remoteStorage/,
     );
-    // The two codex load affordances are LOCAL: uploaded-file text (mode-1) +
-    // in-memory plaintext hydration (mode-2). Neither speaks to a remote store.
-    expect(appSource).toContain("importFromCloud"); // uploaded-JSON restore, not a cloud fetch
-    expect(appSource).toContain("hydrateFromPlaintextSnapshot");
+    // The load path is LOCAL: uploaded-file text restored via importFromCloud
+    // (the codec's own single-reader restore — NOT a remote fetch).
+    expect(appSource).toContain("importFromCloud");
   });
 
   it("uses the LOCAL codex-ouronet MemoryCodexAdapter for persistence — never a cloud/remote adapter export", async () => {

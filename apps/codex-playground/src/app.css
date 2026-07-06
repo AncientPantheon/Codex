@@ -1,0 +1,265 @@
+/* ==========================================================================
+   codex-playground chrome — the standalone Codex product shell.
+   Scoped to `.cxpg-*` so it never collides with the codex-ui dashboard styles
+   (which live under their own `.codex-ui` scope inside <CodexUiRoot>).
+   ========================================================================== */
+
+:root {
+  --cxpg-bg: #0b0e17;
+  --cxpg-bg-soft: #11162334;
+  --cxpg-surface: #151b2b;
+  --cxpg-surface-2: #1c2334;
+  --cxpg-border: #2a3350;
+  --cxpg-text: #e7ecf5;
+  --cxpg-text-dim: #9aa6c2;
+  --cxpg-accent: #6d8bff;
+  --cxpg-accent-soft: #6d8bff22;
+  --cxpg-danger: #ff6b7d;
+  --cxpg-radius: 14px;
+  --cxpg-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+/* ---- Landing / status screens -------------------------------------------- */
+
+.cxpg-app {
+  font-family: var(--cxpg-font);
+  color: var(--cxpg-text);
+  box-sizing: border-box;
+}
+
+.cxpg-landing {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #1a2340 0%, transparent 60%),
+    radial-gradient(900px 500px at 90% 110%, #17203a 0%, transparent 55%),
+    var(--cxpg-bg);
+}
+
+.cxpg-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--cxpg-surface);
+  border: 1px solid var(--cxpg-border);
+  border-radius: 20px;
+  padding: 40px 36px;
+  text-align: center;
+  box-shadow:
+    0 30px 80px -40px #000000cc,
+    0 0 0 1px #ffffff08 inset;
+}
+
+.cxpg-card--status {
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.cxpg-logo {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--cxpg-accent);
+  margin-bottom: 14px;
+  filter: drop-shadow(0 0 18px var(--cxpg-accent-soft));
+}
+
+.cxpg-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.cxpg-subtitle {
+  margin: 8px 0 28px;
+  color: var(--cxpg-text-dim);
+  font-size: 14.5px;
+}
+
+/* The upload zone — the whole label is clickable; the native input is hidden. */
+.cxpg-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 30px 20px;
+  border: 1.5px dashed var(--cxpg-border);
+  border-radius: var(--cxpg-radius);
+  background: var(--cxpg-bg-soft);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.05s ease;
+}
+
+.cxpg-upload:hover {
+  border-color: var(--cxpg-accent);
+  background: var(--cxpg-accent-soft);
+}
+
+.cxpg-upload:active {
+  transform: translateY(1px);
+}
+
+.cxpg-upload:focus-within {
+  outline: 2px solid var(--cxpg-accent);
+  outline-offset: 2px;
+}
+
+.cxpg-upload-icon {
+  font-size: 26px;
+  color: var(--cxpg-accent);
+}
+
+.cxpg-upload-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cxpg-upload-hint {
+  font-size: 12.5px;
+  color: var(--cxpg-text-dim);
+}
+
+.cxpg-upload-hint code {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #ffffff12;
+  color: var(--cxpg-text);
+}
+
+/* Visually-hidden native file input (kept in the a11y tree via the label). */
+.cxpg-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cxpg-note {
+  margin: 22px 0 0;
+  font-size: 12px;
+  color: var(--cxpg-text-dim);
+}
+
+.cxpg-status {
+  margin: 0;
+  color: var(--cxpg-text-dim);
+  font-size: 15px;
+}
+
+.cxpg-error {
+  margin: 0;
+  color: var(--cxpg-danger);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* ---- Loaded shell -------------------------------------------------------- */
+
+.cxpg-shell {
+  min-height: 100vh;
+  background: var(--cxpg-bg);
+}
+
+.cxpg-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 22px;
+  background: #0b0e17e6;
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--cxpg-border);
+}
+
+.cxpg-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--cxpg-text);
+}
+
+.cxpg-brand-mark {
+  color: var(--cxpg-accent);
+  font-size: 16px;
+}
+
+.cxpg-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.cxpg-btn {
+  font-family: var(--cxpg-font);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.cxpg-btn--primary {
+  background: var(--cxpg-accent);
+  color: #0a0d16;
+}
+
+.cxpg-btn--primary:hover {
+  background: #85a0ff;
+}
+
+.cxpg-btn--ghost {
+  background: transparent;
+  color: var(--cxpg-text-dim);
+  border-color: var(--cxpg-border);
+}
+
+.cxpg-btn--ghost:hover {
+  color: var(--cxpg-text);
+  border-color: var(--cxpg-text-dim);
+}
+
+.cxpg-main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 22px;
+}
+
+/* The Foreign Chains section sits below the dashboard as its own panel. */
+.cxpg-foreign {
+  margin-top: 22px;
+  padding: 18px 20px 22px;
+  background: var(--cxpg-surface);
+  border: 1px solid var(--cxpg-border);
+  border-radius: var(--cxpg-radius);
+}
+
+.cxpg-foreign-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}

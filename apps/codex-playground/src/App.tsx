@@ -1,26 +1,28 @@
 // ============================================================================
-// The codex-playground App shell — the D6 terminus.
+// The codex-playground App shell — the standalone local Codex.
 //
 // It mounts the REAL codex-ouronet dashboard (CodexProvider + CodexUiRoot + the
-// STAY tabs) against a file-upload-hydrated MemoryCodexAdapter, driving the two
-// explicit load modes (D-12, N-11). No dashboard fork, no throwaway UI: the
-// shipped shell renders verbatim; the playground differs from the future
-// standalone wallet only in the adapter (file-upload instead of cloud) and the
-// login (a minimal unlock screen / no login instead of cloud login).
+// STAY tabs) against a file-upload-hydrated MemoryCodexAdapter. The product flow
+// is a single path: no codex loaded → a clean "Load your Codex" screen; upload
+// the encrypted `.json` you exported from your wallet → restore it into the
+// mounted store via the REAL useCodexBackup().importFromCloud → unlock with your
+// password → the full Codex UI.
 //
-//   - mode-2 (plaintext fixture): loadCodex("plaintext", snapshot) hydrates a
-//     fresh adapter PRE-MOUNT (pure saveAll), then <CodexProvider adapter=…>
-//     renders the dashboard DIRECTLY — no encrypted secrets, so no unlock.
-//
-//   - mode-1 (encrypted backup .json + password): mount an EMPTY adapter FIRST,
-//     restore the uploaded backup INTO the mounted store via the REAL
-//     useCodexBackup().importFromCloud (the single-reader restore path), gate on
-//     <UnlockScreen/> until useCodexAuth().authenticate seeds the cache, THEN
-//     render the dashboard.
+//   mount an EMPTY adapter FIRST, restore the uploaded backup INTO the mounted
+//   store via importFromCloud (the single-reader restore path — a hook that
+//   operates on the mounted store, so it can't run pre-mount), gate on
+//   <UnlockScreen/> until useCodexAuth().authenticate seeds the cache, THEN
+//   render the dashboard.
 //
 // The export-to-JSON button reuses the REAL useCodexBackup().downloadAsJson —
-// SYMMETRIC with the mode-1 restore (both speak useCodexBackup's own
-// "1.2"+pureKeypairs format); NOT a bespoke serializer.
+// SYMMETRIC with the restore (both speak useCodexBackup's own codec format);
+// NOT a bespoke serializer.
+//
+// NOTE: `Dashboard` is exported so tests can mount it directly against a
+// plaintext-hydrated store (see loadCodex.hydrateFromPlaintextSnapshot) without
+// exercising the encrypt/unlock round-trip — that hydration utility is a test/dev
+// seam and is deliberately NOT surfaced in the product UI (you always load a real
+// exported codex).
 //
 // SECRET HYGIENE (N-06): nothing here logs a password, a snapshot, or a backup
 // blob. The uploaded backup text is handed straight to importFromCloud; the
@@ -34,6 +36,7 @@ import {
   useState,
   type ChangeEvent,
   type ReactElement,
+  type ReactNode,
 } from "react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
@@ -43,13 +46,9 @@ import {
   useCodexAuth,
   useCodexBackup,
 } from "@ancientpantheon/codex-ouronet/hooks";
-import {
-  MemoryCodexAdapter,
-  type CodexSnapshot,
-} from "@ancientpantheon/codex-ouronet/adapters";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 
 import { UnlockScreen } from "./UnlockScreen";
-import { hydrateFromPlaintextSnapshot } from "./loadCodex";
 // The E5 app-side wiring of the generic Foreign Chains tab to the concrete
 // Arweave panel. Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
 import { ForeignChainsWiring } from "./ForeignChainsWiring";
@@ -61,20 +60,24 @@ import {
   ARWEAVE_WIRING_MODE_MOCK,
   type ArweaveWiringMode,
 } from "./ForeignChainsWiring";
-// The T10.3 committed throwaway fixtures — CONSUMED here (not created).
-import { emptySnapshot, populatedKadenaSnapshot } from "../fixtures";
+import "./app.css";
 
-/** What the App is currently rendering: the landing picker, or a mounted mode. */
+/** What the App is currently rendering: the load screen, or a mounted codex. */
 type LoadedState =
   | { kind: "idle" }
-  | { kind: "plaintext"; adapter: MemoryCodexAdapter }
   | { kind: "encrypted"; adapter: MemoryCodexAdapter; backupText: string };
 
 /**
- * The dashboard body — the real shipped shell + the export button. Rendered
- * inside <CodexProvider> so its hooks (useCodexBackup) see the mounted store.
+ * The dashboard — the real shipped shell inside a slim playground chrome (title
+ * + export + "load a different codex"). Rendered inside <CodexProvider> so its
+ * hooks (useCodexBackup) see the mounted store. Exported so tests can mount it
+ * directly against a hydrated store.
  */
-function Dashboard(): ReactElement {
+export function Dashboard({
+  onReset,
+}: {
+  onReset?: () => void;
+} = {}): ReactElement {
   const { downloadAsJson } = useCodexBackup();
 
   // The Arweave path defaults to MOCK + OFFLINE (funds-safety, N-11): the app
@@ -87,32 +90,60 @@ function Dashboard(): ReactElement {
   const [gatewayUrl, setGatewayUrl] = useState<string>(DEFAULT_GATEWAY_URL);
 
   return (
-    <CodexUiRoot>
-      <button type="button" onClick={() => void downloadAsJson()}>
-        Export codex to JSON
-      </button>
-      <CodexTabs />
-      {/* The Arweave path — the generic Foreign Chains tab wired to the concrete
-          ArweavePanel via the app (codex-ui stays Arweave-free). The mock ⇄ real
-          toggle drives the wiring mode; default is mock+offline (funds-safety). */}
-      <section aria-label="Foreign chains">
-        <h2>Foreign chains</h2>
-        <ArweaveModeToggle
-          initialMode={arweaveMode}
-          initialGatewayUrl={gatewayUrl}
-          onModeChange={setArweaveMode}
-          onGatewayUrlChange={setGatewayUrl}
-        />
-        <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
-      </section>
-    </CodexUiRoot>
+    <div className="cxpg-shell">
+      <header className="cxpg-header">
+        <span className="cxpg-brand">
+          <span className="cxpg-brand-mark" aria-hidden="true">
+            ◈
+          </span>
+          Codex
+        </span>
+        <div className="cxpg-header-actions">
+          <button
+            type="button"
+            className="cxpg-btn cxpg-btn--primary"
+            onClick={() => void downloadAsJson()}
+          >
+            Export codex to JSON
+          </button>
+          {onReset ? (
+            <button
+              type="button"
+              className="cxpg-btn cxpg-btn--ghost"
+              onClick={onReset}
+            >
+              Load a different codex
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      <main className="cxpg-main">
+        <CodexUiRoot>
+          <CodexTabs />
+          {/* The Arweave path — the generic Foreign Chains tab wired to the
+              concrete ArweavePanel via the app (codex-ui stays Arweave-free). The
+              mock ⇄ real toggle drives the wiring mode; default is mock+offline. */}
+          <section className="cxpg-foreign" aria-label="Foreign chains">
+            <h2 className="cxpg-foreign-title">Foreign chains</h2>
+            <ArweaveModeToggle
+              initialMode={arweaveMode}
+              initialGatewayUrl={gatewayUrl}
+              onModeChange={setArweaveMode}
+              onGatewayUrlChange={setGatewayUrl}
+            />
+            <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
+          </section>
+        </CodexUiRoot>
+      </main>
+    </div>
   );
 }
 
 /**
- * Mode-1 body — mounted inside an EMPTY <CodexProvider>. On mount it restores the
- * uploaded backup INTO the mounted store via the REAL importFromCloud (a hook
- * that operates on the mounted store — it cannot run pre-mount), then gates the
+ * Mounted inside an EMPTY <CodexProvider>. On mount it restores the uploaded
+ * backup INTO the mounted store via the REAL importFromCloud (a hook that
+ * operates on the mounted store — it cannot run pre-mount), then gates the
  * dashboard behind <UnlockScreen/> until authenticate() unlocks the store.
  */
 function EncryptedSession({
@@ -140,8 +171,8 @@ function EncryptedSession({
       .then(() => setRestored(true))
       // A malformed / wrong-version upload rejects with CodexImportError, whose
       // message names only the stage + field (already secret-free — no uploaded
-      // bytes, no password). Surface it and offer the picker instead of hanging
-      // forever on the "Restoring backup…" spinner.
+      // bytes, no password). Surface it and offer the load screen instead of
+      // hanging forever on the "Restoring backup…" spinner.
       .catch((err: unknown) => {
         setRestoreError(err instanceof Error ? err.message : String(err));
       });
@@ -149,21 +180,27 @@ function EncryptedSession({
 
   if (restoreError !== null) {
     return (
-      <main>
-        <p role="alert">Could not restore backup: {restoreError}</p>
-        <button type="button" onClick={onReset}>
+      <StatusScreen>
+        <p className="cxpg-error" role="alert">
+          Could not restore backup: {restoreError}
+        </p>
+        <button type="button" className="cxpg-btn cxpg-btn--primary" onClick={onReset}>
           Try another file
         </button>
-      </main>
+      </StatusScreen>
     );
   }
   if (!restored) {
-    return <p>Restoring backup…</p>;
+    return (
+      <StatusScreen>
+        <p className="cxpg-status">Restoring backup…</p>
+      </StatusScreen>
+    );
   }
   if (isLocked) {
     return <UnlockScreen />;
   }
-  return <Dashboard />;
+  return <Dashboard onReset={onReset} />;
 }
 
 export function App(): ReactElement {
@@ -173,15 +210,6 @@ export function App(): ReactElement {
   const reset = useCallback(() => {
     setLoadError(null);
     setLoaded({ kind: "idle" });
-  }, []);
-
-  const loadPlaintext = useCallback(async (snapshot: CodexSnapshot) => {
-    try {
-      const adapter = await hydrateFromPlaintextSnapshot(snapshot);
-      setLoaded({ kind: "plaintext", adapter });
-    } catch (err: unknown) {
-      setLoadError(err instanceof Error ? err.message : String(err));
-    }
   }, []);
 
   const loadEncrypted = useCallback(
@@ -205,35 +233,22 @@ export function App(): ReactElement {
 
   if (loadError !== null) {
     return (
-      <main>
-        <p role="alert">Could not load codex: {loadError}</p>
-        <button type="button" onClick={reset}>
+      <StatusScreen>
+        <p className="cxpg-error" role="alert">
+          Could not load codex: {loadError}
+        </p>
+        <button type="button" className="cxpg-btn cxpg-btn--primary" onClick={reset}>
           Try another file
         </button>
-      </main>
+      </StatusScreen>
     );
   }
 
   if (loaded.kind === "idle") {
-    return (
-      <LandingPicker
-        onLoadEmpty={() => void loadPlaintext(emptySnapshot)}
-        onLoadPopulated={() => void loadPlaintext(populatedKadenaSnapshot)}
-        onUploadBackup={loadEncrypted}
-      />
-    );
+    return <LoadCodexScreen onUploadBackup={loadEncrypted} />;
   }
 
-  if (loaded.kind === "plaintext") {
-    // Mode-2: hydrated pre-mount → render the dashboard directly (skip unlock).
-    return (
-      <CodexProvider adapter={loaded.adapter} deviceVariant="dev">
-        <Dashboard />
-      </CodexProvider>
-    );
-  }
-
-  // Mode-1: mount empty → restore → unlock → dashboard.
+  // Mount empty → restore → unlock → dashboard.
   return (
     <CodexProvider adapter={loaded.adapter} deviceVariant="dev">
       <EncryptedSession backupText={loaded.backupText} onReset={reset} />
@@ -241,43 +256,57 @@ export function App(): ReactElement {
   );
 }
 
+/** A centered chrome wrapper for the load / status / error screens. */
+function StatusScreen({ children }: { children: ReactNode }): ReactElement {
+  return (
+    <div className="cxpg-app cxpg-landing">
+      <div className="cxpg-card cxpg-card--status">{children}</div>
+    </div>
+  );
+}
+
 /**
- * The landing screen — two explicit entry points (NO byte-sniffing): the
- * plaintext-fixture buttons (mode-2) and the encrypted-backup file input (mode-1).
+ * The load screen — the single product entry point: upload the encrypted codex
+ * `.json` you exported from your wallet. No demo/fixture shortcuts; you always
+ * load a real codex.
  */
-function LandingPicker({
-  onLoadEmpty,
-  onLoadPopulated,
+function LoadCodexScreen({
   onUploadBackup,
 }: {
-  onLoadEmpty: () => void;
-  onLoadPopulated: () => void;
   onUploadBackup: (event: ChangeEvent<HTMLInputElement>) => void;
 }): ReactElement {
   return (
-    <main>
-      <h1>Codex Playground</h1>
+    <div className="cxpg-app cxpg-landing">
+      <div className="cxpg-card">
+        <div className="cxpg-logo" aria-hidden="true">
+          ◈
+        </div>
+        <h1 className="cxpg-title">Codex</h1>
+        <p className="cxpg-subtitle">
+          Your multi-chain key vault — local &amp; offline.
+        </p>
 
-      <section>
-        <h2>Load plaintext fixture</h2>
-        <button type="button" onClick={onLoadEmpty}>
-          Load empty plaintext fixture
-        </button>
-        <button type="button" onClick={onLoadPopulated}>
-          Load populated Kadena plaintext fixture
-        </button>
-      </section>
+        <label htmlFor="codex-file" className="cxpg-upload">
+          <span className="cxpg-upload-icon" aria-hidden="true">
+            ⭳
+          </span>
+          <span className="cxpg-upload-title">Load your Codex</span>
+          <span className="cxpg-upload-hint">
+            Choose the <code>.json</code> you exported from your wallet
+          </span>
+          <input
+            id="codex-file"
+            className="cxpg-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={onUploadBackup}
+          />
+        </label>
 
-      <section>
-        <h2>Load encrypted backup</h2>
-        <label htmlFor="codex-backup-file">Load encrypted backup (.json)</label>
-        <input
-          id="codex-backup-file"
-          type="file"
-          accept="application/json,.json"
-          onChange={onUploadBackup}
-        />
-      </section>
-    </main>
+        <p className="cxpg-note">
+          Nothing leaves this device — no account, no cloud.
+        </p>
+      </div>
+    </div>
   );
 }
