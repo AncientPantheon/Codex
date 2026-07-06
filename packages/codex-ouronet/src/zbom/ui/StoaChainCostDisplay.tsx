@@ -1,8 +1,8 @@
 /**
- * KadenaCostDisplay — cloned verbatim from OuronetUI
- * `src/components/settings/KadenaCostDisplay.tsx`.
+ * StoaChainCostDisplay — cloned verbatim from OuronetUI
+ * `src/components/settings/StoaChainCostDisplay.tsx`.
  *
- * Shared STOA/Kadena cost row for CFM Zone 1.
+ * Shared STOA/StoaChain cost row for CFM Zone 1.
  *
  * kadena-discount is subunitary (0.55 = user pays 55% of full price).
  * 1.0 = no discount. Display: multiply by 100, no minus sign.
@@ -14,16 +14,16 @@
 import { InfoTooltip } from "./InfoTooltip.js";
 
 interface Props {
-  kadenaNeed:      number;
-  kadenaFull?:     number;
-  kadenaDiscount?: number;
-  kadenaText?:     string;
+  stoaChainNeed:      number;
+  stoaChainFull?:     number;
+  stoaChainDiscount?: number;
+  stoaChainText?:     string;
 }
 
-export function KadenaCostDisplay({ kadenaNeed, kadenaFull, kadenaDiscount, kadenaText }: Props) {
-  const isFree      = kadenaNeed === 0;
-  const hasDiscount = kadenaDiscount !== undefined && kadenaDiscount > 0 && kadenaDiscount !== 1.0;
-  const hasFull     = kadenaFull !== undefined && kadenaFull !== kadenaNeed && !isFree;
+export function StoaChainCostDisplay({ stoaChainNeed, stoaChainFull, stoaChainDiscount, stoaChainText }: Props) {
+  const isFree      = stoaChainNeed === 0;
+  const hasDiscount = stoaChainDiscount !== undefined && stoaChainDiscount > 0 && stoaChainDiscount !== 1.0;
+  const hasFull     = stoaChainFull !== undefined && stoaChainFull !== stoaChainNeed && !isFree;
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
@@ -31,13 +31,13 @@ export function KadenaCostDisplay({ kadenaNeed, kadenaFull, kadenaDiscount, kade
 
       {/* Final price — kadena-need */}
       <span className="text-xs font-mono font-semibold" style={{ color: isFree ? "#555" : "#d2d3d4" }}>
-        {isFree ? "Free" : `${kadenaNeed} STOA`}
+        {isFree ? "Free" : `${stoaChainNeed} STOA`}
       </span>
 
       {/* Original price with strikethrough — kadena-full */}
       {hasFull && (
         <span className="text-[10px] font-mono line-through" style={{ color: "#555" }}>
-          {kadenaFull}
+          {stoaChainFull}
         </span>
       )}
 
@@ -45,11 +45,11 @@ export function KadenaCostDisplay({ kadenaNeed, kadenaFull, kadenaDiscount, kade
       {hasDiscount && !isFree && (
         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
           style={{ backgroundColor: "#22c55e18", color: "#4ade80", border: "1px solid #22c55e30" }}>
-          {Math.round(kadenaDiscount! * 100)}%
+          {Math.round(stoaChainDiscount! * 100)}%
         </span>
       )}
 
-      <InfoTooltip content={kadenaText || "Native STOA gas cost. 'Free' means Gas Station covers it."} />
+      <InfoTooltip content={stoaChainText || "Native STOA gas cost. 'Free' means Gas Station covers it."} />
     </div>
   );
 }

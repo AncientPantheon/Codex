@@ -112,7 +112,7 @@ describe("<EncryptionCard>", () => {
             isSmart: false,
             address: "Ѻ.x",
             guard: null,
-            kadenaLedger: null,
+            stoaChainLedger: null,
             publicKey: "pk",
             secret: V1_SECRET,
           } as never,

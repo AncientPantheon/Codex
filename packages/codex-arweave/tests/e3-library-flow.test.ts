@@ -246,7 +246,7 @@ describe("E3 flow — manifest detection / single link (E-07, FIX-3)", () => {
   });
 });
 
-describe("E3 flow — RUNTIME Kadena isolation (E-04/N-05)", () => {
+describe("E3 flow — RUNTIME StoaChain isolation (E-04/N-05)", () => {
   it("uploadAndTrack + pollStatus + openUrl NEVER invoke an InternalCodexResolver-shaped sentinel", async () => {
     const sentinel = makeKadenaSentinel();
     const spies = {

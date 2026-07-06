@@ -23,7 +23,7 @@ import { useCodex } from "../hooks/useCodex.js";
 import { useOuroAccounts } from "../hooks/useOuroAccounts.js";
 import { useCodexIdentity } from "../hooks/useCodexIdentity.js";
 import { usePureKeypairs } from "../hooks/usePureKeypairs.js";
-import { useKadenaSeeds } from "../hooks/useKadenaSeeds.js";
+import { useStoaChainSeeds } from "../hooks/useStoaChainSeeds.js";
 import { useCodexStore } from "../provider/index.js";
 import { detectOriginCurve } from "./internal/originCurve.js";
 import { IconCopyBtn } from "./internal/IconButtons.js";
@@ -239,7 +239,7 @@ export function ObservationalCodexIdDisplay({ className, onDefineIdentity, rende
   const { uiSettings } = useCodex();
   const { accounts } = useOuroAccounts();
   const { keypairs } = usePureKeypairs();
-  const { seeds } = useKadenaSeeds();
+  const { seeds } = useStoaChainSeeds();
   const { identity } = useCodexIdentity();
   const cfg = readObservationalCodexIdConfig(uiSettings);
   const [expanded, setExpanded] = useState(false);

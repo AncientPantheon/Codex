@@ -17,7 +17,7 @@ import {
   CodexPrimeProtectedError,
 } from "@ancientpantheon/codex-ouronet/errors";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -28,7 +28,7 @@ import type {
 // Fixtures
 // --------------------------------------------------------------------
 
-const seed = (id = "s1"): IKadenaSeed => ({
+const seed = (id = "s1"): IStoaChainSeed => ({
   id,
   name: "Seed",
   seedType: "koala",
@@ -56,7 +56,7 @@ const ouro = (
   isSmart: false,
   address: "Ѻ." + id,
   guard: null,
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey: "pk-" + id,
   secret: "secret-" + id,
   backup: "backup-" + id,
@@ -111,7 +111,7 @@ describe("CodexStore", () => {
       expect(s.locked).toBe(true);
       expect(s.kadenaSeeds).toEqual([]);
       expect(s.ouroAccounts).toEqual([]);
-      expect(s.activeKadenaWalletId).toBeNull();
+      expect(s.activeStoaChainWalletId).toBeNull();
       expect(s.activeOuroAccountId).toBeNull();
       expect(s.initError).toBeNull();
     });
@@ -135,7 +135,7 @@ describe("CodexStore", () => {
       const state = s2.getState();
       expect(state.kadenaSeeds).toHaveLength(1);
       expect(state.ouroAccounts).toHaveLength(1);
-      expect(state.activeKadenaWalletId).toBe("s1");
+      expect(state.activeStoaChainWalletId).toBe("s1");
       expect(state.activeOuroAccountId).toBe("o1");
       // init() auto-applies the full migration chain on load (1->2->3), so a
       // loaded schemaVersion:1 codex lands at the current 3.
@@ -181,9 +181,9 @@ describe("CodexStore", () => {
   });
 
   describe("kadena seeds", () => {
-    it("addKadenaSeed persists + marks dirty + updates lastUpdatedAt", async () => {
+    it("addStoaChainSeed persists + marks dirty + updates lastUpdatedAt", async () => {
       const before = store.getState().lastUpdatedAt;
-      await store.getState().actions.addKadenaSeed(seed());
+      await store.getState().actions.addStoaChainSeed(seed());
       const s = store.getState();
       expect(s.kadenaSeeds).toHaveLength(1);
       expect(s.dirty).toBe(true);
@@ -193,28 +193,28 @@ describe("CodexStore", () => {
       expect(snap.kadenaSeeds).toHaveLength(1);
     });
 
-    it("updateKadenaSeed mutates the right entry only", async () => {
-      await store.getState().actions.addKadenaSeed(seed("s1"));
-      await store.getState().actions.addKadenaSeed(seed("s2"));
+    it("updateStoaChainSeed mutates the right entry only", async () => {
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s2"));
       await store
         .getState()
-        .actions.updateKadenaSeed({ ...seed("s1"), name: "RENAMED" });
+        .actions.updateStoaChainSeed({ ...seed("s1"), name: "RENAMED" });
       const seeds = store.getState().kadenaSeeds;
       expect(seeds.find((s) => s.id === "s1")?.name).toBe("RENAMED");
       expect(seeds.find((s) => s.id === "s2")?.name).toBe("Seed");
     });
 
-    it("deleteKadenaSeed removes + clears active if needed", async () => {
+    it("deleteStoaChainSeed removes + clears active if needed", async () => {
       // s1 is added first → auto-flagged as Prime Codex Seed (v0.2.0).
       // We delete s2 (non-prime) instead to exercise the non-prime path.
-      await store.getState().actions.addKadenaSeed(seed("s1"));
-      await store.getState().actions.addKadenaSeed(seed("s2"));
-      store.getState().actions.setActiveKadenaWallet("s2");
-      await store.getState().actions.deleteKadenaSeed("s2");
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s2"));
+      store.getState().actions.setActiveStoaChainWallet("s2");
+      await store.getState().actions.deleteStoaChainSeed("s2");
       const s = store.getState();
       expect(s.kadenaSeeds).toHaveLength(1);
       expect(s.kadenaSeeds[0]?.id).toBe("s1");
-      expect(s.activeKadenaWalletId).toBe("s1"); // fell through to the prime
+      expect(s.activeStoaChainWalletId).toBe("s1"); // fell through to the prime
     });
   });
 
@@ -334,11 +334,11 @@ describe("CodexStore", () => {
   });
 
   describe("active selection", () => {
-    it("setActiveKadenaWallet updates state", () => {
-      store.getState().actions.setActiveKadenaWallet("x");
-      expect(store.getState().activeKadenaWalletId).toBe("x");
-      store.getState().actions.setActiveKadenaWallet(null);
-      expect(store.getState().activeKadenaWalletId).toBeNull();
+    it("setActiveStoaChainWallet updates state", () => {
+      store.getState().actions.setActiveStoaChainWallet("x");
+      expect(store.getState().activeStoaChainWalletId).toBe("x");
+      store.getState().actions.setActiveStoaChainWallet(null);
+      expect(store.getState().activeStoaChainWalletId).toBeNull();
     });
 
     it("setActiveOuroAccount updates state", () => {
@@ -384,45 +384,45 @@ describe("CodexStore", () => {
 
   describe("v0.2.0 — Prime Codex Seed protection (§B1)", () => {
     it("first added seed auto-flags isPrime: true", async () => {
-      await store.getState().actions.addKadenaSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
       const s = store.getState().kadenaSeeds[0];
       expect(s?.isPrime).toBe(true);
     });
 
     it("subsequent seeds default isPrime: false", async () => {
-      await store.getState().actions.addKadenaSeed(seed("s1"));
-      await store.getState().actions.addKadenaSeed(seed("s2"));
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s2"));
       const seeds = store.getState().kadenaSeeds;
       expect(seeds.find((x) => x.id === "s1")?.isPrime).toBe(true);
       expect(seeds.find((x) => x.id === "s2")?.isPrime).toBeFalsy();
     });
 
-    it("deleteKadenaSeed on the Prime Codex Seed throws CodexPrimeSeedProtectedError", async () => {
+    it("deleteStoaChainSeed on the Prime Codex Seed throws CodexPrimeSeedProtectedError", async () => {
       const { CodexPrimeSeedProtectedError } = await import(
         "@ancientpantheon/codex-ouronet/errors"
       );
-      await store.getState().actions.addKadenaSeed(seed("prime"));
+      await store.getState().actions.addStoaChainSeed(seed("prime"));
       await expect(
-        store.getState().actions.deleteKadenaSeed("prime")
+        store.getState().actions.deleteStoaChainSeed("prime")
       ).rejects.toThrow(CodexPrimeSeedProtectedError);
       expect(store.getState().kadenaSeeds).toHaveLength(1);
     });
 
-    it("addKadenaSeed with explicit isPrime:true when prime exists throws id-conflict", async () => {
+    it("addStoaChainSeed with explicit isPrime:true when prime exists throws id-conflict", async () => {
       const { CodexKickstartError } = await import(
         "@ancientpantheon/codex-ouronet/errors"
       );
-      await store.getState().actions.addKadenaSeed(seed("s1")); // becomes prime
+      await store.getState().actions.addStoaChainSeed(seed("s1")); // becomes prime
       const intruder = { ...seed("s2"), isPrime: true };
       await expect(
-        store.getState().actions.addKadenaSeed(intruder)
+        store.getState().actions.addStoaChainSeed(intruder)
       ).rejects.toThrow(CodexKickstartError);
     });
 
-    it("deleteKadenaSeed on non-prime seed cascades to its derived ouro accounts", async () => {
+    it("deleteStoaChainSeed on non-prime seed cascades to its derived ouro accounts", async () => {
       // s1 = prime (auto). s2 = non-prime. Add an ouro derived from s2.
-      await store.getState().actions.addKadenaSeed(seed("s1"));
-      await store.getState().actions.addKadenaSeed(seed("s2"));
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s2"));
       await store
         .getState()
         .actions.addOuroAccount(ouro("o-derived-from-s2", { parentSeedId: "s2" }));
@@ -443,9 +443,9 @@ describe("CodexStore", () => {
       const adapter2 = new MemoryCodexAdapter();
       const store2 = createCodexStore();
       await store2.getState().actions.init(adapter2);
-      await store2.getState().actions.addKadenaSeed(seed("prime"));
+      await store2.getState().actions.addStoaChainSeed(seed("prime"));
       await store2.getState().actions.addOuroAccount(ouro("primeOuro")); // first → isPrime
-      await store2.getState().actions.addKadenaSeed(seed("s2"));
+      await store2.getState().actions.addStoaChainSeed(seed("s2"));
       await store2.getState().actions.addOuroAccount(
         ouro("derived-from-s2", { parentSeedId: "s2" })
       );
@@ -454,7 +454,7 @@ describe("CodexStore", () => {
         store2.getState().ouroAccounts.find((a) => a.id === "derived-from-s2")?.isPrime
       ).toBeFalsy();
       // Delete s2 → derived-from-s2 should be cascaded out.
-      await store2.getState().actions.deleteKadenaSeed("s2");
+      await store2.getState().actions.deleteStoaChainSeed("s2");
       expect(store2.getState().kadenaSeeds.map((x) => x.id)).toEqual(["prime"]);
       expect(store2.getState().ouroAccounts.map((a) => a.id)).toEqual(["primeOuro"]);
     });
@@ -465,14 +465,14 @@ describe("CodexStore", () => {
       const result = (await store.getState().actions.kickstartCodex({
         seed: seed("primeSeed"),
         primeOuroAccount: ouro("primeOuro"),
-      })) as { seed: IKadenaSeed; primeOuro: IOuroAccount };
+      })) as { seed: IStoaChainSeed; primeOuro: IOuroAccount };
       expect(result.seed.isPrime).toBe(true);
       expect(result.primeOuro.isPrime).toBe(true);
       expect(result.primeOuro.parentSeedId).toBe("primeSeed");
       const s = store.getState();
       expect(s.kadenaSeeds).toHaveLength(1);
       expect(s.ouroAccounts).toHaveLength(1);
-      expect(s.activeKadenaWalletId).toBe("primeSeed");
+      expect(s.activeStoaChainWalletId).toBe("primeSeed");
       expect(s.activeOuroAccountId).toBe("primeOuro");
     });
 
@@ -480,7 +480,7 @@ describe("CodexStore", () => {
       const { CodexKickstartError } = await import(
         "@ancientpantheon/codex-ouronet/errors"
       );
-      await store.getState().actions.addKadenaSeed(seed("s1"));
+      await store.getState().actions.addStoaChainSeed(seed("s1"));
       await expect(
         store.getState().actions.kickstartCodex({
           seed: seed("primeSeed"),
@@ -567,7 +567,7 @@ describe("CodexStore", () => {
         seed: seed("primeSeed"),
         primeOuroAccount: ouro("primeOuro"),
       });
-      await store.getState().actions.addKadenaSeed(seed("extraSeed"));
+      await store.getState().actions.addStoaChainSeed(seed("extraSeed"));
       await store
         .getState()
         .actions.addOuroAccount(ouro("extraOuro", { parentSeedId: "extraSeed" }));
@@ -606,7 +606,7 @@ describe("CodexStore", () => {
     });
 
     it("preserves parentSeedId when matching seed exists", async () => {
-      await store.getState().actions.addKadenaSeed(seed("realSeed"));
+      await store.getState().actions.addStoaChainSeed(seed("realSeed"));
       await store
         .getState()
         .actions.addOuroAccount(ouro("bound", { parentSeedId: "realSeed" }));

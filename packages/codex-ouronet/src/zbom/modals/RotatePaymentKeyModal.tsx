@@ -12,14 +12,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { ZbomModalFrame } from "../ui/ZbomModalFrame.js";
 import { InfoTooltip } from "../ui/InfoTooltip.js";
-import { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { useGetKeypair } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance } from "../debouncer/monitoredReads.js";
-import { getRotateKadenaInfo, rotateKadenaPaymentKey } from "@stoachain/ouronet-core/interactions/ouroRotateFunctions";
+import { getRotateKadenaInfo as getRotateStoaChainInfo, rotateKadenaPaymentKey as rotateStoaChainPaymentKey } from "@stoachain/ouronet-core/interactions/ouroRotateFunctions";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
 import { publicKeyFromPrivateKey, publicKeyFromExtendedKey } from "@stoachain/stoa-core/signing";
@@ -54,15 +54,15 @@ type PatronMode = "prime" | "resident" | "custom";
 interface Props {
   open: boolean; onClose: () => void;
   account: IOuroAccount; accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[]; kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[]; stoaChainAccounts: IStoaChainWallet[];
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function RotatePaymentKeyModal({
-  open, onClose, account, accounts, kadenaSeeds, kadenaAccounts,
+  open, onClose, account, accounts, kadenaSeeds, stoaChainAccounts,
 }: Props) {
-  const getKadenaKeyPairsByPublicKey = useGetKeypair();
+  const getStoaChainKeyPairsByPublicKey = useGetKeypair();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   // ── Patron selection mode (canonical wiring via usePatronSelectionDefaults) ──
@@ -107,8 +107,8 @@ export default function RotatePaymentKeyModal({
 
   // ── Signing readiness (for canExecute) ──
   const codexPubs = useMemo(
-    () => buildCodexPubSet(kadenaSeeds, kadenaAccounts),
-    [kadenaSeeds, kadenaAccounts],
+    () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
+    [kadenaSeeds, stoaChainAccounts],
   );
   const patronAnalysis  = useMemo(() => analyzeGuard(patronAccount?.guard, codexPubs, resolvedManualKeys), [patronAccount?.guard, codexPubs, resolvedManualKeys]);
   const accountAnalysis = useMemo(() => analyzeGuard(account?.guard, codexPubs, resolvedManualKeys), [account?.guard, codexPubs, resolvedManualKeys]);
@@ -143,7 +143,7 @@ export default function RotatePaymentKeyModal({
     if (!open || !patronAccount?.address || !account?.address) return;
     setLoadingInfo(true);
     setInfoData(null);
-    getRotateKadenaInfo(patronAccount.address, account.address)
+    getRotateStoaChainInfo(patronAccount.address, account.address)
       .then(setInfoData)
       .finally(() => setLoadingInfo(false));
   }, [open, patronAccount?.address, account?.address]);
@@ -189,17 +189,17 @@ export default function RotatePaymentKeyModal({
         for (const pub of candidates) {
           if (keys.length >= analysis.threshold) break;
           if (resolvedManualKeys[pub]) keys.push({ publicKey: pub, privateKey: resolvedManualKeys[pub] });
-          else { const kp = await getKadenaKeyPairsByPublicKey(pub); if (kp) keys.push(kp); }
+          else { const kp = await getStoaChainKeyPairsByPublicKey(pub); if (kp) keys.push(kp); }
         }
         return keys;
       };
 
       const patronSignKeys  = await collectKeys(patronAnalysis);
       const accountSignKeys = await collectKeys(accountAnalysis);
-      const gasStationKey   = await getKadenaKeyPairsByPublicKey(gasStationPub);
+      const gasStationKey   = await getStoaChainKeyPairsByPublicKey(gasStationPub);
       if (!gasStationKey) { toast.error("Cannot resolve Gas Station key"); setIsProcessing(false); return; }
 
-      const result = await rotateKadenaPaymentKey(
+      const result = await rotateStoaChainPaymentKey(
         patronAccount!.address,
         account.address,
         newPaymentKey.trim(),
@@ -229,7 +229,7 @@ export default function RotatePaymentKeyModal({
             <div className="flex items-center gap-2">
               {ICON}
               <h2 className="text-lg font-bold" style={{ color: "#d2d3d4" }}>Rotate Payment Key</h2>
-              <InfoTooltip content="Rotates the Kadena payment key linked to an Ouronet account." />
+              <InfoTooltip content="Rotates the StoaChain payment key linked to an Ouronet account." />
             </div>
           </div>
           <div className="flex items-center gap-2 mt-0.5">
@@ -255,10 +255,10 @@ export default function RotatePaymentKeyModal({
         {/* ── Zone 0 — Function Info ── */}
         <FunctionInfoZone
           key={patronAccount?.address}
-          readId="INFO_RotateKadena"
-          label="DALOS-INFO|URC_RotateKadena"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateKadena "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
-          fetcher={() => getRotateKadenaInfo(patronAccount?.address ?? "", account.address)}
+          readId="INFO_RotateStoaChain"
+          label="DALOS-INFO|URC_RotateStoaChain"
+          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateStoaChain "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
+          fetcher={() => getRotateStoaChainInfo(patronAccount?.address ?? "", account.address)}
         />
 
         {/* ── Zone 1 — Patron Spend ── */}
@@ -279,7 +279,7 @@ export default function RotatePaymentKeyModal({
 
         {/* ── Zone 2 — Function Inputs ── */}
         <Zone2Wrapper
-          functionName="ouronet-ns.TS01-C1.DALOS|C_RotateKadena"
+          functionName="ouronet-ns.TS01-C1.DALOS|C_RotateStoaChain"
           functionMeta={{
             locations:      ["Settings -> Ouronet Account -> Rotate Payment Key"],
             name:           "Rotate Payment Key",

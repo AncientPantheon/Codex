@@ -18,7 +18,7 @@
  *
  * D5 registry (from `@ancientpantheon/codex-ouronet/hooks`, D5 T9.7/T9.8):
  *   `registerChainAddressValidator` / `validateAddress` / `getRegisteredChains` /
- *   `resetAddressValidators` / `KADENA_CHAIN_ID`.
+ *   `resetAddressValidators` / `STOACHAIN_CHAIN_ID`.
  *
  * `// @vitest-environment node` (FIX-9): pure node-logic, no DOM.
  *
@@ -38,7 +38,7 @@ import {
   validateAddress,
   getRegisteredChains,
   resetAddressValidators,
-  KADENA_CHAIN_ID,
+  STOACHAIN_CHAIN_ID,
 } from "@ancientpantheon/codex-ouronet/hooks";
 
 // RED: none of these exist yet (T14.9 GREEN provisions `../src/address-book`).
@@ -64,13 +64,13 @@ describe("arweave validator — the file carries the node-env pragma (FIX-9)", (
 describe("Arweave address validator registration (E-11)", () => {
   beforeEach(() => {
     // Isolate the module-level default registry between tests: re-register the
-    // Kadena validator (D5 registers it at its own module init) is out of scope;
+    // StoaChain validator (D5 registers it at its own module init) is out of scope;
     // resetAddressValidators clears everything, then we register Arweave fresh.
     resetAddressValidators();
-    // D5's Kadena validator must be re-registered for the "no-disturb" row — the
+    // D5's StoaChain validator must be re-registered for the "no-disturb" row — the
     // D5 hooks module registers it on import; a reset clears it, so we re-register
-    // a Kadena validator explicitly to model the co-existence.
-    registerChainAddressValidator(KADENA_CHAIN_ID, (addr) => addr.startsWith("k:"));
+    // a StoaChain validator explicitly to model the co-existence.
+    registerChainAddressValidator(STOACHAIN_CHAIN_ID, (addr) => addr.startsWith("k:"));
     registerArweaveAddressValidator();
   });
 
@@ -91,16 +91,16 @@ describe("Arweave address validator registration (E-11)", () => {
     expect(validateAddress(ARWEAVE_CHAIN_ID, "too-short", "stoa")).toBe(false);
   });
 
-  it("(c) registering Arweave does NOT disturb the Kadena validator", () => {
-    // Kadena still validates its own form after Arweave registered.
-    expect(validateAddress(KADENA_CHAIN_ID, "k:abc123")).toBe(true);
-    expect(validateAddress(KADENA_CHAIN_ID, "not-kadena")).toBe(false);
+  it("(c) registering Arweave does NOT disturb the StoaChain validator", () => {
+    // StoaChain still validates its own form after Arweave registered.
+    expect(validateAddress(STOACHAIN_CHAIN_ID, "k:abc123")).toBe(true);
+    expect(validateAddress(STOACHAIN_CHAIN_ID, "not-kadena")).toBe(false);
   });
 
-  it("(d) getRegisteredChains() includes BOTH the Arweave and the Kadena chain ids", () => {
+  it("(d) getRegisteredChains() includes BOTH the Arweave and the StoaChain chain ids", () => {
     const chains = getRegisteredChains();
     expect(chains).toContain(ARWEAVE_CHAIN_ID);
-    expect(chains).toContain(KADENA_CHAIN_ID);
+    expect(chains).toContain(STOACHAIN_CHAIN_ID);
   });
 
   it("(e) the validator delegates to arweave-core isCanonicalAddress / ARWEAVE_ADDRESS_RE — same verdict as the core predicate for every probe", () => {

@@ -26,7 +26,7 @@ import { pactRead } from "@stoachain/stoa-core/reads";
 
 // ── Shared helper ────────────────────────────────────────────────────────────
 
-/** Detect if a string looks like an Ouronet (Ѻ.) or Kadena (k:/c:/u:/w:) account address */
+/** Detect if a string looks like an Ouronet (Ѻ.) or StoaChain (k:/c:/u:/w:) account address */
 function isAccountAddress(v: string): boolean {
   return v.startsWith("Ѻ.") || /^[kcuw]:/.test(v);
 }

@@ -21,7 +21,7 @@
  *      T9.3-T9.6 land files — a value edge sneaking in during the carve fails it.
  *
  * The load-bearing rule the graph guard encodes: NOT "zero imports of any kind"
- * from @stoachain/codex-ouronet — a type-only `import type { IKadenaKeypair }
+ * from @stoachain/codex-ouronet — a type-only `import type { IStoaChainKeypair }
  * from "@stoachain/…"` is PERMITTED (erased under verbatimModuleSyntax). Only a
  * VALUE `import { X } from "@stoachain/…"` is a violation.
  */
@@ -87,7 +87,7 @@ describe("post-carve invariants — the four structural guards still throw (N-09
   it("(a) the Prime Codex Seed stays structurally undeletable after the carve", T, async () => {
     const primeId = kick.primeCodexSeed!.id;
     await expect(
-      store.getState().actions.deleteKadenaSeed(primeId),
+      store.getState().actions.deleteStoaChainSeed(primeId),
     ).rejects.toBeInstanceOf(CodexPrimeSeedProtectedError);
     expect(store.getState().kadenaSeeds.some((s) => s.id === primeId)).toBe(true);
   });
@@ -323,7 +323,7 @@ describe("dependency graph — codex-ui carries no VALUE @stoachain / Ouronet ed
     // all". Prove the classifier lets a type-only @stoachain import pass and
     // flags a value one — otherwise a broken classifier would pass vacuously.
     expect(
-      isValueImport('import type { IKadenaKeypair } from "@stoachain/stoa-core/signing"'),
+      isValueImport('import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing"'),
     ).toBe(false);
     expect(
       isValueImport('import { type A, type B } from "@stoachain/stoa-core"'),

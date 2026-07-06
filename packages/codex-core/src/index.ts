@@ -86,13 +86,13 @@ export {
 export { createHeadlessCodexResolver } from "./resolver/index.js";
 
 export type {
-  ResolvedKadenaKeypair,
+  ResolvedStoaChainKeypair,
   HeadlessResolverDeps,
   HeadlessCodexResolver,
   SnapshotSlice,
-  KadenaSeedLike,
+  StoaChainSeedLike,
   PureKeypairLike,
-  KadenaSeedType,
+  StoaChainSeedType,
 } from "./resolver/index.js";
 
 // ----- headless connection layer (Phase 1: CL-01..CL-05, N-01) -----

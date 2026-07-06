@@ -2,7 +2,7 @@
  * The ForeignChainAdapter contract — the per-chain driver seam.
  *
  * This is a GREENFIELD injection seam (no ancestor in the ouronet-codex source):
- * a per-chain driver exposing the operations a foreign (non-Kadena) chain needs.
+ * a per-chain driver exposing the operations a foreign (non-StoaChain) chain needs.
  * A second chain registers with ZERO change to generic code by implementing this
  * contract and registering under its own `id` (see `createForeignChainRegistry`).
  *

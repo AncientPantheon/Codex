@@ -18,7 +18,7 @@
  * status onto the seam's `pending`/`final` result.
  *
  * ISOLATION (E2): this module imports ONLY arweave-core + codex-core — never the
- * Kadena resolver/PactClient. The Arweave path stays a sibling of the Kadena one.
+ * StoaChain resolver/PactClient. The Arweave path stays a sibling of the StoaChain one.
  *
  * NOTE ON arweave.net: no `arweave.net` literal appears in this file. The reads
  * flow through the pool's INJECTED endpoint; the broadcast POSTs to the same

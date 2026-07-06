@@ -77,7 +77,7 @@ describe("v0.2 -> v0.3 schema migration", () => {
         { id: "s1", seedType: "koala", version: 1, index: 0, secret: "enc", main: true, accounts: [] } as never,
       ],
       ouroAccounts: [
-        { id: "o1", version: 1, isSmart: false, address: "k:abc", guard: null, kadenaLedger: "k:abc", publicKey: "abc", secret: "enc", backup: "bk" } as never,
+        { id: "o1", version: 1, isSmart: false, address: "k:abc", guard: null, stoaChainLedger: "k:abc", publicKey: "abc", secret: "enc", backup: "bk" } as never,
       ],
       pureKeypairs: [
         { id: "p1", publicKey: "pub", encryptedPrivateKey: "enc", createdAt: "2026-01-01T00:00:00.000Z" } as never,

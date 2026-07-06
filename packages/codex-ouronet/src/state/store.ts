@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -42,7 +42,7 @@ import type {
 } from "../codex-identity/index.js";
 import type { IKeyset } from "../types/entities.js";
 import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { Apollo, DalosGenesis } from "@stoachain/dalos-crypto/registry";
 import type { FullKey } from "@stoachain/dalos-crypto/registry";
 import { ed25519 } from "@noble/curves/ed25519";
@@ -62,13 +62,13 @@ function bytesToHex(bytes: Uint8Array): string {
   return hex;
 }
 
-/** Generate a fresh random ED25519 keypair as Kadena-style 64-char hex strings.
- *  Kadena's `genKeyPair` (`@kadena/cryptography-utils`) is the canonical source
+/** Generate a fresh random ED25519 keypair as StoaChain-style 64-char hex strings.
+ *  StoaChain's `genKeyPair` (`@kadena/cryptography-utils`) is the canonical source
  *  but isn't resolvable under this package's test transform (its vendored .cjs
  *  `require()`s only resolve post-build). `@noble/curves/ed25519` — already a
  *  stoa-core transitive dep — is the documented fallback and produces identical
  *  32-byte ED25519 keys in hex. */
-function freshKadenaKeypair(): { publicKey: string; secretKey: string } {
+function freshStoaChainKeypair(): { publicKey: string; secretKey: string } {
   const priv = ed25519.utils.randomPrivateKey();
   const pub = ed25519.getPublicKey(priv);
   return { publicKey: bytesToHex(pub), secretKey: bytesToHex(priv) };
@@ -178,7 +178,7 @@ export interface KickstartArgs {
   /** Pre-formed kadena seed. Caller has already derived keypairs from
    *  the mnemonic + encrypted `secret` at the codex password. The package
    *  sets `isPrime: true` on persist. */
-  seed: Omit<IKadenaSeed, "isPrime">;
+  seed: Omit<IStoaChainSeed, "isPrime">;
   /** Pre-formed ouro account. MUST be a Standard Ouronet Account
    *  (`isSmart: false`) derived from the SAME mnemonic as `seed`. The
    *  package sets `isPrime: true` AND `parentSeedId: seed.id` on persist;
@@ -189,7 +189,7 @@ export interface KickstartArgs {
 
 export interface KickstartResult {
   /** The installed prime kadena seed, with `isPrime: true`. */
-  seed: IKadenaSeed;
+  seed: IStoaChainSeed;
   /** The installed prime ouro account, with `isPrime: true` and
    *  `parentSeedId === seed.id`. */
   primeOuro: IOuroAccount;
@@ -209,7 +209,7 @@ export interface CodexStoreState {
   pendingPasswordRequest: PendingPasswordRequest | null;
 
   // Codex content (mirrors adapter)
-  kadenaSeeds: IKadenaSeed[];
+  kadenaSeeds: IStoaChainSeed[];
   pureKeypairs: IPureKeypair[];
   ouroAccounts: IOuroAccount[];
   addressBook: AddressBookEntry[];
@@ -227,7 +227,7 @@ export interface CodexStoreState {
   codexIdentity?: ICodexIdentity;
 
   // Runtime
-  activeKadenaWalletId: string | null;
+  activeStoaChainWalletId: string | null;
   activeOuroAccountId: string | null;
   dirty: boolean;
   schemaVersion: number;
@@ -279,9 +279,9 @@ export interface CodexStoreActions {
   cancelPasswordRequest(): void;
 
   // ----- kadena seeds -----
-  addKadenaSeed(seed: IKadenaSeed): Promise<void>;
-  updateKadenaSeed(seed: IKadenaSeed): Promise<void>;
-  deleteKadenaSeed(id: string): Promise<void>;
+  addStoaChainSeed(seed: IStoaChainSeed): Promise<void>;
+  updateStoaChainSeed(seed: IStoaChainSeed): Promise<void>;
+  deleteStoaChainSeed(id: string): Promise<void>;
 
   // ----- codex lifecycle (kickstart / recover) -----
   /** Atomically install the Prime Codex Seed + CodexPrime ouro account
@@ -407,7 +407,7 @@ export interface CodexStoreActions {
   buildRegisterCodexIdentityTx(opts?: { registeredBy?: string }): UnsignedPactTx;
 
   // ----- active selection -----
-  setActiveKadenaWallet(id: string | null): void;
+  setActiveStoaChainWallet(id: string | null): void;
   setActiveOuroAccount(id: string | null): void;
 
   // ----- meta -----
@@ -428,7 +428,7 @@ export interface CodexStoreActions {
  * FUNDS-CRITICAL: the foreign-key slice persists via the full-snapshot `saveAll`
  * (FIX-5), which is a FULL overwrite re-sharding EVERY field. Omitting a slice
  * here would overwrite its on-disk shard with `undefined`/stale values — a
- * foreign-key mutation could WIPE the Kadena seeds, the double-Apollo
+ * foreign-key mutation could WIPE the StoaChain seeds, the double-Apollo
  * `codexIdentity`, or the `consumerSettings`. Every field on `CodexSnapshot`
  * MUST be included (cascade rule — mirrors `migrateToCurrent`'s inline builder).
  */
@@ -472,7 +472,7 @@ const initialState: Omit<CodexStoreState, "actions"> = {
   // lastUpdatedAt: null precedent); value-type slot, undefined is its resting
   // state.
   codexIdentity: undefined,
-  activeKadenaWalletId: null,
+  activeStoaChainWalletId: null,
   activeOuroAccountId: null,
   dirty: false,
   schemaVersion: 0,
@@ -584,7 +584,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       });
 
       // 7. CodexGuard — fresh random ED25519, first pure key, label locked.
-      const guardPair = freshKadenaKeypair();
+      const guardPair = freshStoaChainKeypair();
       const codexGuard: IPureKeypair = {
         id: newId(),
         label: "CodexGuard",
@@ -595,7 +595,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       };
 
       // 9. duoPrime FIRST — its pubkeys feed the CodexPrime guard keyset (F-008).
-      let primeCodexSeed: IKadenaSeed | undefined;
+      let primeCodexSeed: IStoaChainSeed | undefined;
       let duoPurePrime: [IPureKeypair, IPureKeypair] | undefined;
       let duoPaymentPubkey: string;
       let duoGuardPubkey: string;
@@ -606,10 +606,10 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         // stoa-core wallet builder (koala → BIP39/SLIP-10, chainweaver/eckowallet
         // → BIP32-Ed25519). secretKey is encrypted-at-mnemonic by the builder;
         // we don't store it — only the encrypted mnemonic goes on the seed.
-        const pos0 = await KadenaWalletBuilder.createWalletPairFromMnemonic(
+        const pos0 = await StoaChainWalletBuilder.createWalletPairFromMnemonic(
           duoPrime.mnemonic, duoPrime.mnemonic, 0, duoPrime.seedType
         );
-        const pos1 = await KadenaWalletBuilder.createWalletPairFromMnemonic(
+        const pos1 = await StoaChainWalletBuilder.createWalletPairFromMnemonic(
           duoPrime.mnemonic, duoPrime.mnemonic, 1, duoPrime.seedType
         );
         duoPaymentPubkey = pos0.publicKey;
@@ -633,8 +633,8 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         };
       } else {
         // auto-pure-keys: two fresh pure ED25519 keypairs, both unremovable.
-        const paymentPair = freshKadenaKeypair();
-        const guardPair2 = freshKadenaKeypair();
+        const paymentPair = freshStoaChainKeypair();
+        const guardPair2 = freshStoaChainKeypair();
         const paymentKey: IPureKeypair = {
           id: newId(),
           label: "DuoPurePrime (payment)",
@@ -659,7 +659,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       }
 
       // 10. fresh-dalos backing seed (F-012 — always persisted, non-prime).
-      let primeOuroAccountSeed: IKadenaSeed | undefined;
+      let primeOuroAccountSeed: IStoaChainSeed | undefined;
       if (codexPrimeSeed.source === "fresh-dalos") {
         primeOuroAccountSeed = {
           id: newId(),
@@ -720,7 +720,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         publicKey: primeKey.keyPair.publ,
         secret: await encryptStringV2(primeKey.keyPair.priv, ck),
         guard: primeGuard,
-        kadenaLedger: null,
+        stoaChainLedger: null,
         originMode:
           codexPrimeSeed.source === "fresh-dalos" ? "seedWords" : "bitString",
         originCurve: primeCurve,
@@ -731,9 +731,9 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       };
 
       // 11. Assemble the next slices and commit atomically in one set().
-      const nextKadenaSeeds: IKadenaSeed[] = [];
-      if (primeCodexSeed) nextKadenaSeeds.push(primeCodexSeed);
-      if (primeOuroAccountSeed) nextKadenaSeeds.push(primeOuroAccountSeed);
+      const nextStoaChainSeeds: IStoaChainSeed[] = [];
+      if (primeCodexSeed) nextStoaChainSeeds.push(primeCodexSeed);
+      if (primeOuroAccountSeed) nextStoaChainSeeds.push(primeOuroAccountSeed);
       const nextPureKeypairs: IPureKeypair[] = [codexGuard];
       if (duoPurePrime) nextPureKeypairs.push(duoPurePrime[0], duoPurePrime[1]);
       const nextOuroAccounts: IOuroAccount[] = [codexPrime];
@@ -741,15 +741,15 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       set({
         codexIdentity,
         pureKeypairs: nextPureKeypairs,
-        kadenaSeeds: nextKadenaSeeds,
+        kadenaSeeds: nextStoaChainSeeds,
         ouroAccounts: nextOuroAccounts,
-        activeKadenaWalletId: nextKadenaSeeds[0]?.id ?? null,
+        activeStoaChainWalletId: nextStoaChainSeeds[0]?.id ?? null,
         activeOuroAccountId: codexPrime.id,
       });
 
       // 12. Best-effort persistence — saveCodexIdentity LAST (F-001 ordering).
       await persistAndTouch(async (a) => {
-        await a.saveKadenaSeeds(nextKadenaSeeds);
+        await a.saveStoaChainSeeds(nextStoaChainSeeds);
         await a.savePureKeypairs(nextPureKeypairs);
         await a.saveOuroAccounts(nextOuroAccounts);
         await a.saveCodexIdentity(codexIdentity);
@@ -798,7 +798,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         throw new CodexKickstartError("smart-account-not-allowed");
       }
 
-      const seed: IKadenaSeed = { ...args.seed, isPrime: true };
+      const seed: IStoaChainSeed = { ...args.seed, isPrime: true };
       const primeOuro: IOuroAccount = {
         ...args.primeOuroAccount,
         isPrime: true,
@@ -810,11 +810,11 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       set({
         kadenaSeeds: nextSeeds,
         ouroAccounts: nextOuros,
-        activeKadenaWalletId: seed.id,
+        activeStoaChainWalletId: seed.id,
         activeOuroAccountId: primeOuro.id,
       });
       await persistAndTouch(async (a) => {
-        await a.saveKadenaSeeds(nextSeeds);
+        await a.saveStoaChainSeeds(nextSeeds);
         await a.saveOuroAccounts(nextOuros);
       });
 
@@ -847,18 +847,18 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // because matching an ouro to a seed requires decrypting the
           // ouro's secret with the codex password (not known at init).
           // See docs/v0.2.0-design.md §8.
-          let migratedKadenaSeeds = snap.kadenaSeeds;
+          let migratedStoaChainSeeds = snap.kadenaSeeds;
           const needsSeedMigration =
             snap.kadenaSeeds.length > 0 &&
             !snap.kadenaSeeds.some((s) => s.isPrime);
           if (needsSeedMigration) {
-            migratedKadenaSeeds = snap.kadenaSeeds.map((s, idx) =>
+            migratedStoaChainSeeds = snap.kadenaSeeds.map((s, idx) =>
               idx === 0 ? { ...s, isPrime: true } : s
             );
             // Persist the flag eagerly so the protection takes effect
             // immediately (without waiting for any next mutation).
             try {
-              await adapter.saveKadenaSeeds(migratedKadenaSeeds);
+              await adapter.saveStoaChainSeeds(migratedStoaChainSeeds);
             } catch {
               // Best-effort: if persistence fails (e.g. quota), the flag
               // still applies in-memory for this session. Next successful
@@ -871,7 +871,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // field on CodexSnapshot MUST be included here; future phases adding
           // a snapshot field must extend this builder (see migrateToCurrent).
           const preMigration: CodexSnapshot = {
-            kadenaSeeds: migratedKadenaSeeds,
+            kadenaSeeds: migratedStoaChainSeeds,
             ouroAccounts: snap.ouroAccounts,
             pureKeypairs: snap.pureKeypairs,
             addressBook: snap.addressBook,
@@ -941,7 +941,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // First account is the default active. Consumers can override
             // via setActiveOuroAccount() after init.
             activeOuroAccountId: migrated.ouroAccounts[0]?.id ?? null,
-            activeKadenaWalletId: migrated.kadenaSeeds[0]?.id ?? null,
+            activeStoaChainWalletId: migrated.kadenaSeeds[0]?.id ?? null,
           });
         } catch (e) {
           set({
@@ -1039,7 +1039,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
 
       // ----- kadena seeds -----
 
-      async addKadenaSeed(seed: IKadenaSeed) {
+      async addStoaChainSeed(seed: IStoaChainSeed) {
         const existing = get().kadenaSeeds;
         const existingPrime = existing.find((s) => s.isPrime);
 
@@ -1061,19 +1061,19 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         const next = [...existing.filter((s) => s.id !== enriched.id), enriched];
         set({ kadenaSeeds: next });
         // Auto-activate first seed if none is selected.
-        if (get().activeKadenaWalletId === null) {
-          set({ activeKadenaWalletId: enriched.id });
+        if (get().activeStoaChainWalletId === null) {
+          set({ activeStoaChainWalletId: enriched.id });
         }
-        await persistAndTouch((a) => a.saveKadenaSeeds(next));
+        await persistAndTouch((a) => a.saveStoaChainSeeds(next));
       },
 
-      async updateKadenaSeed(seed: IKadenaSeed) {
+      async updateStoaChainSeed(seed: IStoaChainSeed) {
         const next = get().kadenaSeeds.map((s) => (s.id === seed.id ? seed : s));
         set({ kadenaSeeds: next });
-        await persistAndTouch((a) => a.saveKadenaSeeds(next));
+        await persistAndTouch((a) => a.saveStoaChainSeeds(next));
       },
 
-      async deleteKadenaSeed(id: string) {
+      async deleteStoaChainSeed(id: string) {
         const target = get().kadenaSeeds.find((s) => s.id === id);
         // v0.2.0 §6.2: prime seed is structurally unremovable.
         if (target?.isPrime) {
@@ -1099,14 +1099,14 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           kadenaSeeds: nextSeeds,
           ouroAccounts: nextOuros,
         });
-        if (get().activeKadenaWalletId === id) {
-          set({ activeKadenaWalletId: nextSeeds[0]?.id ?? null });
+        if (get().activeStoaChainWalletId === id) {
+          set({ activeStoaChainWalletId: nextSeeds[0]?.id ?? null });
         }
         if (get().activeOuroAccountId && !nextOuros.some((a) => a.id === get().activeOuroAccountId)) {
           set({ activeOuroAccountId: nextOuros[0]?.id ?? null });
         }
         await persistAndTouch(async (a) => {
-          await a.saveKadenaSeeds(nextSeeds);
+          await a.saveStoaChainSeeds(nextSeeds);
           await a.saveOuroAccounts(nextOuros);
         });
       },
@@ -1175,7 +1175,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           );
         }
 
-        const seed: IKadenaSeed = { ...args.seed, isPrime: true };
+        const seed: IStoaChainSeed = { ...args.seed, isPrime: true };
         const primeOuro: IOuroAccount = {
           ...args.primeOuroAccount,
           isPrime: true,
@@ -1200,7 +1200,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           ouroAccounts: nextOuros,
         });
         await persistAndTouch(async (a) => {
-          await a.saveKadenaSeeds(nextSeeds);
+          await a.saveStoaChainSeeds(nextSeeds);
           await a.saveOuroAccounts(nextOuros);
         });
 
@@ -1293,7 +1293,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       //
       // COMPLETE-SNAPSHOT SAFETY (funds-critical): `saveAll` is a FULL overwrite
       // that re-shards EVERY snapshot field, so a partial snapshot would WIPE the
-      // other shards (the Kadena seeds, the double-Apollo `codexIdentity`, the
+      // other shards (the StoaChain seeds, the double-Apollo `codexIdentity`, the
       // `consumerSettings`) on disk. `buildForeignKeySnapshot` therefore builds a
       // COMPLETE snapshot from live `get()` state carrying ALL slices plus the
       // updated `foreignKeys` — mirroring `migrateToCurrent`'s every-field builder.
@@ -1389,9 +1389,9 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         }
 
         // 3. Build the CodexGuard — same shape as _kickstartV3's guard block
-        //    (freshKadenaKeypair + encryptStringV2 + label "CodexGuard"), the
+        //    (freshStoaChainKeypair + encryptStringV2 + label "CodexGuard"), the
         //    single source of truth for "how a CodexGuard is constructed".
-        const pair = freshKadenaKeypair();
+        const pair = freshStoaChainKeypair();
         const codexGuard: IPureKeypair = {
           id: newId(),
           label: "CodexGuard",
@@ -1443,7 +1443,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
 
         // 3. Build the new active CodexGuard — same shape as generateCodexGuard
         //    ForLegacy / _kickstartV3 (single source of truth).
-        const pair = freshKadenaKeypair();
+        const pair = freshStoaChainKeypair();
         const newGuard: IPureKeypair = {
           id: newId(),
           label: "CodexGuard",
@@ -1691,8 +1691,8 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
 
       // ----- active selection (no persistence — runtime only) -----
 
-      setActiveKadenaWallet(id: string | null) {
-        set({ activeKadenaWalletId: id });
+      setActiveStoaChainWallet(id: string | null) {
+        set({ activeStoaChainWalletId: id });
       },
 
       setActiveOuroAccount(id: string | null) {

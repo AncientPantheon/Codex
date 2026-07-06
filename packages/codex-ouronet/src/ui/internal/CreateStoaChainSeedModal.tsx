@@ -1,11 +1,11 @@
 /**
- * CreateKadenaSeedModal — Redux-free port of OuronetUI's `CreateKadenaSeed`
+ * CreateStoaChainSeedModal — Redux-free port of OuronetUI's `CreateStoaChainSeed`
  * ("Add Seed to Codex"). Generates (or restores) a BIP39/Chainweaver mnemonic,
- * shows a live Key #0 preview, and writes an `IKadenaSeed` into the codex store
+ * shows a live Key #0 preview, and writes an `IStoaChainSeed` into the codex store
  * with Key #0 + Key #1 auto-derived.
  *
  * Derivation + encryption mirror SpawnAccountModal exactly:
- *   - `KadenaWalletBuilder.generateMnemonic(12|24)` / `createWalletPairFromMnemonic`
+ *   - `StoaChainWalletBuilder.generateMnemonic(12|24)` / `createWalletPairFromMnemonic`
  *     from `@stoachain/stoa-core/wallet` (routes by seedType).
  *   - The entered password is verified by decrypting an existing seed/account
  *     secret before anything is written; the mnemonic is stored as
@@ -15,19 +15,19 @@
 import * as React from "react";
 import { useEffect, useState } from "react";
 import { Check, Copy, Eye, EyeOff, RefreshCw, BookKey } from "lucide-react";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
-import { useKadenaSeeds } from "../../hooks/index.js";
+import { useStoaChainSeeds } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
 import { CodexModalShell } from "./CodexModalShell.js";
-import type { IKadenaSeed, SeedType, WalletAccount } from "../../types/entities.js";
+import type { IStoaChainSeed, SeedType, WalletAccount } from "../../types/entities.js";
 
 type Mode = "generate" | "restore";
 
 const SEED_TYPE_OPTIONS: { value: SeedType; label: string; words: 12 | 24; color: string; desc: string }[] = [
   { value: "koala", label: "Koala", words: 24, color: "#ec4899", desc: "24-word BIP39 mnemonic (256-bit entropy). Standard Koala Wallet seed." },
-  { value: "chainweaver", label: "Chainweaver", words: 12, color: "#3b82f6", desc: "12-word Kadena Chainweaver mnemonic." },
+  { value: "chainweaver", label: "Chainweaver", words: 12, color: "#3b82f6", desc: "12-word StoaChain Chainweaver mnemonic." },
   { value: "eckowallet", label: "EckoWallet", words: 12, color: "#f97316", desc: "12-word mnemonic — same derivation as Chainweaver." },
 ];
 
@@ -35,12 +35,12 @@ const SEED_TYPE_OPTIONS: { value: SeedType; label: string; words: 12 | 24; color
 const ALLOWED = /[^0-9A-Za-z ]/g;
 const ALLOWED_PREFIXED_PATH = (i: number) => `m'/44'/626'/${i}'`;
 
-export interface CreateKadenaSeedModalProps {
+export interface CreateStoaChainSeedModalProps {
   onClose: () => void;
 }
 
-export function CreateKadenaSeedModal({ onClose }: CreateKadenaSeedModalProps): React.JSX.Element {
-  const { seeds, addSeed } = useKadenaSeeds();
+export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalProps): React.JSX.Element {
+  const { seeds, addSeed } = useStoaChainSeeds();
   const { getCurrentPassword, authenticate } = useCodexAuth();
   const { uiSettings } = useCodex();
   const ttl = typeof uiSettings.passwordCacheMinutes === "number" ? uiSettings.passwordCacheMinutes : undefined;
@@ -67,7 +67,7 @@ export function CreateKadenaSeedModal({ onClose }: CreateKadenaSeedModalProps): 
 
   const genMnemonic = (type: SeedType) => {
     const opt = SEED_TYPE_OPTIONS.find((o) => o.value === type)!;
-    void KadenaWalletBuilder.generateMnemonic(opt.words).then(setMnemonic);
+    void StoaChainWalletBuilder.generateMnemonic(opt.words).then(setMnemonic);
   };
 
   // On open + on every seed-type change, regenerate (generate mode only).
@@ -83,7 +83,7 @@ export function CreateKadenaSeedModal({ onClose }: CreateKadenaSeedModalProps): 
     let cancelled = false;
     const words = mnemonic.trim().split(/\s+/).filter(Boolean);
     if (words.length !== option.words) { setPreviewKey(null); return; }
-    KadenaWalletBuilder.createWalletPairFromMnemonic("", mnemonic.trim(), 0, seedType)
+    StoaChainWalletBuilder.createWalletPairFromMnemonic("", mnemonic.trim(), 0, seedType)
       .then((kp) => { if (!cancelled) setPreviewKey(kp.publicKey); })
       .catch(() => { if (!cancelled) setPreviewKey(null); });
     return () => { cancelled = true; };
@@ -115,11 +115,11 @@ export function CreateKadenaSeedModal({ onClose }: CreateKadenaSeedModalProps): 
       // Auto-derive Key #0 and Key #1.
       const accounts: WalletAccount[] = [];
       for (const idx of [0, 1]) {
-        const kp = await KadenaWalletBuilder.createWalletPairFromMnemonic(password, mnemonic.trim(), idx, seedType);
+        const kp = await StoaChainWalletBuilder.createWalletPairFromMnemonic(password, mnemonic.trim(), idx, seedType);
         accounts.push({ index: idx, publicKey: kp.publicKey, derivationPath: ALLOWED_PREFIXED_PATH(idx) });
       }
 
-      const seed: IKadenaSeed = {
+      const seed: IStoaChainSeed = {
         id: globalThis.crypto.randomUUID(),
         version: "1.0",
         name: name.trim(),
@@ -262,4 +262,4 @@ export function CreateKadenaSeedModal({ onClose }: CreateKadenaSeedModalProps): 
   );
 }
 
-export default CreateKadenaSeedModal;
+export default CreateStoaChainSeedModal;

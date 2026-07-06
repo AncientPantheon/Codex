@@ -19,8 +19,8 @@
  *       vitest TS transform at compile time).
  *   (3) The THREE contracts stay stable:
  *         - storage-adapter contract: `CodexAdapter` (codex-core generic seam);
- *         - key-resolver contract: `ResolvedKadenaKeypair` (codex-core) is
- *           ASSIGNABLE to the real `IKadenaKeypair` (the funds-critical resolver
+ *         - key-resolver contract: `ResolvedStoaChainKeypair` (codex-core) is
+ *           ASSIGNABLE to the real `IStoaChainKeypair` (the funds-critical resolver
  *           shape codex-ui's two signing hooks consume via the injected seam);
  *         - consumer-settings contract: `ConsumerSettingsView` shape present.
  *
@@ -44,7 +44,7 @@ import type {
   CodexView,
   ActiveWalletView,
   CodexAuthView,
-  KadenaSeedsView,
+  StoaChainSeedsView,
   PureKeypairsView,
   OuroAccountsView,
   AddressBookView,
@@ -66,14 +66,14 @@ import type {
 import type {
   CodexAdapter,
   CodexSnapshotBase,
-  ResolvedKadenaKeypair,
+  ResolvedStoaChainKeypair,
 } from "@ancientpantheon/codex-core";
 
-// The real Kadena keypair the resolver contract must produce. Type-only import
+// The real StoaChain keypair the resolver contract must produce. Type-only import
 // from the Ouronet resolver subpath (erased at runtime — no VALUE edge, allowed
-// by the type-only-import pin). `ResolvedKadenaKeypair` must stay assignable to
+// by the type-only-import pin). `ResolvedStoaChainKeypair` must stay assignable to
 // this or the two signing hooks break byte-stability (funds-critical, N-04).
-import type { IKadenaKeypair } from "@ancientpantheon/codex-ouronet/resolver";
+import type { IStoaChainKeypair } from "@ancientpantheon/codex-ouronet/resolver";
 
 // The authoritative enumerated hook set, mechanically mirrored from the source
 // barrel `ouronet-codex/src/hooks/index.ts` (16 hook FUNCTIONS). The 17th "hook"
@@ -86,7 +86,7 @@ const EXPECTED_HOOK_FUNCTIONS = [
   "useRequestPassword",
   "useGetKeypair",
   "useSignTransaction",
-  "useKadenaSeeds",
+  "useStoaChainSeeds",
   "usePureKeypairs",
   "useOuroAccounts",
   "useAddressBook",
@@ -156,7 +156,7 @@ describe("codex-ui /hooks surface — type-shape lock (view/fn type exports pres
     acceptType<CodexView>();
     acceptType<ActiveWalletView>();
     acceptType<CodexAuthView>();
-    acceptType<KadenaSeedsView>();
+    acceptType<StoaChainSeedsView>();
     acceptType<PureKeypairsView>();
     acceptType<OuroAccountsView>();
     acceptType<AddressBookView>();
@@ -187,12 +187,12 @@ describe("codex-ui surface — the three cross-package contracts stay stable", (
     expect(shape).toBeInstanceOf(Function);
   });
 
-  it("contract-2 (key resolver): ResolvedKadenaKeypair is ASSIGNABLE to the real IKadenaKeypair (funds-critical)", () => {
+  it("contract-2 (key resolver): ResolvedStoaChainKeypair is ASSIGNABLE to the real IStoaChainKeypair (funds-critical)", () => {
     // The two signing hooks consume an injected resolver whose keypair is a
-    // core-side `ResolvedKadenaKeypair`. If that structural mirror ever drifts
-    // from the real `@stoachain` `IKadenaKeypair`, this assignment fails the TS
+    // core-side `ResolvedStoaChainKeypair`. If that structural mirror ever drifts
+    // from the real `@stoachain` `IStoaChainKeypair`, this assignment fails the TS
     // transform — catching a byte-stability break BEFORE it reaches the signer.
-    const asKadenaKeypair = (r: ResolvedKadenaKeypair): IKadenaKeypair => r;
+    const asKadenaKeypair = (r: ResolvedStoaChainKeypair): IStoaChainKeypair => r;
     expect(asKadenaKeypair).toBeInstanceOf(Function);
   });
 

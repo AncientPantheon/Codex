@@ -1,8 +1,8 @@
 /**
- * <RotatePaymentKeyModal> — headless modal for Kadena Ledger payment-key
+ * <RotatePaymentKeyModal> — headless modal for StoaChain Ledger payment-key
  * rotation on an Ouronet account.
  *
- * Builds the C_RotateKadena Pact tx via buildRotateKadenaPactCode +
+ * Builds the C_RotateStoaChain Pact tx via buildRotateStoaChainPactCode +
  * dispatches through useSignTransaction's CodexSigningStrategy.execute().
  *
  * The patron's guard + (when patron ≠ account) the account's guard need
@@ -19,15 +19,15 @@ import * as React from "react";
 import { useCallback, useState } from "react";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
-  KADENA_CHAIN_ID,
-  KADENA_NETWORK,
+  KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID,
+  KADENA_NETWORK as STOACHAIN_NETWORK,
 } from "@stoachain/stoa-core/constants";
 import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
-import { buildRotateKadenaPactCode } from "@stoachain/ouronet-core/pact";
+import { buildRotateKadenaPactCode as buildRotateStoaChainPactCode } from "@stoachain/ouronet-core/pact";
 
 import { useSignTransaction } from "../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../zbom/hooks/useEnsureCodexUnlocked.js";
@@ -116,7 +116,7 @@ export function RotatePaymentKeyModal({
       // Prompt for the codex password if locked; abort on cancel.
       if (!(await ensureCodexUnlocked())) { setLastError("Authentication required"); return; }
 
-      const pactCode = buildRotateKadenaPactCode({
+      const pactCode = buildRotateStoaChainPactCode({
         patron: patron.address,
         account: account.address,
         newPaymentKey: newPaymentKey.trim(),
@@ -135,10 +135,10 @@ export function RotatePaymentKeyModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime: safeCreationTime(),
-              chainId: KADENA_CHAIN_ID,
+              chainId: STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK);
+            .setNetworkId(STOACHAIN_NETWORK);
 
           // Required data slots for the chain's keyset reads:
           if (patron.guard) {
@@ -156,7 +156,7 @@ export function RotatePaymentKeyModal({
 
           builder = builder.addSigner(capsKeyPub, (w: any) => [
             w(
-              `${KADENA_NAMESPACE}.DALOS.GAS_PAYER`,
+              `${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`,
               "",
               { int: 0 },
               { decimal: "0.0" }

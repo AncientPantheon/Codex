@@ -18,8 +18,8 @@ export type {
   // Entity types
   IKeyset,
   WalletAccount,
-  IKadenaSeed,
-  IKadenaWallet,
+  IStoaChainSeed,
+  IStoaChainWallet,
   IPureKeypair,
   IOuroAccount,
   AddressBookEntry,

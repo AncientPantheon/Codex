@@ -11,7 +11,7 @@
  */
 
 import { getIgnisBalance as _getIgnisBalance } from "@stoachain/ouronet-core/interactions/ouroBalanceFunctions";
-import { getKadenaAccountGuard as _getKadenaAccountGuard } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
+import { getKadenaAccountGuard as _getStoaChainAccountGuard } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
 import { codexClock } from "./codexClock.js";
 
 /** IGNIS balance read — registry id `UR_AccountSupply`. */
@@ -19,5 +19,5 @@ export const getIgnisBalance: typeof _getIgnisBalance = (...args) =>
   codexClock.report("UR_AccountSupply", undefined, () => _getIgnisBalance(...args));
 
 /** Sovereign-guard read — registry id `UR_AccountGuard`. */
-export const getKadenaAccountGuard: typeof _getKadenaAccountGuard = (...args) =>
-  codexClock.report("UR_AccountGuard", undefined, () => _getKadenaAccountGuard(...args));
+export const getStoaChainAccountGuard: typeof _getStoaChainAccountGuard = (...args) =>
+  codexClock.report("UR_AccountGuard", undefined, () => _getStoaChainAccountGuard(...args));

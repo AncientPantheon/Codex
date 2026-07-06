@@ -17,6 +17,7 @@
 import { useState, useEffect } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { useCodexStore } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useRequestPassword } from "../../hooks/index.js";
 import { useDebouncerState } from "./useDebouncerState.js";
@@ -90,7 +91,7 @@ function ZbomCodexLockOval() {
   const { passwordCacheExpiresAt } = useCodexAuth();
   const requestPassword = useRequestPassword();
   const store = useCodexStore();
-  const cacheMinutes = store((s) => s.uiSettings.passwordCacheMinutes ?? 1);
+  const cacheMinutes = store((s: CodexStoreState) => s.uiSettings.passwordCacheMinutes ?? 1);
   const [remaining, setRemaining] = useState(0);
   const [fraction, setFraction] = useState(0);
 

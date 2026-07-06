@@ -90,7 +90,7 @@ export function Dashboard({
   const { isReady } = useCodex();
   const store = useCodexStore();
 
-  // The surfaced, editable, UNLOCKED network config (CL-13): the Kadena node +
+  // The surfaced, editable, UNLOCKED network config (CL-13): the StoaChain node +
   // Arweave gateway, restored from localStorage (defaults to the local/testnet
   // endpoints). Standalone → both chains are LOCAL, editable rows.
   const [network, setNetwork] = useState<NetworkSettings>(() => loadNetworkSettings());
@@ -115,7 +115,7 @@ export function Dashboard({
     saveNetworkSettings(network);
   }, [network]);
 
-  // Push the Kadena node into uiSettings (selectedNode:"custom"/customNodeUrl —
+  // Push the StoaChain node into uiSettings (selectedNode:"custom"/customNodeUrl —
   // the Phase-3 seam the dashboard's signing/reads follow). Gated on `isReady`:
   // updateUiSettings persists through the adapter, which is wired only after the
   // provider's init effect runs — writing earlier throws "no adapter wired".
@@ -125,9 +125,9 @@ export function Dashboard({
       .getState()
       .actions.updateUiSettings({
         selectedNode: "custom",
-        customNodeUrl: network.kadenaNodeUrl,
+        customNodeUrl: network.stoaChainNodeUrl,
       });
-  }, [isReady, network.kadenaNodeUrl, store]);
+  }, [isReady, network.stoaChainNodeUrl, store]);
 
   // Build the per-chain NetworkSettingsModel off the surfaced state (async
   // resolve — the resolver probes coverage; standalone has no global so it
@@ -145,7 +145,7 @@ export function Dashboard({
 
   const setChainUrl = useCallback((chainId: string, url: string) => {
     setNetwork((prev) => {
-      if (chainId === STOACHAIN_CHAIN_ID) return { ...prev, kadenaNodeUrl: url };
+      if (chainId === STOACHAIN_CHAIN_ID) return { ...prev, stoaChainNodeUrl: url };
       if (chainId === ARWEAVE_CHAIN_ID) return { ...prev, arweaveGatewayUrl: url };
       return prev;
     });
@@ -192,7 +192,7 @@ export function Dashboard({
               <NetworkSettingsCard
                 model={networkModel}
                 urls={{
-                  [STOACHAIN_CHAIN_ID]: network.kadenaNodeUrl,
+                  [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
                   [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
                 }}
                 onSetChainUrl={setChainUrl}

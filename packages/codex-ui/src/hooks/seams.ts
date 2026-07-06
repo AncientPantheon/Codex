@@ -1,8 +1,8 @@
 /**
- * The injected resolver-provider seam the two Kadena-bound hooks
+ * The injected resolver-provider seam the two StoaChain-bound hooks
  * (useGetKeypair / useSignTransaction) consume at runtime.
  *
- * WHY a seam: those hooks need Kadena crypto — keypair resolution and the
+ * WHY a seam: those hooks need StoaChain crypto — keypair resolution and the
  * CodexSigningStrategy (which wires an InternalCodexResolver + a Pact client).
  * All of that is a VALUE `@stoachain` + Ouronet edge that must NOT live in this
  * chain-generic package (the D5 graph guard forbids a value chain edge in
@@ -17,7 +17,7 @@
  * `CodexResolverProvider`; this seam narrows further at the signing hooks' call
  * sites, where the injected object is known to carry `createSigningStrategy`.
  *
- * The `CodexSigningStrategy` / `IKadenaKeypair` TYPES stay byte-stable via
+ * The `CodexSigningStrategy` / `IStoaChainKeypair` TYPES stay byte-stable via
  * `import type` from `@stoachain/stoa-core/signing` — erased at compile under
  * verbatimModuleSyntax, so referencing them here creates no runtime edge. The
  * seam NEVER constructs a strategy in codex-ui; it only receives one built
@@ -26,7 +26,7 @@
 
 import type { CodexStore, CodexResolverProvider } from "../provider/index.js";
 import type {
-  IKadenaKeypair,
+  IKadenaKeypair as IStoaChainKeypair,
   CodexSigningStrategy,
 } from "@stoachain/stoa-core/signing";
 
@@ -50,9 +50,9 @@ export interface CreateSigningStrategyOptions {
  */
 export interface CodexResolverSeam extends CodexResolverProvider {
   /** Keypair resolution — the auth-gated `getKeyPairByPublicKey`. Narrowed here
-   *  to the byte-stable `IKadenaKeypair` return the `GetKeypairFn` View exposes
+   *  to the byte-stable `IStoaChainKeypair` return the `GetKeypairFn` View exposes
    *  (the provider context types it as `Promise<unknown>`). */
-  getKeyPairByPublicKey(publicKey: string): Promise<IKadenaKeypair>;
+  getKeyPairByPublicKey(publicKey: string): Promise<IStoaChainKeypair>;
 
   /** Builds the CodexSigningStrategy for `useSignTransaction`. The whole value-
    *  level construction cluster (InternalCodexResolver + Pact client +

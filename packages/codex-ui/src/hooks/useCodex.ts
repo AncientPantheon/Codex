@@ -4,7 +4,7 @@
  * Intended for components that want a quick view of "what's in the
  * codex right now" — onboarding completion check, dashboard counters,
  * etc. Components that mutate one specific slice should use the
- * per-entity CRUD hooks (useKadenaSeeds, useOuroAccounts, etc.) so
+ * per-entity CRUD hooks (useStoaChainSeeds, useOuroAccounts, etc.) so
  * they only re-render on changes to that slice.
  *
  * This hook subscribes to MANY slices, so any change to the codex

@@ -458,7 +458,7 @@ export function PatronZonePattern2({
   autoSelectBestPatron = true,
 }: PatronZonePattern2Props) {
   // Auto-select patron with highest IGNIS balance + keys in codex
-  const { kadena: kadenaSeeds, kadenaAccounts } = useWallet();
+  const { kadena: kadenaSeeds, stoaChainAccounts } = useWallet();
   const [autoSelected, setAutoSelected] = useState(false);
   useEffect(() => {
     if (!autoSelectBestPatron || autoSelected) return;
@@ -477,7 +477,7 @@ export function PatronZonePattern2({
     let aborted = false;
     (async () => {
       try {
-        const codexPubs = buildCodexPubSet(kadenaSeeds, kadenaAccounts);
+        const codexPubs = buildCodexPubSet(kadenaSeeds, stoaChainAccounts);
 
         // Fetch IGNIS for all eligible accounts in parallel
         const balances = await Promise.all(

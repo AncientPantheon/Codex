@@ -6,7 +6,7 @@
  * generic `CodexAdapter<TSnapshot>` method surface, and the structured
  * `assertCodexAdapter` runtime guard — the three seams codex-core must own
  * so a headless, non-Ouronet consumer can import core without dragging in
- * Kadena/Ouronet entity types.
+ * StoaChain/Ouronet entity types.
  *
  * The source `CodexAdapter`/`CodexSnapshot` (ouronet-codex) is deeply
  * Ouronet-coupled — it names `kadenaSeeds`/`ouroAccounts`/`codexIdentity`
@@ -46,7 +46,7 @@ interface TestUiSettings {
 /**
  * A conforming adapter double built against `TestSnapshot`. It implements the
  * ENTIRE generic surface and NOTHING Ouronet-specific — if a `CodexAdapter`
- * double that omits `saveKadenaSeeds`/`saveOuroAccounts`/etc. still typechecks,
+ * double that omits `saveStoaChainSeeds`/`saveOuroAccounts`/etc. still typechecks,
  * those writes are (correctly) NOT on the generic interface.
  */
 function makeConformingDouble(
@@ -113,7 +113,7 @@ describe("emptySnapshotBase — the Ouronet-free skeleton", () => {
 describe("CodexAdapter<TSnapshot> — the generic method surface (compile-time contract)", () => {
   it("a double implementing only the generic surface satisfies CodexAdapter (per-Ouronet-entity writes are NOT required)", () => {
     const adapter = makeConformingDouble("main");
-    // A double with NO saveKadenaSeeds/saveOuroAccounts/etc. still typechecks
+    // A double with NO saveStoaChainSeeds/saveOuroAccounts/etc. still typechecks
     // as a CodexAdapter — the type parameter below asserts this at compile time.
     expectTypeOf(adapter).toMatchTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>();
     expect(adapter.name).toBe("test-double");
@@ -131,8 +131,8 @@ describe("CodexAdapter<TSnapshot> — the generic method surface (compile-time c
     expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().toHaveProperty("clearAll");
   });
 
-  it("does NOT declare per-Ouronet-entity writes on the generic interface (saveKadenaSeeds etc. moved to the D5 extension)", () => {
-    expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().not.toHaveProperty("saveKadenaSeeds");
+  it("does NOT declare per-Ouronet-entity writes on the generic interface (saveStoaChainSeeds etc. moved to the D5 extension)", () => {
+    expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().not.toHaveProperty("saveStoaChainSeeds");
     expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().not.toHaveProperty("saveOuroAccounts");
     expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().not.toHaveProperty("savePureKeypairs");
     expectTypeOf<CodexAdapter<TestSnapshot, TestUiSettings>>().not.toHaveProperty("saveCodexIdentity");

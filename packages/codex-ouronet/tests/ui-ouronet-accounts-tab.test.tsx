@@ -50,7 +50,7 @@ const ouroFx = (over: Partial<IOuroAccount> = {}): IOuroAccount => ({
   isSmart: over.isSmart ?? false,
   address: over.address ?? "Ѻ.my-account",
   guard: over.guard ?? null,
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey: over.publicKey ?? "p".repeat(64),
   secret: "s",
   backup: "b",

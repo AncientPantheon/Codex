@@ -14,10 +14,10 @@
  *   - requestForeignKey: default-throws when no callback; delegates when
  *     a callback is provided.
  *
- * Why not mock smartDecrypt + KadenaWalletBuilder: those are the actual
+ * Why not mock smartDecrypt + StoaChainWalletBuilder: those are the actual
  * crypto primitives consumers depend on at runtime. Mocking them would
  * hide regressions where the resolver mis-orders the password-cache
- * pull, the smartDecrypt call, or the KadenaWalletBuilder invocation.
+ * pull, the smartDecrypt call, or the StoaChainWalletBuilder invocation.
  * Real crypto is slow (~1-2s per test for the SLIP-10 derivation) but
  * gives us a real assurance signal.
  */
@@ -30,10 +30,10 @@ import {
   CodexKeyMissingError,
   CodexLockedError,
 } from "@ancientpantheon/codex-ouronet/errors";
-import type { IKadenaSeed, IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
 
 import { smartEncrypt } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { universalSignTransaction } from "@stoachain/stoa-core/signing";
 import { kadenaDecrypt } from "@stoachain/kadena-stoic-legacy/hd-wallet";
 import { binToHex } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
@@ -66,12 +66,12 @@ async function makePureKeypair(): Promise<IPureKeypair> {
  *  derive account[0] for its pubkey. The resolver test will then ask
  *  for that pubkey and the resolver should return a matching keypair. */
 async function makeKoalaSeed(): Promise<{
-  seed: IKadenaSeed;
+  seed: IStoaChainSeed;
   derivedPub: string;
 }> {
-  const mnemonic = await KadenaWalletBuilder.generateMnemonic(24);
+  const mnemonic = await StoaChainWalletBuilder.generateMnemonic(24);
   const { publicKey } =
-    await KadenaWalletBuilder.createWalletPairFromMnemonic(
+    await StoaChainWalletBuilder.createWalletPairFromMnemonic(
       PASSWORD,
       mnemonic,
       0,
@@ -110,10 +110,10 @@ async function makeChainweaverPureKeypair(): Promise<{
   publicKey: string;
   canonicalPriv: string;
 }> {
-  const mnemonic = await KadenaWalletBuilder.generateMnemonic(12);
+  const mnemonic = await StoaChainWalletBuilder.generateMnemonic(12);
   // Canonical derivation — identical to SeedWordsTab.revealPrivateKey.
   const { publicKey, secretKey } =
-    await KadenaWalletBuilder.createWalletPairFromMnemonic(
+    await StoaChainWalletBuilder.createWalletPairFromMnemonic(
       "",
       mnemonic,
       0,
@@ -175,7 +175,7 @@ describe("InternalCodexResolver", () => {
 
     it("includes derived-account pubkeys from all seeds", async () => {
       const { seed, derivedPub } = await makeKoalaSeed();
-      await store.getState().actions.addKadenaSeed(seed);
+      await store.getState().actions.addStoaChainSeed(seed);
       const set = resolver.listCodexPubs() as Set<string>;
       expect(set.has(derivedPub)).toBe(true);
     });
@@ -218,7 +218,7 @@ describe("InternalCodexResolver", () => {
 
     it("returns derived keypair for a koala-seed-derived account", async () => {
       const { seed, derivedPub } = await makeKoalaSeed();
-      await store.getState().actions.addKadenaSeed(seed);
+      await store.getState().actions.addStoaChainSeed(seed);
       store.getState().actions.authenticate(PASSWORD, 60);
 
       const result = await resolver.getKeyPairByPublicKey(derivedPub);
@@ -285,7 +285,7 @@ describe("InternalCodexResolver", () => {
       const kp = await makePureKeypair();
       await store.getState().actions.addPureKeypair(kp);
       const { seed } = await makeKoalaSeed();
-      await store.getState().actions.addKadenaSeed(seed);
+      await store.getState().actions.addStoaChainSeed(seed);
       store.getState().actions.authenticate(PASSWORD, 60);
 
       try {

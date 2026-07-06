@@ -64,7 +64,7 @@ import throwawayKeyfile from "./fixtures/throwaway-arweave-keyfile.json" assert 
 // ── constants ─────────────────────────────────────────────────────────────
 
 const ARWEAVE_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
-const KADENA_CHAIN_ID = "kadena:mainnet";
+const STOACHAIN_CHAIN_ID = "kadena:mainnet";
 const STUB_CHAIN_ID = "stub-chain";
 const PRIVATE_JWK_FIELDS = ["d", "p", "q", "dp", "dq", "qi"] as const;
 
@@ -189,7 +189,7 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
     // address book (D5)
     addressBook: [
       { id: "ab-1", name: "Alice (AR)", address: ARWEAVE_ADDRESS, chainId: ARWEAVE_CHAIN_ID },
-      { id: "ab-2", name: "Bob (KDA)", address: "k:abcdef", chainId: KADENA_CHAIN_ID },
+      { id: "ab-2", name: "Bob (KDA)", address: "k:abcdef", chainId: STOACHAIN_CHAIN_ID },
     ],
 
     ...overrides,
@@ -431,7 +431,7 @@ describe("E4 integration — the address-book recipient pick (E-11)", () => {
     fireEvent.click(screen.getByTestId("arweave-subtab-send"));
 
     const picker = screen.getByTestId("send-book-picker");
-    // Only the chainId===ARWEAVE_CHAIN_ID contact is offerable; the Kadena one is filtered.
+    // Only the chainId===ARWEAVE_CHAIN_ID contact is offerable; the StoaChain one is filtered.
     expect(within(picker).getByText("Alice (AR)")).toBeInTheDocument();
     expect(within(picker).queryByText("Bob (KDA)")).not.toBeInTheDocument();
 

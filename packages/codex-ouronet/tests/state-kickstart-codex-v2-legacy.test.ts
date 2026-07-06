@@ -18,7 +18,7 @@ import {
   CodexIdentityError,
   CodexGuardError,
 } from "@ancientpantheon/codex-ouronet/errors";
-import type { IKadenaSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 import type { KickstartArgsV3 } from "@ancientpantheon/codex-ouronet/codex-identity";
 
 const T = { timeout: 120_000 };
@@ -32,7 +32,7 @@ beforeEach(async () => {
   await store.getState().actions.init(adapter, "dev");
 });
 
-function v2Seed(id = "s1"): Omit<IKadenaSeed, "isPrime"> {
+function v2Seed(id = "s1"): Omit<IStoaChainSeed, "isPrime"> {
   return {
     id, name: "Seed", seedType: "koala", version: "2", index: 0,
     secret: "enc-mnemonic", main: "k:" + "0".repeat(64),
@@ -44,7 +44,7 @@ function v2Seed(id = "s1"): Omit<IKadenaSeed, "isPrime"> {
 function v2Ouro(id = "o1", isSmart = false): Omit<IOuroAccount, "isPrime" | "parentSeedId"> {
   return {
     id, name: "Ouro", version: "2", isSmart, address: "Ѻ." + id,
-    guard: null, kadenaLedger: null, publicKey: "pk-" + id,
+    guard: null, stoaChainLedger: null, publicKey: "pk-" + id,
     secret: "enc-secret", backup: "",
   };
 }
@@ -60,7 +60,7 @@ describe("kickstartCodex v0.2 legacy passthrough", () => {
     const r = (await store.getState().actions.kickstartCodex({
       seed: v2Seed("s1"),
       primeOuroAccount: v2Ouro("o1"),
-    })) as { seed: IKadenaSeed; primeOuro: IOuroAccount };
+    })) as { seed: IStoaChainSeed; primeOuro: IOuroAccount };
 
     expect(r.seed.isPrime).toBe(true);
     expect(r.primeOuro.isPrime).toBe(true);
@@ -82,7 +82,7 @@ describe("kickstartCodex v0.2 legacy passthrough", () => {
   });
 
   it("rejects when the codex already has a kadena seed (already-kickstarted)", async () => {
-    await adapter.saveKadenaSeeds([{ ...v2Seed("pre"), isPrime: true }]);
+    await adapter.saveStoaChainSeeds([{ ...v2Seed("pre"), isPrime: true }]);
     await store.getState().actions.init(adapter, "dev");
     await expect(
       store.getState().actions.kickstartCodex({ seed: v2Seed("s1"), primeOuroAccount: v2Ouro() }),
@@ -112,7 +112,7 @@ describe("kickstartCodex dispatch boundary", () => {
   it("routes a clean v0.2 shape to the v0.2 path (returns {seed, primeOuro})", async () => {
     const r = (await store.getState().actions.kickstartCodex({
       seed: v2Seed(), primeOuroAccount: v2Ouro(),
-    })) as { seed: IKadenaSeed; primeOuro: IOuroAccount };
+    })) as { seed: IStoaChainSeed; primeOuro: IOuroAccount };
     expect(r.seed).toBeDefined();
     expect(r.primeOuro).toBeDefined();
     expect((r as { codexIdentity?: unknown }).codexIdentity).toBeUndefined();
@@ -139,11 +139,11 @@ describe("kickstartCodex legacy defensive v0.3-state detection (PAT-003)", () =>
     });
     await store.getState().actions.init(adapter, "dev");
 
-    const saveKadenaSeeds = vi.spyOn(adapter, "saveKadenaSeeds");
+    const saveStoaChainSeeds = vi.spyOn(adapter, "saveStoaChainSeeds");
     await expect(
       store.getState().actions.kickstartCodex({ seed: v2Seed(), primeOuroAccount: v2Ouro() }),
     ).rejects.toBeInstanceOf(CodexIdentityError);
-    expect(saveKadenaSeeds).not.toHaveBeenCalled();
+    expect(saveStoaChainSeeds).not.toHaveBeenCalled();
   });
 
   it("rejects a v0.2 call on a codex that already has a CodexGuard", async () => {
@@ -152,10 +152,10 @@ describe("kickstartCodex legacy defensive v0.3-state detection (PAT-003)", () =>
     ]);
     await store.getState().actions.init(adapter, "dev");
 
-    const saveKadenaSeeds = vi.spyOn(adapter, "saveKadenaSeeds");
+    const saveStoaChainSeeds = vi.spyOn(adapter, "saveStoaChainSeeds");
     await expect(
       store.getState().actions.kickstartCodex({ seed: v2Seed(), primeOuroAccount: v2Ouro() }),
     ).rejects.toBeInstanceOf(CodexGuardError);
-    expect(saveKadenaSeeds).not.toHaveBeenCalled();
+    expect(saveStoaChainSeeds).not.toHaveBeenCalled();
   });
 });

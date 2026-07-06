@@ -74,9 +74,9 @@ export function CodexInfoCard({ className }: CodexInfoCardProps) {
   } = useCodex();
 
   const abOuronet = addressBook.filter(
-    (e) => e.type === "ouronet" || !e.type,
+    (e: { type?: string }) => e.type === "ouronet" || !e.type,
   ).length;
-  const abStoa = addressBook.filter((e) => e.type === "stoa").length;
+  const abStoa = addressBook.filter((e: { type?: string }) => e.type === "stoa").length;
 
   const secrets = collectCodexSecrets({
     kadenaSeeds,

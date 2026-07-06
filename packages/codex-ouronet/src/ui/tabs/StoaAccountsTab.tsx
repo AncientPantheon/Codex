@@ -22,12 +22,12 @@ import {
   ChevronDown, ChevronRight, Eye, RefreshCw, Loader2, Plus, Check, X, Pencil,
 } from "lucide-react";
 import { STOA_CHAINS } from "@stoachain/stoa-core/constants";
-import { useKadenaSeeds } from "../../hooks/index.js";
+import { useStoaChainSeeds } from "../../hooks/index.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
 import { IconCopyBtn, IconStoaExplorerBtn, IconDeleteBtn } from "../internal/IconButtons.js";
 import { useStoaChainBalances, type StoaAccountBalances } from "../internal/useStoaChainBalances.js";
-import type { IKadenaSeed } from "../../types/entities.js";
+import type { IStoaChainSeed } from "../../types/entities.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const ADDR_PREFIXES = ["k:", "u:", "c:", "w:"];
@@ -153,7 +153,7 @@ function GroupRow({ name, color, count, children }: { name: string; color: strin
 
 /* ─────────────── Main tab ─────────────── */
 export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
-  const { seeds } = useKadenaSeeds();
+  const { seeds } = useStoaChainSeeds();
   const { keypairs } = usePureKeypairs();
   const { entries: watchEntries, addEntry, deleteEntry } = useWatchList();
   const [subTab, setSubTab] = useState<"codex" | "watch">("codex");
@@ -163,7 +163,7 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
   // Build the codex groups (one per seed + a Pure Key Pairs group).
   const groups = useMemo(() => {
     const out: { id: string; name: string; color: string; entries: AddrEntry[] }[] = [];
-    seeds.forEach((seed: IKadenaSeed, i) => {
+    seeds.forEach((seed: IStoaChainSeed, i) => {
       const isPrime = seed.isPrime === true || i === 0;
       const name = isPrime ? "Prime Codex Seed" : seed.name || `Seed #${i + 1}`;
       const color = SEED_TYPE_COLOR[seed.seedType] ?? "#ec4899";

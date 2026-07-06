@@ -147,10 +147,10 @@ export function makeHealthPool(
 }
 
 /** An InternalCodexResolver-shaped sentinel: any invocation is a Critical N-05
- *  isolation breach (the E3 flows must NEVER touch the Kadena resolver). */
+ *  isolation breach (the E3 flows must NEVER touch the StoaChain resolver). */
 export function makeKadenaSentinel() {
   const throwTouch = () => {
-    throw new Error("Kadena resolver was touched");
+    throw new Error("StoaChain resolver was touched");
   };
   return {
     resolvePrivateKey: throwTouch,

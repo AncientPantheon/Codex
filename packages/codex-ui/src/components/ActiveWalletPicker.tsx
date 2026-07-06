@@ -13,14 +13,14 @@
 import * as React from "react";
 import { useActiveWallet } from "../hooks/useActiveWallet.js";
 import { useCodex } from "../hooks/useCodex.js";
-import type { IKadenaSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 
 export interface ActiveWalletPickerRenderArgs {
-  kadenaSeeds: IKadenaSeed[];
+  kadenaSeeds: IStoaChainSeed[];
   ouroAccounts: IOuroAccount[];
-  activeKadenaWalletId: string | null;
+  activeStoaChainWalletId: string | null;
   activeOuroAccountId: string | null;
-  setActiveKadenaWallet: (id: string | null) => void;
+  setActiveStoaChainWallet: (id: string | null) => void;
   setActiveOuroAccount: (id: string | null) => void;
 }
 
@@ -28,11 +28,11 @@ export interface ActiveWalletPickerProps {
   className?: string;
   render?: (args: ActiveWalletPickerRenderArgs) => React.ReactNode;
   /** Override individual kadena-seed option rendering. */
-  renderKadenaSeedOption?: (seed: IKadenaSeed) => React.ReactNode;
+  renderStoaChainSeedOption?: (seed: IStoaChainSeed) => React.ReactNode;
   /** Override individual ouro-account option rendering. */
   renderOuroAccountOption?: (account: IOuroAccount) => React.ReactNode;
   /** Hide the kadena seed picker (e.g. consumer doesn't surface it). */
-  hideKadenaSeedPicker?: boolean;
+  hideStoaChainSeedPicker?: boolean;
   /** Hide the ouro account picker. */
   hideOuroAccountPicker?: boolean;
 }
@@ -40,9 +40,9 @@ export interface ActiveWalletPickerProps {
 export function ActiveWalletPicker({
   className,
   render,
-  renderKadenaSeedOption,
+  renderStoaChainSeedOption,
   renderOuroAccountOption,
-  hideKadenaSeedPicker,
+  hideStoaChainSeedPicker,
   hideOuroAccountPicker,
 }: ActiveWalletPickerProps): React.JSX.Element {
   const codex = useCodex();
@@ -51,9 +51,9 @@ export function ActiveWalletPicker({
   const renderArgs: ActiveWalletPickerRenderArgs = {
     kadenaSeeds: codex.kadenaSeeds,
     ouroAccounts: codex.ouroAccounts,
-    activeKadenaWalletId: active.activeKadenaWalletId,
+    activeStoaChainWalletId: active.activeStoaChainWalletId,
     activeOuroAccountId: active.activeOuroAccountId,
-    setActiveKadenaWallet: active.setActiveKadenaWallet,
+    setActiveStoaChainWallet: active.setActiveStoaChainWallet,
     setActiveOuroAccount: active.setActiveOuroAccount,
   };
 
@@ -63,20 +63,20 @@ export function ActiveWalletPicker({
 
   return (
     <div className={className}>
-      {!hideKadenaSeedPicker && (
+      {!hideStoaChainSeedPicker && (
         <label>
-          Kadena seed
+          StoaChain seed
           <select
-            value={active.activeKadenaWalletId ?? ""}
+            value={active.activeStoaChainWalletId ?? ""}
             onChange={(e) =>
-              active.setActiveKadenaWallet(e.target.value || null)
+              active.setActiveStoaChainWallet(e.target.value || null)
             }
           >
             <option value="">— none —</option>
             {codex.kadenaSeeds.map((seed) =>
-              renderKadenaSeedOption ? (
+              renderStoaChainSeedOption ? (
                 <React.Fragment key={seed.id}>
-                  {renderKadenaSeedOption(seed)}
+                  {renderStoaChainSeedOption(seed)}
                 </React.Fragment>
               ) : (
                 <option key={seed.id} value={seed.id}>

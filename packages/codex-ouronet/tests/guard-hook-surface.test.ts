@@ -39,7 +39,7 @@ import type {
   CodexView,
   ActiveWalletView,
   CodexAuthView,
-  KadenaSeedsView,
+  StoaChainSeedsView,
   PureKeypairsView,
   OuroAccountsView,
   AddressBookView,
@@ -65,7 +65,7 @@ const EXPECTED_HOOK_FUNCTIONS = [
   "useRequestPassword",
   "useGetKeypair",
   "useSignTransaction",
-  "useKadenaSeeds",
+  "useStoaChainSeeds",
   "usePureKeypairs",
   "useOuroAccounts",
   "useAddressBook",
@@ -87,8 +87,8 @@ const EXPECTED_HOOK_FUNCTIONS = [
 // is a runtime error class; `validateAddress` etc. are runtime functions; only
 // the two type companions (`AddressKind`, `ChainAddressValidator`, …) erase.
 const EXPECTED_ADDRESS_BOOK_CHAIN_EXPORTS = [
-  "KADENA_CHAIN_ID",
-  "kadenaAddressValidator",
+  "STOACHAIN_CHAIN_ID",
+  "stoaChainAddressValidator",
   "createAddressValidatorRegistry",
   "registerChainAddressValidator",
   "validateAddress",
@@ -132,13 +132,13 @@ describe("hooks barrel — negative lock (runtime surface does not widen)", () =
     // the set equals the allow-list. An `export *` regression, a leaked helper, or
     // a new hook added without updating the contract adds a name here and FAILS,
     // naming the offending export via the sorted-set diff. The address-book-chain
-    // FUNCTIONS (validateAddress, kadenaAddressValidator, the registry ops, the
+    // FUNCTIONS (validateAddress, stoaChainAddressValidator, the registry ops, the
     // UnknownChainError class — all typeof "function") are part of the D-10
     // additive surface, so they are allow-listed alongside the 16 hooks; the
-    // string constant KADENA_CHAIN_ID is not a function and is checked by the
+    // string constant STOACHAIN_CHAIN_ID is not a function and is checked by the
     // broader value-export lock below.
     const expectedFunctions = EXPECTED_RUNTIME_EXPORTS.filter(
-      (name) => name !== "KADENA_CHAIN_ID",
+      (name) => name !== "STOACHAIN_CHAIN_ID",
     );
     const runtimeFunctionExports = Object.keys(hooks)
       .filter((name) => typeof (hooks as Record<string, unknown>)[name] === "function")
@@ -170,7 +170,7 @@ describe("hooks barrel — type-shape lock (view/fn type exports present)", () =
     acceptView<CodexView>();
     acceptView<ActiveWalletView>();
     acceptView<CodexAuthView>();
-    acceptView<KadenaSeedsView>();
+    acceptView<StoaChainSeedsView>();
     acceptView<PureKeypairsView>();
     acceptView<OuroAccountsView>();
     acceptView<AddressBookView>();

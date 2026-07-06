@@ -8,7 +8,7 @@
  * (`kadenaSeeds`/`ouroAccounts`/`codexIdentity`/…) and the per-Ouronet-entity
  * convenience writes are deliberately ABSENT here — they belong to the
  * Ouronet-side extension, so a headless, non-Ouronet consumer can import this
- * core without dragging in Kadena/Ouronet types.
+ * core without dragging in StoaChain/Ouronet types.
  */
 
 import { CodexAdapterError } from "../codex/errors.js";
@@ -49,7 +49,7 @@ export interface CodexSnapshotBase {
  * `TUiSettings` so a consumer can carry its own settings shape without core
  * naming it.
  *
- * The per-Ouronet-entity writes (`saveKadenaSeeds` etc.) are intentionally NOT
+ * The per-Ouronet-entity writes (`saveStoaChainSeeds` etc.) are intentionally NOT
  * on this interface — they are an Ouronet-side extension concern.
  */
 export interface CodexAdapter<

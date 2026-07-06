@@ -64,18 +64,18 @@ export function parseIgnisInfo(raw: unknown): ParsedIgnisInfo {
   };
 }
 
-export interface ParsedKadenaInfo {
+export interface ParsedStoaChainInfo {
   /** Native STOA the operation needs (0 ⇒ Gas Station covers it). */
-  kadenaNeed: number | null;
-  kadenaFull: number | null;
-  kadenaDiscount: number | null;
-  kadenaText: string;
+  stoaChainNeed: number | null;
+  stoaChainFull: number | null;
+  stoaChainDiscount: number | null;
+  stoaChainText: string;
 }
 
 /** Parse the `kadena` (native-STOA) block out of an INFO read result. STOA-cost
  *  ops (Activate, Register StoicTag) report cost here, mirroring OuronetUI's
- *  `KadenaCostDisplay` (`infoData.kadena["kadena-need"]`). */
-export function parseKadenaInfo(raw: unknown): ParsedKadenaInfo {
+ *  `StoaChainCostDisplay` (`infoData.kadena["kadena-need"]`). */
+export function parseStoaChainInfo(raw: unknown): ParsedStoaChainInfo {
   const payload = unwrapReadResult(raw);
   const kadena =
     payload && typeof payload === "object"
@@ -84,14 +84,14 @@ export function parseKadenaInfo(raw: unknown): ParsedKadenaInfo {
   const block = (kadena && typeof kadena === "object" ? kadena : {}) as Record<string, unknown>;
   const text = block["kadena-text"];
   return {
-    kadenaNeed: coercePactDecimal(block["kadena-need"]),
-    kadenaFull: coercePactDecimal(block["kadena-full"]),
-    kadenaDiscount: coercePactDecimal(block["kadena-discount"]),
-    kadenaText: typeof text === "string" ? text : "",
+    stoaChainNeed: coercePactDecimal(block["kadena-need"]),
+    stoaChainFull: coercePactDecimal(block["kadena-full"]),
+    stoaChainDiscount: coercePactDecimal(block["kadena-discount"]),
+    stoaChainText: typeof text === "string" ? text : "",
   };
 }
 
-export interface ParsedKadenaSplit {
+export interface ParsedStoaChainSplit {
   /** Protocol receiver addresses the native-STOA fee pays out to. */
   receivers: string[];
   /** Per-receiver amounts (decimal strings), index-aligned with `receivers`.
@@ -105,7 +105,7 @@ export interface ParsedKadenaSplit {
  *  ActivateStandardAccountModal: receivers come from the top-level `receivers`
  *  list, amounts from `kadena["kadena-split"]`. Both default to empty so the
  *  execute glue emits zero coin.TRANSFER legs when the read hasn't settled. */
-export function parseKadenaSplit(raw: unknown): ParsedKadenaSplit {
+export function parseStoaChainSplit(raw: unknown): ParsedStoaChainSplit {
   const payload = unwrapReadResult(raw);
   const obj = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
 

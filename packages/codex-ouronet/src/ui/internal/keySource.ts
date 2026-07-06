@@ -3,12 +3,12 @@
  * OuroAccountList helpers (identifyKeySource / addrColor / SEED_COLORS).
  *
  * Adapted to the package data model: OuronetUI carried a flat
- * `kadenaAccounts: IKadenaWallet[]` list alongside the seeds; the codex
+ * `stoaChainAccounts: IStoaChainWallet[]` list alongside the seeds; the codex
  * store keeps derived accounts inside `seed.accounts` and pure keys in a
  * separate `IPureKeypair[]`, so we resolve a public key against both.
  */
 
-import type { IKadenaSeed, IPureKeypair, SeedType } from "../../types/entities.js";
+import type { IStoaChainSeed, IPureKeypair, SeedType } from "../../types/entities.js";
 import { getSeedDisplayName } from "./seedNames.js";
 
 export interface KeySourceInfo {
@@ -54,7 +54,7 @@ export function addrColor(addr: string): string {
  */
 export function identifyKeySource(
   keyOrAddr: string,
-  seeds: IKadenaSeed[],
+  seeds: IStoaChainSeed[],
   pureKeypairs: IPureKeypair[] = [],
 ): KeySourceInfo {
   if (!keyOrAddr) return { label: "", color: "#888" };

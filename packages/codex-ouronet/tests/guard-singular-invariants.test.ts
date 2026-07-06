@@ -35,7 +35,7 @@ import type {
   KickstartResultV3,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
 } from "@ancientpantheon/codex-ouronet/types";
 
@@ -91,7 +91,7 @@ describe("(a) singular invariant: exactly one Prime Codex Seed", () => {
   });
 
   it("rejects adding a SECOND explicit prime seed — the singleton holds", T, async () => {
-    const intruder: IKadenaSeed = {
+    const intruder: IStoaChainSeed = {
       id: "intruder-seed",
       seedType: "koala",
       version: "2",
@@ -103,7 +103,7 @@ describe("(a) singular invariant: exactly one Prime Codex Seed", () => {
       isPrime: true,
     };
     await expect(
-      store.getState().actions.addKadenaSeed(intruder)
+      store.getState().actions.addStoaChainSeed(intruder)
     ).rejects.toMatchObject({
       name: "CodexKickstartError",
       reason: "id-conflict",
@@ -117,7 +117,7 @@ describe("(a) singular invariant: exactly one Prime Codex Seed", () => {
   it("the Prime Codex Seed is structurally undeletable", T, async () => {
     const primeId = kick.primeCodexSeed!.id;
     await expect(
-      store.getState().actions.deleteKadenaSeed(primeId)
+      store.getState().actions.deleteStoaChainSeed(primeId)
     ).rejects.toBeInstanceOf(CodexPrimeSeedProtectedError);
     // Delete attempt left the prime in place.
     expect(store.getState().kadenaSeeds.some((s) => s.id === primeId)).toBe(true);
@@ -147,7 +147,7 @@ describe("(b) singular invariant: exactly one CodexPrime ouro account", () => {
       isSmart: false,
       address: "Ѻ.intruder",
       guard: null,
-      kadenaLedger: null,
+      stoaChainLedger: null,
       publicKey: "pk-intruder",
       secret: "enc-intruder",
       backup: "",

@@ -57,7 +57,7 @@ export interface WalletAccount {
 
 /** A kadena HD seed (one mnemonic) with all derived accounts. The `secret`
  *  is the encrypted mnemonic (encrypted at the codex password). */
-export interface IKadenaSeed {
+export interface IStoaChainSeed {
   id: string;
   name?: string;
   seedType: SeedType;
@@ -69,7 +69,7 @@ export interface IKadenaSeed {
   accounts: WalletAccount[];
   /** Prime Codex Seed marker (spec §B1 — see docs/v0.2.0-design.md).
    *  True for the seed that kickstarted the codex; false (or absent) for
-   *  additional seeds added later. The package's `deleteKadenaSeed`
+   *  additional seeds added later. The package's `deleteStoaChainSeed`
    *  throws `CodexPrimeSeedProtectedError` on `isPrime: true` seeds.
    *  There is exactly one prime seed per codex, set atomically by
    *  `kickstartCodex`. Added v0.2.0. */
@@ -78,9 +78,9 @@ export interface IKadenaSeed {
 
 /** A single derived kadena account flattened with its seed linkage + live
  *  chain state. Cloned verbatim from OuronetUI `ouro.d.ts` — the ZBOM modals
- *  take `kadenaAccounts: IKadenaWallet[]` as a prop (payment-key / guard
+ *  take `stoaChainAccounts: IStoaChainWallet[]` as a prop (payment-key / guard
  *  signing material lookup). */
-export interface IKadenaWallet extends WalletAccount {
+export interface IStoaChainWallet extends WalletAccount {
   address: string;
   secret: string;
   seedId: string;
@@ -137,7 +137,7 @@ export interface IPureKeypair {
 
   /** Duo Pure Prime marker (autopilot CodexPrime backing).
    *  When the user chooses "auto-pure-keys" mode at kickstart instead of
-   *  providing a Kadena seed, the package generates two pure keys to back
+   *  providing a StoaChain seed, the package generates two pure keys to back
    *  the CodexPrime Ouronet Account (one as Payment Key, one as the
    *  Ouronet account's keyset key). Both keys get isDuoPurePrime: true
    *  and are protected from deletion (same mechanism as CodexGuard).
@@ -159,7 +159,7 @@ export interface IOuroAccount {
   isSmart: boolean;
   address: string;
   guard: IKeyset | null;
-  kadenaLedger: string | null;
+  stoaChainLedger: string | null;
   /** Codex-local public key (the value the UI itself produced — source of
    *  truth for what we minted). Compare to `chainPublicKey` for the live
    *  chain-side value. */
@@ -194,7 +194,7 @@ export interface IOuroAccount {
    *  hook throws `CodexPrimeProtectedError` when called on a `isPrime: true`
    *  account. */
   isPrime?: boolean;
-  /** ID of the IKadenaSeed this account was derived from (v0.2.0+).
+  /** ID of the IStoaChainSeed this account was derived from (v0.2.0+).
    *  Undefined for pure-keypair-derived accounts (which have no parent
    *  seed) and for legacy accounts imported from v0.1.0 backups. Set by
    *  `kickstartCodex` on the CodexPrime account so the prime-account
@@ -214,7 +214,7 @@ export interface AddressBookEntry {
   type: "ouronet" | "stoa" | "stoic-tag";
   /** Chain this recipient lives on (D-10). OPTIONAL and additive: an entry
    *  persisted before the field existed has no `chainId` and reads as the
-   *  Kadena default (`entry.chainId ?? KADENA_CHAIN_ID`) — the stored entry is
+   *  StoaChain default (`entry.chainId ?? STOACHAIN_CHAIN_ID`) — the stored entry is
    *  never rewritten. Shares the string namespace with codex-core's
    *  `ForeignKeyEntry.chainId` / `ForeignChainAdapter.id`, so a foreign entry
    *  (e.g. `"arweave:mainnet"`) uses that same vocabulary. */

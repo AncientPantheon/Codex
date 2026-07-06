@@ -20,17 +20,17 @@ import { InfoTooltip } from "../ui/InfoTooltip.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { txPending } from "../toast/toastManager.js";
 import { Unlink, Loader2 } from "lucide-react";
-import { getIgnisBalance, getKadenaAccountGuard } from "../debouncer/monitoredReads.js";
+import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_CHAIN_ID, KADENA_NETWORK } from "@stoachain/stoa-core/constants";
+import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
 import { buildReleaseStoicTagPactCode } from "@stoachain/ouronet-core/pact";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
-import type { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
 import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { PatronZonePattern2 } from "../cfm/PatronSpend.js";
@@ -57,8 +57,8 @@ interface Props {
   account: IOuroAccount;
   /** Full codex Ouronet accounts — for the patron Custom selector. */
   accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[];
-  kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[];
+  stoaChainAccounts: IStoaChainWallet[];
 }
 
 export default function ReleaseStoicTagModal({
@@ -66,8 +66,8 @@ export default function ReleaseStoicTagModal({
   onClose,
   account,
   accounts,
-  kadenaSeeds: _kadenaSeeds,
-  kadenaAccounts: _kadenaAccounts,
+  kadenaSeeds: _stoaChainSeeds,
+  stoaChainAccounts: _stoaChainAccounts,
 }: Props) {
   const { execute } = useSignTransaction();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -89,7 +89,7 @@ export default function ReleaseStoicTagModal({
   const [isProcessing, setIsProcessing] = useState(false);
 
   // ── Resolved account guard (for AuthPathZone — Smart accounts only).
-  //    account.guard is an UNRESOLVED keyset-ref object; getKadenaAccountGuard
+  //    account.guard is an UNRESOLVED keyset-ref object; getStoaChainAccountGuard
   //    resolves it to a plain keyset so the Account-Guard branch classifies as
   //    key-based instead of "ZBOM cannot". ──
   const [resolvedAccountGuard, setResolvedAccountGuard] = useState<unknown>(null);
@@ -142,7 +142,7 @@ export default function ReleaseStoicTagModal({
     setInfoData(null);
     let aborted = false;
     pactRead(
-      `(${KADENA_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount.address}" "${tagName}")`,
+      `(${STOACHAIN_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount.address}" "${tagName}")`,
       { tier: "T7" },
     )
       .then((res: any) => { if (!aborted) setInfoData(res?.result?.data ?? null); })
@@ -152,7 +152,7 @@ export default function ReleaseStoicTagModal({
   }, [open, patronAccount?.address, tagName]);
 
   // ── Account guard resolution — the stored account.guard is an UNRESOLVED
-  //    keyset-ref object, which classifies as non-key-based. getKadenaAccountGuard
+  //    keyset-ref object, which classifies as non-key-based. getStoaChainAccountGuard
   //    resolves it to a plain keyset so the Account-Guard branch is signable.
   //    Standard accounts don't use AuthPathZone, so leave inert. ──
   useEffect(() => {
@@ -164,7 +164,7 @@ export default function ReleaseStoicTagModal({
       return;
     }
     let aborted = false;
-    getKadenaAccountGuard(account.address)
+    getStoaChainAccountGuard(account.address)
       .then((g) => { if (!aborted) setResolvedAccountGuard(g); })
       .catch(() => { if (!aborted) setResolvedAccountGuard(null); })
       .finally(() => { if (!aborted) setAccountGuardLoaded(true); });
@@ -193,7 +193,7 @@ export default function ReleaseStoicTagModal({
       return;
     }
     let aborted = false;
-    getKadenaAccountGuard(sov)
+    getStoaChainAccountGuard(sov)
       .then((g) => { if (!aborted) setSovereignGuard(g); })
       .catch(() => { if (!aborted) setSovereignGuard(null); })
       .finally(() => { if (!aborted) setSovereignLoaded(true); });
@@ -289,12 +289,12 @@ export default function ReleaseStoicTagModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime:  safeCreationTime(),
-              chainId:       KADENA_CHAIN_ID,
+              chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK)
+            .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
-              w(`${KADENA_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
+              w(`${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
             ]);
           for (const gp of guardPubs) builder = (builder as any).addSigner(gp);
           return (builder as any).createTransaction();
@@ -358,7 +358,7 @@ export default function ReleaseStoicTagModal({
           pactCall={`(ouronet-ns.CODEX.CODEX|INFO_ReleaseStoicTag "${(patronAccount?.address ?? "").slice(0, 20)}…" "§${tagName.slice(0, 16)}${tagName.length > 16 ? "…" : ""}")`}
           fetcher={async () => {
             const res = await pactRead(
-              `(${KADENA_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount?.address ?? ""}" "${tagName}")`,
+              `(${STOACHAIN_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount?.address ?? ""}" "${tagName}")`,
               { tier: "T7" },
             );
             return (res as any)?.result?.data ?? null;

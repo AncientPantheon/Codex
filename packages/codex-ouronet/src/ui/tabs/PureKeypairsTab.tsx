@@ -1,5 +1,5 @@
 /**
- * PureKeypairsTab — upgraded 3-subtab interface for pure (raw `pact -g`) Kadena
+ * PureKeypairsTab — upgraded 3-subtab interface for pure (raw `pact -g`) StoaChain
  * keypairs. NOT a 1:1 clone of My Codex — a richer surface:
  *
  *   • List      — one row per stored keypair showing ONLY the public key (its

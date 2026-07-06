@@ -1,5 +1,5 @@
 /**
- * createKadenaConnection (CL-08/CL-09) — routing the Kadena Pact node URL through
+ * createStoaChainConnection (CL-08/CL-09) — routing the StoaChain Pact node URL through
  * the network-settings connection descriptor instead of stoa-core's hidden
  * `node2` default.
  *
@@ -21,17 +21,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getActivePactUrl,
   resetNodeFailover,
-  KADENA_CHAIN_ID,
+  STOACHAIN_CHAIN_ID,
 } from "./stoaNetwork.js";
 import {
-  createKadenaConnection,
-  KADENA_DEFAULT_NODE_URL,
-  type KadenaConnectionDescriptor,
+  createStoaChainConnection,
+  STOACHAIN_DEFAULT_NODE_URL,
+  type StoaChainConnectionDescriptor,
 } from "./index.js";
 
 const CUSTOM_URL = "https://my-node.example.com";
 
-describe("createKadenaConnection", () => {
+describe("createStoaChainConnection", () => {
   beforeEach(() => {
     resetNodeFailover();
   });
@@ -41,11 +41,11 @@ describe("createKadenaConnection", () => {
   });
 
   it("builds a clientOverride for a direct node URL so signing bypasses the hardcoded node2 default", () => {
-    const desc: KadenaConnectionDescriptor = {
+    const desc: StoaChainConnectionDescriptor = {
       kind: "direct",
       nodeUrl: CUSTOM_URL,
     };
-    const built = createKadenaConnection(desc);
+    const built = createStoaChainConnection(desc);
 
     // A direct node URL must yield a concrete client override — the resolver
     // seam prefers `clientOverride` over its lazy `createClient(getPactUrl(...))`
@@ -56,22 +56,22 @@ describe("createKadenaConnection", () => {
   });
 
   it("redirects stoa-core's global read path to the direct node URL when applied", () => {
-    const desc: KadenaConnectionDescriptor = {
+    const desc: StoaChainConnectionDescriptor = {
       kind: "direct",
       nodeUrl: CUSTOM_URL,
     };
-    const built = createKadenaConnection(desc);
+    const built = createStoaChainConnection(desc);
 
     // Reads (Accounts-tab balances) resolve their URL via getActivePactUrl, which
     // reads stoa-core's module-global active host. Applying must move that global
     // onto the user's origin so reads AND signing agree on the node.
     built.applyNodeConfig();
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("my-node.example.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("my-node.example.com");
   });
 
   it("maps a preset descriptor to the surfaced selectedNode value (no clientOverride)", () => {
-    const desc: KadenaConnectionDescriptor = { kind: "preset", preset: "node1" };
-    const built = createKadenaConnection(desc);
+    const desc: StoaChainConnectionDescriptor = { kind: "preset", preset: "node1" };
+    const built = createStoaChainConnection(desc);
 
     // A preset routes through the existing selectedNode mechanism — the resolver
     // then builds its own client for that node. No override is fabricated.
@@ -80,20 +80,20 @@ describe("createKadenaConnection", () => {
   });
 
   it("redirects the read path to node1's host for a node1 preset when applied", () => {
-    const built = createKadenaConnection({ kind: "preset", preset: "node1" });
+    const built = createStoaChainConnection({ kind: "preset", preset: "node1" });
     built.applyNodeConfig();
     // node1 preset moves the active host to node1.stoachain.com — an EXPLICIT,
     // surfaced selection rather than the implicit node2 assumption (CL-09).
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node1.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node1.stoachain.com");
   });
 
   it("exposes the current node2 default as an explicit descriptor value, not a hidden assumption", () => {
     // CL-09: the previously-implicit node2 default is surfaced as a real URL a
     // Network tab can display and edit. Behaviour identical (same URL).
-    expect(KADENA_DEFAULT_NODE_URL).toContain("node2.stoachain.com");
-    const built = createKadenaConnection({ kind: "preset", preset: "node2" });
+    expect(STOACHAIN_DEFAULT_NODE_URL).toContain("node2.stoachain.com");
+    const built = createStoaChainConnection({ kind: "preset", preset: "node2" });
     built.applyNodeConfig();
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node2.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node2.stoachain.com");
   });
 
   it("produces a ChainConnection whose health covers only the kadena chain over the given node URL", async () => {
@@ -102,7 +102,7 @@ describe("createKadenaConnection", () => {
       status: 200,
       json: async () => ({}),
     }));
-    const built = createKadenaConnection(
+    const built = createStoaChainConnection(
       { kind: "direct", nodeUrl: CUSTOM_URL },
       { fetchFn }
     );
@@ -118,7 +118,7 @@ describe("createKadenaConnection", () => {
   });
 
   it("defers signing for a pythia descriptor (no override, no read redirect) while still producing a ChainConnection", () => {
-    const built = createKadenaConnection({
+    const built = createStoaChainConnection({
       kind: "pythia",
       baseUrl: "https://pythia.example.com",
     });
@@ -130,7 +130,7 @@ describe("createKadenaConnection", () => {
     expect(built.signingOptions.clientOverride).toBeUndefined();
     expect(built.signingOptions.selectedNode).toBeUndefined();
     built.applyNodeConfig();
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node2.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node2.stoachain.com");
     // The ChainConnection still exists (over the pythia base) so the
     // network-settings model + health can operate on the row.
     expect(built.connection.chainId).toBe("stoachain");
@@ -142,7 +142,7 @@ describe("createKadenaConnection", () => {
       status: 200,
       json: async () => ({ result: { status: "success", data: 42 } }),
     }));
-    const built = createKadenaConnection(
+    const built = createStoaChainConnection(
       { kind: "direct", nodeUrl: CUSTOM_URL },
       { fetchFn }
     );

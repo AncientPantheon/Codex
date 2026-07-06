@@ -12,7 +12,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { ZbomModalFrame } from "../ui/ZbomModalFrame.js";
 import { InfoTooltip } from "../ui/InfoTooltip.js";
-import { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { useGetKeypair } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
@@ -43,15 +43,15 @@ type PatronMode = "prime" | "resident" | "custom";
 interface Props {
   open: boolean; onClose: () => void;
   account: IOuroAccount; accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[]; kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[]; stoaChainAccounts: IStoaChainWallet[];
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function RotateGuardModal({
-  open, onClose, account, accounts, kadenaSeeds, kadenaAccounts,
+  open, onClose, account, accounts, kadenaSeeds, stoaChainAccounts,
 }: Props) {
-  const getKadenaKeyPairsByPublicKey = useGetKeypair();
+  const getStoaChainKeyPairsByPublicKey = useGetKeypair();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   // ── Patron selection mode (canonical wiring via usePatronSelectionDefaults) ──
@@ -121,8 +121,8 @@ export default function RotateGuardModal({
 
   // ── canExecute ──
   const codexPubs = useMemo(
-    () => buildCodexPubSet(kadenaSeeds, kadenaAccounts),
-    [kadenaSeeds, kadenaAccounts],
+    () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
+    [kadenaSeeds, stoaChainAccounts],
   );
   const patronAnalysis   = useMemo(() => analyzeGuard(patronAccount?.guard, codexPubs, resolvedManualKeys), [patronAccount?.guard, codexPubs, resolvedManualKeys]);
   const accountAnalysis  = useMemo(() => analyzeGuard(account?.guard, codexPubs, resolvedManualKeys), [account?.guard, codexPubs, resolvedManualKeys]);
@@ -192,7 +192,7 @@ export default function RotateGuardModal({
         for (const pub of candidates) {
           if (keys.length >= analysis.threshold) break;
           if (resolvedManualKeys[pub]) keys.push({ publicKey: pub, privateKey: resolvedManualKeys[pub] });
-          else { const kp = await getKadenaKeyPairsByPublicKey(pub); if (kp) keys.push(kp); }
+          else { const kp = await getStoaChainKeyPairsByPublicKey(pub); if (kp) keys.push(kp); }
         }
         return keys;
       };
@@ -200,7 +200,7 @@ export default function RotateGuardModal({
       const patronSignKeys   = await collectKeys(patronAnalysis);
       const accountSignKeys  = await collectKeys(accountAnalysis);
       const newGuardSignKeys = newGuardAnalysis ? await collectKeys(newGuardAnalysis) : [];
-      const gasStationKey    = await getKadenaKeyPairsByPublicKey(gasStationPub);
+      const gasStationKey    = await getStoaChainKeyPairsByPublicKey(gasStationPub);
       if (!gasStationKey) { toast.error("Cannot resolve Gas Station key"); setIsProcessing(false); return; }
 
       const mode = guardValue?.mode ?? "define";

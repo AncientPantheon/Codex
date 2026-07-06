@@ -23,7 +23,7 @@ import {
 } from "@ancientpantheon/codex-ouronet/errors";
 import type {
   IPureKeypair,
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
 } from "@ancientpantheon/codex-ouronet/types";
 
@@ -195,7 +195,7 @@ describe("deletePureKeypair — Phase 6 protection", () => {
         isSmart: false,
         address: "Ѻ.po",
         guard: null,
-        kadenaLedger: null,
+        stoaChainLedger: null,
         publicKey: "pk-po",
         secret: "s-po",
         backup: "b-po",
@@ -209,7 +209,7 @@ describe("deletePureKeypair — Phase 6 protection", () => {
       ).rejects.toBeInstanceOf(CodexPrimeProtectedError);
     });
 
-    it("deleteKadenaSeed still throws CodexPrimeSeedProtectedError on a prime seed", async () => {
+    it("deleteStoaChainSeed still throws CodexPrimeSeedProtectedError on a prime seed", async () => {
       const primeSeed = {
         id: "ps",
         name: "PrimeSeed",
@@ -221,12 +221,12 @@ describe("deletePureKeypair — Phase 6 protection", () => {
         createdAt: "2026-05-24T10:00:00.000Z",
         accounts: [],
         isPrime: true,
-      } as IKadenaSeed;
+      } as IStoaChainSeed;
       const store = await storeWith(
         baseSnapshot({ kadenaSeeds: [primeSeed] })
       );
       await expect(
-        store.getState().actions.deleteKadenaSeed("ps")
+        store.getState().actions.deleteStoaChainSeed("ps")
       ).rejects.toBeInstanceOf(CodexPrimeSeedProtectedError);
     });
   });

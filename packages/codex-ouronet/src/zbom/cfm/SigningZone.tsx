@@ -8,7 +8,7 @@
  *
  * Tabs:
  *   A. Signing (Pure)  — live guard key analysis via analyzeGuard + buildCodexPubSet
- *   B. CAPS           — auto-generated: GAS_PAYER always, coin.TRANSFER when kadenaNeed > 0
+ *   B. CAPS           — auto-generated: GAS_PAYER always, coin.TRANSFER when stoaChainNeed > 0
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -99,9 +99,9 @@ export interface SigningZoneProps {
   /** Optional extra caps injected per-button (e.g. coin.TRANSFER to liquidPOT) */
   extraCaps?: Array<{ capability: string; params: string[]; signer: string; signerKey: string; description: string; }>;
   /** From infoData.kadena — used to generate coin.TRANSFER CAPS */
-  kadenaNeed?: number;
-  kadenaReceivers?: string[];
-  kadenaAmounts?: string[];
+  stoaChainNeed?: number;
+  stoaChainReceivers?: string[];
+  stoaChainAmounts?: string[];
 }
 
 export function SigningZone({
@@ -109,11 +109,11 @@ export function SigningZone({
   accountAccount,
   additionalGuards = [],
   extraCaps = [],
-  kadenaNeed = 0,
-  kadenaReceivers = [],
-  kadenaAmounts = [],
+  stoaChainNeed = 0,
+  stoaChainReceivers = [],
+  stoaChainAmounts = [],
 }: SigningZoneProps) {
-  const { kadena: kadenaSeeds, kadenaAccounts } = useWallet();
+  const { kadena: kadenaSeeds, stoaChainAccounts } = useWallet();
   const [signingTab, setSigningTab]             = useState<SigningTab>("signing");
   const [resolvedManualKeys, setResolvedManualKeys] = useState<Record<string, string>>({});
 
@@ -123,8 +123,8 @@ export function SigningZone({
 
   // ── A1: Codex pub set ──
   const codexPubs = useMemo(
-    () => buildCodexPubSet(kadenaSeeds, kadenaAccounts),
-    [kadenaSeeds, kadenaAccounts],
+    () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
+    [kadenaSeeds, stoaChainAccounts],
   );
 
   // ── A2: Guard analysis ──
@@ -210,11 +210,11 @@ export function SigningZone({
       signerKey: gasStationPub || "auto-selected",
       description: "Covers StoaChain™ network gas fees — paid by Gas Station, not the user.",
     });
-    if (kadenaNeed > 0 && kadenaReceivers.length > 0) {
-      kadenaReceivers.forEach((receiver, i) => {
+    if (stoaChainNeed > 0 && stoaChainReceivers.length > 0) {
+      stoaChainReceivers.forEach((receiver, i) => {
         caps.push({
           capability: "coin.TRANSFER",
-          params: [`"<payment-key>"`, `"${receiver.slice(0, 10)}…"`, `{ decimal: "${kadenaAmounts[i] ?? kadenaNeed}" }`],
+          params: [`"<payment-key>"`, `"${receiver.slice(0, 10)}…"`, `{ decimal: "${stoaChainAmounts[i] ?? stoaChainNeed}" }`],
           signer: "Payment Key",
           signerKey: gasStationPub || "auto-selected",
           description: `Transfers STOA from payment account to protocol receiver ${i + 1}.`,
@@ -222,7 +222,7 @@ export function SigningZone({
       });
     }
     return [...caps, ...extraCaps];
-  }, [gasStationPub, kadenaNeed, kadenaReceivers, kadenaAmounts, extraCaps]);
+  }, [gasStationPub, stoaChainNeed, stoaChainReceivers, stoaChainAmounts, extraCaps]);
 
   const noAccounts = !patronAccount && !accountAccount;
 
@@ -233,7 +233,7 @@ export function SigningZone({
 
   // Compute pure keys + caps count for collapsed label
   const pureKeysCount = pureSigningPubs.size;
-  const capsCount = 1 + (kadenaNeed > 0 ? kadenaReceivers.length : 0) + extraCaps.length;
+  const capsCount = 1 + (stoaChainNeed > 0 ? stoaChainReceivers.length : 0) + extraCaps.length;
 
   return (
     <div style={{ borderRadius: "10px", border: `1px solid ${BD}`, backgroundColor: BG, overflow: "hidden" }}>
@@ -370,7 +370,7 @@ export function SigningZone({
         {signingTab === "caps" && (
           <>
             <p style={{ fontSize: "10px", color: "#555", margin: 0 }}>
-              Capabilities automatically attached by the UI from INFO data. GAS_PAYER always present. coin.TRANSFER(s) when kadenaNeed &gt; 0.
+              Capabilities automatically attached by the UI from INFO data. GAS_PAYER always present. coin.TRANSFER(s) when stoaChainNeed &gt; 0.
             </p>
             {autoCaps.map((cap, i) => <CapRow key={i} {...cap} />)}
           </>

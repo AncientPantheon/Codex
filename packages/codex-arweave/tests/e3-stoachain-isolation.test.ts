@@ -1,15 +1,15 @@
 /**
- * E3 RUNTIME Kadena-isolation gate (E-04, N-05) — the AUTHORITATIVE isolation
+ * E3 RUNTIME StoaChain-isolation gate (E-04, N-05) — the AUTHORITATIVE isolation
  * gate over the E3 `src/library/**` surface.
  *
  * The E2 STATIC import-scan (widened to `src/library` in
  * `e2-kadena-isolation.test.ts`) proves the library source references NO
- * forbidden Kadena specifier/symbol in any import. This file is its runtime
+ * forbidden StoaChain specifier/symbol in any import. This file is its runtime
  * counterpart: it drives the FULL E3 flow set — `uploadAndTrack`, `pollStatus`,
  * `openUrl`, and `rebuildLibrary` — against an `InternalCodexResolver`-shaped
  * sentinel whose `resolvePrivateKey` / `smartDecrypt` / `requestForeignKey`
  * spies THROW on any touch. Any invocation is a Critical N-05 isolation breach
- * (an Arweave path must NEVER reach the Kadena resolver/signing strategy).
+ * (an Arweave path must NEVER reach the StoaChain resolver/signing strategy).
  *
  * Seam discipline mirrors the E3 helpers: upload uses `clientFactory` (fake
  * Turbo), poll/rebuild use `fetchFn`, open uses the healthy pool. The flows
@@ -44,7 +44,7 @@ import {
 
 const OWNER = KNOWN_ADDRESS;
 
-describe("E3 RUNTIME Kadena isolation — the resolver is NEVER touched across the full E3 flow set (E-04, N-05, authoritative)", () => {
+describe("E3 RUNTIME StoaChain isolation — the resolver is NEVER touched across the full E3 flow set (E-04, N-05, authoritative)", () => {
   it("uploadAndTrack + pollStatus + openUrl + rebuildLibrary never invoke an InternalCodexResolver-shaped sentinel", async () => {
     // A sentinel shaped like InternalCodexResolver: any invocation throws, so a
     // touch would fail the flow AND trip the never-called assertions below.
@@ -82,7 +82,7 @@ describe("E3 RUNTIME Kadena isolation — the resolver is NEVER touched across t
       fetchFn: makeFetchFn(200, graphqlRebuildBody(ownerUploadRecords)),
     });
 
-    // Every E3 flow completed WITHOUT reaching the Kadena resolver.
+    // Every E3 flow completed WITHOUT reaching the StoaChain resolver.
     expect(spies.resolvePrivateKey).not.toHaveBeenCalled();
     expect(spies.smartDecrypt).not.toHaveBeenCalled();
     expect(spies.requestForeignKey).not.toHaveBeenCalled();

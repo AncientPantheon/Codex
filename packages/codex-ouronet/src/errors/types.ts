@@ -82,7 +82,7 @@ export class CodexPrimeProtectedError extends CodexError {
 }
 
 /** Thrown when a user attempts to delete the Prime Codex Seed — the
- *  IKadenaSeed that kickstarted the codex (spec §B1, v0.2.0+). The
+ *  IStoaChainSeed that kickstarted the codex (spec §B1, v0.2.0+). The
  *  prime seed is structurally tied to the codex's identity; removing it
  *  is equivalent to deleting the codex itself, which is a separate flow
  *  (codex-reset, not seed-delete). See docs/v0.2.0-design.md §5.1. */
@@ -92,7 +92,7 @@ export class CodexPrimeSeedProtectedError extends CodexError {
 
   constructor(seedId: string) {
     super(
-      `Kadena seed ${seedId} is the Prime Codex Seed and cannot be ` +
+      `StoaChain seed ${seedId} is the Prime Codex Seed and cannot be ` +
         `deleted. Removing the prime seed is equivalent to deleting the ` +
         `codex itself — use the codex-reset flow instead.`
     );
@@ -104,7 +104,7 @@ export class CodexPrimeSeedProtectedError extends CodexError {
  *  pre-flight invariants fail (v0.2.0+). The `reason` field discriminates:
  *
  *   - `already-kickstarted`: kickstartCodex called on a codex that
- *     already has a prime seed. Caller should use addKadenaSeed for
+ *     already has a prime seed. Caller should use addStoaChainSeed for
  *     additional seeds, or reset the codex first.
  *   - `smart-account-not-allowed`: caller passed an ouro with
  *     `isSmart: true` as the CodexPrime. CodexPrime must be a Standard
@@ -135,7 +135,7 @@ export class CodexKickstartError extends CodexError {
     const messages: Record<CodexKickstartError["reason"], string> = {
       "already-kickstarted":
         "Codex has already been kickstarted (a Prime Codex Seed exists). " +
-        "Use addKadenaSeed() to add additional seeds, or reset the codex first.",
+        "Use addStoaChainSeed() to add additional seeds, or reset the codex first.",
       "smart-account-not-allowed":
         "CodexPrime must be a Standard Ouronet Account (isSmart: false). " +
         "Smart accounts (Σ. prefix) cannot be the CodexPrime.",

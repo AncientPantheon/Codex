@@ -209,7 +209,7 @@ describe("kickstartCodex v0.3 — atomicity + rejections", () => {
     {
       const s2 = createCodexStore();
       const a2 = new MemoryCodexAdapter("dev");
-      await a2.saveKadenaSeeds([
+      await a2.saveStoaChainSeeds([
         {
           id: "s1", seedType: "koala", version: "2", index: 0, secret: "x",
           main: "k:" + "0".repeat(64), createdAt: "t", accounts: [], isPrime: true,
@@ -275,16 +275,16 @@ describe("kickstartCodex v0.3 — atomicity + rejections", () => {
 });
 
 describe("kickstartCodex v0.3 — best-effort persistence ordering (F-001/F-009)", () => {
-  it("saveKadenaSeeds failure propagates, leaves disk without identity (saveCodexIdentity not called)", T, async () => {
+  it("saveStoaChainSeeds failure propagates, leaves disk without identity (saveCodexIdentity not called)", T, async () => {
     store.getState().actions.authenticate(PW, 60);
     const saveCodexIdentity = vi.spyOn(adapter, "saveCodexIdentity");
-    vi.spyOn(adapter, "saveKadenaSeeds").mockRejectedValue(new Error("disk full"));
+    vi.spyOn(adapter, "saveStoaChainSeeds").mockRejectedValue(new Error("disk full"));
 
     await expect(
       store.getState().actions.kickstartCodex(args("reuse-codexid-whole", "kadena-seed")),
     ).rejects.toThrow();
 
-    // saveCodexIdentity is LAST in the order → never reached when saveKadenaSeeds throws first.
+    // saveCodexIdentity is LAST in the order → never reached when saveStoaChainSeeds throws first.
     expect(saveCodexIdentity).not.toHaveBeenCalled();
     // in-memory IS populated (set() ran before persistAndTouch) — best-effort persistence contract.
     expect(store.getState().codexIdentity).toBeDefined();
@@ -292,7 +292,7 @@ describe("kickstartCodex v0.3 — best-effort persistence ordering (F-001/F-009)
 
   it("saveCodexIdentity failure propagates only AFTER the other three slices persisted", T, async () => {
     store.getState().actions.authenticate(PW, 60);
-    const saveKadenaSeeds = vi.spyOn(adapter, "saveKadenaSeeds");
+    const saveStoaChainSeeds = vi.spyOn(adapter, "saveStoaChainSeeds");
     const savePureKeypairs = vi.spyOn(adapter, "savePureKeypairs");
     const saveOuroAccounts = vi.spyOn(adapter, "saveOuroAccounts");
     vi.spyOn(adapter, "saveCodexIdentity").mockRejectedValue(new Error("disk full at last write"));
@@ -301,7 +301,7 @@ describe("kickstartCodex v0.3 — best-effort persistence ordering (F-001/F-009)
       store.getState().actions.kickstartCodex(args("reuse-codexid-whole", "kadena-seed")),
     ).rejects.toThrow();
 
-    expect(saveKadenaSeeds).toHaveBeenCalled();
+    expect(saveStoaChainSeeds).toHaveBeenCalled();
     expect(savePureKeypairs).toHaveBeenCalled();
     expect(saveOuroAccounts).toHaveBeenCalled();
   });

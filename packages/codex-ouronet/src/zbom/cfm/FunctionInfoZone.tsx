@@ -2,7 +2,7 @@
  * FunctionInfoZone — Zone 0 prototype for CFM gallery.
  *
  * Each instance is its own collapsible accordion (fetch on first open).
- * Body uses IgnisCostDisplay + KadenaCostDisplay — same as WrapModal / CFMPrototype.
+ * Body uses IgnisCostDisplay + StoaChainCostDisplay — same as WrapModal / CFMPrototype.
  */
 
 import { useEffect, useState } from "react";
@@ -10,7 +10,7 @@ import { Loader2, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
 import { useUiSetting } from "./seam.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { IgnisCostDisplay } from "../ui/IgnisCostDisplay.js";
-import { KadenaCostDisplay } from "../ui/KadenaCostDisplay.js";
+import { StoaChainCostDisplay } from "../ui/StoaChainCostDisplay.js";
 import { codexClock } from "../debouncer/codexClock.js";
 
 const GOLD = "#ceac5f";
@@ -129,10 +129,10 @@ export function FunctionInfoZone({ label, pactCall, fetcher, readId }: FunctionI
   const ignisDiscount = toNum(data?.ignis?.["ignis-discount"]);
   const ignisText     = data?.ignis?.["ignis-text"] as string | undefined;
 
-  const kadenaNeed     = toNum(data?.kadena?.["kadena-need"]);
-  const kadenaFull     = toNum(data?.kadena?.["kadena-full"]);
-  const kadenaDiscount = toNum(data?.kadena?.["kadena-discount"]);
-  const kadenaText     = data?.kadena?.["kadena-text"] as string | undefined;
+  const stoaChainNeed     = toNum(data?.kadena?.["kadena-need"]);
+  const stoaChainFull     = toNum(data?.kadena?.["kadena-full"]);
+  const stoaChainDiscount = toNum(data?.kadena?.["kadena-discount"]);
+  const stoaChainText     = data?.kadena?.["kadena-text"] as string | undefined;
 
   return (
     <div style={{ borderRadius: "10px", border: `1px solid ${BD}`, backgroundColor: BG, overflow: "hidden" }}>
@@ -200,11 +200,11 @@ export function FunctionInfoZone({ label, pactCall, fetcher, readId }: FunctionI
                     ignisDiscount={ignisDiscount}
                     ignisText={ignisText}
                   />
-                  <KadenaCostDisplay
-                    kadenaNeed={kadenaNeed}
-                    kadenaFull={kadenaFull}
-                    kadenaDiscount={kadenaDiscount}
-                    kadenaText={kadenaText}
+                  <StoaChainCostDisplay
+                    stoaChainNeed={stoaChainNeed}
+                    stoaChainFull={stoaChainFull}
+                    stoaChainDiscount={stoaChainDiscount}
+                    stoaChainText={stoaChainText}
                   />
                 </div>
               ) : (
@@ -218,11 +218,11 @@ export function FunctionInfoZone({ label, pactCall, fetcher, readId }: FunctionI
                     />
                   )}
                   {data?.kadena !== undefined && (
-                    <KadenaCostDisplay
-                      kadenaNeed={kadenaNeed}
-                      kadenaFull={kadenaFull}
-                      kadenaDiscount={kadenaDiscount}
-                      kadenaText={kadenaText}
+                    <StoaChainCostDisplay
+                      stoaChainNeed={stoaChainNeed}
+                      stoaChainFull={stoaChainFull}
+                      stoaChainDiscount={stoaChainDiscount}
+                      stoaChainText={stoaChainText}
                     />
                   )}
                 </>

@@ -27,7 +27,7 @@ import {
 } from "@ancientpantheon/codex-ouronet/zbom";
 import type {
   IOuroAccount,
-  IKadenaSeed,
+  IStoaChainSeed,
   PatronSelectionMode,
 } from "@ancientpantheon/codex-ouronet/types";
 
@@ -39,7 +39,7 @@ function acct(over: Partial<IOuroAccount> & { id: string; address: string }): IO
     version: "1.0",
     isSmart: false,
     guard: { pred: "keys-all", keys: [] },
-    kadenaLedger: null,
+    stoaChainLedger: null,
     publicKey: "",
     secret: "",
     backup: "",
@@ -53,7 +53,7 @@ const B = acct({ id: "b", address: "Ѻ.BBBrichBBB", guard: { pred: "keys-all", k
 // Guard key NOT present in the codex seed → not satisfiable even if richest.
 const C = acct({ id: "c", address: "Ѻ.CCCforeignCCC", guard: { pred: "keys-all", keys: ["pubForeign"] } });
 
-const SEED: IKadenaSeed = {
+const SEED: IStoaChainSeed = {
   id: "seed-1",
   seedType: "koala",
   version: "1.0",

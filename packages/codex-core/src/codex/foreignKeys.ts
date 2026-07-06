@@ -1,7 +1,7 @@
 /**
  * Seedless foreign-key keyring model.
  *
- * A foreign key is cryptographic material for a NON-Kadena chain (e.g. an
+ * A foreign key is cryptographic material for a NON-StoaChain chain (e.g. an
  * Arweave JWK) that rides inside a codex backup. This model is SEEDLESS BY
  * CONSTRUCTION: there is NO shared seed and NO derivation field anywhere in
  * the shape. Each entry's `encryptedKeyfile` is a self-contained,
@@ -36,7 +36,7 @@
  * One foreign-chain key in the seedless keyring.
  *
  * `label` is OPTIONAL — matching the established keyring-entity convention
- * (`IPureKeypair.label?` / `IKadenaSeed.name?`), so a key generated without a
+ * (`IPureKeypair.label?` / `IStoaChainSeed.name?`), so a key generated without a
  * human-supplied name (E1's Arweave keygen) is a VALID entry, not a rejected
  * one. `encryptedKeyfile` is ciphertext at rest (see module JSDoc).
  */

@@ -1,5 +1,5 @@
 /**
- * The two Kadena-bound hooks (useGetKeypair / useSignTransaction) — seam
+ * The two StoaChain-bound hooks (useGetKeypair / useSignTransaction) — seam
  * delegation, funds-critical.
  *
  * In codex-ouronet these hooks value-imported InternalCodexResolver +

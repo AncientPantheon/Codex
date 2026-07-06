@@ -22,7 +22,7 @@
  * (`tests/fixtures/resolver-live-fixture.json`, emitted by
  * `tests/fixtures/generate-resolver-live-fixture.mjs`) whose blobs are REAL V2
  * AES-GCM / PBKDF2-SHA512-600k ciphertexts and whose derived expected outputs
- * were computed by the REAL `KadenaWalletBuilder`. This is the TRUE live
+ * were computed by the REAL `StoaChainWalletBuilder`. This is the TRUE live
  * byte-proof: real encrypt → real decrypt → real derive round-trips to the
  * known throwaway values.
  *
@@ -37,7 +37,7 @@
  * Two independent, structural reasons the parity cases FAIL at Wave 1 and GREEN
  * only when T9.6 (Wave 4) lands the rewire:
  *
- *   1. `@ancientpantheon/codex-core`'s resolver types (`ResolvedKadenaKeypair`)
+ *   1. `@ancientpantheon/codex-core`'s resolver types (`ResolvedStoaChainKeypair`)
  *      are not resolvable from codex-ouronet's test env yet — codex-core is a
  *      declared `workspace:*` dep with NO cross-package vitest alias (T9.6 adds
  *      the `@ancientpantheon/codex-core` alias to `vitest.config.ts`).
@@ -81,7 +81,7 @@ import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { InternalCodexResolver } from "@ancientpantheon/codex-ouronet/resolver";
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IPureKeypair,
 } from "@ancientpantheon/codex-ouronet/types";
 
@@ -90,7 +90,7 @@ import type {
 // so the cross-package parity assertion feeds core the SAME crypto the live
 // resolver uses (identical primitives → any output diff is a plumbing drift).
 import { smartDecrypt } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { toHexString } from "@stoachain/stoa-core/signing";
 import { buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import { kadenaDecrypt, kadenaEncrypt } from "@stoachain/kadena-stoic-legacy/hd-wallet";
@@ -108,10 +108,10 @@ import { hexToBin } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
 // live resolver delegates to after T9.6, so importing it here pins the
 // cross-package seam the live proof depends on.
 import { createHeadlessCodexResolver } from "@ancientpantheon/codex-core";
-import type { ResolvedKadenaKeypair } from "@ancientpantheon/codex-core";
+import type { ResolvedStoaChainKeypair } from "@ancientpantheon/codex-core";
 // The REAL signing-ready keypair type the resolver's KeyResolver contract
 // returns — the assignability cross-check target (D4 note item 3).
-import type { IKadenaKeypair } from "@stoachain/stoa-core/signing";
+import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
 
 // ---------------------------------------------------------------------------
 // Real-KDF fixture (committed THROWAWAY material) — read-only, never mutated.
@@ -158,8 +158,8 @@ const CODEX_PASSWORD = fixture.password;
 const EXTENDED_FOREIGN_SCRAMBLE_PW = "codex-extended-foreign";
 
 /**
- * Hydrate the fixture's snapshot slice into IKadenaSeed[] / IPureKeypair[] the
- * live store's `addKadenaSeed` / `addPureKeypair` actions accept. The fixture's
+ * Hydrate the fixture's snapshot slice into IStoaChainSeed[] / IPureKeypair[] the
+ * live store's `addStoaChainSeed` / `addPureKeypair` actions accept. The fixture's
  * minimal shapes are widened with the id/version/createdAt metadata the store
  * entities require — the resolve algorithm reads only the pubkey/secret/index
  * fields the fixture carries, so the synthesized metadata is inert to parity.
@@ -174,7 +174,7 @@ function fixturePureKeypairs(): IPureKeypair[] {
   }));
 }
 
-function fixtureKadenaSeeds(): IKadenaSeed[] {
+function fixtureKadenaSeeds(): IStoaChainSeed[] {
   return fixture.snapshot.kadenaSeeds.map((s, i) => ({
     id: `fixture-seed-${i}`,
     name: `fixture seed ${i}`,
@@ -201,7 +201,7 @@ async function buildFixtureStore(): Promise<
   const store = createCodexStore();
   await store.getState().actions.init(new MemoryCodexAdapter("dev"), "dev");
   for (const seed of fixtureKadenaSeeds()) {
-    await store.getState().actions.addKadenaSeed(seed);
+    await store.getState().actions.addStoaChainSeed(seed);
   }
   for (const kp of fixturePureKeypairs()) {
     await store.getState().actions.addPureKeypair(kp);
@@ -232,13 +232,13 @@ function realStoaSeam() {
   return {
     decryptSecret: (ciphertext: string, password: string) =>
       smartDecrypt(ciphertext, password),
-    deriveKadenaKeypair: (
+    deriveStoaChainKeypair: (
       password: string,
       mnemonic: string,
       index: number,
       seedType: "koala" | "chainweaver" | "eckowallet",
     ) =>
-      KadenaWalletBuilder.createWalletPairFromMnemonic(
+      StoaChainWalletBuilder.createWalletPairFromMnemonic(
         password,
         mnemonic,
         index,
@@ -368,7 +368,7 @@ describe("InternalCodexResolver — real-KDF live parity (closes D4 P-001)", () 
 
     it("derived-koala: real BIP39/SLIP-10 derivation → known pubkey + 64-hex private key", async () => {
       // The seed's mnemonic is real-V2-decrypted, then re-derived at index 0 via
-      // the REAL KadenaWalletBuilder. Byte-equality on the derived pubkey +
+      // the REAL StoaChainWalletBuilder. Byte-equality on the derived pubkey +
       // private-key hex is the core live proof: real decrypt → real derive
       // round-trips to the known throwaway values.
       const lc = liveCase("derived-koala");
@@ -429,9 +429,9 @@ describe("InternalCodexResolver — real-KDF live parity (closes D4 P-001)", () 
   });
 
   describe("assignability cross-check (D5 obligation, type-level)", () => {
-    it("ResolvedKadenaKeypair (D4 structural return) is assignable to the real IKadenaKeypair", async () => {
-      // Compile-time proof: a value typed as D4's ResolvedKadenaKeypair binds to
-      // the real @stoachain IKadenaKeypair without a cast. This is the D5
+    it("ResolvedStoaChainKeypair (D4 structural return) is assignable to the real IStoaChainKeypair", async () => {
+      // Compile-time proof: a value typed as D4's ResolvedStoaChainKeypair binds to
+      // the real @stoachain IStoaChainKeypair without a cast. This is the D5
       // assignability obligation — if the two shapes drift (e.g. a truncated
       // seedType union or a string-coerced encryptedSecretKey), this fails `tsc`.
       // At runtime we replay one real case through the type to keep the
@@ -441,10 +441,10 @@ describe("InternalCodexResolver — real-KDF live parity (closes D4 P-001)", () 
       const resolver = new InternalCodexResolver(store);
       const lc = liveCase("derived-koala");
 
-      const resolved: ResolvedKadenaKeypair =
+      const resolved: ResolvedStoaChainKeypair =
         await resolver.getKeyPairByPublicKey(lc.publicKey);
-      // The load-bearing line: ResolvedKadenaKeypair → IKadenaKeypair with no cast.
-      const asContract: IKadenaKeypair = resolved;
+      // The load-bearing line: ResolvedStoaChainKeypair → IStoaChainKeypair with no cast.
+      const asContract: IStoaChainKeypair = resolved;
 
       expect(asContract.publicKey).toBe(lc.expected.publicKey);
       expect(asContract.seedType).toBe(lc.expected.seedType);

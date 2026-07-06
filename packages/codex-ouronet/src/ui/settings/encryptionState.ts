@@ -10,7 +10,7 @@
 
 import { allEncryptedV2 } from "@stoachain/stoa-core/crypto";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
 } from "../../types/entities.js";
@@ -21,7 +21,7 @@ export type EncryptionLevel = "none" | "v1" | "v2";
  *  carry one. Empty strings / absent secrets are dropped so a codex with no
  *  secrets reads as "none" rather than a false legacy. */
 export function collectCodexSecrets(slices: {
-  kadenaSeeds: IKadenaSeed[];
+  kadenaSeeds: IStoaChainSeed[];
   ouroAccounts: IOuroAccount[];
   pureKeypairs: IPureKeypair[];
 }): string[] {

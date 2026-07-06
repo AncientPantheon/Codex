@@ -1,8 +1,8 @@
 /**
  * @ancientpantheon/codex-ouronet/connection (Phase 3).
  *
- * The Kadena-side wiring of the codex-core connection layer: `createKadenaConnection`
- * resolves a serialisable `KadenaConnectionDescriptor` into the resolver seam's
+ * The StoaChain-side wiring of the codex-core connection layer: `createStoaChainConnection`
+ * resolves a serialisable `StoaChainConnectionDescriptor` into the resolver seam's
  * signing inputs (`clientOverride` / surfaced `selectedNode`), the `setNodeConfig`
  * side-effect that redirects stoa-core's global READ path, and a Phase-1
  * `ChainConnection` over the node URL. This removes the hidden `node2` default
@@ -10,13 +10,13 @@
  */
 
 export {
-  createKadenaConnection,
-  KADENA_DEFAULT_NODE_URL,
-  KADENA_NODE1_URL,
-  KADENA_NODE2_URL,
-  KADENA_CONNECTION_CHAIN_ID,
-  type KadenaConnectionDescriptor,
-  type KadenaConnection,
-  type KadenaSigningOptions,
-  type CreateKadenaConnectionOptions,
-} from "./createKadenaConnection.js";
+  createStoaChainConnection,
+  STOACHAIN_DEFAULT_NODE_URL,
+  STOACHAIN_NODE1_URL,
+  STOACHAIN_NODE2_URL,
+  STOACHAIN_CONNECTION_CHAIN_ID,
+  type StoaChainConnectionDescriptor,
+  type StoaChainConnection,
+  type StoaChainSigningOptions,
+  type CreateStoaChainConnectionOptions,
+} from "./createStoaChainConnection.js";

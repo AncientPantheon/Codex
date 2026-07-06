@@ -4,7 +4,7 @@
  *
  * Shared IGNIS cost row for CFM Zone 1.
  *
- * ignisNeed === 0  → shows "Free" (dimmed), same pattern as KadenaCostDisplay.
+ * ignisNeed === 0  → shows "Free" (dimmed), same pattern as StoaChainCostDisplay.
  * ignis-discount is subunitary (0.55 = user pays 55% of full price).
  * 1.0 = no discount. Display: multiply by 100, no minus sign.
  */

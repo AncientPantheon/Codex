@@ -3,7 +3,7 @@
  *
  * The ForeignChainAdapter is a GREENFIELD injection seam (it has no ancestor in
  * the ouronet-codex source): a per-chain driver exposing the operations a
- * foreign (non-Kadena) chain needs — key lifecycle (`generateKey`/`importKey`/
+ * foreign (non-StoaChain) chain needs — key lifecycle (`generateKey`/`importKey`/
  * `addressOf`), balance/send (`getBalance`/`buildSend`), signing/broadcast
  * (`sign`/`post`), and an OPTIONAL `upload?`. `upload?` is optional because it
  * is the Arweave-specific data-write operation (E12/E13); a native-send-only

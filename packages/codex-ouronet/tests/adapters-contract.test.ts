@@ -20,7 +20,7 @@ import {
 } from "@ancientpantheon/codex-ouronet/adapters";
 import {
   DEFAULT_UI_SETTINGS,
-  type IKadenaSeed,
+  type IStoaChainSeed,
   type IOuroAccount,
   type IPureKeypair,
   type AddressBookEntry,
@@ -33,7 +33,7 @@ import {
 // actually persists. Used by every adapter through the shared contract.
 // --------------------------------------------------------------------
 
-const sampleSeed = (): IKadenaSeed => ({
+const sampleSeed = (): IStoaChainSeed => ({
   id: "seed-1",
   name: "Test seed",
   seedType: "koala",
@@ -58,7 +58,7 @@ const sampleOuro = (overrides: Partial<IOuroAccount> = {}): IOuroAccount => ({
   isSmart: false,
   address: "Ѻ.testaddress",
   guard: { pred: "keys-all", keys: ["abcd…"] },
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey: "40.somepubkey",
   secret: "encrypted-ouro-secret",
   backup: "encrypted-backup",
@@ -171,9 +171,9 @@ function adapterContract(name: string, makeAdapter: () => CodexAdapter): void {
     });
 
     describe("per-entity convenience writes", () => {
-      it("saveKadenaSeeds round-trips through loadAll", async () => {
+      it("saveStoaChainSeeds round-trips through loadAll", async () => {
         const seeds = [sampleSeed()];
-        await adapter.saveKadenaSeeds(seeds);
+        await adapter.saveStoaChainSeeds(seeds);
         const loaded = await adapter.loadAll();
         expect(loaded.kadenaSeeds).toEqual(seeds);
       });

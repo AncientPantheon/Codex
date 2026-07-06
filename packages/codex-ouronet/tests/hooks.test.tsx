@@ -23,7 +23,7 @@ import {
   useCodex,
   useActiveWallet,
   useCodexAuth,
-  useKadenaSeeds,
+  useStoaChainSeeds,
   usePureKeypairs,
   useOuroAccounts,
   useAddressBook,
@@ -38,7 +38,7 @@ import {
   CodexImportError,
 } from "@ancientpantheon/codex-ouronet/errors";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -55,7 +55,7 @@ function mkWrapper(adapter: MemoryCodexAdapter) {
   );
 }
 
-const seedFx = (id = "s1"): IKadenaSeed => ({
+const seedFx = (id = "s1"): IStoaChainSeed => ({
   id,
   name: "Test Seed",
   seedType: "koala",
@@ -83,7 +83,7 @@ const ouroFx = (
   isSmart: false,
   address: "Ѻ." + id,
   guard: null,
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey: "pk-" + id,
   secret: "secret-" + id,
   backup: "backup-" + id,
@@ -196,17 +196,17 @@ describe("useCodexAuth", () => {
 });
 
 // --------------------------------------------------------------------
-// useKadenaSeeds
+// useStoaChainSeeds
 // --------------------------------------------------------------------
 
-describe("useKadenaSeeds", () => {
+describe("useStoaChainSeeds", () => {
   let adapter: MemoryCodexAdapter;
   beforeEach(() => {
     adapter = new MemoryCodexAdapter("dev");
   });
 
   it("addSeed persists + reflects in state", async () => {
-    const { result } = renderHook(() => useKadenaSeeds(), {
+    const { result } = renderHook(() => useStoaChainSeeds(), {
       wrapper: mkWrapper(adapter),
     });
     await waitFor(() => expect(result.current.seeds).toEqual([]));
@@ -219,7 +219,7 @@ describe("useKadenaSeeds", () => {
   });
 
   it("deleteSeed removes the entry", async () => {
-    const { result } = renderHook(() => useKadenaSeeds(), {
+    const { result } = renderHook(() => useStoaChainSeeds(), {
       wrapper: mkWrapper(adapter),
     });
     // Wait for provider's init effect to finish — otherwise init's
@@ -356,10 +356,10 @@ describe("useActiveWallet", () => {
       wrapper: mkWrapper(adapter),
     });
     await waitFor(() => {
-      expect(result.current.activeKadenaWalletId).toBeNull();
+      expect(result.current.activeStoaChainWalletId).toBeNull();
       expect(result.current.activeOuroAccountId).toBeNull();
     });
-    expect(result.current.activeKadenaWallet).toBeNull();
+    expect(result.current.activeStoaChainWallet).toBeNull();
     expect(result.current.activeOuroAccount).toBeNull();
   });
 
@@ -369,7 +369,7 @@ describe("useActiveWallet", () => {
     const { result } = renderHook(
       () => ({
         active: useActiveWallet(),
-        seeds: useKadenaSeeds(),
+        seeds: useStoaChainSeeds(),
       }),
       { wrapper: mkWrapper(adapter) }
     );
@@ -378,9 +378,9 @@ describe("useActiveWallet", () => {
       await result.current.seeds.addSeed(seedFx("s1"));
       await result.current.seeds.addSeed(seedFx("s2"));
     });
-    act(() => result.current.active.setActiveKadenaWallet("s2"));
-    expect(result.current.active.activeKadenaWalletId).toBe("s2");
-    expect(result.current.active.activeKadenaWallet?.id).toBe("s2");
+    act(() => result.current.active.setActiveStoaChainWallet("s2"));
+    expect(result.current.active.activeStoaChainWalletId).toBe("s2");
+    expect(result.current.active.activeStoaChainWallet?.id).toBe("s2");
   });
 });
 
@@ -436,7 +436,7 @@ describe("useCodexBackup", () => {
       () => ({
         backup: useCodexBackup(),
         pure: usePureKeypairs(),
-        seeds: useKadenaSeeds(),
+        seeds: useStoaChainSeeds(),
       }),
       { wrapper: mkWrapper(adapter) }
     );

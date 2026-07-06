@@ -38,17 +38,17 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { txPending } from "../toast/toastManager.js";
 import { Copy, Crown, Loader2, Lock } from "lucide-react";
 import { OuronetAddressHighlight } from "../../ui/internal/OuronetAddressHighlight.js";
-import { getIgnisBalance, getKadenaAccountGuard } from "../debouncer/monitoredReads.js";
+import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_CHAIN_ID, KADENA_NETWORK } from "@stoachain/stoa-core/constants";
+import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
 import { buildRotateSovereignPactCode } from "@stoachain/ouronet-core/pact";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
-import type { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
 import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { PatronZonePattern2 } from "../cfm/PatronSpend.js";
@@ -151,8 +151,8 @@ interface Props {
   account: IOuroAccount;
   /** Full codex Ouronet accounts — for patron Custom selector. */
   accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[];
-  kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[];
+  stoaChainAccounts: IStoaChainWallet[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -162,8 +162,8 @@ export default function RotateSovereignModal({
   onClose,
   account,
   accounts,
-  kadenaSeeds: _kadenaSeeds,
-  kadenaAccounts: _kadenaAccounts,
+  kadenaSeeds: _stoaChainSeeds,
+  stoaChainAccounts: _stoaChainAccounts,
 }: Props) {
   const { execute } = useSignTransaction();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -230,7 +230,7 @@ export default function RotateSovereignModal({
     setInfoData(null);
     let aborted = false;
     pactRead(
-      `(${KADENA_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount.address}" "${account.address}")`,
+      `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount.address}" "${account.address}")`,
       { tier: "T7" },
     )
       .then((res: any) => {
@@ -256,7 +256,7 @@ export default function RotateSovereignModal({
       return;
     }
     let aborted = false;
-    getKadenaAccountGuard(sov)
+    getStoaChainAccountGuard(sov)
       .then((g) => { if (!aborted) setSovereignGuard(g); })
       .catch(() => { if (!aborted) setSovereignGuard(null); })
       .finally(() => { if (!aborted) setSovereignLoaded(true); });
@@ -376,12 +376,12 @@ export default function RotateSovereignModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime:  safeCreationTime(),
-              chainId:       KADENA_CHAIN_ID,
+              chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK)
+            .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
-              w(`${KADENA_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
+              w(`${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
             ]);
           for (const gp of guardPubs) builder = (builder as any).addSigner(gp);
           return (builder as any).createTransaction();
@@ -470,7 +470,7 @@ export default function RotateSovereignModal({
           pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
           fetcher={async () => {
             const res = await pactRead(
-              `(${KADENA_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount?.address ?? ""}" "${account.address}")`,
+              `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount?.address ?? ""}" "${account.address}")`,
               { tier: "T7" },
             );
             return (res as any)?.result?.data ?? null;

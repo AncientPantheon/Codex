@@ -13,7 +13,7 @@
  *  - the persisted `encryptedKeyfile` is CIPHERTEXT only (no plaintext d/p/q);
  *  - the saveAll snapshot PRESERVES every other slice deep-equal, INCLUDING
  *    codexIdentity + consumerSettings (a partial-snapshot write would wipe the
- *    Kadena seeds or the double-Apollo identity when adding an Arweave key);
+ *    StoaChain seeds or the double-Apollo identity when adding an Arweave key);
  *  - generate/import are UNLOCK-GATED on the ABSOLUTE window (isUnlocked).
  */
 
@@ -164,7 +164,7 @@ describe("foreignKeys keyring + slice persist (E-02)", () => {
 
     // CROSS-SLICE PRESERVATION (funds-critical): every pre-existing slice is
     // byte-identical in the persisted snapshot — a partial write that dropped
-    // Kadena seeds or the double-Apollo codexIdentity would fail HERE.
+    // StoaChain seeds or the double-Apollo codexIdentity would fail HERE.
     const before = seededState();
     expect(saved.kadenaSeeds).toEqual(before.kadenaSeeds);
     expect(saved.pureKeypairs).toEqual(before.pureKeypairs);

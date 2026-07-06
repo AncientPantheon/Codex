@@ -1,7 +1,7 @@
 /**
  * AddressBookPicker — compact popover for quick address selection.
  * Ouronet: shows Ouronet accounts from wallet context + Ouronet AB entries.
- * Stoa: shows Kadena accounts from wallet context + watched Stoa accounts + Stoa AB entries.
+ * Stoa: shows StoaChain accounts from wallet context + watched Stoa accounts + Stoa AB entries.
  */
 import { useState, useRef, useEffect } from "react";
 import { BookOpen, User, ChevronDown } from "lucide-react";
@@ -73,7 +73,7 @@ export function AddressBookPicker({ addressType, onSelect, className }: AddressB
         entries.push({ address: ab.address, name: ab.name, group: "Address Book" });
       }
     });
-    // 2. Kadena accounts from seeds (grouped by display name, sorted)
+    // 2. StoaChain accounts from seeds (grouped by display name, sorted)
     const sortedSeeds = sortSeeds(kadena);
     sortedSeeds.forEach((seed) => {
       const displayName = getSeedDisplayName(seed, sortedSeeds);

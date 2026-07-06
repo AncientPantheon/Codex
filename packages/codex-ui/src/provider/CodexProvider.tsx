@@ -9,7 +9,7 @@
  *   - onCodexDirty callback → fires on clean→dirty transitions
  *   - signingClient prop → optional signing-client override (consumed by the
  *     signing hook via the provider's internal context)
- *   - resolverFactory prop → produces the resolver-provider the two Kadena-bound
+ *   - resolverFactory prop → produces the resolver-provider the two StoaChain-bound
  *     hooks (useGetKeypair / useSignTransaction) consume, exposed via context
  *   - zbomToast prop → an injected toast-host slot mounted browser-side
  *   - SSR-safe shell: renders children with a no-op shell on the server
@@ -86,7 +86,7 @@ export interface CodexStoreLike {
 export type CodexStore = OuronetCodexStore;
 
 /**
- * The resolver-provider seam the two Kadena-bound hooks consume at runtime.
+ * The resolver-provider seam the two StoaChain-bound hooks consume at runtime.
  * codex-ouronet's InternalCodexResolver fills it; codex-ui never imports the
  * concrete resolver, only reads it from context.
  */

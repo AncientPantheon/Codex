@@ -22,7 +22,7 @@
  *     legacy codices that predate the flag.
  *   - `codexPubs` is built as `buildCodexPubSet(seeds, [], pureKeypairs)` —
  *     the package models accounts only as nested `seeds[].accounts[]` (no flat
- *     `kadenaAccounts` mirror), matching `InternalCodexResolver.listCodexPubs`.
+ *     `stoaChainAccounts` mirror), matching `InternalCodexResolver.listCodexPubs`.
  *   - `getIgnisBalance` is injectable via options purely for unit-testability;
  *     production callers omit it and get the real chain read.
  */

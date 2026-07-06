@@ -19,7 +19,7 @@ import type { PureKeypairEntry } from "./pureKeypairs.js";
 /**
  * PlaintextCodex — the portable shape of an Ouronet user's in-memory
  * codex state. Consumers decide the concrete element types for each list
- * via generics (OuronetUI plugs in its IKadenaSeed / IOuroAccount / etc;
+ * via generics (OuronetUI plugs in its IStoaChainSeed / IOuroAccount / etc;
  * the future HUB can supply its own if it prefers, or reuse UI's via a
  * shared `@ouronet/shared-types` package later).
  *
@@ -35,14 +35,14 @@ import type { PureKeypairEntry } from "./pureKeypairs.js";
  * nothing structured FROM (exactly right for a generic serializer).
  */
 export interface PlaintextCodex<
-  KadenaSeed       = unknown,
+  StoaChainSeed       = unknown,
   OuroAccount      = unknown,
   PureKeypair      = unknown,
   AddressBookEntry = unknown,
   UiSettings       = unknown,
 > {
   /** HD seeds (koala / chainweaver / eckowallet variants) known to this codex. */
-  readonly kadenaWallets: KadenaSeed[];
+  readonly kadenaWallets: StoaChainSeed[];
   /** Resident OURO accounts the user controls. */
   readonly ouronetWallets: OuroAccount[];
   /** Address-book entries (cached or user-added). */
@@ -75,7 +75,7 @@ export interface PlaintextCodex<
    * that carries its own `schemaVersion` from silently downgrading the
    * writer's stamped block version.
    *
-   * OPTIONAL so existing Kadena-only consumers compile unchanged.
+   * OPTIONAL so existing StoaChain-only consumers compile unchanged.
    */
   readonly foreignKeys?: ForeignKeyEntry[];
 }
@@ -97,14 +97,14 @@ export interface PlaintextCodex<
  * writer emits it anymore.
  */
 export interface CodexExportV1_2<
-  KadenaSeed       = unknown,
+  StoaChainSeed       = unknown,
   OuroAccount      = unknown,
   AddressBookEntry = unknown,
   UiSettings       = unknown,
 > {
   readonly version: "1.2";
   readonly exportedAt: string;
-  readonly kadenaWallets: KadenaSeed[];
+  readonly kadenaWallets: StoaChainSeed[];
   readonly ouronetWallets: OuroAccount[];
   readonly addressBook: AddressBookEntry[];
   readonly uiSettings: UiSettings;
@@ -132,7 +132,7 @@ export interface CodexExportV1_2<
  * models — never re-declared here.
  */
 export interface CodexExportV1_3<
-  KadenaSeed       = unknown,
+  StoaChainSeed       = unknown,
   OuroAccount      = unknown,
   AddressBookEntry = unknown,
   UiSettings       = unknown,
@@ -140,7 +140,7 @@ export interface CodexExportV1_3<
 > {
   readonly version: "1.3";
   readonly exportedAt: string;
-  readonly kadenaWallets: KadenaSeed[];
+  readonly kadenaWallets: StoaChainSeed[];
   readonly ouronetWallets: OuroAccount[];
   readonly addressBook: AddressBookEntry[];
   readonly uiSettings: UiSettings;

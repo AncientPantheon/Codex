@@ -32,7 +32,7 @@ import type {
   ICodexIdentity,
   IPureKeypair,
   IOuroAccount,
-  IKadenaSeed,
+  IStoaChainSeed,
 } from "@ancientpantheon/codex-ouronet/types";
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ describe("KickstartArgsV3 / KickstartResultV3 shapes", () => {
     const identity = {} as ICodexIdentity;
     const guard = {} as IPureKeypair;
     const prime = {} as IOuroAccount;
-    const seed = {} as IKadenaSeed;
+    const seed = {} as IStoaChainSeed;
     const pure = {} as IPureKeypair;
 
     const full: KickstartResultV3 = {

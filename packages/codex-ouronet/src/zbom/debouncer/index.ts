@@ -2,12 +2,12 @@
 
 export {
   parseIgnisInfo,
-  parseKadenaInfo,
-  parseKadenaSplit,
+  parseStoaChainInfo,
+  parseStoaChainSplit,
   coercePactDecimal,
   unwrapReadResult,
 } from "./parseIgnisInfo.js";
-export type { ParsedIgnisInfo, ParsedKadenaInfo, ParsedKadenaSplit } from "./parseIgnisInfo.js";
+export type { ParsedIgnisInfo, ParsedStoaChainInfo, ParsedStoaChainSplit } from "./parseIgnisInfo.js";
 
 export { useZbomInfoRead } from "./useZbomInfoRead.js";
 export type {

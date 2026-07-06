@@ -31,7 +31,7 @@ import {
   type CreateAccountOptions,
 } from "@stoachain/stoa-core/dalos";
 import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { useOuroAccounts } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
@@ -55,7 +55,7 @@ type SeedMode = "12-words" | "write-seed" | "24-words" | "bitmap" | "bitstring" 
 
 const SEED_TABS: { value: SeedMode; label: string; sublabel: string; description: string; color: string }[] = [
   { value: "12-words", label: "Chainweaver", sublabel: "12 words", color: "#3b82f6",
-    description: "12-word mnemonic using Kadena's native Chainweaver wordlist. Compatible with Chainweaver and EckoWallet." },
+    description: "12-word mnemonic using StoaChain's native Chainweaver wordlist. Compatible with Chainweaver and EckoWallet." },
   { value: "write-seed", label: "DALOS Custom", sublabel: "4–256 words", color: "#ceac5f", description: "DALOS_CUSTOM" },
   { value: "24-words", label: "Koala", sublabel: "24 words", color: "#ec4899",
     description: "24-word mnemonic using the BIP39 English wordlist (256-bit entropy). The standard Koala Wallet seed format." },
@@ -160,7 +160,7 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
     setPreview(null); setDerr(null);
     let cancelled = false;
     if (active === "12-words" || active === "24-words") {
-      void KadenaWalletBuilder.generateMnemonic(active === "12-words" ? 12 : 24).then((m) => { if (!cancelled) setMnemonic(m); });
+      void StoaChainWalletBuilder.generateMnemonic(active === "12-words" ? 12 : 24).then((m) => { if (!cancelled) setMnemonic(m); });
     } else if (active === "write-seed") {
       setMnemonic(DEFAULT_CUSTOM_SEED);
     }
@@ -297,7 +297,7 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
         isSmart,
         address: previewAddress,
         guard: null,
-        kadenaLedger: null,
+        stoaChainLedger: null,
         publicKey: preview.keyPair.publ,
         secret: await encryptStringV2(secretPlaintextFor(), password),
         backup: await encryptStringV2(preview.keyPair.priv, password),
@@ -567,7 +567,7 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
               {copied ? <Check style={{ width: 14, height: 14 }} /> : <Copy style={{ width: 14, height: 14 }} />}{copied ? "Copied" : "Copy Seed"}
             </button>
             {active !== "write-seed" && (
-              <button type="button" onClick={() => void KadenaWalletBuilder.generateMnemonic(active === "12-words" ? 12 : 24).then(setMnemonic)}
+              <button type="button" onClick={() => void StoaChainWalletBuilder.generateMnemonic(active === "12-words" ? 12 : 24).then(setMnemonic)}
                 style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer", border: "1px solid #262626", background: "transparent", color: "#d2d3d4" }}>
                 <RefreshCw style={{ width: 14, height: 14 }} /> Generate New
               </button>

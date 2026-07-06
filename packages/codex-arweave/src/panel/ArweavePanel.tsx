@@ -9,7 +9,7 @@
  * Upload / Library) and reads its E1-E3 seams from the panel context — the
  * codex-ui slot stays chain-blind; the Arweave panel obtains its own seams here.
  *
- * Kadena-free: imports ONLY `@ancientpantheon/{arweave-core,codex-core,
+ * StoaChain-free: imports ONLY `@ancientpantheon/{arweave-core,codex-core,
  * codex-arweave,codex-ui}` + the codex-ouronet address-book registry (indirectly,
  * via the injected `addressBook` seam). The subtab id vocabulary is namespaced
  * off the ARWEAVE_CHAIN_ID const — the chain id string is never re-spelled here.

@@ -15,11 +15,11 @@ import { smartEncrypt } from "@stoachain/stoa-core/crypto";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
-import { useCodex, useKadenaSeeds, useCodexAuth } from "@ancientpantheon/codex-ouronet/hooks";
+import { useCodex, useStoaChainSeeds, useCodexAuth } from "@ancientpantheon/codex-ouronet/hooks";
 import { SeedWordsTab } from "@ancientpantheon/codex-ouronet/ui";
-import type { IKadenaSeed } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
 
-const seedFx = (over: Partial<IKadenaSeed> = {}): IKadenaSeed => ({
+const seedFx = (over: Partial<IStoaChainSeed> = {}): IStoaChainSeed => ({
   id: over.id ?? "s1",
   name: over.name ?? "My Seed",
   seedType: "koala",
@@ -32,8 +32,8 @@ const seedFx = (over: Partial<IKadenaSeed> = {}): IKadenaSeed => ({
   ...over,
 });
 
-function Seeder({ seeds }: { seeds: IKadenaSeed[] }) {
-  const { addSeed } = useKadenaSeeds();
+function Seeder({ seeds }: { seeds: IStoaChainSeed[] }) {
+  const { addSeed } = useStoaChainSeeds();
   const { isReady } = useCodex();
   React.useEffect(() => {
     if (isReady) seeds.forEach((s) => void addSeed(s));
@@ -52,7 +52,7 @@ function Authenticator({ password }: { password: string }) {
   return null;
 }
 
-async function renderTab(seeds: IKadenaSeed[] = [], password?: string) {
+async function renderTab(seeds: IStoaChainSeed[] = [], password?: string) {
   const adapter = new MemoryCodexAdapter("dev");
   const utils = render(
     <CodexProvider adapter={adapter}>

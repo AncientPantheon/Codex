@@ -30,7 +30,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { ZbomModalFrame } from "../ui/ZbomModalFrame.js";
 import { InfoTooltip } from "../ui/InfoTooltip.js";
-import { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { useUiSetting } from "../cfm/seam.js";
 import { StoaChainBrand } from "../ui/StoaChainBrand.js";
 import { toast } from "sonner";
@@ -54,10 +54,10 @@ import { buildDeploySmartAccountPactCode } from "@stoachain/ouronet-core/pact";
 import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
-import { KADENA_CHAIN_ID, KADENA_NETWORK } from "@stoachain/stoa-core/constants";
+import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 
 // ─── Zone tokens ──────────────────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ function derivePubKey(privHex: string): string | null {
   } catch { return null; }
 }
 
-function findCodexKeys(keys: string[], seeds: IKadenaSeed[], accs: IKadenaWallet[]) {
+function findCodexKeys(keys: string[], seeds: IStoaChainSeed[], accs: IStoaChainWallet[]) {
   const all = new Set<string>();
   for (const s of seeds) for (const a of s.accounts) all.add(a.publicKey);
   for (const a of accs) all.add(a.publicKey);
@@ -168,7 +168,7 @@ function CollapsibleZoneHeader({
 interface Props {
   open: boolean; onClose: () => void;
   ouroAccount: IOuroAccount; accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[]; kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[]; stoaChainAccounts: IStoaChainWallet[];
 }
 
 type SigningTab = "signing" | "caps";
@@ -176,7 +176,7 @@ type SigningTab = "signing" | "caps";
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ActivateSmartAccountModal({
-  open, onClose, ouroAccount, accounts, kadenaSeeds, kadenaAccounts,
+  open, onClose, ouroAccount, accounts, kadenaSeeds, stoaChainAccounts,
 }: Props) {
   // CodexSigningStrategy — patronless flow. Gas-payer key carries
   // GAS_PAYER + N coin.TRANSFER caps; the new account's guard keyset
@@ -198,7 +198,7 @@ export default function ActivateSmartAccountModal({
   const [guardValue,   setGuardValue]   = useState<GuardChangeValue>(null);
 
   // INPUT III — kadena payment address (manual entry)
-  const [manualKadena, setManualKadena] = useState("");
+  const [manualStoaChain, setManualStoaChain] = useState("");
 
   // INPUT IV — sovereign address (manual entry) — must be an existing
   // Standard (Ѻ.) Ouronet account.
@@ -218,8 +218,8 @@ export default function ActivateSmartAccountModal({
   // ── Effective values (all manual) ──
   const effectiveGuardKeys  = guardValue?.mode === "define" ? guardValue.keys : guardValue?.mode === "existing" ? guardValue.resolvedKeys : [];
   const effectiveGuardPred  = guardValue?.mode === "define" ? guardValue.pred : guardValue?.mode === "existing" ? guardValue.resolvedPred : "keys-all";
-  const effectiveKadenaAddr = manualKadena.trim();
-  const effectiveKadena     = kadenaAccounts.find(a => a.address === effectiveKadenaAddr) ?? null;
+  const effectiveStoaChainAddr = manualStoaChain.trim();
+  const effectiveStoaChain     = stoaChainAccounts.find(a => a.address === effectiveStoaChainAddr) ?? null;
   const effectiveSovereign  = manualSovereign.trim();
   const sovereignIsSmart    = effectiveSovereign.startsWith("Σ.");
 
@@ -231,18 +231,18 @@ export default function ActivateSmartAccountModal({
       .then(r => { setFullInfo(r); setLoadingInfo(false); });
   }, [open, ouroAccount?.address]);
 
-  const kadenaNeed = fullInfo?.info?.kadena?.["kadena-full"] ?? 0;
+  const stoaChainNeed = fullInfo?.info?.kadena?.["kadena-full"] ?? 0;
   const receivers  = fullInfo?.receivers ?? [];
   const amounts    = fullInfo?.info?.kadena?.["kadena-split"] ?? [];
 
-  const kadenaBalance = parseFloat(effectiveKadena?.balance ?? "0");
-  const hasEnoughStoa = kadenaBalance >= kadenaNeed;
-  const showStoaWarn  = effectiveKadenaAddr.length > 0 && !hasEnoughStoa && !!fullInfo;
+  const stoaChainBalance = parseFloat(effectiveStoaChain?.balance ?? "0");
+  const hasEnoughStoa = stoaChainBalance >= stoaChainNeed;
+  const showStoaWarn  = effectiveStoaChainAddr.length > 0 && !hasEnoughStoa && !!fullInfo;
 
   // ── Signing analysis (for SigningZone display only — actual signing
   // is routed through strategy.execute) ──
-  const guardAnalysis    = useMemo(() => findCodexKeys(effectiveGuardKeys, kadenaSeeds, kadenaAccounts), [effectiveGuardKeys, kadenaSeeds, kadenaAccounts]);
-  const gasPayerAnalysis = useMemo(() => findCodexKeys(primeKey0 ? [primeKey0] : [], kadenaSeeds, kadenaAccounts), [primeKey0, kadenaSeeds, kadenaAccounts]);
+  const guardAnalysis    = useMemo(() => findCodexKeys(effectiveGuardKeys, kadenaSeeds, stoaChainAccounts), [effectiveGuardKeys, kadenaSeeds, stoaChainAccounts]);
+  const gasPayerAnalysis = useMemo(() => findCodexKeys(primeKey0 ? [primeKey0] : [], kadenaSeeds, stoaChainAccounts), [primeKey0, kadenaSeeds, stoaChainAccounts]);
   const gasPayerReady    = gasPayerAnalysis.found.length > 0;
   const guardReady       = effectiveGuardKeys.length > 0 && guardAnalysis.found.length >= effectiveGuardKeys.length;
 
@@ -257,32 +257,32 @@ export default function ActivateSmartAccountModal({
     },
     ...receivers.map((receiver: string, i: number) => ({
       capability: "coin.TRANSFER",
-      params: [`"${effectiveKadenaAddr.slice(0, 10)}…"`, `"${receiver.slice(0, 10)}…"`, `{ decimal: "${amounts[i] ?? "?"}" }`],
+      params: [`"${effectiveStoaChainAddr.slice(0, 10)}…"`, `"${receiver.slice(0, 10)}…"`, `{ decimal: "${amounts[i] ?? "?"}" }`],
       signer: "coin.TRANSFER",
       signerKey: primeKey0 || "CodexPrime Key #0",
       description: `Transfers STOA from payment account to protocol receiver ${i + 1}.`,
     })),
-  ], [primeKey0, effectiveKadenaAddr, receivers, amounts]);
+  ], [primeKey0, effectiveStoaChainAddr, receivers, amounts]);
 
   // ── canExecute ──
   const canExecute = useMemo(() => {
     if (isProcessing || loadingInfo) return false;
-    if (!effectiveKadenaAddr) return false;
-    if (kadenaNeed > 0 && !hasEnoughStoa) return false;
+    if (!effectiveStoaChainAddr) return false;
+    if (stoaChainNeed > 0 && !hasEnoughStoa) return false;
     if (!guardValue) return false;
     if (effectiveGuardKeys.length === 0) return false;
     // Smart-specific: a sovereign is required and must be a Standard (Ѻ.)
     // account — the chain rejects Σ.→Σ.
     if (!effectiveSovereign || sovereignIsSmart) return false;
     return true;
-  }, [isProcessing, loadingInfo, effectiveKadenaAddr, kadenaNeed, hasEnoughStoa,
+  }, [isProcessing, loadingInfo, effectiveStoaChainAddr, stoaChainNeed, hasEnoughStoa,
       guardValue, effectiveGuardKeys.length, effectiveSovereign, sovereignIsSmart]);
 
   // ── Reset ──
   useEffect(() => {
     if (open) {
       setSigningTab("signing");
-      setGuardValue(null); setManualKadena(""); setManualSovereign("");
+      setGuardValue(null); setManualStoaChain(""); setManualSovereign("");
       setManualKeys({}); setResolvedManualKeys({}); setIsProcessing(false);
     }
   }, [open]);
@@ -332,7 +332,7 @@ export default function ActivateSmartAccountModal({
       const guardRef  = guardValue?.mode === "existing" ? guardValue.keysetRef : undefined;
       const pactCode = buildDeploySmartAccountPactCode({
         account:       ouroAccount.address,
-        kadenaAddress: effectiveKadenaAddr,
+        kadenaAddress: effectiveStoaChainAddr,
         sovereign:     effectiveSovereign,
         publicKey:     ouroAccount.publicKey,
         mode:          guardMode,
@@ -354,14 +354,14 @@ export default function ActivateSmartAccountModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime:  safeCreationTime(),
-              chainId:       KADENA_CHAIN_ID,
+              chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK)
+            .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
-              w(`${KADENA_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
+              w(`${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
               ...receivers.map((receiver: string, i: number) =>
-                w("coin.TRANSFER", effectiveKadenaAddr, receiver, { decimal: String(amounts[i]) })
+                w("coin.TRANSFER", effectiveStoaChainAddr, receiver, { decimal: String(amounts[i]) })
               ),
             ]);
           for (const gp of guardPubs) builder = (builder as any).addSigner(gp);
@@ -377,7 +377,7 @@ export default function ActivateSmartAccountModal({
     } catch (err) {
       _tx.fail((err as any)?.message ?? "Failed");
     } finally { setIsProcessing(false); }
-  }, [canExecute, primeKey0, guardValue, effectiveGuardKeys, effectiveGuardPred, effectiveKadenaAddr,
+  }, [canExecute, primeKey0, guardValue, effectiveGuardKeys, effectiveGuardPred, effectiveStoaChainAddr,
       effectiveSovereign, ouroAccount, receivers, amounts, resolvedManualKeys,
       execute, ensureCodexUnlocked, onClose]);
 
@@ -437,15 +437,15 @@ export default function ActivateSmartAccountModal({
                 <StringEntryInput
                   labelIndex={3}
                   varName="kadena"
-                  value={manualKadena}
-                  onChange={setManualKadena}
+                  value={manualStoaChain}
+                  onChange={setManualStoaChain}
                   variant="free"
                   placeholder="(k:, c:, u:, w:, or custom account)"
                   addressBookType="stoa"
                 />
-                {effectiveKadena && (
+                {effectiveStoaChain && (
                   <p className="text-[10px] mt-1" style={{ color: hasEnoughStoa ? "#4ade80" : "#c0392b" }}>
-                    Balance: {effectiveKadena.balance} STOA{!hasEnoughStoa && ` (need ≥ ${kadenaNeed})`}
+                    Balance: {effectiveStoaChain.balance} STOA{!hasEnoughStoa && ` (need ≥ ${stoaChainNeed})`}
                   </p>
                 )}
               </div>
@@ -493,15 +493,15 @@ export default function ActivateSmartAccountModal({
             <StringEntryInput
               labelIndex={3}
               varName="kadena"
-              value={manualKadena}
-              onChange={setManualKadena}
+              value={manualStoaChain}
+              onChange={setManualStoaChain}
               variant="free"
               placeholder="(k:, c:, u:, w:, or custom account)"
               addressBookType="stoa"
             />
-            {effectiveKadena && (
+            {effectiveStoaChain && (
               <p className="text-[10px] mt-1" style={{ color: hasEnoughStoa ? "#4ade80" : "#c0392b" }}>
-                Balance: {effectiveKadena.balance} STOA{!hasEnoughStoa && ` (need ≥ ${kadenaNeed})`}
+                Balance: {effectiveStoaChain.balance} STOA{!hasEnoughStoa && ` (need ≥ ${stoaChainNeed})`}
               </p>
             )}
           </div>
@@ -511,7 +511,7 @@ export default function ActivateSmartAccountModal({
               style={{ backgroundColor: "#8b1a1a10", borderColor: "#8b1a1a30" }}>
               <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: "#c0392b" }} />
               <p className="text-xs" style={{ color: "#c0392b" }}>
-                Insufficient STOA ({effectiveKadena?.balance ?? "0"} / {kadenaNeed} required).
+                Insufficient STOA ({effectiveStoaChain?.balance ?? "0"} / {stoaChainNeed} required).
               </p>
             </div>
           )}

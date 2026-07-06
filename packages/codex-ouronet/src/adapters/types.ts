@@ -1,5 +1,5 @@
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -31,7 +31,7 @@ import type { CodexSnapshotBase } from "@ancientpantheon/codex-core";
  * makes a future base-field drop a compile error HERE.
  */
 export interface CodexSnapshot extends CodexSnapshotBase {
-  kadenaSeeds: IKadenaSeed[];
+  kadenaSeeds: IStoaChainSeed[];
   ouroAccounts: IOuroAccount[];
   pureKeypairs: IPureKeypair[];
   addressBook: AddressBookEntry[];
@@ -111,7 +111,7 @@ export interface CodexAdapter {
   // as wrappers around `saveAll()` if their backend doesn't support
   // partial writes — semantics are equivalent.
 
-  saveKadenaSeeds(seeds: IKadenaSeed[]): Promise<void>;
+  saveStoaChainSeeds(seeds: IStoaChainSeed[]): Promise<void>;
   saveOuroAccounts(accounts: IOuroAccount[]): Promise<void>;
   savePureKeypairs(keypairs: IPureKeypair[]): Promise<void>;
   saveAddressBook(entries: AddressBookEntry[]): Promise<void>;

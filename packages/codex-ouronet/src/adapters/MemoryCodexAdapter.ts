@@ -1,6 +1,6 @@
 import { CodexAdapterError } from "../errors/types.js";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -51,7 +51,7 @@ export class MemoryCodexAdapter implements CodexAdapter {
 
   // ----- per-entity convenience writes -----
 
-  public async saveKadenaSeeds(seeds: IKadenaSeed[]): Promise<void> {
+  public async saveStoaChainSeeds(seeds: IStoaChainSeed[]): Promise<void> {
     this.snapshot.kadenaSeeds = structuredClone(seeds);
   }
 

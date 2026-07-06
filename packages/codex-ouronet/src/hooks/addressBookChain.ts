@@ -1,14 +1,14 @@
 /**
  * The chain-aware address-book validation seam (D-10 / D-11).
  *
- * `AddressBookEntry` gained an OPTIONAL `chainId` (defaulting to Kadena on read).
+ * `AddressBookEntry` gained an OPTIONAL `chainId` (defaulting to StoaChain on read).
  * This module is the PLUGGABLE per-chain validator registry that consumes it: a
  * `chainId` maps to a validator, and the address book validates a contact against
  * the validator for its chain.
  *
  * The registry VALUE TYPE is `(addr, type?: AddressKind) => boolean` — a chain
  * validator INTERNALLY dispatches on the orthogonal address-KIND (`type`), so the
- * Kadena validator preserves the three per-kind checks verbatim rather than
+ * StoaChain validator preserves the three per-kind checks verbatim rather than
  * collapsing them into one permissive/over-strict check. `type` (KIND) and
  * `chainId` (CHAIN) are orthogonal.
  *
@@ -19,7 +19,7 @@
  * module-level default registry is provided for the app's single shared instance,
  * with a `reset` for test isolation.
  *
- * D5 ships the Kadena validator + this seam only. E-series registers Arweave via
+ * D5 ships the StoaChain validator + this seam only. E-series registers Arweave via
  * `registerChainAddressValidator(ARWEAVE_CHAIN_ID, arweaveValidator)` with ZERO
  * change here.
  */
@@ -28,11 +28,11 @@ import type { AddressKind } from "../types/entities.js";
 
 /**
  * The default chainId a legacy entry (no `chainId`) resolves to on read
- * (`entry.chainId ?? KADENA_CHAIN_ID`). Shares the string namespace with
+ * (`entry.chainId ?? STOACHAIN_CHAIN_ID`). Shares the string namespace with
  * codex-core's `ForeignKeyEntry.chainId` / `ForeignChainAdapter.id`, and is
  * DISTINCT from a foreign chainId like `"arweave:mainnet"`.
  */
-export const KADENA_CHAIN_ID = "kadena:mainnet";
+export const STOACHAIN_CHAIN_ID = "kadena:mainnet";
 
 /**
  * A per-chain address validator. Returns whether `addr` is well-formed for the
@@ -45,16 +45,16 @@ export type ChainAddressValidator = (addr: string, type?: AddressKind) => boolea
 const stripSigil = (v: string): string => v.replace(/^§/, "").trim();
 
 /**
- * The Kadena chain validator. Dispatches on the address-KIND to reuse the three
+ * The StoaChain chain validator. Dispatches on the address-KIND to reuse the three
  * per-kind checks the address book has always enforced:
  *   - `ouronet`   → starts with `Ѻ.`
  *   - `stoa`      → starts with `k:` / `c:` / `w:` / `u:`
  *   - `stoic-tag` → a non-empty bare tag (after stripping the `§` sigil)
  *
  * The three are kept distinct: an address valid under one kind is rejected under
- * another. An unspecified/unknown kind is not a valid Kadena address.
+ * another. An unspecified/unknown kind is not a valid StoaChain address.
  */
-export const kadenaAddressValidator: ChainAddressValidator = (addr, type) => {
+export const stoaChainAddressValidator: ChainAddressValidator = (addr, type) => {
   switch (type) {
     case "ouronet":
       return addr.startsWith("Ѻ.");

@@ -67,7 +67,7 @@ import { dirname, join } from "node:path";
 // RED: the factory subpath barrel does not exist yet. T8.3 (Wave 2) creates it.
 import {
   createHeadlessCodexResolver,
-  type ResolvedKadenaKeypair,
+  type ResolvedStoaChainKeypair,
   type HeadlessResolverDeps,
   type SnapshotSlice,
 } from "../src/resolver/index.js";
@@ -88,7 +88,7 @@ interface GoldenCase {
   name: string;
   publicKey: string;
   password: string;
-  expected: ResolvedKadenaKeypair;
+  expected: ResolvedStoaChainKeypair;
 }
 
 interface GoldenFixture {
@@ -123,7 +123,7 @@ function makeGoldenSeam(seam: GoldenSeam): HeadlessResolverDeps {
       }
       return plain;
     },
-    async deriveKadenaKeypair(_password, _mnemonic, index): Promise<{ publicKey: string; secretKey: unknown }> {
+    async deriveStoaChainKeypair(_password, _mnemonic, index): Promise<{ publicKey: string; secretKey: unknown }> {
       const entry = seam.deriveByIndex[String(index)];
       if (!entry) throw new Error("golden seam: unknown derive index (fixture drift)");
       return { publicKey: entry.publicKey, secretKey: entry.secretKey };
@@ -165,7 +165,7 @@ async function transcribedBrowserResolve(
   publicKey: string,
   password: string,
   deps: HeadlessResolverDeps,
-): Promise<ResolvedKadenaKeypair> {
+): Promise<ResolvedStoaChainKeypair> {
   const pureKeypairs = snapshot.pureKeypairs ?? [];
   const kadenaSeeds = snapshot.kadenaSeeds ?? [];
 
@@ -195,7 +195,7 @@ async function transcribedBrowserResolve(
     if (!account) continue;
 
     const mnemonic = await deps.decryptSecret(seed.secret, password);
-    const { publicKey: pub, secretKey: encryptedSecretKey } = await deps.deriveKadenaKeypair(
+    const { publicKey: pub, secretKey: encryptedSecretKey } = await deps.deriveStoaChainKeypair(
       password,
       mnemonic,
       account.index,
@@ -310,7 +310,7 @@ describe("headless resolver — golden-fixture parity replay (D-08 success crite
   it("derived koala path passes the seed's seedType through verbatim ('koala')", async () => {
     // seedType passthrough (audit F-BUG-001): the derived path returns
     // seed.seedType verbatim — a koala seed yields seedType "koala", proving the
-    // ResolvedKadenaKeypair union includes "koala" (not just foreign/chainweaver).
+    // ResolvedStoaChainKeypair union includes "koala" (not just foreign/chainweaver).
     const gc = fixture.cases.find((c) => c.name.startsWith("derived-koala"))!;
     const resolver = createHeadlessCodexResolver(makeGoldenSeam(fixture.seam));
     const out = await resolver.getKeyPairByPublicKey(fixture.snapshot, gc.publicKey, gc.password);

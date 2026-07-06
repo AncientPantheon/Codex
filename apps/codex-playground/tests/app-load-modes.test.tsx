@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("Dashboard — renders a plaintext-hydrated store directly (dev/test seam)", () => {
-  it("mounts the populated-Kadena fixture and renders the dashboard with the Kadena seed entry visible (no unlock)", async () => {
+  it("mounts the populated-StoaChain fixture and renders the dashboard with the StoaChain seed entry visible (no unlock)", async () => {
     const user = userEvent.setup();
     const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
     render(
@@ -56,14 +56,14 @@ describe("Dashboard — renders a plaintext-hydrated store directly (dev/test se
     const seedTab = await screen.findByRole("tab", { name: /seed words/i });
     expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
 
-    // The Seed Words tab surfaces the fixture's ONE Kadena seed — the index-0
+    // The Seed Words tab surfaces the fixture's ONE StoaChain seed — the index-0
     // seed renders as "Prime Codex Seed", proving the real store hydrated from
     // the fixture (not an empty codex, which shows the empty-state text).
     await user.click(seedTab);
     expect(await screen.findByText(/prime codex seed/i)).toBeInTheDocument();
   });
 
-  it("mounts the empty fixture and renders an empty codex dashboard (no Kadena seeds)", async () => {
+  it("mounts the empty fixture and renders an empty codex dashboard (no StoaChain seeds)", async () => {
     const user = userEvent.setup();
     const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
     render(
@@ -104,7 +104,7 @@ describe("App — encrypted backup: load screen → upload → restore → unloc
     await user.click(screen.getByRole("button", { name: /^unlock$/i }));
 
     // The dashboard now renders, hydrated from the restored backup: the backup's
-    // ONE Kadena seed is present (restore mapped kadenaWallets → kadenaSeeds); the
+    // ONE StoaChain seed is present (restore mapped kadenaWallets → kadenaSeeds); the
     // index-0 seed renders as "Prime Codex Seed".
     const seedTab = await screen.findByRole("tab", { name: /seed words/i });
     await user.click(seedTab);

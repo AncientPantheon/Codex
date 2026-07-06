@@ -1,8 +1,8 @@
 /**
  * RED contract tests for the snapshot-fed headless resolver factory (D4).
  *
- * codex-core owns the state-to-keypair PLUMBING, never the Kadena crypto. The
- * real primitives (`smartDecrypt`, `KadenaWalletBuilder.createWalletPairFromMnemonic`,
+ * codex-core owns the state-to-keypair PLUMBING, never the StoaChain crypto. The
+ * real primitives (`smartDecrypt`, `StoaChainWalletBuilder.createWalletPairFromMnemonic`,
  * `kadenaDecrypt`, `buildExtendedForeignSigningKey`, `toHexString`, `buildCodexPubSet`)
  * are INJECTED by the consumer (D5) as `HeadlessResolverDeps` — core stays
  * `@stoachain`-free, React-free, DOM-free (D7/N-08). The factory reproduces the
@@ -32,9 +32,9 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createHeadlessCodexResolver,
   type HeadlessResolverDeps,
-  type ResolvedKadenaKeypair,
+  type ResolvedStoaChainKeypair,
   type SnapshotSlice,
-  type KadenaSeedLike,
+  type StoaChainSeedLike,
   type PureKeypairLike,
 } from "../src/resolver/index.js";
 import { CodexError, CodexKeyMissingError } from "../src/codex/errors.js";
@@ -90,7 +90,7 @@ function makeFakeDeps(overrides: Partial<HeadlessResolverDeps> = {}): HeadlessRe
     }
   });
 
-  const deriveKadenaKeypair = vi.fn(
+  const deriveStoaChainKeypair = vi.fn(
     async (
       _password: string,
       _mnemonic: string,
@@ -121,7 +121,7 @@ function makeFakeDeps(overrides: Partial<HeadlessResolverDeps> = {}): HeadlessRe
   const toHex = vi.fn((_bytes: Uint8Array): string => DERIVED_HEX_192);
 
   const collectCodexPubs = vi.fn(
-    (kadenaSeeds: KadenaSeedLike[], pureKeypairs: PureKeypairLike[]): Set<string> => {
+    (kadenaSeeds: StoaChainSeedLike[], pureKeypairs: PureKeypairLike[]): Set<string> => {
       const set = new Set<string>();
       for (const p of pureKeypairs) set.add(p.publicKey);
       for (const s of kadenaSeeds) for (const a of s.accounts ?? []) set.add(a.publicKey);
@@ -131,7 +131,7 @@ function makeFakeDeps(overrides: Partial<HeadlessResolverDeps> = {}): HeadlessRe
 
   return {
     decryptSecret,
-    deriveKadenaKeypair,
+    deriveStoaChainKeypair,
     decryptWalletSecret,
     buildExtendedForeignKey,
     toHex,
@@ -151,7 +151,7 @@ const PURE_EXTENDED: PureKeypairLike = {
   publicKey: "pub-pure-extended",
   encryptedPrivateKey: "enc-extended-128",
 };
-const KOALA_SEED: KadenaSeedLike = {
+const KOALA_SEED: StoaChainSeedLike = {
   secret: "enc-seed-secret",
   seedType: "koala",
   accounts: [{ publicKey: DERIVED_PUB, index: 0 }],
@@ -243,7 +243,7 @@ describe("getKeyPairByPublicKey — PURE-KEYPAIR path (InternalCodexResolver L13
 });
 
 describe("getKeyPairByPublicKey — DERIVED-ACCOUNT path (InternalCodexResolver L163-198)", () => {
-  it("derives via decryptSecret(seed.secret)→deriveKadenaKeypair→decryptWalletSecret→toHex, truncating hexKey.length>64 to slice(0,64), passing seed.seedType through verbatim", async () => {
+  it("derives via decryptSecret(seed.secret)→deriveStoaChainKeypair→decryptWalletSecret→toHex, truncating hexKey.length>64 to slice(0,64), passing seed.seedType through verbatim", async () => {
     const deps = makeFakeDeps();
     const resolver = createHeadlessCodexResolver(deps);
 
@@ -256,7 +256,7 @@ describe("getKeyPairByPublicKey — DERIVED-ACCOUNT path (InternalCodexResolver 
     // The derived pipeline: decrypt the mnemonic, derive at the recorded index
     // with the seed's own seedType, decrypt the wallet secret, hex-stringify.
     expect(deps.decryptSecret).toHaveBeenCalledWith(KOALA_SEED.secret, PASSWORD);
-    expect(deps.deriveKadenaKeypair).toHaveBeenCalledWith(
+    expect(deps.deriveStoaChainKeypair).toHaveBeenCalledWith(
       PASSWORD,
       MNEMONIC_SENTINEL,
       0,
@@ -265,9 +265,9 @@ describe("getKeyPairByPublicKey — DERIVED-ACCOUNT path (InternalCodexResolver 
     expect(deps.decryptWalletSecret).toHaveBeenCalledWith(PASSWORD, OPAQUE_ENCRYPTED_SECRET);
 
     // F-BUG-001: seedType passes through as "koala" (the DEFAULT type) — this
-    // TYPECHECKS against ResolvedKadenaKeypair only if the local union keeps
+    // TYPECHECKS against ResolvedStoaChainKeypair only if the local union keeps
     // "koala"/"eckowallet" (not a truncated "foreign"|"chainweaver" subset).
-    const expected: ResolvedKadenaKeypair = {
+    const expected: ResolvedStoaChainKeypair = {
       publicKey: DERIVED_PUB,
       // hexKey.length (192) > 64 → truncated to the first 64 chars.
       privateKey: DERIVED_HEX_192_TRUNCATED,
@@ -305,7 +305,7 @@ describe("getKeyPairByPublicKey — BRANCH PRECEDENCE (funds-critical, L135-164 
       publicKey: collidingPub,
       encryptedPrivateKey: "enc-plain-foreign",
     };
-    const seedWithColliding: KadenaSeedLike = {
+    const seedWithColliding: StoaChainSeedLike = {
       secret: "enc-seed-secret",
       seedType: "koala",
       accounts: [{ publicKey: collidingPub, index: 0 }],
@@ -323,7 +323,7 @@ describe("getKeyPairByPublicKey — BRANCH PRECEDENCE (funds-critical, L135-164 
     // resolve the WRONG key → signing with the wrong key.
     expect(result.seedType).toBe("foreign");
     expect(deps.decryptSecret).toHaveBeenCalledWith(purePair.encryptedPrivateKey, PASSWORD);
-    expect(deps.deriveKadenaKeypair).not.toHaveBeenCalled();
+    expect(deps.deriveStoaChainKeypair).not.toHaveBeenCalled();
     expect(deps.decryptWalletSecret).not.toHaveBeenCalled();
   });
 });
@@ -353,7 +353,7 @@ describe("getKeyPairByPublicKey — PARTIAL/CORRUPT snapshot robustness (bug F-0
   it("a seed whose accounts is absent yields CodexKeyMissingError (not a TypeError from .find/.length on undefined)", async () => {
     const deps = makeFakeDeps();
     const resolver = createHeadlessCodexResolver(deps);
-    const corruptSeed = { secret: "enc-seed-secret", seedType: "koala" } as unknown as KadenaSeedLike;
+    const corruptSeed = { secret: "enc-seed-secret", seedType: "koala" } as unknown as StoaChainSeedLike;
 
     await expect(
       resolver.getKeyPairByPublicKey(
@@ -430,7 +430,7 @@ describe("getKeyPairByPublicKey — NOT-FOUND path (N-06 secret hygiene, L200-21
       pureKeypairs: [],
       kadenaSeeds: [
         { secret: "s1", seedType: "koala", accounts: [{ publicKey: "a", index: 0 }] },
-        { secret: "s2", seedType: "koala" } as unknown as KadenaSeedLike, // no accounts
+        { secret: "s2", seedType: "koala" } as unknown as StoaChainSeedLike, // no accounts
       ],
     });
 

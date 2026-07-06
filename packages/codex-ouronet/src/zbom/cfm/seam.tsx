@@ -10,29 +10,30 @@
  * the import line changes.
  *
  * `useWallet()` returns the exact shape OuronetUI's context did
- * (`{ ouro, kadena, kadenaAccounts, pureKeypairs }`), assembled from the
- * package's per-entity hooks. `kadenaAccounts` is FLATTENED from the seeds the
- * same way OuronetUI's context carried a flat `IKadenaWallet[]`.
+ * (`{ ouro, kadena, stoaChainAccounts, pureKeypairs }`), assembled from the
+ * package's per-entity hooks. `stoaChainAccounts` is FLATTENED from the seeds the
+ * same way OuronetUI's context carried a flat `IStoaChainWallet[]`.
  */
 
 import { useMemo } from "react";
 import { useOuroAccounts } from "../../hooks/index.js";
-import { useKadenaSeeds } from "../../hooks/index.js";
+import { useStoaChainSeeds } from "../../hooks/index.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodexStore } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/index.js";
 import type {
   IOuroAccount,
-  IKadenaSeed,
-  IKadenaWallet,
+  IStoaChainSeed,
+  IStoaChainWallet,
   IPureKeypair,
 } from "../../types/entities.js";
 
-/** Flatten the codex's kadena seeds into the flat `IKadenaWallet[]` that
+/** Flatten the codex's kadena seeds into the flat `IStoaChainWallet[]` that
  *  OuronetUI's wallet-context carried. Each derived account is stamped with its
  *  `k:`-prefixed address + its seed linkage (secret / seedId / seedType) so the
  *  signing-material lookup in SigningZone / AuthPathZone works unchanged. */
-export function flattenKadenaAccounts(seeds: IKadenaSeed[]): IKadenaWallet[] {
-  const out: IKadenaWallet[] = [];
+export function flattenStoaChainAccounts(seeds: IStoaChainSeed[]): IStoaChainWallet[] {
+  const out: IStoaChainWallet[] = [];
   for (const seed of seeds) {
     for (const acc of seed.accounts) {
       out.push({
@@ -49,8 +50,8 @@ export function flattenKadenaAccounts(seeds: IKadenaSeed[]): IKadenaWallet[] {
 
 export interface WalletView {
   ouro: IOuroAccount[];
-  kadena: IKadenaSeed[];
-  kadenaAccounts: IKadenaWallet[];
+  kadena: IStoaChainSeed[];
+  stoaChainAccounts: IStoaChainWallet[];
   pureKeypairs: IPureKeypair[];
 }
 
@@ -59,10 +60,10 @@ export interface WalletView {
  *  Zustand-backed per-entity hooks. */
 export function useWallet(): WalletView {
   const { accounts: ouro } = useOuroAccounts();
-  const { seeds: kadena } = useKadenaSeeds();
+  const { seeds: kadena } = useStoaChainSeeds();
   const { keypairs: pureKeypairs } = usePureKeypairs();
-  const kadenaAccounts = useMemo(() => flattenKadenaAccounts(kadena), [kadena]);
-  return { ouro, kadena, kadenaAccounts, pureKeypairs };
+  const stoaChainAccounts = useMemo(() => flattenStoaChainAccounts(kadena), [kadena]);
+  return { ouro, kadena, stoaChainAccounts, pureKeypairs };
 }
 
 /** Package analogue of OuronetUI's `useSelector((s) => s.wallet.uiSettings?.KEY
@@ -70,6 +71,6 @@ export function useWallet(): WalletView {
  *  focused subscription (re-renders only when that key changes). */
 export function useUiSetting<T>(key: string, def: T): T {
   const store = useCodexStore();
-  const val = store((s) => (s.uiSettings as Record<string, unknown>)[key]);
+  const val = store((s: CodexStoreState) => (s.uiSettings as Record<string, unknown>)[key]);
   return (val === undefined ? def : val) as T;
 }

@@ -10,33 +10,33 @@
  */
 
 import { useCodexStore } from "../provider/index.js";
-import type { IKadenaSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 
 export interface ActiveWalletView {
-  activeKadenaWalletId: string | null;
-  activeKadenaWallet: IKadenaSeed | null;
+  activeStoaChainWalletId: string | null;
+  activeStoaChainWallet: IStoaChainSeed | null;
   activeOuroAccountId: string | null;
   activeOuroAccount: IOuroAccount | null;
-  setActiveKadenaWallet: (id: string | null) => void;
+  setActiveStoaChainWallet: (id: string | null) => void;
   setActiveOuroAccount: (id: string | null) => void;
 }
 
 export function useActiveWallet(): ActiveWalletView {
   const store = useCodexStore();
-  const activeKadenaWalletId = store((s) => s.activeKadenaWalletId);
+  const activeStoaChainWalletId = store((s) => s.activeStoaChainWalletId);
   const activeOuroAccountId = store((s) => s.activeOuroAccountId);
   const kadenaSeeds = store((s) => s.kadenaSeeds);
   const ouroAccounts = store((s) => s.ouroAccounts);
   const actions = store((s) => s.actions);
 
   return {
-    activeKadenaWalletId,
-    activeKadenaWallet:
-      kadenaSeeds.find((s) => s.id === activeKadenaWalletId) ?? null,
+    activeStoaChainWalletId,
+    activeStoaChainWallet:
+      kadenaSeeds.find((s) => s.id === activeStoaChainWalletId) ?? null,
     activeOuroAccountId,
     activeOuroAccount:
       ouroAccounts.find((a) => a.id === activeOuroAccountId) ?? null,
-    setActiveKadenaWallet: actions.setActiveKadenaWallet,
+    setActiveStoaChainWallet: actions.setActiveStoaChainWallet,
     setActiveOuroAccount: actions.setActiveOuroAccount,
   };
 }

@@ -4,8 +4,8 @@
 //
 // The standalone Codex has no operator-injected global connection, so BOTH
 // chains are surfaced as LOCAL, user-editable endpoints:
-//   - the Kadena/StoaChain node URL, defaulting to the explicit node2-host
-//     default `KADENA_DEFAULT_NODE_URL` (never a hidden hardcoded node);
+//   - the StoaChain node URL, defaulting to the explicit node2-host
+//     default `STOACHAIN_DEFAULT_NODE_URL` (never a hidden hardcoded node);
 //   - the Arweave gateway URL, defaulting to the local testnet gateway
 //     `DEFAULT_GATEWAY_URL` (= http://localhost:1984 — NEVER mainnet, N-04).
 //
@@ -24,23 +24,23 @@ import {
   type NetworkSettingsModel,
 } from "@ancientpantheon/codex-core";
 import {
-  createKadenaConnection,
-  KADENA_DEFAULT_NODE_URL,
+  createStoaChainConnection,
+  STOACHAIN_DEFAULT_NODE_URL,
 } from "@ancientpantheon/codex-ouronet/connection";
 import { createArweaveConnection } from "@ancientpantheon/codex-arweave/connection";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 
 import { DEFAULT_GATEWAY_URL } from "./ArweaveModeToggle";
 
-/** The Kadena/StoaChain connection chain id (matches createKadenaConnection). */
+/** The StoaChain connection chain id (matches createStoaChainConnection). */
 export const STOACHAIN_CHAIN_ID = "stoachain" as const;
 /** Re-exported so the wiring + tests key rows uniformly. */
 export { ARWEAVE_CHAIN_ID };
 
 /** The persisted, editable per-chain endpoint config. */
 export interface NetworkSettings {
-  /** The Kadena/StoaChain node URL the dashboard reads/broadcasts against. */
-  kadenaNodeUrl: string;
+  /** The StoaChain node URL the dashboard reads/broadcasts against. */
+  stoaChainNodeUrl: string;
   /** The Arweave gateway URL the Arweave panel reads/broadcasts against. */
   arweaveGatewayUrl: string;
 }
@@ -50,7 +50,7 @@ export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
 
 /** The surfaced defaults — both real, editable, local/testnet endpoints. */
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
-  kadenaNodeUrl: KADENA_DEFAULT_NODE_URL,
+  stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
 };
 
@@ -65,10 +65,10 @@ export function loadNetworkSettings(): NetworkSettings {
     if (!raw) return { ...DEFAULT_NETWORK_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<NetworkSettings>;
     return {
-      kadenaNodeUrl:
-        typeof parsed.kadenaNodeUrl === "string" && parsed.kadenaNodeUrl.length > 0
-          ? parsed.kadenaNodeUrl
-          : DEFAULT_NETWORK_SETTINGS.kadenaNodeUrl,
+      stoaChainNodeUrl:
+        typeof parsed.stoaChainNodeUrl === "string" && parsed.stoaChainNodeUrl.length > 0
+          ? parsed.stoaChainNodeUrl
+          : DEFAULT_NETWORK_SETTINGS.stoaChainNodeUrl,
       arweaveGatewayUrl:
         typeof parsed.arweaveGatewayUrl === "string" && parsed.arweaveGatewayUrl.length > 0
           ? parsed.arweaveGatewayUrl
@@ -103,9 +103,9 @@ export function resolveNetworkModel(
     supportedChains: [STOACHAIN_CHAIN_ID, ARWEAVE_CHAIN_ID],
     global: undefined,
     local: {
-      [STOACHAIN_CHAIN_ID]: createKadenaConnection({
+      [STOACHAIN_CHAIN_ID]: createStoaChainConnection({
         kind: "direct",
-        nodeUrl: settings.kadenaNodeUrl,
+        nodeUrl: settings.stoaChainNodeUrl,
       }).connection,
       [ARWEAVE_CHAIN_ID]: createArweaveConnection({
         gatewayUrl: settings.arweaveGatewayUrl,

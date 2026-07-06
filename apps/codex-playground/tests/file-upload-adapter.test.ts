@@ -88,11 +88,11 @@ describe("mode-2 (plaintext snapshot): hydrateFromPlaintextSnapshot", () => {
     expect(loaded.lastUpdatedDevice).toBe(emptySnapshot.lastUpdatedDevice);
   });
 
-  it("round-trips the POPULATED-Kadena fixture verbatim (entities + secrets survive as-is)", async () => {
+  it("round-trips the POPULATED-StoaChain fixture verbatim (entities + secrets survive as-is)", async () => {
     const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
     const loaded = await adapter.loadAll();
     expect(loaded).toEqual(populatedKadenaSnapshot);
-    // The Kadena entries render-visible content — they must survive hydration.
+    // The StoaChain entries render-visible content — they must survive hydration.
     expect(loaded.kadenaSeeds).toHaveLength(populatedKadenaSnapshot.kadenaSeeds.length);
     expect(loaded.kadenaSeeds.length).toBeGreaterThan(0);
     expect(loaded.ouroAccounts).toEqual(populatedKadenaSnapshot.ouroAccounts);

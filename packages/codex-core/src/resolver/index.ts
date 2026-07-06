@@ -5,16 +5,16 @@
  * structural types (Ouronet-free mirrors of the codex state slice and the
  * signing-ready keypair). The root barrel (`src/index.ts`) re-exports these
  * names; consumers may import from either. Core holds no real crypto — every
- * Kadena primitive is caller-injected via `HeadlessResolverDeps`.
+ * StoaChain primitive is caller-injected via `HeadlessResolverDeps`.
  */
 
 export {
   createHeadlessCodexResolver,
   type HeadlessCodexResolver,
   type HeadlessResolverDeps,
-  type ResolvedKadenaKeypair,
+  type ResolvedStoaChainKeypair,
   type SnapshotSlice,
-  type KadenaSeedLike,
+  type StoaChainSeedLike,
   type PureKeypairLike,
-  type KadenaSeedType,
+  type StoaChainSeedType,
 } from "./headlessResolver.js";

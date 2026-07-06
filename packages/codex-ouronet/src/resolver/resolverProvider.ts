@@ -1,6 +1,6 @@
 /**
  * The Ouronet-side resolver-provider seam that fills codex-ui's `resolverFactory`
- * prop. codex-ui's two Kadena-bound hooks (useGetKeypair / useSignTransaction)
+ * prop. codex-ui's two StoaChain-bound hooks (useGetKeypair / useSignTransaction)
  * read this object from the provider's resolver-provider context and call:
  *
  *   - `getKeyPairByPublicKey(pub)` — the auth-gated keypair resolution
@@ -18,9 +18,9 @@
 
 import { createClient } from "@stoachain/kadena-stoic-legacy/client";
 import { CodexSigningStrategy } from "@stoachain/stoa-core/signing";
-import { getPactUrl, KADENA_CHAIN_ID } from "@stoachain/stoa-core/constants";
+import { getPactUrl, KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID } from "@stoachain/stoa-core/constants";
 import { setNodeConfig } from "@stoachain/stoa-core/network";
-import type { IKadenaKeypair } from "@stoachain/stoa-core/signing";
+import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
 
 import type { CodexStore } from "../state/index.js";
 import { InternalCodexResolver } from "./InternalCodexResolver.js";
@@ -40,10 +40,10 @@ export interface OuronetSigningStrategyOptions {
 /**
  * The resolver-provider seam object. `getKeyPairByPublicKey` delegates to the
  * per-store InternalCodexResolver (auth gate + factory-backed decrypt);
- * `createSigningStrategy` composes the full Kadena signing cluster.
+ * `createSigningStrategy` composes the full StoaChain signing cluster.
  */
 export interface OuronetResolverProvider {
-  getKeyPairByPublicKey(publicKey: string): Promise<IKadenaKeypair>;
+  getKeyPairByPublicKey(publicKey: string): Promise<IStoaChainKeypair>;
   createSigningStrategy(
     store: CodexStore,
     options: OuronetSigningStrategyOptions
@@ -61,7 +61,7 @@ export function createOuronetResolverProvider(
   const resolver = new InternalCodexResolver(store);
 
   return {
-    getKeyPairByPublicKey(publicKey: string): Promise<IKadenaKeypair> {
+    getKeyPairByPublicKey(publicKey: string): Promise<IStoaChainKeypair> {
       return resolver.getKeyPairByPublicKey(publicKey);
     },
 
@@ -102,7 +102,7 @@ export function createOuronetResolverProvider(
       }
 
       const pactClient =
-        options.clientOverride ?? createClient(getPactUrl(KADENA_CHAIN_ID));
+        options.clientOverride ?? createClient(getPactUrl(STOACHAIN_CHAIN_ID));
       return new CodexSigningStrategy(strategyResolver, pactClient as never);
     },
   };

@@ -1,12 +1,12 @@
 /**
- * E2 RED matrix — the E-04 Kadena-isolation acceptance gate (N-05).
+ * E2 RED matrix — the E-04 StoaChain-isolation acceptance gate (N-05).
  *
- * The Arweave signer/send is a SIBLING of the Kadena signing path — it shares
+ * The Arweave signer/send is a SIBLING of the StoaChain signing path — it shares
  * NOTHING with `InternalCodexResolver` / `CodexSigningStrategy` / `KeyResolver` /
  * `PactClient` / `useSignTransaction`. Two gates prove it:
  *
  *   (a) STATIC IMPORT-SCAN — read `src/signer/**` + `src/adapter/**` file text
- *       and assert NO import references any forbidden Kadena specifier/symbol,
+ *       and assert NO import references any forbidden StoaChain specifier/symbol,
  *       and the signer path imports ONLY arweave-core (+ codex-core types +
  *       `arweave`). SCOPE LIMIT: this lexical scan catches DIRECT imports only —
  *       it does NOT catch a transitive import via a clean-looking re-export. The
@@ -46,7 +46,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..", "src");
 
-/** The forbidden Kadena module specifiers + symbol names the signer/send path
+/** The forbidden StoaChain module specifiers + symbol names the signer/send path
  *  must NEVER reference in an import. */
 const FORBIDDEN_TOKENS = [
   "@stoachain/stoa-core/signing",
@@ -95,13 +95,13 @@ function importLines(source: string): string[] {
     .filter((line) => /^\s*import\b/.test(line) || /\bfrom\s+["']/.test(line));
 }
 
-describe("STATIC import-scan — the signer/adapter/library source is Kadena-free (E-04, N-05)", () => {
+describe("STATIC import-scan — the signer/adapter/library source is StoaChain-free (E-04, N-05)", () => {
   const signerFiles = collectTsFiles(join(SRC, "signer"));
   const adapterFiles = collectTsFiles(join(SRC, "adapter"));
   const libraryFiles = collectTsFiles(join(SRC, "library"));
   const scanned = [...signerFiles, ...adapterFiles, ...libraryFiles];
 
-  it("references NO forbidden Kadena specifier/symbol in any import across src/signer + src/adapter + src/library", () => {
+  it("references NO forbidden StoaChain specifier/symbol in any import across src/signer + src/adapter + src/library", () => {
     for (const file of scanned) {
       const lines = importLines(readFileSync(file, "utf8"));
       const joined = lines.join("\n");
@@ -141,7 +141,7 @@ describe("STATIC import-scan — the signer/adapter/library source is Kadena-fre
   });
 });
 
-describe("RUNTIME negative sentinel — the Kadena resolver is NEVER touched (E-04, authoritative)", () => {
+describe("RUNTIME negative sentinel — the StoaChain resolver is NEVER touched (E-04, authoritative)", () => {
   it("createArweaveAdapter carries NO KeyResolver/SigningStrategy/resolver param (constructible with only { pool })", () => {
     // Constructing with only a pool-shaped dep succeeds — the factory has no
     // resolver/strategy slot. (A resolver param would show up as a required dep.)
@@ -159,13 +159,13 @@ describe("RUNTIME negative sentinel — the Kadena resolver is NEVER touched (E-
     // A sentinel shaped like InternalCodexResolver: any touch is a Critical bug.
     const sentinel = {
       resolvePrivateKey: vi.fn(() => {
-        throw new Error("Kadena resolver was touched");
+        throw new Error("StoaChain resolver was touched");
       }),
       smartDecrypt: vi.fn(() => {
-        throw new Error("Kadena resolver was touched");
+        throw new Error("StoaChain resolver was touched");
       }),
       requestForeignKey: vi.fn(() => {
-        throw new Error("Kadena resolver was touched");
+        throw new Error("StoaChain resolver was touched");
       }),
     };
 

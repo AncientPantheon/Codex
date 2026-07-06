@@ -212,7 +212,7 @@ describe("PG-02 — '1.3'+foreignKeys round-trip through the REAL useCodexBackup
       pureKeypairs?: unknown;
     };
     // The with-Arweave-keys backup carries BOTH keyrings; a rewire that dropped
-    // pureKeypairs while carrying foreignKeys would silently lose the Kadena-side
+    // pureKeypairs while carrying foreignKeys would silently lose the StoaChain-side
     // pure keys. `pureKeypairs` is a BARE array on the wire (distinct from the block).
     expect(reExported.pureKeypairs).toEqual(arweaveBackupPureKeypairs);
   });

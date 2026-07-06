@@ -161,8 +161,8 @@ export function txPending(title: string) {
       const c = ensureStarted();
       c.updateStep(0, 'active', { label: 'Confirming…', requestKey });
       // Start polling — dynamic import to avoid circular deps
-      import('@stoachain/stoa-core/constants').then(({ KADENA_CHAIN_ID }) => {
-        _pollConfirmation(c, requestKey, chainId ?? KADENA_CHAIN_ID);
+      import('@stoachain/stoa-core/constants').then(({ KADENA_CHAIN_ID: STOACHAIN_CHAIN_ID }) => {
+        _pollConfirmation(c, requestKey, chainId ?? STOACHAIN_CHAIN_ID);
       });
     },
     /** Manually mark done (skips polling) */
@@ -179,7 +179,7 @@ export function txPending(title: string) {
   };
 }
 
-/** Poll Kadena /poll endpoint directly (single fetch, no @kadena/client overhead) */
+/** Poll StoaChain /poll endpoint directly (single fetch, no @kadena/client overhead) */
 async function _pollConfirmation(ctrl: ToastController, requestKey: string, chainId: string) {
   const { getPactUrl } = await import('@stoachain/stoa-core/constants');
   const pactUrl = getPactUrl(chainId);

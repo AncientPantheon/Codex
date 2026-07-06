@@ -9,7 +9,7 @@
  * This file is now a THIN binding that:
  *
  *   1. injects the real `@stoachain` crypto primitives into core's
- *      `HeadlessResolverDeps` seam (`smartDecrypt`, `KadenaWalletBuilder`,
+ *      `HeadlessResolverDeps` seam (`smartDecrypt`, `StoaChainWalletBuilder`,
  *      `kadenaDecrypt`, the extended-key repackage, `toHexString`,
  *      `buildCodexPubSet`), and
  *   2. RE-ADDS the browser auth gate core deliberately dropped:
@@ -26,18 +26,18 @@
  *   1. listCodexPubs() — every pubkey the store can produce a private key for.
  *      Cheap (no decryption). Delegated to the factory's `listCodexPubs`.
  *   2. getKeyPairByPublicKey(pub) — resolve one pubkey to a signing-ready
- *      IKadenaKeypair. Auth-gated (throws CodexLockedError if the password cache
+ *      IStoaChainKeypair. Auth-gated (throws CodexLockedError if the password cache
  *      is empty/expired), then delegates decrypt plumbing to the factory.
  *   3. requestForeignKey(pub) — optional modal-driven foreign-key path; stays
  *      resolver-side (a UI concern). Default: throw CodexKeyMissingError.
  */
 
 import type { UseBoundStore, StoreApi } from "zustand";
-import type { KeyResolver, IKadenaKeypair } from "@stoachain/stoa-core/signing";
+import type { KeyResolver, IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
 import { toHexString } from "@stoachain/stoa-core/signing";
 import { buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import { smartDecrypt } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { kadenaDecrypt, kadenaEncrypt } from "@stoachain/kadena-stoic-legacy/hd-wallet";
 import { legacyKadenaChangePassword } from "@stoachain/kadena-stoic-legacy/hd-wallet/chainweaver";
 import { hexToBin } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
@@ -45,10 +45,10 @@ import { hexToBin } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
 import {
   createHeadlessCodexResolver,
   type HeadlessResolverDeps,
-  type ResolvedKadenaKeypair,
-  type KadenaSeedLike,
+  type ResolvedStoaChainKeypair,
+  type StoaChainSeedLike,
   type PureKeypairLike,
-  type KadenaSeedType,
+  type StoaChainSeedType,
 } from "@ancientpantheon/codex-core";
 
 import type { CodexStoreState } from "../state/store.js";
@@ -108,8 +108,8 @@ async function buildExtendedForeignSigningKey(
  */
 const REAL_STOA_DEPS: HeadlessResolverDeps = {
   decryptSecret: (ciphertext, password) => smartDecrypt(ciphertext, password),
-  deriveKadenaKeypair: (password, mnemonic, index, seedType) =>
-    KadenaWalletBuilder.createWalletPairFromMnemonic(
+  deriveStoaChainKeypair: (password, mnemonic, index, seedType) =>
+    StoaChainWalletBuilder.createWalletPairFromMnemonic(
       password,
       mnemonic,
       index,
@@ -150,12 +150,12 @@ export class InternalCodexResolver implements KeyResolver {
   listCodexPubs(): Set<string> {
     const s = this.store.getState();
     return HEADLESS.listCodexPubs({
-      kadenaSeeds: s.kadenaSeeds as unknown as KadenaSeedLike[],
+      kadenaSeeds: s.kadenaSeeds as unknown as StoaChainSeedLike[],
       pureKeypairs: s.pureKeypairs as unknown as PureKeypairLike[],
     });
   }
 
-  async getKeyPairByPublicKey(publicKey: string): Promise<IKadenaKeypair> {
+  async getKeyPairByPublicKey(publicKey: string): Promise<IStoaChainKeypair> {
     const state = this.store.getState();
 
     // Auth gate — the browser wrapper re-adds the unlock ceremony core drops.
@@ -172,11 +172,11 @@ export class InternalCodexResolver implements KeyResolver {
     // the `length === 128` extended-key fork, and the seedType tags all live in
     // core now — this file no longer duplicates them.
     const snapshot = {
-      kadenaSeeds: state.kadenaSeeds as unknown as KadenaSeedLike[],
+      kadenaSeeds: state.kadenaSeeds as unknown as StoaChainSeedLike[],
       pureKeypairs: state.pureKeypairs as unknown as PureKeypairLike[],
     };
 
-    let resolved: ResolvedKadenaKeypair;
+    let resolved: ResolvedStoaChainKeypair;
     try {
       resolved = await HEADLESS.getKeyPairByPublicKey(
         snapshot,
@@ -199,11 +199,11 @@ export class InternalCodexResolver implements KeyResolver {
     }
 
     // Compile-time assignability proof (D4 note item 3 / D5 obligation): the
-    // factory's local structural `ResolvedKadenaKeypair` must be assignable to
-    // the real `@stoachain` `IKadenaKeypair` with no cast. If either shape drifts
+    // factory's local structural `ResolvedStoaChainKeypair` must be assignable to
+    // the real `@stoachain` `IStoaChainKeypair` with no cast. If either shape drifts
     // (a truncated seedType union, a string-coerced encryptedSecretKey) this line
     // fails `tsc` — catching a byte-stability break before it reaches the signer.
-    const asContract: IKadenaKeypair = resolved;
+    const asContract: IStoaChainKeypair = resolved;
     return asContract;
   }
 
@@ -245,4 +245,4 @@ function isCoreKeyMissing(
 
 // Retain the exported binding-site type so downstream tooling / tests can
 // reference the seed-type union the factory consumes without re-declaring it.
-export type { KadenaSeedType };
+export type { StoaChainSeedType };

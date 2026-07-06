@@ -3,7 +3,7 @@ import { migrateSeedType } from "@stoachain/ouronet-core/codex";
 import { CodexAdapterError } from "../errors/types.js";
 import {
   DEFAULT_UI_SETTINGS,
-  type IKadenaSeed,
+  type IStoaChainSeed,
   type IOuroAccount,
   type IPureKeypair,
   type AddressBookEntry,
@@ -51,7 +51,7 @@ import { emptySnapshot } from "./types.js";
  *
  * Encryption note: the `secret` fields on seeds + ouro accounts and the
  * `encryptedPrivateKey` field on pure keypairs are ALREADY encrypted by
- * the hook layer before they reach `saveAll()` / `saveKadenaSeeds()` etc.
+ * the hook layer before they reach `saveAll()` / `saveStoaChainSeeds()` etc.
  * This adapter does not encrypt or decrypt those — it only persists bytes.
  * The `loadUiSettingsEncrypted` / `saveUiSettingsEncrypted` pair is the
  * one exception: it owns the encrypt + decrypt of the UI-settings sidecar
@@ -78,7 +78,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
   public async loadAll(): Promise<CodexSnapshot> {
     this.assertBrowser("loadAll");
     try {
-      const kadenaSeeds = this.loadKadenaSeedsWithMigration();
+      const kadenaSeeds = this.loadStoaChainSeedsWithMigration();
       const ouroAccounts = this.parseArray<IOuroAccount>("ouronetWallets");
       const pureKeypairs = this.parseArray<IPureKeypair>("pureKeypairs");
       const addressBook = this.loadAddressBookWithLegacyFallback();
@@ -147,12 +147,12 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
 
   // ----- per-entity convenience writes -----
 
-  public async saveKadenaSeeds(seeds: IKadenaSeed[]): Promise<void> {
-    this.assertBrowser("saveKadenaSeeds");
+  public async saveStoaChainSeeds(seeds: IStoaChainSeed[]): Promise<void> {
+    this.assertBrowser("saveStoaChainSeeds");
     try {
       window.localStorage.setItem("wallets", JSON.stringify(seeds));
     } catch (e) {
-      throw new CodexAdapterError(this.name, "saveKadenaSeeds", e);
+      throw new CodexAdapterError(this.name, "saveStoaChainSeeds", e);
     }
   }
 
@@ -360,7 +360,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
    *  OuronetUI's pre-v0.1.0 behaviour. If any migration was applied, we
    *  write back the migrated seeds so subsequent loads are clean.
    */
-  private loadKadenaSeedsWithMigration(): IKadenaSeed[] {
+  private loadStoaChainSeedsWithMigration(): IStoaChainSeed[] {
     const raw = window.localStorage.getItem("wallets");
     if (!raw) return [];
     let parsed: unknown[];
@@ -372,16 +372,16 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
     }
     let migratedAny = false;
     const seeds = parsed.map((w) => {
-      const wallet = w as IKadenaSeed & { seedType: string };
+      const wallet = w as IStoaChainSeed & { seedType: string };
       const before = wallet.seedType;
-      let after: IKadenaSeed["seedType"];
+      let after: IStoaChainSeed["seedType"];
       try {
-        after = migrateSeedType(before) as IKadenaSeed["seedType"];
+        after = migrateSeedType(before) as IStoaChainSeed["seedType"];
       } catch {
         after = "koala";
       }
       if (before !== after) migratedAny = true;
-      return { ...wallet, seedType: after } as IKadenaSeed;
+      return { ...wallet, seedType: after } as IStoaChainSeed;
     });
     if (migratedAny) {
       try {

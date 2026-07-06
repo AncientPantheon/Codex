@@ -30,7 +30,7 @@ import { validateAddress, registerChainAddressValidator } from "@ancientpantheon
 import type { AddressBookEntry } from "@ancientpantheon/codex-ouronet/types";
 
 const ARWEAVE_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
-const KADENA_CHAIN_ID = "kadena:mainnet";
+const STOACHAIN_CHAIN_ID = "kadena:mainnet";
 
 /** Register a real Arweave validator once so the paste-validation path exercises
  *  the actual `validateAddress(ARWEAVE_CHAIN_ID, ...)` D5 seam. */
@@ -41,11 +41,11 @@ beforeEach(() => {
   registerChainAddressValidator(ARWEAVE_CHAIN_ID, (addr) => /^[A-Za-z0-9_-]{43}$/.test(addr));
 });
 
-/** A book with one Arweave + one Kadena contact — only the Arweave one is offerable. */
+/** A book with one Arweave + one StoaChain contact — only the Arweave one is offerable. */
 function makeBook(): AddressBookEntry[] {
   return [
     { id: "ab-1", name: "Alice (AR)", address: ARWEAVE_ADDRESS, type: "stoa", chainId: ARWEAVE_CHAIN_ID },
-    { id: "ab-2", name: "Bob (KDA)", address: "k:abcdef", type: "stoa", chainId: KADENA_CHAIN_ID },
+    { id: "ab-2", name: "Bob (KDA)", address: "k:abcdef", type: "stoa", chainId: STOACHAIN_CHAIN_ID },
   ];
 }
 
@@ -101,7 +101,7 @@ describe("SendArea — recipient from the book (Arweave-only)", () => {
     render(<SendArea {...makeProps()} />);
     const picker = screen.getByTestId("send-book-picker");
     expect(within(picker).getByText("Alice (AR)")).toBeInTheDocument();
-    // The Kadena contact is filtered out — never offered as an Arweave recipient.
+    // The StoaChain contact is filtered out — never offered as an Arweave recipient.
     expect(within(picker).queryByText("Bob (KDA)")).not.toBeInTheDocument();
   });
 

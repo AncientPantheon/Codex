@@ -5,7 +5,7 @@
  * repos with NO cross-org runtime edge: codex-core owns the canonical codec, and
  * ouronet-core keeps an independent peer. The safety of that no-edge decision
  * rests on one invariant — the two writers emit BYTE-IDENTICAL wire output for the
- * same Kadena-only codex (modulo the `exportedAt` timestamp each stamps live).
+ * same StoaChain-only codex (modulo the `exportedAt` timestamp each stamps live).
  *
  * ouronet-core cannot be imported here (different repo, no cross-org dependency),
  * so its expected output is encoded as a FIXTURE STRING and codex-core's normalized
@@ -38,7 +38,7 @@ import {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-// A Kadena-only PlaintextCodex with NO foreign keys — the shared cross-writer
+// A StoaChain-only PlaintextCodex with NO foreign keys — the shared cross-writer
 // fixture. Both codex-core and ouronet-core writers must emit the identical 1.3
 // envelope for this (each writer wraps the same four collections + uiSettings and
 // omits foreignKeys). Field values are chosen to be exactly what BOTH writers
@@ -81,7 +81,7 @@ function stripExportedAt(json: string): string {
   return JSON.stringify(obj);
 }
 
-// ouronet-core's EXPECTED empty-1.3 output for the Kadena-only fixture, encoded as
+// ouronet-core's EXPECTED empty-1.3 output for the StoaChain-only fixture, encoded as
 // a fixture string (its writer omits foreignKeys, stamps "1.3", and carries the
 // exact same field set as codex-core: version, exportedAt, kadenaWallets,
 // ouronetWallets, addressBook, uiSettings). This mirrors ouronet-core's
@@ -161,7 +161,7 @@ describe("(a) CROSS-PARSE — codex-core deserializes both self-written and ouro
 
 describe("(b) BYTE-IDENTITY — the two writers emit identical empty-1.3 wire (modulo exportedAt)", () => {
   it("codex-core's normalized empty-1.3 output equals ouronet-core's expected empty-1.3 fixture", () => {
-    // The load-bearing invariant: for the SAME Kadena-only codex, the two writers'
+    // The load-bearing invariant: for the SAME StoaChain-only codex, the two writers'
     // serialize output is byte-identical once the live exportedAt is stripped. If
     // this drifts, the two deliberately-duplicated envelopes have diverged and the
     // no-cross-org-edge decision is no longer safe.

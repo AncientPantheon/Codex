@@ -3,10 +3,10 @@
  *
  * The package-owned half of the "first codex creation" flow. Consumers
  * derive keypairs upstream (DALOS via stoa-core for the prime ouro,
- * KadenaWalletBuilder for the prime kadena seed), then call
+ * StoaChainWalletBuilder for the prime kadena seed), then call
  * `kickstart(args)` to atomically install both as the codex's prime
  * pair. The package handles isPrime flagging, parentSeedId linkage,
- * activeKadenaWalletId / activeOuroAccountId selection, and persistence.
+ * activeStoaChainWalletId / activeOuroAccountId selection, and persistence.
  *
  * Usage (OuronetUI / AncientHoldings):
  *
@@ -15,7 +15,7 @@
  *     seed: { id, name, secret, main, accounts, ... },          // pre-formed
  *     primeOuroAccount: { id, address, secret, backup, ... },   // pre-derived
  *   });
- *   // Codex now has exactly one IKadenaSeed (isPrime: true) and one
+ *   // Codex now has exactly one IStoaChainSeed (isPrime: true) and one
  *   // IOuroAccount (isPrime: true, parentSeedId: seed.id). Both
  *   // structurally undeletable.
  *

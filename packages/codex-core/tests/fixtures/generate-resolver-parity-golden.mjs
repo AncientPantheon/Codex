@@ -36,7 +36,7 @@
  * THE SEAM SCHEME (why this is deterministic-fake, not real WASM)
  * ---------------------------------------------------------------------------
  * codex-core is `@stoachain`-free (D3/D7). This generator therefore does NOT
- * import the real `smartDecrypt` / `KadenaWalletBuilder` / `kadenaDecrypt` /
+ * import the real `smartDecrypt` / `StoaChainWalletBuilder` / `kadenaDecrypt` /
  * `buildExtendedForeignSigningKey`. Instead it models each seam touchpoint's
  * INPUT→OUTPUT *contract* — the exact shape/branch the real primitive feeds the
  * resolver algorithm — with a deterministic fake. The parity proof is
@@ -54,7 +54,7 @@
  * value (bug F-002). It is pinned verbatim below.
  *
  * PINNED @stoachain VERSIONS D5 WILL BIND (the algorithm this golden matches):
- *   @stoachain/stoa-core            4.3.6   (smartDecrypt, KadenaWalletBuilder,
+ *   @stoachain/stoa-core            4.3.6   (smartDecrypt, StoaChainWalletBuilder,
  *                                            toHexString, buildCodexPubSet)
  *   @stoachain/kadena-stoic-legacy  4.3.6   (kadenaDecrypt, kadenaEncrypt,
  *                                            legacyKadenaChangePassword)
@@ -109,9 +109,9 @@ const PURE_EXTENDED_PUB =
 const DERIVED_SEED_PUB =
   "d00d0000111122223333444455556666777788889999aaaabbbbccccddddeee2";
 
-// The derived keypair's re-derived pub (KadenaWalletBuilder returns this).
+// The derived keypair's re-derived pub (StoaChainWalletBuilder returns this).
 const DERIVED_REDERIVED_PUB = DERIVED_SEED_PUB;
-// The opaque wallet secret KadenaWalletBuilder returns as `secretKey`.
+// The opaque wallet secret StoaChainWalletBuilder returns as `secretKey`.
 const DERIVED_ENCRYPTED_SECRET = {
   __kind: "throwaway-encrypted-string",
   of: "koala-seed-derived",
@@ -158,7 +158,7 @@ function resolveGolden(snapshot, publicKey, password, seam) {
     const account = (seed.accounts ?? []).find((a) => a.publicKey === publicKey);
     if (!account) continue;
     const mnemonic = seam.decryptSecret(seed.secret, password);
-    const { publicKey: pub, secretKey: encryptedSecretKey } = seam.deriveKadenaKeypair(
+    const { publicKey: pub, secretKey: encryptedSecretKey } = seam.deriveStoaChainKeypair(
       password,
       mnemonic,
       account.index,
@@ -191,7 +191,7 @@ const seam = {
   buildExtendedForeignKey() {
     return { encryptedSecretKey: EXTENDED_ENCRYPTED_SECRET, password: EXTENDED_FOREIGN_SCRAMBLE_PW };
   },
-  deriveKadenaKeypair(_pw, _mnemonic, index) {
+  deriveStoaChainKeypair(_pw, _mnemonic, index) {
     // index 0 → the 64-hex koala case; index 1 → the >64 truncation case.
     if (index === 1) return { publicKey: DERIVED_TRUNC_SEED_PUB, secretKey: { __kind: "trunc", of: "long" } };
     return { publicKey: DERIVED_REDERIVED_PUB, secretKey: DERIVED_ENCRYPTED_SECRET };

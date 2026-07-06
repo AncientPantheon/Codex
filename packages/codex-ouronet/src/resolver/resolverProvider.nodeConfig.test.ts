@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   getActivePactUrl,
   resetNodeFailover,
-  KADENA_CHAIN_ID,
+  STOACHAIN_CHAIN_ID,
 } from "../connection/stoaNetwork.js";
 import { createOuronetResolverProvider } from "./resolverProvider.js";
 import { createCodexStore } from "@ancientpantheon/codex-ouronet/state";
@@ -40,7 +40,7 @@ describe("createSigningStrategy — node-config application", () => {
 
     // The Accounts-tab reads resolve their URL from stoa-core's global active
     // host; applying 'custom' must move that global onto the user's origin.
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("custom-node.example.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("custom-node.example.com");
   });
 
   it("moves the read path to node1's host when selectedNode is 'node1'", () => {
@@ -49,7 +49,7 @@ describe("createSigningStrategy — node-config application", () => {
 
     provider.createSigningStrategy(store, { selectedNode: "node1" });
 
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node1.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node1.stoachain.com");
   });
 
   it("keeps the read path on node2 for the default selection (behaviour identical)", () => {
@@ -60,7 +60,7 @@ describe("createSigningStrategy — node-config application", () => {
     // nothing) must leave the read URL exactly where it was.
     provider.createSigningStrategy(store, { selectedNode: "node2" });
 
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node2.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node2.stoachain.com");
   });
 
   it("does not throw (and stays on node2) when 'custom' is selected with an empty URL", () => {
@@ -78,7 +78,7 @@ describe("createSigningStrategy — node-config application", () => {
         customNodeUrl: "",
       }),
     ).not.toThrow();
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node2.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node2.stoachain.com");
   });
 
   it("leaves the global untouched when no selectedNode is supplied (no dead-param regression)", () => {
@@ -90,6 +90,6 @@ describe("createSigningStrategy — node-config application", () => {
     // Omitting selectedNode entirely must not throw and must keep the default
     // node2 host — the seam stays backward-compatible with callers that never
     // forwarded the node fields.
-    expect(getActivePactUrl(KADENA_CHAIN_ID)).toContain("node2.stoachain.com");
+    expect(getActivePactUrl(STOACHAIN_CHAIN_ID)).toContain("node2.stoachain.com");
   });
 });

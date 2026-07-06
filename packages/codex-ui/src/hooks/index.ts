@@ -6,16 +6,16 @@
 //
 // The ~14 generic hooks read the store via useCodexStore() (codex-ui's provider
 // context — the store is INJECTED by codex-ouronet through the `createStore`
-// seam). The two Kadena-bound hooks (useGetKeypair / useSignTransaction) consume
+// seam). The two StoaChain-bound hooks (useGetKeypair / useSignTransaction) consume
 // the INJECTED resolver-provider seam (`seams.ts`) — no value @stoachain edge.
 //
 // Inventory (per spec §5.2 + Phase 5 useWatchList addition):
 //   - useCodex()             high-level Codex state + actions
 //   - useActiveWallet()      active kadena/ouro wallet + switch
-//   - useGetKeypair()        pubkey → IKadenaKeypair (throws CodexKeyMissingError)
+//   - useGetKeypair()        pubkey → IStoaChainKeypair (throws CodexKeyMissingError)
 //   - useSignTransaction()   CFM strategy wrapper (replaces useCFMStrategy)
 //   - useCodexAuth()         password prompts, lock/unlock
-//   - useKadenaSeeds()       CRUD
+//   - useStoaChainSeeds()       CRUD
 //   - usePureKeypairs()      CRUD
 //   - useOuroAccounts()      CRUD (CodexPrime is protected)
 //   - useAddressBook()       CRUD
@@ -48,8 +48,8 @@ export type {
   UseSignTransactionOptions,
 } from "./useSignTransaction.js";
 
-export { useKadenaSeeds } from "./useKadenaSeeds.js";
-export type { KadenaSeedsView } from "./useKadenaSeeds.js";
+export { useStoaChainSeeds } from "./useStoaChainSeeds.js";
+export type { StoaChainSeedsView } from "./useStoaChainSeeds.js";
 
 export { usePureKeypairs } from "./usePureKeypairs.js";
 export type { PureKeypairsView } from "./usePureKeypairs.js";
@@ -78,7 +78,7 @@ export type { CodexGuardView } from "./useCodexGuard.js";
 export { useConsumerSettings } from "./useConsumerSettings.js";
 export type { ConsumerSettingsView } from "./useConsumerSettings.js";
 
-// The injected resolver-provider seam type the two Kadena-bound hooks consume.
+// The injected resolver-provider seam type the two StoaChain-bound hooks consume.
 // Type-only — no runtime value is added to the barrel (the D-11 surface lock
 // pins the /hooks runtime exports to EXACTLY the 16 hook functions).
 export type {

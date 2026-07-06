@@ -15,7 +15,7 @@ import type {
   ICodexIdentity,
   IPureKeypair,
   IOuroAccount,
-  IKadenaSeed,
+  IStoaChainSeed,
 } from "../types/entities.js";
 import { CodexKickstartError } from "../errors/types.js";
 
@@ -73,13 +73,13 @@ export interface KickstartResultV3 {
   /** The CodexPrime Standard Ouronet account (`isPrime: true`). */
   codexPrime: IOuroAccount;
   /** Present iff `duoPrime.mode === "kadena-seed"`. */
-  primeCodexSeed?: IKadenaSeed;
+  primeCodexSeed?: IStoaChainSeed;
   /** Present iff `duoPrime.mode === "auto-pure-keys"` — the two pure keypairs
    *  backing CodexPrime (`isDuoPurePrime: true`, payment + guard roles). */
   duoPurePrime?: [IPureKeypair, IPureKeypair];
   /** Present iff `codexPrimeSeed.source === "fresh-dalos"` — the fresh DALOS
    *  seed generated for CodexPrime, persisted non-prime for future recovery. */
-  primeOuroAccountSeed?: IKadenaSeed;
+  primeOuroAccountSeed?: IStoaChainSeed;
 }
 
 const SEED_MODES: ReadonlySet<string> = new Set<CodexIdSeedMode>([

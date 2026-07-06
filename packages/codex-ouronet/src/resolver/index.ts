@@ -12,4 +12,4 @@
 
 export { InternalCodexResolver } from "./InternalCodexResolver.js";
 export type { InternalCodexResolverOptions } from "./InternalCodexResolver.js";
-export type { KeyResolver, IKadenaKeypair } from "@stoachain/stoa-core/signing";
+export type { KeyResolver, IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";

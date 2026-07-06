@@ -21,20 +21,20 @@ import { useGetKeypair } from "../../hooks/index.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { txPending } from "../toast/toastManager.js";
 import { Tag, Loader2, AlertTriangle, Trash2 } from "lucide-react";
-import { getIgnisBalance, getKadenaAccountGuard } from "../debouncer/monitoredReads.js";
+import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { getWrapperPaymentKey, getPaymentKeyBalance } from "@stoachain/ouronet-core/interactions/wrapFunctions";
 import { getRegisterStoicTagInfo } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
-import { KADENA_CHAIN_ID, KADENA_NETWORK } from "@stoachain/stoa-core/constants";
+import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
 import { buildRegisterStoicTagPactCode } from "@stoachain/ouronet-core/pact";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { classifyPaymentKey, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
-import type { IKadenaKeypair } from "@stoachain/stoa-core/signing";
-import type { IOuroAccount, IKadenaSeed, IKadenaWallet } from "../../types/entities.js";
+import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
+import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
 import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { PatronZonePattern2 } from "../cfm/PatronSpend.js";
@@ -62,8 +62,8 @@ interface Props {
   /** The account the StoicTag is being applied to. */
   account: IOuroAccount;
   accounts: IOuroAccount[];
-  kadenaSeeds: IKadenaSeed[];
-  kadenaAccounts: IKadenaWallet[];
+  kadenaSeeds: IStoaChainSeed[];
+  stoaChainAccounts: IStoaChainWallet[];
 }
 
 export default function RegisterStoicTagModal({
@@ -72,9 +72,9 @@ export default function RegisterStoicTagModal({
   account,
   accounts,
   kadenaSeeds,
-  kadenaAccounts,
+  stoaChainAccounts,
 }: Props) {
-  const getKadenaKeyPairsByPublicKey = useGetKeypair();
+  const getStoaChainKeyPairsByPublicKey = useGetKeypair();
   const { execute } = useSignTransaction();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
   const { initialPatronMode, autoSelectBestPatron } = usePatronSelectionDefaults();
@@ -100,7 +100,7 @@ export default function RegisterStoicTagModal({
   const [isProcessing, setIsProcessing] = useState(false);
 
   // ── Resolved account guard (for AuthPathZone — Smart accounts only).
-  //    account.guard is an UNRESOLVED keyset-ref object; getKadenaAccountGuard
+  //    account.guard is an UNRESOLVED keyset-ref object; getStoaChainAccountGuard
   //    resolves it to a plain keyset so the Account-Guard branch classifies as
   //    key-based instead of "ZBOM cannot". ──
   const [resolvedAccountGuard, setResolvedAccountGuard] = useState<unknown>(null);
@@ -168,7 +168,7 @@ export default function RegisterStoicTagModal({
   }, [open, patronAccount?.address, tagName, account.address]);
 
   // ── Account guard resolution — the stored account.guard is an UNRESOLVED
-  //    keyset-ref object, which classifies as non-key-based. getKadenaAccountGuard
+  //    keyset-ref object, which classifies as non-key-based. getStoaChainAccountGuard
   //    resolves it to a plain keyset so the Account-Guard branch is signable.
   //    Standard accounts don't use AuthPathZone, so leave inert. ──
   useEffect(() => {
@@ -180,7 +180,7 @@ export default function RegisterStoicTagModal({
       return;
     }
     let aborted = false;
-    getKadenaAccountGuard(account.address)
+    getStoaChainAccountGuard(account.address)
       .then((g) => { if (!aborted) setResolvedAccountGuard(g); })
       .catch(() => { if (!aborted) setResolvedAccountGuard(null); })
       .finally(() => { if (!aborted) setAccountGuardLoaded(true); });
@@ -209,7 +209,7 @@ export default function RegisterStoicTagModal({
       return;
     }
     let aborted = false;
-    getKadenaAccountGuard(sov)
+    getStoaChainAccountGuard(sov)
       .then((g) => { if (!aborted) setSovereignGuard(g); })
       .catch(() => { if (!aborted) setSovereignGuard(null); })
       .finally(() => { if (!aborted) setSovereignLoaded(true); });
@@ -253,7 +253,7 @@ export default function RegisterStoicTagModal({
   const insufficientIgnis = ignisCost > 0 && (patronIgnisBalance ?? 0) < ignisCost;
 
   // ── Payment key readiness ──
-  const codexPubs = useMemo(() => buildCodexPubSet(kadenaSeeds, kadenaAccounts), [kadenaSeeds, kadenaAccounts]);
+  const codexPubs = useMemo(() => buildCodexPubSet(kadenaSeeds, stoaChainAccounts), [kadenaSeeds, stoaChainAccounts]);
   const paymentKeyInfo = useMemo(() => classifyPaymentKey(paymentKeyAddr), [paymentKeyAddr]);
   const paymentPubKey = paymentKeyInfo?.pubkey ?? "";
   const paymentKeyIsK = paymentKeyInfo?.type === "k-account";
@@ -319,12 +319,12 @@ export default function RegisterStoicTagModal({
 
       // Pre-resolve the patron's payment key — strategy treats it as the
       // coin.TRANSFER spender (extraSigner), not a guard key.
-      const raw = await getKadenaKeyPairsByPublicKey(paymentPubKey).catch(async () => {
+      const raw = await getStoaChainKeyPairsByPublicKey(paymentPubKey).catch(async () => {
         const priv = resolvedManualKeys[paymentPubKey];
         return priv ? { publicKey: paymentPubKey, privateKey: priv } : null;
       });
       if (!raw) throw new Error("Payment key not found in Codex");
-      const paymentKP: IKadenaKeypair = {
+      const paymentKP: IStoaChainKeypair = {
         publicKey:          raw.publicKey,
         privateKey:         raw.privateKey,
         seedType:           (raw as any).seedType,
@@ -349,12 +349,12 @@ export default function RegisterStoicTagModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime:  safeCreationTime(),
-              chainId:       KADENA_CHAIN_ID,
+              chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK)
+            .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
-              w(`${KADENA_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
+              w(`${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),
             ])
             // Patron's payment key: one coin.TRANSFER per protocol split receiver
             // (amounts are the on-chain, discount-applied kadena-split).
@@ -563,9 +563,9 @@ export default function RegisterStoicTagModal({
                 }]
               : undefined
           }
-          kadenaNeed={stoaCost}
-          kadenaReceivers={receivers}
-          kadenaAmounts={amounts.map((a) => String(mayComeWithDeimal(a)))}
+          stoaChainNeed={stoaCost}
+          stoaChainReceivers={receivers}
+          stoaChainAmounts={amounts.map((a) => String(mayComeWithDeimal(a)))}
         />
       </ZbomLayout>
     </ZbomModalFrame>

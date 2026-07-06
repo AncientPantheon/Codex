@@ -17,7 +17,7 @@ export interface CodexInfoRenderArgs {
   isReady: boolean;
   isLocked: boolean;
   isDirty: boolean;
-  kadenaSeedsCount: number;
+  stoaChainSeedsCount: number;
   ouroAccountsCount: number;
   pureKeypairsCount: number;
   addressBookCount: number;
@@ -42,7 +42,7 @@ export function CodexInfoPanel({
     isReady: codex.isReady,
     isLocked: codex.isLocked,
     isDirty: codex.isDirty,
-    kadenaSeedsCount: codex.kadenaSeeds.length,
+    stoaChainSeedsCount: codex.kadenaSeeds.length,
     ouroAccountsCount: codex.ouroAccounts.length,
     pureKeypairsCount: codex.pureKeypairs.length,
     addressBookCount: codex.addressBook.length,
@@ -64,8 +64,8 @@ export function CodexInfoPanel({
         {args.isLocked ? " · Locked" : " · Unlocked"}
         {args.isDirty ? " · Unsaved" : ""}
       </dd>
-      <dt>Kadena seeds</dt>
-      <dd>{args.kadenaSeedsCount}</dd>
+      <dt>StoaChain seeds</dt>
+      <dd>{args.stoaChainSeedsCount}</dd>
       <dt>Ouro accounts</dt>
       <dd>{args.ouroAccountsCount}</dd>
       <dt>Pure keypairs</dt>

@@ -13,7 +13,7 @@
  * NOT `opts.apiFactory` (that is the SEND seam). Rotation is inherited from the
  * pool's `execute`; there is no custom retry here.
  *
- * ISOLATION: this file imports ONLY arweave-core — no Kadena resolver/strategy.
+ * ISOLATION: this file imports ONLY arweave-core — no StoaChain resolver/strategy.
  */
 
 import {

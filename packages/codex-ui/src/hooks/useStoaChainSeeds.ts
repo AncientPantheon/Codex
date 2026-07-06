@@ -1,5 +1,5 @@
 /**
- * useKadenaSeeds — CRUD over the codex's kadena seeds.
+ * useStoaChainSeeds — CRUD over the codex's kadena seeds.
  *
  * Per-entity hook so components mutating one seed only re-render on
  * seeds-array changes (not the whole codex). Actions are the store
@@ -8,24 +8,24 @@
  */
 
 import { useCodexStore } from "../provider/index.js";
-import type { IKadenaSeed } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
 
-export interface KadenaSeedsView {
-  seeds: IKadenaSeed[];
-  addSeed: (seed: IKadenaSeed) => Promise<void>;
-  updateSeed: (seed: IKadenaSeed) => Promise<void>;
+export interface StoaChainSeedsView {
+  seeds: IStoaChainSeed[];
+  addSeed: (seed: IStoaChainSeed) => Promise<void>;
+  updateSeed: (seed: IStoaChainSeed) => Promise<void>;
   deleteSeed: (id: string) => Promise<void>;
 }
 
-export function useKadenaSeeds(): KadenaSeedsView {
+export function useStoaChainSeeds(): StoaChainSeedsView {
   const store = useCodexStore();
   const seeds = store((s) => s.kadenaSeeds);
   const actions = store((s) => s.actions);
 
   return {
     seeds,
-    addSeed: actions.addKadenaSeed,
-    updateSeed: actions.updateKadenaSeed,
-    deleteSeed: actions.deleteKadenaSeed,
+    addSeed: actions.addStoaChainSeed,
+    updateSeed: actions.updateStoaChainSeed,
+    deleteSeed: actions.deleteStoaChainSeed,
   };
 }

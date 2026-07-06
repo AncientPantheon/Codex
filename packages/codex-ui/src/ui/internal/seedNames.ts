@@ -8,11 +8,11 @@
  * historical "Initial Seed" name from older codices.
  */
 
-import type { IKadenaSeed } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
 
 export function getSeedDisplayName(
-  seed: IKadenaSeed,
-  seedIndexOrSeeds: number | IKadenaSeed[],
+  seed: IStoaChainSeed,
+  seedIndexOrSeeds: number | IStoaChainSeed[],
 ): string {
   const idx = Array.isArray(seedIndexOrSeeds)
     ? seedIndexOrSeeds.indexOf(seed)
@@ -29,7 +29,7 @@ export function getSeedDisplayName(
  * sortSeeds — prime seed first, the rest alphabetically by display name.
  * Returns a new array; does not mutate the input.
  */
-export function sortSeeds(seeds: IKadenaSeed[]): IKadenaSeed[] {
+export function sortSeeds(seeds: IStoaChainSeed[]): IStoaChainSeed[] {
   if (seeds.length <= 1) return seeds;
   const primeIdx = seeds.findIndex((s, i) => s.isPrime || i === 0 || s.name === "Initial Seed");
   const prime = seeds[primeIdx >= 0 ? primeIdx : 0];

@@ -1,7 +1,7 @@
 /**
  * useForeignKeys — CRUD over the seedless foreign-chain keyring (E-02).
  *
- * Foreign keys are non-Kadena chain keys (the first being Arweave JWKs) stored
+ * Foreign keys are non-StoaChain chain keys (the first being Arweave JWKs) stored
  * as an INDEPENDENTLY-encrypted `encryptedKeyfile` ciphertext at rest (N-07).
  * This hook exposes the `foreignKeys` slice state + its CRUD actions; the
  * Arweave-specific generate/import/decrypt logic (which produces the

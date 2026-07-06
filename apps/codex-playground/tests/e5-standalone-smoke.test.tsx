@@ -106,7 +106,7 @@ describe("PG-03 standalone — the NO-CLOUD boundary (N-11): uploaded-JSON + loc
   it("composes the codex against the LOCAL MemoryCodexAdapter only — no cloud adapter / cloud login / remote-storage persistence surface", () => {
     // N-11 boundary: the standalone shell persists the codex via uploaded-JSON +
     // a LOCAL in-memory adapter, NOT a cloud persistence surface. This asserts the
-    // codex-STORE persistence path (distinct from the Kadena chain-read the shipped
+    // codex-STORE persistence path (distinct from the StoaChain chain-read the shipped
     // dashboard legitimately issues — the N-11 fence is about codex persistence,
     // not chain RPC). A regression re-introducing a cloud/remote persistence
     // adapter or a cloud-login surface is caught here at the wiring boundary.

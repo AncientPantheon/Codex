@@ -120,7 +120,7 @@ export interface AuthPathZoneProps {
   accountGuard: unknown;
   /**
    * Sovereign account's guard. Resolve via
-   * `getKadenaAccountGuard(account.sovereign)` at modal mount; pass
+   * `getStoaChainAccountGuard(account.sovereign)` at modal mount; pass
    * `undefined` while the fetch is in flight (the zone shows a loading
    * row instead of "unknown").
    */
@@ -142,7 +142,7 @@ export function AuthPathZone({
   sovereignLoaded,
   onChange,
 }: AuthPathZoneProps) {
-  const { kadena: kadenaSeeds, kadenaAccounts } = useWallet();
+  const { kadena: kadenaSeeds, stoaChainAccounts } = useWallet();
   const [resolvedManualKeys, setResolvedManualKeys] = useState<Record<string, string>>({});
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
 
@@ -152,8 +152,8 @@ export function AuthPathZone({
 
   // ── Pull the codex public-key set ───────────────────────────────────────────
   const codexPubs = useMemo(
-    () => buildCodexPubSet(kadenaSeeds, kadenaAccounts),
-    [kadenaSeeds, kadenaAccounts],
+    () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
+    [kadenaSeeds, stoaChainAccounts],
   );
 
   // ── Analyse the auth branches via core's primitive ──────────────────────────

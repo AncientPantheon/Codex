@@ -20,12 +20,12 @@ import * as React from "react";
 import { useCallback, useState } from "react";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
-  KADENA_CHAIN_ID,
-  KADENA_NETWORK,
+  KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID,
+  KADENA_NETWORK as STOACHAIN_NETWORK,
 } from "@stoachain/stoa-core/constants";
 import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import {
-  KADENA_NAMESPACE,
+  KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@stoachain/ouronet-core/constants";
 import { buildRotateSovereignPactCode } from "@stoachain/ouronet-core/pact";
@@ -146,13 +146,13 @@ export function RotateSovereignModal({
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
               creationTime: safeCreationTime(),
-              chainId: KADENA_CHAIN_ID,
+              chainId: STOACHAIN_CHAIN_ID,
               gasLimit,
             })
-            .setNetworkId(KADENA_NETWORK)
+            .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
               w(
-                `${KADENA_NAMESPACE}.DALOS.GAS_PAYER`,
+                `${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`,
                 "",
                 { int: 0 },
                 { decimal: "0.0" }

@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 
 import { useOuroAccounts } from "../../hooks/index.js";
-import { useKadenaSeeds } from "../../hooks/index.js";
+import { useStoaChainSeeds } from "../../hooks/index.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
 import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
@@ -56,7 +56,7 @@ import RotateSovereignModal from "../../zbom/modals/RotateSovereignModal.js";
 import RotateGovernorModal from "../../zbom/modals/RotateGovernorModal.js";
 import ActivateStandardAccountModal from "../../zbom/modals/ActivateStandardAccountModal.js";
 import ActivateSmartAccountModal from "../../zbom/modals/ActivateSmartAccountModal.js";
-import { flattenKadenaAccounts } from "../../zbom/cfm/seam.js";
+import { flattenStoaChainAccounts } from "../../zbom/cfm/seam.js";
 import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconRenameBtnRect } from "../internal/IconButtons.js";
 import { OuronetAddressHighlight } from "../internal/OuronetAddressHighlight.js";
 import { GuardTree } from "../internal/GuardTree.js";
@@ -67,7 +67,7 @@ import { MONO, GoldenBtn, VioletBtn, GreenBtn, pillStyle, sectionBox, sectionLab
 import { ViewSeedModal } from "../internal/ViewSeedModal.js";
 import { SpawnAccountModal } from "../internal/SpawnAccountModal.js";
 import type { AccountSelectorData } from "@stoachain/ouronet-core/interactions/ouroTypes";
-import type { IOuroAccount, IKadenaSeed, IPureKeypair, IKadenaWallet } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IStoaChainWallet } from "../../types/entities.js";
 
 /** Overlay live URC_0027 chain state onto a codex account for display. The
  *  codex store stays the at-rest source of truth; chain fields win when present. */
@@ -81,7 +81,7 @@ function hydrate(account: IOuroAccount, d?: AccountSelectorData): IOuroAccount {
     ...account,
     isActive: d["iz-activated"],
     guard: accountGuard && accountGuard !== false ? accountGuard : account.guard,
-    kadenaLedger: d["payment-key-existance"] ? d["payment-key"] : account.kadenaLedger,
+    stoaChainLedger: d["payment-key-existance"] ? d["payment-key"] : account.stoaChainLedger,
     paymentKeyGuard: pkGuard !== false && pkGuard != null ? pkGuard : account.paymentKeyGuard,
     chainPublicKey: d["public-key"] || account.chainPublicKey,
     sovereign: sovereign !== false ? (sovereign as string) : account.sovereign,
@@ -188,14 +188,14 @@ function PrimeSeparator({ label }: { label: string }) {
 }
 
 function AccountRow({
-  account, index, seeds, pureKeypairs, accounts, kadenaAccounts, forceExpanded, paymentBalance, primeName,
+  account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, primeName,
 }: {
   account: IOuroAccount;
   index: number;
-  seeds: IKadenaSeed[];
+  seeds: IStoaChainSeed[];
   pureKeypairs: IPureKeypair[];
   accounts: IOuroAccount[];
-  kadenaAccounts: IKadenaWallet[];
+  stoaChainAccounts: IStoaChainWallet[];
   forceExpanded: boolean;
   paymentBalance: string | number | null;
   /** When set, this account is a prime CodexID half — shown with this name
@@ -229,8 +229,8 @@ function AccountRow({
   const guardKeyCount = account.guard?.keys?.length ?? 0;
   const isActivated = account.isActive === true;
 
-  const paymentSource = account.kadenaLedger
-    ? identifyKeySource(account.kadenaLedger, seeds, pureKeypairs)
+  const paymentSource = account.stoaChainLedger
+    ? identifyKeySource(account.stoaChainLedger, seeds, pureKeypairs)
     : { label: "", color: "#888" };
 
   const rowBorderColor = isApollo ? apolloAccent + "55" : isFirst ? "#ceac5f40" : isActivated ? "#262626" : "#8b1a1a50";
@@ -303,7 +303,7 @@ function AccountRow({
           </div>
 
           {/* Payment Key + guard */}
-          {isActivated && account.kadenaLedger && (
+          {isActivated && account.stoaChainLedger && (
             <div style={sectionBox}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={sectionLabel}>Payment Key</span>
@@ -312,9 +312,9 @@ function AccountRow({
                 <GoldenBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Payment Key" onClick={() => setActiveOpId("rotate-payment-key")} />
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                <code style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, wordBreak: "break-all", flex: 1, color: addrColor(account.kadenaLedger) }}>{account.kadenaLedger}</code>
+                <code style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, wordBreak: "break-all", flex: 1, color: addrColor(account.stoaChainLedger) }}>{account.stoaChainLedger}</code>
                 {paymentSource.label && <span style={{ fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0, color: paymentSource.color }}>{paymentSource.label}</span>}
-                <IconCopyBtn text={account.kadenaLedger} size={28} />
+                <IconCopyBtn text={account.stoaChainLedger} size={28} />
               </div>
               {account.paymentKeyGuard != null && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #1f1f23" }}>
@@ -452,28 +452,28 @@ function AccountRow({
           self-contained debouncer + patron + signing flow. Keyed off the open
           operation id; each mounts only while open so its hooks stay idle. */}
       {activeOpId === "rotate-payment-key" && (
-        <RotatePaymentKeyModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <RotatePaymentKeyModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "rotate-guard" && (
-        <RotateGuardModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <RotateGuardModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "release-stoic-tag" && (
-        <ReleaseStoicTagModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <ReleaseStoicTagModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "register-stoic-tag" && (
-        <RegisterStoicTagModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <RegisterStoicTagModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "rotate-sovereign" && (
-        <RotateSovereignModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <RotateSovereignModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "rotate-governor" && (
-        <RotateGovernorModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <RotateGovernorModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "activate-standard" && (
-        <ActivateStandardAccountModal open onClose={() => setActiveOpId(null)} ouroAccount={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <ActivateStandardAccountModal open onClose={() => setActiveOpId(null)} ouroAccount={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       {activeOpId === "activate-smart" && (
-        <ActivateSmartAccountModal open onClose={() => setActiveOpId(null)} ouroAccount={account} accounts={accounts} kadenaSeeds={seeds} kadenaAccounts={kadenaAccounts} />
+        <ActivateSmartAccountModal open onClose={() => setActiveOpId(null)} ouroAccount={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
       <ViewSeedModal isOpen={viewSeedOpen} onClose={() => setViewSeedOpen(false)} account={account} name={displayName} />
       {void updateAccount /* reserved for optimistic post-rotate mirror */}
@@ -489,7 +489,7 @@ const pageBtn = (disabled: boolean): React.CSSProperties => ({
 /* ─── Main tab ─── */
 export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   const { accounts } = useOuroAccounts();
-  const { seeds } = useKadenaSeeds();
+  const { seeds } = useStoaChainSeeds();
   const { keypairs } = usePureKeypairs();
   const { uiSettings } = useCodex();
 
@@ -530,10 +530,10 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
     };
   }, [hydratedAccounts]);
 
-  // Flat kadena signing material (IKadenaWallet[]) the ZBOM modals need for
+  // Flat kadena signing material (IStoaChainWallet[]) the ZBOM modals need for
   // payment-key / guard pub-set lookup — derived the same way My Codex's
   // wallet-context carried it.
-  const kadenaAccounts = useMemo(() => flattenKadenaAccounts(seeds), [seeds]);
+  const stoaChainAccounts = useMemo(() => flattenStoaChainAccounts(seeds), [seeds]);
 
   const currentList = activeTab === "standard" ? standardAccounts : smartAccounts;
   const primeDesignated = activeTab === "standard" ? CODEXID_PRIME_NAMES.standard : CODEXID_PRIME_NAMES.smart;
@@ -639,7 +639,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
                   seeds={seeds}
                   pureKeypairs={keypairs}
                   accounts={hydratedAccounts}
-                  kadenaAccounts={kadenaAccounts}
+                  stoaChainAccounts={stoaChainAccounts}
                   forceExpanded={allExpanded}
                   paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
                   primeName={primeName}
@@ -656,7 +656,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
               seeds={seeds}
               pureKeypairs={keypairs}
               accounts={hydratedAccounts}
-              kadenaAccounts={kadenaAccounts}
+              stoaChainAccounts={stoaChainAccounts}
               forceExpanded={allExpanded}
               paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
             />

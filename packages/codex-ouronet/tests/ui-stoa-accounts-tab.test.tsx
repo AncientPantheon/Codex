@@ -15,9 +15,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
-import { useCodex, useKadenaSeeds, usePureKeypairs } from "@ancientpantheon/codex-ouronet/hooks";
+import { useCodex, useStoaChainSeeds, usePureKeypairs } from "@ancientpantheon/codex-ouronet/hooks";
 import { StoaAccountsTab } from "@ancientpantheon/codex-ouronet/ui";
-import type { IKadenaSeed, IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
 import { setPactReader } from "@stoachain/stoa-core/reads";
 
 // Stub the read seam so the tab's live-balance effect never touches the network.
@@ -25,7 +25,7 @@ beforeEach(() => {
   setPactReader(async () => ({ result: { data: [] } }) as never);
 });
 
-const seedFx = (over: Partial<IKadenaSeed> = {}): IKadenaSeed => ({
+const seedFx = (over: Partial<IStoaChainSeed> = {}): IStoaChainSeed => ({
   id: over.id ?? "s1",
   name: over.name ?? "My Seed",
   seedType: "koala",
@@ -47,8 +47,8 @@ const kpFx = (over: Partial<IPureKeypair> = {}): IPureKeypair => ({
   ...over,
 });
 
-function Seeder({ seeds, pairs }: { seeds: IKadenaSeed[]; pairs: IPureKeypair[] }) {
-  const { addSeed } = useKadenaSeeds();
+function Seeder({ seeds, pairs }: { seeds: IStoaChainSeed[]; pairs: IPureKeypair[] }) {
+  const { addSeed } = useStoaChainSeeds();
   const { addKeypair } = usePureKeypairs();
   const { isReady } = useCodex();
   React.useEffect(() => {
@@ -60,7 +60,7 @@ function Seeder({ seeds, pairs }: { seeds: IKadenaSeed[]; pairs: IPureKeypair[] 
   return null;
 }
 
-async function renderTab(seeds: IKadenaSeed[] = [], pairs: IPureKeypair[] = []) {
+async function renderTab(seeds: IStoaChainSeed[] = [], pairs: IPureKeypair[] = []) {
   const adapter = new MemoryCodexAdapter("dev");
   const utils = render(
     <CodexProvider adapter={adapter}>
@@ -79,7 +79,7 @@ describe("<StoaAccountsTab>", () => {
     expect(screen.getByText(/No Stoa accounts in the codex/i)).toBeTruthy();
   });
 
-  it("derives a k: address per seed account so the list mirrors useKadenaSeeds", async () => {
+  it("derives a k: address per seed account so the list mirrors useStoaChainSeeds", async () => {
     const { container } = await renderTab([
       seedFx({
         id: "s1",

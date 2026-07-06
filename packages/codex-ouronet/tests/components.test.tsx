@@ -31,13 +31,13 @@ import {
 import {
   useRequestPassword,
   useCodexAuth,
-  useKadenaSeeds,
+  useStoaChainSeeds,
   useOuroAccounts,
   useActiveWallet,
   useCodex,
 } from "@ancientpantheon/codex-ouronet/hooks";
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
-import type { IKadenaSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { IStoaChainSeed, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 
 // --------------------------------------------------------------------
 // Helpers
@@ -49,7 +49,7 @@ function mkWrapper(adapter: MemoryCodexAdapter) {
   );
 }
 
-const seedFx = (id = "s1"): IKadenaSeed => ({
+const seedFx = (id = "s1"): IStoaChainSeed => ({
   id,
   name: "Test Seed",
   seedType: "koala",
@@ -68,7 +68,7 @@ const ouroFx = (id = "o1", overrides: Partial<IOuroAccount> = {}): IOuroAccount 
   isSmart: false,
   address: "Ѻ." + id,
   guard: null,
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey: "pk-" + id,
   secret: "s",
   backup: "b",
@@ -320,7 +320,7 @@ describe("<BackupRestorePanel>", () => {
 });
 
 function DirtyToggleHarness() {
-  const seeds = useKadenaSeeds();
+  const seeds = useStoaChainSeeds();
   return (
     <button onClick={() => void seeds.addSeed(seedFx())}>Mark dirty</button>
   );
@@ -427,7 +427,7 @@ describe("<ActiveWalletPicker>", () => {
         <ActiveWalletPicker />
       </CodexProvider>
     );
-    expect(screen.getByLabelText(/kadena seed/i)).toBeTruthy();
+    expect(screen.getByLabelText(/stoachain seed/i)).toBeTruthy();
     expect(screen.getByLabelText(/ouro account/i)).toBeTruthy();
   });
 
@@ -446,7 +446,7 @@ describe("<ActiveWalletPicker>", () => {
 
     await waitFor(() => {
       const seedSelect = screen.getByLabelText(
-        /kadena seed/i
+        /stoachain seed/i
       ) as HTMLSelectElement;
       expect(seedSelect.options.length).toBeGreaterThanOrEqual(3); // empty + s1 + s2
     });
@@ -464,20 +464,20 @@ describe("<ActiveWalletPicker>", () => {
     });
   });
 
-  it("hideKadenaSeedPicker hides the kadena dropdown", async () => {
+  it("hideStoaChainSeedPicker hides the kadena dropdown", async () => {
     const adapter = new MemoryCodexAdapter("dev");
     render(
       <CodexProvider adapter={adapter}>
-        <ActiveWalletPicker hideKadenaSeedPicker />
+        <ActiveWalletPicker hideStoaChainSeedPicker />
       </CodexProvider>
     );
-    expect(screen.queryByLabelText(/kadena seed/i)).toBeNull();
+    expect(screen.queryByLabelText(/stoachain seed/i)).toBeNull();
     expect(screen.getByLabelText(/ouro account/i)).toBeTruthy();
   });
 });
 
 function SeedAdderHarness() {
-  const { addSeed } = useKadenaSeeds();
+  const { addSeed } = useStoaChainSeeds();
   return (
     <>
       <button onClick={() => void addSeed(seedFx("s1"))}>Add s1</button>
@@ -489,16 +489,16 @@ function SeedAdderHarness() {
 function ActiveIdSpy() {
   // Read active id via the same hook the picker uses, so we observe
   // the same subscription path.
-  const { activeKadenaWalletId } = useActiveWallet();
+  const { activeStoaChainWalletId } = useActiveWallet();
   return (
-    <span data-testid="active-kadena-id">{activeKadenaWalletId ?? ""}</span>
+    <span data-testid="active-kadena-id">{activeStoaChainWalletId ?? ""}</span>
   );
 }
 
 function SetActiveHarness() {
-  const { setActiveKadenaWallet } = useActiveWallet();
+  const { setActiveStoaChainWallet } = useActiveWallet();
   return (
-    <button onClick={() => setActiveKadenaWallet("s2")}>
+    <button onClick={() => setActiveStoaChainWallet("s2")}>
       Set active s2
     </button>
   );
@@ -540,20 +540,20 @@ describe("<CodexInfoPanel>", () => {
 
   it("render-prop receives full args bag", async () => {
     const adapter = new MemoryCodexAdapter("dev");
-    type Args = { kadenaSeedsCount: number; isLocked: boolean };
+    type Args = { stoaChainSeedsCount: number; isLocked: boolean };
     const captured: { args: Args | null } = { args: null };
     render(
       <CodexProvider adapter={adapter}>
         <CodexInfoPanel
           render={(args) => {
             captured.args = args as Args;
-            return <div data-testid="custom-stats">{args.kadenaSeedsCount}</div>;
+            return <div data-testid="custom-stats">{args.stoaChainSeedsCount}</div>;
           }}
         />
       </CodexProvider>
     );
     await waitFor(() => expect(captured.args).toBeTruthy());
-    expect(captured.args?.kadenaSeedsCount).toBe(0);
+    expect(captured.args?.stoaChainSeedsCount).toBe(0);
     expect(captured.args?.isLocked).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
 // Network settings wiring (CL-13, N-03, N-04) — the working-localhost deliverable.
 //
 // The playground surfaces an EDITABLE, UNLOCKED default network config: the
-// Kadena node URL (default KADENA_DEFAULT_NODE_URL) + the Arweave gateway URL
+// StoaChain node URL (default STOACHAIN_DEFAULT_NODE_URL) + the Arweave gateway URL
 // (default DEFAULT_GATEWAY_URL = http://localhost:1984), persisted to
 // localStorage. It builds a `NetworkSettingsModel` via `createConnectionResolver`
 // (standalone → no global → both chains local → both rows editable + "Live
@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
-import { KADENA_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
+import { STOACHAIN_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
 
 import { Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
@@ -47,11 +47,11 @@ beforeEach(() => {
 });
 
 describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
-  it("defaults the Kadena node to KADENA_DEFAULT_NODE_URL and the Arweave gateway to the local testnet gateway", () => {
+  it("defaults the StoaChain node to STOACHAIN_DEFAULT_NODE_URL and the Arweave gateway to the local testnet gateway", () => {
     const settings = loadNetworkSettings();
-    // Surfaced as REAL default values (not hidden): the Kadena node is the
+    // Surfaced as REAL default values (not hidden): the StoaChain node is the
     // explicit node2-host default, the Arweave gateway is the local testnet one.
-    expect(settings.kadenaNodeUrl).toBe(KADENA_DEFAULT_NODE_URL);
+    expect(settings.stoaChainNodeUrl).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(settings.arweaveGatewayUrl).toBe(DEFAULT_GATEWAY_URL);
   });
 
@@ -63,7 +63,7 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
 
   it("round-trips edited settings through localStorage so the surfaced config persists", () => {
     saveNetworkSettings({
-      kadenaNodeUrl: "https://my-node.example:8080",
+      stoaChainNodeUrl: "https://my-node.example:8080",
       arweaveGatewayUrl: "http://localhost:1984",
     });
     const raw = window.localStorage.getItem(NETWORK_SETTINGS_STORAGE_KEY);
@@ -71,14 +71,14 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
 
     const reloaded = loadNetworkSettings();
     // The edited node survives a reload — the persisted value wins over the default.
-    expect(reloaded.kadenaNodeUrl).toBe("https://my-node.example:8080");
+    expect(reloaded.stoaChainNodeUrl).toBe("https://my-node.example:8080");
   });
 });
 
 describe("networkSettings — resolveNetworkModel (standalone unlocked two-tier)", () => {
   it("builds an UNLOCKED two-row model — stoachain + arweave, both live-local + editable (no global)", async () => {
     const model = await resolveNetworkModel({
-      kadenaNodeUrl: KADENA_DEFAULT_NODE_URL,
+      stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
     });
 
@@ -119,12 +119,12 @@ describe("Network card in the dashboard shell (CL-13)", () => {
 
     // The surfaced defaults are visible + real (N-03): the operator sees the
     // live node + gateway, not an empty/hidden field.
-    expect(stoaUrl.value).toBe(KADENA_DEFAULT_NODE_URL);
+    expect(stoaUrl.value).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(arweaveUrl.value).toBe(DEFAULT_GATEWAY_URL);
     expect(arweaveUrl.value).not.toContain("arweave.net");
   });
 
-  it("persists an edited Kadena node URL so the dashboard reads against the surfaced state", async () => {
+  it("persists an edited StoaChain node URL so the dashboard reads against the surfaced state", async () => {
     await mountDashboard();
 
     const stoaUrl = (await screen.findByTestId(
@@ -133,7 +133,7 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     fireEvent.change(stoaUrl, { target: { value: "https://edited-node.example:9090" } });
 
     // The edit flows into the persisted network state.
-    expect(loadNetworkSettings().kadenaNodeUrl).toBe(
+    expect(loadNetworkSettings().stoaChainNodeUrl).toBe(
       "https://edited-node.example:9090",
     );
   });

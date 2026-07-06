@@ -17,8 +17,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAddressBook } from "../../hooks/index.js";
 import {
-  KADENA_CHAIN_ID,
-  kadenaAddressValidator,
+  STOACHAIN_CHAIN_ID,
+  stoaChainAddressValidator,
   registerChainAddressValidator,
   getRegisteredChains,
   validateAddress,
@@ -82,12 +82,12 @@ const TAB_CONFIG: Record<TabType, TabConfig> = {
 
 const TAB_ORDER: TabType[] = ["ouronet", "stoa", "stoic-tag"];
 
-// Register the Kadena chain validator on the module-level default registry so
+// Register the StoaChain chain validator on the module-level default registry so
 // the tab dispatches every address check through the pluggable per-chain seam
 // (D-10). E-series registers Arweave the same way with zero change here.
 // Guarded so a re-import (HMR / repeated module eval) doesn't re-register.
-if (!getRegisteredChains().includes(KADENA_CHAIN_ID)) {
-  registerChainAddressValidator(KADENA_CHAIN_ID, kadenaAddressValidator);
+if (!getRegisteredChains().includes(STOACHAIN_CHAIN_ID)) {
+  registerChainAddressValidator(STOACHAIN_CHAIN_ID, stoaChainAddressValidator);
 }
 
 const MONO = "var(--codex-font-mono, ui-monospace, monospace)";
@@ -174,11 +174,11 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
     const name = formName.trim();
     const raw = activeTab === "stoic-tag" ? stripSigil(formAddress) : formAddress.trim();
     if (!name || !raw) return;
-    // Dispatch validation through the chain-aware registry: the Kadena chain
+    // Dispatch validation through the chain-aware registry: the StoaChain chain
     // validator internally re-runs the per-type check (dispatching on the
     // orthogonal address-KIND), so the three per-type rules are preserved.
     const candidate = activeTab === "stoic-tag" ? raw : formAddress.trim();
-    if (!validateAddress(KADENA_CHAIN_ID, candidate, activeTab)) {
+    if (!validateAddress(STOACHAIN_CHAIN_ID, candidate, activeTab)) {
       setFormError(cfg.hint);
       return;
     }
@@ -394,8 +394,8 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
               const displayValue = isTag ? `§${entry.address}` : entry.address;
               const copyText = displayValue;
               // Read-time chain default (D-10): a legacy entry with no chainId
-              // resolves to Kadena without rewriting the stored entry.
-              const chainId = entry.chainId ?? KADENA_CHAIN_ID;
+              // resolves to StoaChain without rewriting the stored entry.
+              const chainId = entry.chainId ?? STOACHAIN_CHAIN_ID;
               return (
                 <div
                   key={entry.id}

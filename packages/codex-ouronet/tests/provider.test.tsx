@@ -14,7 +14,7 @@ import {
   useSigningClientOverride,
 } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
-import { useCodex, useKadenaSeeds } from "@ancientpantheon/codex-ouronet/hooks";
+import { useCodex, useStoaChainSeeds } from "@ancientpantheon/codex-ouronet/hooks";
 import type { PactClient } from "@stoachain/stoa-core/signing";
 // Relative import (no subpath alias for the toast module) — resolves to the
 // SAME src module the provider's mounted MultiStepToastContainer subscribes to.
@@ -224,7 +224,7 @@ describe("CodexProvider — onCodexDirty (Phase 7)", () => {
       </CodexProvider>
     );
     const { result } = renderHook(
-      () => ({ codex: useCodex(), seeds: useKadenaSeeds() }),
+      () => ({ codex: useCodex(), seeds: useStoaChainSeeds() }),
       { wrapper }
     );
     await waitFor(() => expect(result.current.codex.isReady).toBe(true));
@@ -269,7 +269,7 @@ describe("CodexProvider — onCodexDirty (Phase 7)", () => {
       </CodexProvider>
     );
     const { result } = renderHook(
-      () => ({ codex: useCodex(), seeds: useKadenaSeeds() }),
+      () => ({ codex: useCodex(), seeds: useStoaChainSeeds() }),
       { wrapper }
     );
     await waitFor(() => expect(result.current.codex.isReady).toBe(true));

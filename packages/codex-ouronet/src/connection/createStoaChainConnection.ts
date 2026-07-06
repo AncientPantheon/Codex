@@ -1,11 +1,11 @@
 /**
- * createKadenaConnection (CL-08 / CL-09) — source the Kadena Pact node URL from a
+ * createStoaChainConnection (CL-08 / CL-09) — source the StoaChain Pact node URL from a
  * network-settings connection descriptor instead of stoa-core's hidden `node2`
  * default.
  *
  * ## The mechanism (grounded)
  *
- * stoa-core's `nodeFailover` holds the active Kadena host in a MODULE-LEVEL
+ * stoa-core's `nodeFailover` holds the active StoaChain host in a MODULE-LEVEL
  * global. `getActivePactUrl(chainId)` — used by BOTH the Accounts-tab balance
  * reads (`useStoaChainBalances` → `getPactUrl`) AND the resolver's lazy
  * `createClient(getPactUrl(...))` signing default — reads that global. So there
@@ -19,7 +19,7 @@
  *
  * ## What this helper produces
  *
- * From a `KadenaConnectionDescriptor` it returns:
+ * From a `StoaChainConnectionDescriptor` it returns:
  *   - `signingOptions` — the `{ clientOverride?, selectedNode, customNodeUrl }`
  *     the resolver seam's `createSigningStrategy` consumes. For a `direct` URL it
  *     builds a `clientOverride = createClient(nodeUrl)` (so signing follows the
@@ -47,51 +47,51 @@ import {
 
 import {
   setNodeConfig,
-  KADENA_CHAIN_ID,
+  STOACHAIN_CHAIN_ID,
 } from "./stoaNetwork.js";
 
 /** The canonical StoaChain node preset hosts (mirrors stoa-core's nodeFailover). */
-export const KADENA_NODE1_URL = "https://node1.stoachain.com";
-export const KADENA_NODE2_URL = "https://node2.stoachain.com";
+export const STOACHAIN_NODE1_URL = "https://node1.stoachain.com";
+export const STOACHAIN_NODE2_URL = "https://node2.stoachain.com";
 
 /**
- * The EXPLICIT surfaced Kadena default (CL-09): the same `node2` host the old
+ * The EXPLICIT surfaced StoaChain default (CL-09): the same `node2` host the old
  * hidden default used. Surfacing it as a real value is what lets the Network tab
  * display and edit it instead of it being a baked-in assumption.
  */
-export const KADENA_DEFAULT_NODE_URL = KADENA_NODE2_URL;
+export const STOACHAIN_DEFAULT_NODE_URL = STOACHAIN_NODE2_URL;
 
 /** The StoaChain network name the chainweb Pact base path embeds. */
-const KADENA_NETWORK = "stoa";
+const STOACHAIN_NETWORK = "stoa";
 
 /** The chainId the connection speaks for, as a ChainConnection identifier. */
-export const KADENA_CONNECTION_CHAIN_ID = "stoachain";
+export const STOACHAIN_CONNECTION_CHAIN_ID = "stoachain";
 
 /**
- * A Kadena connection descriptor — the serialisable network-settings shape the
+ * A StoaChain connection descriptor — the serialisable network-settings shape the
  * Network tab (Phase 4) edits and this helper consumes.
  *
  *   - `direct`  — an explicit node URL the user typed (or the surfaced default).
  *   - `preset`  — one of stoa-core's two known nodes, by name.
  *   - `pythia`  — (stretch) route reads/broadcast through a Pythia gateway.
  */
-export type KadenaConnectionDescriptor =
+export type StoaChainConnectionDescriptor =
   | { kind: "direct"; nodeUrl: string }
   | { kind: "preset"; preset: "node1" | "node2" }
   | { kind: "pythia"; baseUrl: string };
 
 /** The signing-strategy inputs the resolver seam consumes. Structurally matches
  *  `OuronetSigningStrategyOptions`' node fields without importing it. */
-export interface KadenaSigningOptions {
+export interface StoaChainSigningOptions {
   clientOverride?: unknown;
   selectedNode?: "node1" | "node2" | "custom";
   customNodeUrl?: string;
 }
 
 /** The full result of resolving a descriptor into the resolver seam's inputs. */
-export interface KadenaConnection {
+export interface StoaChainConnection {
   /** The inputs `createSigningStrategy` reads (override + surfaced node fields). */
-  signingOptions: KadenaSigningOptions;
+  signingOptions: StoaChainSigningOptions;
   /** Move stoa-core's global active host onto this descriptor's node so the
    *  READ path (`getActivePactUrl`) follows it too. Idempotent. */
   applyNodeConfig(): void;
@@ -99,17 +99,17 @@ export interface KadenaConnection {
   connection: ChainConnection;
 }
 
-/** Options for {@link createKadenaConnection}. */
-export interface CreateKadenaConnectionOptions {
+/** Options for {@link createStoaChainConnection}. */
+export interface CreateStoaChainConnectionOptions {
   /** Injected fetch for the ChainConnection transport + health probe. */
   fetchFn?: FetchLike;
 }
 
 /** Resolve the effective node URL for a descriptor (presets map to their host). */
-function resolveNodeUrl(descriptor: KadenaConnectionDescriptor): string {
+function resolveNodeUrl(descriptor: StoaChainConnectionDescriptor): string {
   if (descriptor.kind === "direct") return descriptor.nodeUrl;
   if (descriptor.kind === "preset") {
-    return descriptor.preset === "node1" ? KADENA_NODE1_URL : KADENA_NODE2_URL;
+    return descriptor.preset === "node1" ? STOACHAIN_NODE1_URL : STOACHAIN_NODE2_URL;
   }
   // pythia — the base URL is the transport target.
   return descriptor.baseUrl;
@@ -118,7 +118,7 @@ function resolveNodeUrl(descriptor: KadenaConnectionDescriptor): string {
 /** Build the chainweb Pact base path for a node origin + chain. */
 function pactBaseUrl(nodeUrl: string, chainId: string): string {
   const origin = nodeUrl.replace(/\/+$/, "");
-  return `${origin}/chainweb/0.0/${KADENA_NETWORK}/chain/${chainId}/pact`;
+  return `${origin}/chainweb/0.0/${STOACHAIN_NETWORK}/chain/${chainId}/pact`;
 }
 
 /**
@@ -158,21 +158,21 @@ function directPactTransport(
 }
 
 /**
- * Resolve a Kadena connection descriptor into the resolver seam's signing inputs,
+ * Resolve a StoaChain connection descriptor into the resolver seam's signing inputs,
  * a `setNodeConfig` side-effect, and a Phase-1 ChainConnection.
  */
-export function createKadenaConnection(
-  descriptor: KadenaConnectionDescriptor,
-  options: CreateKadenaConnectionOptions = {},
-): KadenaConnection {
+export function createStoaChainConnection(
+  descriptor: StoaChainConnectionDescriptor,
+  options: CreateStoaChainConnectionOptions = {},
+): StoaChainConnection {
   const fetchFn: FetchLike =
     options.fetchFn ?? (globalThis.fetch as unknown as FetchLike);
   const nodeUrl = resolveNodeUrl(descriptor);
 
   const connection = createDirectNodeConnection({
-    chainId: KADENA_CONNECTION_CHAIN_ID,
+    chainId: STOACHAIN_CONNECTION_CHAIN_ID,
     nodeUrl,
-    transport: directPactTransport(nodeUrl, KADENA_CHAIN_ID, fetchFn),
+    transport: directPactTransport(nodeUrl, STOACHAIN_CHAIN_ID, fetchFn),
     fetchFn,
   });
 
@@ -188,7 +188,7 @@ export function createKadenaConnection(
   }
 
   if (descriptor.kind === "pythia") {
-    // TODO: Kadena-via-Pythia (CL-10, deferred). A faithful `clientOverride`
+    // TODO: StoaChain-via-Pythia (CL-10, deferred). A faithful `clientOverride`
     // Pact-client SHIM that routes kadena-stoic-legacy's local/send/poll through
     // Pythia's REST (POST <base>/stoachain/read|send|poll) is NOT built here:
     // matching kadena-stoic-legacy's full ICreateClient return surface risks the

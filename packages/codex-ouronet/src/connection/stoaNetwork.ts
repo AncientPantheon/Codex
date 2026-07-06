@@ -2,7 +2,7 @@
  * stoa-core network shim (Phase 3).
  *
  * A thin, Ouronet-side re-export of `@stoachain/stoa-core`'s node-failover
- * module + the Kadena chain constant. The Kadena node URL is a module-level
+ * module + the StoaChain chain constant. The StoaChain node URL is a module-level
  * GLOBAL inside stoa-core's `nodeFailover`: `getActivePactUrl(chainId)` (and so
  * the balance reads in the Accounts tab + the resolver's lazy `createClient`
  * default) all read the same active host that `setNodeConfig(selected, url)`
@@ -23,4 +23,4 @@ export {
   getNodeConfig,
 } from "@stoachain/stoa-core/network";
 
-export { KADENA_CHAIN_ID } from "@stoachain/stoa-core/constants";
+export { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID } from "@stoachain/stoa-core/constants";

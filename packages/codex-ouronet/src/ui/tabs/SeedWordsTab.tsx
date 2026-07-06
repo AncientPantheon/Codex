@@ -3,14 +3,14 @@
  * (src/components/settings/SeedWordsList.tsx + the Create-New-Seed control),
  * rebuilt Redux-free over the package store.
  *
- * Full surface: a "Create New Seed" button (→ CreateKadenaSeedModal); each seed
+ * Full surface: a "Create New Seed" button (→ CreateStoaChainSeedModal); each seed
  * row is expandable to reveal its derived keys; per key a Copy + Delete button
  * (the Prime seed's Key #0 delete is disabled); "Add Consecutive Key"
  * (gap-fills the lowest free index) and "Add Key at Position" (arbitrary index,
  * dup-guarded). View-mnemonic / rename / delete-seed live in a per-row menu.
  *
  * Key derivation mirrors My Codex exactly:
- *   getCurrentPassword() → smartDecrypt(seed.secret) → KadenaWalletBuilder
+ *   getCurrentPassword() → smartDecrypt(seed.secret) → StoaChainWalletBuilder
  *   .createWalletPairFromMnemonic(password, mnemonic, index, seedType); the new
  *   key is persisted by replacing the whole seed via updateSeed({...seed,accounts}).
  * Styled with the original's hardcoded hex palette (matches OuronetAccountsTab).
@@ -21,15 +21,15 @@ import {
   Lock, ChevronDown, ChevronUp, MoreVertical, Key, Eye, Edit2, Trash2, Plus, Hash, PlusCircle, Check, X, Loader2,
 } from "lucide-react";
 import { smartDecrypt } from "@stoachain/stoa-core/crypto";
-import { KadenaWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { binToHex } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
-import { useKadenaSeeds } from "../../hooks/index.js";
+import { useStoaChainSeeds } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconHideBtn } from "../internal/IconButtons.js";
 import { KeyFieldsHalves } from "../internal/KeyFieldsHalves.js";
-import { CreateKadenaSeedModal } from "../internal/CreateKadenaSeedModal.js";
-import type { IKadenaSeed, SeedType, WalletAccount } from "../../types/entities.js";
+import { CreateStoaChainSeedModal } from "../internal/CreateStoaChainSeedModal.js";
+import type { IStoaChainSeed, SeedType, WalletAccount } from "../../types/entities.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 
@@ -194,14 +194,14 @@ function PrimeSeparator({ label }: { label: string }) {
 function SeedRow({
   seed, index, expanded, onToggle, onRename, onDeleteSeed, onAddKey, onDeleteKey,
 }: {
-  seed: IKadenaSeed;
+  seed: IStoaChainSeed;
   index: number;
   expanded: boolean;
   onToggle: () => void;
-  onRename: (seed: IKadenaSeed, name: string) => void;
+  onRename: (seed: IStoaChainSeed, name: string) => void;
   onDeleteSeed: (id: string) => void;
-  onAddKey: (seed: IKadenaSeed, index: number, onStage?: (s: string) => Promise<void> | void) => Promise<void>;
-  onDeleteKey: (seed: IKadenaSeed, index: number) => void;
+  onAddKey: (seed: IStoaChainSeed, index: number, onStage?: (s: string) => Promise<void> | void) => Promise<void>;
+  onDeleteKey: (seed: IStoaChainSeed, index: number) => void;
 }) {
   const { getCurrentPassword } = useCodexAuth();
   const ensureUnlocked = useEnsureCodexUnlocked();
@@ -275,8 +275,8 @@ function SeedRow({
     // Empty wallet password for extended keys → plaintext scalar. Koala keeps
     // the codex password (no behavioral change; its key is password-agnostic).
     const walletPw = isExtended ? "" : password;
-    const { secretKey } = await KadenaWalletBuilder.createWalletPairFromMnemonic(walletPw, mnemonic, account.index, seed.seedType);
-    const rawBytes = await KadenaWalletBuilder.decrypt(walletPw, secretKey);
+    const { secretKey } = await StoaChainWalletBuilder.createWalletPairFromMnemonic(walletPw, mnemonic, account.index, seed.seedType);
+    const rawBytes = await StoaChainWalletBuilder.decrypt(walletPw, secretKey);
     const hex = binToHex(rawBytes);
     // Extended: first 64 bytes (kL‖kR) = the 128-hex KadenaKeys export format.
     return isExtended ? hex.slice(0, 128) : hex;
@@ -447,7 +447,7 @@ function SeedRow({
 
 /* ─── Main tab ─── */
 export function SeedWordsTab({ className }: SeedWordsTabProps) {
-  const { seeds, updateSeed, deleteSeed } = useKadenaSeeds();
+  const { seeds, updateSeed, deleteSeed } = useStoaChainSeeds();
   const { getCurrentPassword } = useCodexAuth();
   const ensureUnlocked = useEnsureCodexUnlocked();
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -471,7 +471,7 @@ export function SeedWordsTab({ className }: SeedWordsTabProps) {
 
   const toggle = (id: string) => setExpandedIds((p) => ({ ...p, [id]: !p[id] }));
 
-  const handleRename = (seed: IKadenaSeed, name: string) => void updateSeed({ ...seed, name });
+  const handleRename = (seed: IStoaChainSeed, name: string) => void updateSeed({ ...seed, name });
 
   const handleDeleteSeed = async (id: string) => {
     setTopError(null);
@@ -482,7 +482,7 @@ export function SeedWordsTab({ className }: SeedWordsTabProps) {
    *  is awaited before each step so the progress label (and the compositor sweep
    *  bar) paint before the CPU-heavy derivation blocks the main thread. */
   const handleAddKey = async (
-    seed: IKadenaSeed,
+    seed: IStoaChainSeed,
     index: number,
     onStage?: (s: string) => Promise<void> | void,
   ) => {
@@ -492,14 +492,14 @@ export function SeedWordsTab({ className }: SeedWordsTabProps) {
     await onStage?.("Decrypting seed…");
     const mnemonic = await smartDecrypt(seed.secret, password);
     await onStage?.("Deriving keypair…");
-    const kp = await KadenaWalletBuilder.createWalletPairFromMnemonic(password, mnemonic, index, seed.seedType);
+    const kp = await StoaChainWalletBuilder.createWalletPairFromMnemonic(password, mnemonic, index, seed.seedType);
     await onStage?.("Saving key…");
     const newAcc: WalletAccount = { index, publicKey: kp.publicKey, derivationPath: derivationPath(index) };
     const accounts = [...seed.accounts.filter((a) => a.index !== index), newAcc].sort((a, b) => a.index - b.index);
     await updateSeed({ ...seed, accounts });
   };
 
-  const handleDeleteKey = (seed: IKadenaSeed, index: number) => {
+  const handleDeleteKey = (seed: IStoaChainSeed, index: number) => {
     void updateSeed({ ...seed, accounts: seed.accounts.filter((a) => a.index !== index) });
   };
 
@@ -553,7 +553,7 @@ export function SeedWordsTab({ className }: SeedWordsTabProps) {
         </div>
       )}
 
-      {createOpen && <CreateKadenaSeedModal onClose={() => setCreateOpen(false)} />}
+      {createOpen && <CreateStoaChainSeedModal onClose={() => setCreateOpen(false)} />}
     </div>
   );
 }

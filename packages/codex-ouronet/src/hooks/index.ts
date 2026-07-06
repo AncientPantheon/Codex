@@ -9,17 +9,17 @@
 // @ancientpantheon/codex-ouronet/hooks gets the same face as before (N-04).
 //
 // The chain-aware address-book validation registry (D-10) STAYS Ouronet-side —
-// it is the Kadena validator + pluggable per-chain seam, coupled to the Ouronet
+// it is the StoaChain validator + pluggable per-chain seam, coupled to the Ouronet
 // address-book entity. It is exported LOCALLY below.
 //
 // Inventory (the 16 hooks re-exported from codex-ui):
 //   - useCodex()             high-level Codex state + actions
 //   - useActiveWallet()      active kadena/ouro wallet + switch
-//   - useGetKeypair()        pubkey → IKadenaKeypair (throws CodexKeyMissingError)
+//   - useGetKeypair()        pubkey → IStoaChainKeypair (throws CodexKeyMissingError)
 //   - useSignTransaction()   CFM strategy wrapper (replaces useCFMStrategy)
 //   - useCodexAuth()         password prompts, lock/unlock
 //   - useRequestPassword()   Promise-returning unlock-and-get-password gate
-//   - useKadenaSeeds()       CRUD
+//   - useStoaChainSeeds()       CRUD
 //   - usePureKeypairs()      CRUD
 //   - useOuroAccounts()      CRUD (CodexPrime is protected)
 //   - useAddressBook()       CRUD
@@ -37,7 +37,7 @@ export {
   useRequestPassword,
   useGetKeypair,
   useSignTransaction,
-  useKadenaSeeds,
+  useStoaChainSeeds,
   usePureKeypairs,
   useOuroAccounts,
   useAddressBook,
@@ -56,7 +56,7 @@ export type {
   GetKeypairFn,
   SignTransactionView,
   UseSignTransactionOptions,
-  KadenaSeedsView,
+  StoaChainSeedsView,
   PureKeypairsView,
   OuroAccountsView,
   AddressBookView,
@@ -70,11 +70,11 @@ export type {
 
 // Chain-aware address-book validation seam (D-10 / D-11). ADDITIVE — the
 // useAddressBook / AddressBookView surface is unchanged. STAYS Ouronet-side (the
-// Kadena validator + the pluggable per-chain registry, coupled to the Ouronet
+// StoaChain validator + the pluggable per-chain registry, coupled to the Ouronet
 // address-book entity).
 export {
-  KADENA_CHAIN_ID,
-  kadenaAddressValidator,
+  STOACHAIN_CHAIN_ID,
+  stoaChainAddressValidator,
   createAddressValidatorRegistry,
   registerChainAddressValidator,
   validateAddress,

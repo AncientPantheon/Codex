@@ -60,7 +60,7 @@ export function StyledRotatePaymentKeyModal({ isOpen, onClose, account, ModalCom
       render={(a) => (
         <CodexModalShell title="Rotate Payment Key" subtitle={<code>{a.account.address}</code>} onClose={a.onCancel}>
           <p style={hint}>
-            Replace this account's Kadena-Ledger payment key. The patron guard signs to authorize
+            Replace this account's StoaChain-Ledger payment key. The patron guard signs to authorize
             the rotation. Enter the new payment key's public key (64-char hex).
           </p>
           <label style={modalLabel}>New Payment Key</label>

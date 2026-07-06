@@ -2,12 +2,12 @@
  * The Arweave sibling signer — a single-file, auditable delegate to arweave-core.
  *
  * FUNDS-CRITICAL, HARD-ISOLATED (E-04, N-05): this is a PARALLEL SIBLING of the
- * Kadena signing path (`InternalCodexResolver` → `CodexSigningStrategy`), sharing
+ * StoaChain signing path (`InternalCodexResolver` → `CodexSigningStrategy`), sharing
  * NOTHING with it. It imports ONLY `@ancientpantheon/arweave-core` (the isolated
  * RSA-PSS + deep-hash `signTransaction`) and the `arweave` `Transaction` type. It
  * NEVER references `@stoachain/stoa-core/signing`, a `KeyResolver`, a
  * `CodexSigningStrategy`, a `PactClient`, or any `codex-ouronet` resolver — the
- * static import-scan gate asserts this file stays Kadena-free.
+ * static import-scan gate asserts this file stays StoaChain-free.
  *
  * The JWK arrives as an ARGUMENT (from E1's unlock-gated `decryptArweaveKey`) —
  * this module resolves NO key itself and takes NO resolver/strategy. The plaintext

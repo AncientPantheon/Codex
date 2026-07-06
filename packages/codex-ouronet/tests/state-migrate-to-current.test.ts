@@ -48,7 +48,7 @@ describe("with empty SCHEMA_MIGRATIONS (Phase 1 default)", () => {
     it("throws unknown-schema-version BEFORE mutating the adapter when loaded schema is newer", async () => {
       const adapter = new MemoryCodexAdapter("dev");
       // schemaVersion 99 AND an unflagged seed: if the boundary check did NOT
-      // run first, the legacy migration would call saveKadenaSeeds and mutate
+      // run first, the legacy migration would call saveStoaChainSeeds and mutate
       // a future-version codex.
       await adapter.saveAll(
         snapshotAt(99, {
@@ -70,7 +70,7 @@ describe("with empty SCHEMA_MIGRATIONS (Phase 1 default)", () => {
       const store = createCodexStore();
 
       const saveAll = vi.spyOn(adapter, "saveAll");
-      const saveKadenaSeeds = vi.spyOn(adapter, "saveKadenaSeeds");
+      const saveStoaChainSeeds = vi.spyOn(adapter, "saveStoaChainSeeds");
 
       let thrown: unknown;
       try {
@@ -85,7 +85,7 @@ describe("with empty SCHEMA_MIGRATIONS (Phase 1 default)", () => {
       );
       // No adapter mutation occurred — boundary check ran before legacy migration.
       expect(saveAll).not.toHaveBeenCalled();
-      expect(saveKadenaSeeds).not.toHaveBeenCalled();
+      expect(saveStoaChainSeeds).not.toHaveBeenCalled();
     });
 
     it("does NOT call saveAll when no migration runs (empty registry, current codex)", async () => {
