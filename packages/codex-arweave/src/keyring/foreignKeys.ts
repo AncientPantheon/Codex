@@ -31,9 +31,7 @@ import {
 } from "@ancientpantheon/codex-core";
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
 
-/** The Arweave `chainId` namespace — the SAME constant the adapter registers
- *  under, so a foreign key resolves to its Arweave driver on restore. */
-const ARWEAVE_CHAIN_ID = "arweave";
+import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 
 /**
  * The narrow store seam the keyring drives. The `foreignKeys` slice lives in the

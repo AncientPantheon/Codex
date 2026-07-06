@@ -22,6 +22,14 @@
     "./library": {
       "types": "./dist/library/index.d.ts",
       "import": "./dist/library/index.js"
+    },
+    "./panel": {
+      "types": "./dist/panel/index.d.ts",
+      "import": "./dist/panel/index.js"
+    },
+    "./address-book": {
+      "types": "./dist/address-book/index.d.ts",
+      "import": "./dist/address-book/index.js"
     }
   },
   "files": [
@@ -33,13 +41,28 @@
   "engines": {
     "node": ">=20"
   },
+  "peerDependencies": {
+    "lucide-react": ">=0.400.0",
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
   "dependencies": {
     "@ancientpantheon/arweave-core": "*",
     "@ancientpantheon/codex-core": "*",
     "@ancientpantheon/codex-ouronet": "*"
   },
   "devDependencies": {
-    "fake-indexeddb": "^6.2.5"
+    "@ancientpantheon/codex-ui": "*",
+    "@testing-library/jest-dom": "^6.6.4",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.0.0",
+    "lucide-react": "^0.483.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

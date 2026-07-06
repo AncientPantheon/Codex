@@ -18,6 +18,10 @@ export {
   type OpenIndexedDBLibraryStoreOptions,
 } from "./indexedDbStore.js";
 export {
+  SqliteLibraryStore,
+  type OpenSqliteLibraryStoreOptions,
+} from "./sqliteStore.js";
+export {
   MANIFEST_CONTENT_TYPE,
   UPLOAD_PERMANENCE_WARNING,
 } from "./constants.js";

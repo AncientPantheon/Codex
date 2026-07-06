@@ -140,3 +140,11 @@ export type {
   PasswordCacheCardProps,
   InjectedRotateModal,
 } from "./ui/index.js";
+
+// ── ui/foreign-chains (the chain-generic foreign-chains tab + its slot contract) ──
+export { ForeignChainsTab } from "./ui/foreign-chains/index.js";
+export type {
+  PanelProps,
+  ForeignChainPanels,
+  ForeignChainsTabProps,
+} from "./ui/foreign-chains/index.js";

@@ -27,6 +27,10 @@
       "types": "./dist/ui/index.d.ts",
       "import": "./dist/ui/index.js"
     },
+    "./ui/foreign-chains": {
+      "types": "./dist/ui/foreign-chains/index.d.ts",
+      "import": "./dist/ui/foreign-chains/index.js"
+    },
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js"

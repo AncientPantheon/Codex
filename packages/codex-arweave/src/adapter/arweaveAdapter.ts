@@ -52,8 +52,11 @@ import { NotImplementedError } from "./errors.js";
 /**
  * The stable id the Arweave adapter registers under. Shares the string namespace
  * with `ForeignKeyEntry.chainId`, so a stored foreign key resolves to this driver.
+ * Sourced from the single-source const module so the id is spelled exactly once
+ * across the package; re-exported to preserve the adapter's public surface.
  */
-export const ARWEAVE_CHAIN_ID = "arweave" as const;
+export { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
+import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 
 /** Construction-time dependencies for the Arweave adapter. */
 export interface ArweaveAdapterDeps {
