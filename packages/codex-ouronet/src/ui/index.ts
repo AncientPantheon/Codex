@@ -97,4 +97,4 @@ export type { ReadFunctionsCardProps } from "./settings/ReadFunctionsCard.js";
 // ── STAY-set: the Ouronet-composed settings aggregator (fills the section
 //    shell with the concrete cards + the zbom-specific subtab taxonomy) ──
 export { CodexSettingsSection } from "./settings/CodexSettingsSection.js";
-export type { CodexSettingsSectionProps } from "./settings/CodexSettingsSection.js";
+export type { CodexSettingsSectionProps, CodexNetworkTabConfig } from "./settings/CodexSettingsSection.js";

@@ -112,6 +112,7 @@ export {
   ExperimentalCurvesCard,
   GasSettingsCard,
   NetworkSettingsCard,
+  PythiaConnectorCard,
   PasswordCacheCard,
   StyledRotatePaymentKeyModal,
   StyledRotateGuardModal,
@@ -139,6 +140,7 @@ export type {
   ExperimentalCurvesCardProps,
   GasSettingsCardProps,
   NetworkSettingsCardProps,
+  PythiaConnectorCardProps,
   PasswordCacheCardProps,
   InjectedRotateModal,
 } from "./ui/index.js";

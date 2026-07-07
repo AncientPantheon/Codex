@@ -34,14 +34,39 @@ import {
   PasswordCacheCard,
   GasSettingsCard,
   ObservationalCodexIdSettings,
+  NetworkSettingsCard,
+  PythiaConnectorCard,
 } from "@ancientpantheon/codex-ui/ui";
 import type { CodexSettingsSubtab } from "@ancientpantheon/codex-ui/ui";
 import { CodexSettingsSectionShell } from "@ancientpantheon/codex-ui/ui";
+import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
 import { CodexInfoCard } from "./CodexInfoCard.js";
 import { EncryptionCard } from "./EncryptionCard.js";
 import { ZbomSettingsCard } from "./ZbomSettingsCard.js";
 import { DebouncerSettingsCard } from "./DebouncerSettingsCard.js";
 import { ReadFunctionsCard } from "./ReadFunctionsCard.js";
+
+/**
+ * The injected connection-layer config for the optional Network tab. The Codex
+ * itself holds no connections — the consumer resolves the two-tier global⊕local
+ * model (standalone = all local; managed = admin global + user local) and hands
+ * it in here. When omitted, the Network tab is not rendered (existing consumers
+ * are unaffected — additive, non-breaking).
+ */
+export interface CodexNetworkTabConfig {
+  /** The resolved per-chain network-settings model (from createConnectionResolver). */
+  model: NetworkSettingsModel;
+  /** Current per-chain LOCAL node/gateway URLs, keyed by chainId. */
+  urls: Record<string, string>;
+  /** Called when an enabled, unlocked per-chain (local) URL field is edited. */
+  onSetChainUrl: (chainId: string, url: string) => void;
+  /** The current Pythia (GLOBAL) base URL (empty = no global connector). */
+  pythiaUrl: string;
+  /** Called when the (unlocked) Pythia base-URL field is edited. */
+  onSetPythiaUrl: (url: string) => void;
+  /** Read-only override (e.g. a non-admin user in a managed consumer). */
+  locked?: boolean;
+}
 
 export interface CodexSettingsSectionProps {
   /** Re-encryption seam forwarded to <ChangePasswordCard>. The package hands
@@ -57,10 +82,14 @@ export interface CodexSettingsSectionProps {
   initialTab?: SettingsTab;
   /** Consumer class merged onto the section root. */
   className?: string;
+  /** When provided, renders the Network tab (Pythia · global + per-chain · local
+   *  connectors). Omit to hide it (existing consumers unaffected). */
+  network?: CodexNetworkTabConfig;
 }
 
 type SettingsTab =
   | "operations"
+  | "network"
   | "debouncer"
   | "read-functions"
   | "security"
@@ -85,6 +114,7 @@ export function CodexSettingsSection({
   consumerName = "OuronetUI",
   initialTab = "operations",
   className,
+  network,
 }: CodexSettingsSectionProps) {
   const subtabs: CodexSettingsSubtab[] = [
     {
@@ -207,6 +237,36 @@ export function CodexSettingsSection({
       ),
     },
   ];
+
+  // The Network tab is INJECTED — the Codex holds no connections of its own. When
+  // the consumer supplies the resolved two-tier model, surface it right after
+  // Operations: the Pythia (global) connector above the per-chain (local) rows.
+  if (network) {
+    const coveredChains = network.model.chains
+      .filter((c) => c.status === "live-global")
+      .map((c) => c.chainId);
+    subtabs.splice(1, 0, {
+      key: "network",
+      label: "Network",
+      color: "#3b82f6",
+      cards: (
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <PythiaConnectorCard
+            url={network.pythiaUrl}
+            onSetUrl={network.onSetPythiaUrl}
+            coveredChains={coveredChains}
+            locked={network.locked}
+          />
+          <NetworkSettingsCard
+            model={network.model}
+            onSetChainUrl={network.onSetChainUrl}
+            urls={network.urls}
+            locked={network.locked}
+          />
+        </div>
+      ),
+    });
+  }
 
   return (
     <CodexSettingsSectionShell

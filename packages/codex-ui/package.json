@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-ui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "React/browser interface layer of the Codex family — the chain-generic DOM shell: <CodexProvider> (injected store/resolver/zbom-toast seams), the 16 hooks + their *View types, the generic slot-driven shell components, and the ui.css stylesheet. No value @stoachain, no value Ouronet import (type-only OK).",
   "type": "module",

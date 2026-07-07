@@ -34,7 +34,7 @@ import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { App, Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import { DEFAULT_GATEWAY_URL } from "../src/ArweaveModeToggle";
-import { populatedKadenaSnapshot } from "../fixtures";
+import { populatedStoaChainSnapshot } from "../fixtures";
 
 afterEach(() => {
   cleanup();
@@ -58,7 +58,7 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
     // Mount the exported Dashboard against a plaintext-hydrated store (the
     // dev/test seam) so the composed shell is deterministically reachable
     // without the encrypt/unlock round-trip.
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     render(
       <CodexProvider adapter={adapter} deviceVariant="dev">
         <Dashboard />

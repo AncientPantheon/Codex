@@ -243,6 +243,40 @@
   border-color: var(--cxpg-text-dim);
 }
 
+/* Codex UI / Codex UI Settings view toggle (segmented control). */
+.cxpg-viewtabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #0e1220;
+  border: 1px solid var(--cxpg-border);
+}
+
+.cxpg-viewtab {
+  font-family: var(--cxpg-font);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cxpg-text-dim);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.cxpg-viewtab:hover {
+  color: var(--cxpg-text);
+}
+
+.cxpg-viewtab--active {
+  background: var(--cxpg-accent);
+  color: #0a0d16;
+}
+
 .cxpg-main {
   max-width: 1080px;
   margin: 0 auto;

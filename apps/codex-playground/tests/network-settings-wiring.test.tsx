@@ -27,7 +27,7 @@ import { STOACHAIN_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/conne
 import { Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import { DEFAULT_GATEWAY_URL } from "../src/ArweaveModeToggle";
-import { populatedKadenaSnapshot } from "../fixtures";
+import { populatedStoaChainSnapshot } from "../fixtures";
 import {
   NETWORK_SETTINGS_STORAGE_KEY,
   loadNetworkSettings,
@@ -40,6 +40,7 @@ import {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
@@ -63,6 +64,7 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
 
   it("round-trips edited settings through localStorage so the surfaced config persists", () => {
     saveNetworkSettings({
+      pythiaUrl: "",
       stoaChainNodeUrl: "https://my-node.example:8080",
       arweaveGatewayUrl: "http://localhost:1984",
     });
@@ -78,6 +80,7 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
 describe("networkSettings — resolveNetworkModel (standalone unlocked two-tier)", () => {
   it("builds an UNLOCKED two-row model — stoachain + arweave, both live-local + editable (no global)", async () => {
     const model = await resolveNetworkModel({
+      pythiaUrl: "",
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
     });
@@ -98,13 +101,18 @@ describe("networkSettings — resolveNetworkModel (standalone unlocked two-tier)
 
 describe("Network card in the dashboard shell (CL-13)", () => {
   async function mountDashboard() {
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     render(
       <CodexProvider adapter={adapter} deviceVariant="dev">
         <Dashboard />
       </CodexProvider>,
     );
     await screen.findByRole("tab", { name: /seed words/i });
+    // The network connectors now live in the packaged settings: switch to the
+    // "Codex UI Settings" view, then open the injected "Network" subtab.
+    fireEvent.click(screen.getByRole("tab", { name: /codex ui settings/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^network$/i }));
+    await screen.findByTestId(`network-url-${STOACHAIN_CHAIN_ID}`);
   }
 
   it("renders the NetworkSettingsCard with a StoaChain row and an Arweave row seeded to their default URLs", async () => {
@@ -143,5 +151,47 @@ describe("no hidden hardcoded mainnet default in the wiring source (N-03/N-04)",
   it("names no arweave.net literal in the network-settings wiring", () => {
     const source = readFileSync(resolve(__dirname, "../src/networkSettings.ts"), "utf8");
     expect(source).not.toContain("arweave.net");
+  });
+});
+
+describe("networkSettings — Pythia promoted to GLOBAL (two-tier global⊕local)", () => {
+  it("a reachable Pythia covering stoachain → stoachain live-global (field disabled), arweave live-local", async () => {
+    // Mock a reachable Pythia whose /healthz advertises stoachain coverage.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) =>
+        String(url).endsWith("/healthz")
+          ? ({ ok: true, json: async () => ({ coveredChains: ["stoachain"] }) } as Response)
+          : ({ ok: true, json: async () => ({}) } as Response),
+      ),
+    );
+
+    const model = await resolveNetworkModel({
+      pythiaUrl: "https://pythia.example",
+      stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+      arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+    });
+
+    const stoa = model.chains.find((c) => c.chainId === STOACHAIN_CHAIN_ID)!;
+    const arweave = model.chains.find((c) => c.chainId === ARWEAVE_CHAIN_ID)!;
+    // StoaChain is covered by Pythia (global) → its LOCAL field auto-disables.
+    expect(stoa.status).toBe("live-global");
+    expect(stoa.manualFieldEnabled).toBe(false);
+    // Arweave is NOT covered by Pythia today → falls back to its LOCAL endpoint.
+    expect(arweave.status).toBe("live-local");
+    expect(arweave.manualFieldEnabled).toBe(true);
+  });
+
+  it("an unreachable Pythia advertises nothing → all chains gracefully fall back to LOCAL", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) }) as Response));
+    const model = await resolveNetworkModel({
+      pythiaUrl: "https://pythia.down",
+      stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+      arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+    });
+    for (const row of model.chains) {
+      expect(row.status).toBe("live-local");
+      expect(row.manualFieldEnabled).toBe(true);
+    }
   });
 });

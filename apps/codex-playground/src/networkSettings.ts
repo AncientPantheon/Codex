@@ -21,6 +21,7 @@
 
 import {
   createConnectionResolver,
+  createPythiaConnection,
   type NetworkSettingsModel,
 } from "@ancientpantheon/codex-core";
 import {
@@ -37,19 +38,26 @@ export const STOACHAIN_CHAIN_ID = "stoachain" as const;
 /** Re-exported so the wiring + tests key rows uniformly. */
 export { ARWEAVE_CHAIN_ID };
 
-/** The persisted, editable per-chain endpoint config. */
+/** The persisted, editable connection config. */
 export interface NetworkSettings {
-  /** The StoaChain node URL the dashboard reads/broadcasts against. */
+  /** The Pythia (GLOBAL) base URL. Empty = no global connector → both chains
+   *  resolve LOCAL. When set + reachable, the chains Pythia advertises flip to
+   *  "Live via Pythia" and their per-chain LOCAL field auto-disables. */
+  pythiaUrl: string;
+  /** The StoaChain node URL the dashboard reads/broadcasts against (LOCAL). */
   stoaChainNodeUrl: string;
-  /** The Arweave gateway URL the Arweave panel reads/broadcasts against. */
+  /** The Arweave gateway URL the Arweave panel reads/broadcasts against (LOCAL). */
   arweaveGatewayUrl: string;
 }
 
 /** The localStorage key the surfaced config persists under. */
 export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
 
-/** The surfaced defaults — both real, editable, local/testnet endpoints. */
+/** The surfaced defaults — standalone has no operator, so no global Pythia by
+ *  default (both chains resolve LOCAL against real, editable, local/testnet
+ *  endpoints). The operator can paste a Pythia URL to promote it to global. */
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
+  pythiaUrl: "",
   stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
 };
@@ -65,6 +73,8 @@ export function loadNetworkSettings(): NetworkSettings {
     if (!raw) return { ...DEFAULT_NETWORK_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<NetworkSettings>;
     return {
+      pythiaUrl:
+        typeof parsed.pythiaUrl === "string" ? parsed.pythiaUrl : DEFAULT_NETWORK_SETTINGS.pythiaUrl,
       stoaChainNodeUrl:
         typeof parsed.stoaChainNodeUrl === "string" && parsed.stoaChainNodeUrl.length > 0
           ? parsed.stoaChainNodeUrl
@@ -92,16 +102,26 @@ export function saveNetworkSettings(settings: NetworkSettings): void {
 }
 
 /**
- * Build the `NetworkSettingsModel` off the surfaced state. Standalone = no
- * operator global, both chains surfaced LOCAL + unlocked → both rows resolve to
- * "live-local" + editable.
+ * Build the `NetworkSettingsModel` off the surfaced state. With no `pythiaUrl`,
+ * standalone = no operator global, both chains surfaced LOCAL + unlocked → both
+ * rows resolve "live-local" + editable. With a `pythiaUrl`, Pythia is promoted to
+ * the GLOBAL connection — the chains it advertises (via `health().coveredChains`;
+ * StoaChain today) flip to "Live via Pythia" and their local field auto-disables,
+ * while chains Pythia does not cover (Arweave) fall back to their LOCAL endpoint.
  */
 export function resolveNetworkModel(
   settings: NetworkSettings,
 ): Promise<NetworkSettingsModel> {
+  const pythiaUrl = settings.pythiaUrl.trim();
   const resolver = createConnectionResolver({
     supportedChains: [STOACHAIN_CHAIN_ID, ARWEAVE_CHAIN_ID],
-    global: undefined,
+    // The global connection routes by the chain it's covering; Pythia is
+    // StoaChain-only today, so target the StoaChain route (coverage is still read
+    // dynamically from health() — an unreachable Pythia advertises nothing and
+    // both chains gracefully fall back to LOCAL).
+    global: pythiaUrl
+      ? createPythiaConnection({ baseUrl: pythiaUrl, chainId: STOACHAIN_CHAIN_ID })
+      : undefined,
     local: {
       [STOACHAIN_CHAIN_ID]: createStoaChainConnection({
         kind: "direct",

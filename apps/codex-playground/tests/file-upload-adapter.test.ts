@@ -40,14 +40,14 @@ import {
 
 import {
   emptySnapshot,
-  populatedKadenaSnapshot,
+  populatedStoaChainSnapshot,
   backupJson,
-  backupKadenaWallets,
+  backupStoaChainWallets,
   backupOuronetWallets,
   backupPureKeypairs,
   backupAddressBook,
   backupUiSettings,
-  backupExpectedKadenaWalletsLength,
+  backupExpectedStoaChainWalletsLength,
   backupExpectedPureKeypairsLength,
   MODE2_LAST_UPDATED_AT,
   MODE2_LAST_UPDATED_DEVICE,
@@ -89,31 +89,31 @@ describe("mode-2 (plaintext snapshot): hydrateFromPlaintextSnapshot", () => {
   });
 
   it("round-trips the POPULATED-StoaChain fixture verbatim (entities + secrets survive as-is)", async () => {
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     const loaded = await adapter.loadAll();
-    expect(loaded).toEqual(populatedKadenaSnapshot);
+    expect(loaded).toEqual(populatedStoaChainSnapshot);
     // The StoaChain entries render-visible content — they must survive hydration.
-    expect(loaded.kadenaSeeds).toHaveLength(populatedKadenaSnapshot.kadenaSeeds.length);
+    expect(loaded.kadenaSeeds).toHaveLength(populatedStoaChainSnapshot.kadenaSeeds.length);
     expect(loaded.kadenaSeeds.length).toBeGreaterThan(0);
-    expect(loaded.ouroAccounts).toEqual(populatedKadenaSnapshot.ouroAccounts);
+    expect(loaded.ouroAccounts).toEqual(populatedStoaChainSnapshot.ouroAccounts);
     // The encrypted secret blob passes through verbatim (hydration does NOT decrypt).
-    expect(loaded.kadenaSeeds[0].secret).toBe(populatedKadenaSnapshot.kadenaSeeds[0].secret);
+    expect(loaded.kadenaSeeds[0].secret).toBe(populatedStoaChainSnapshot.kadenaSeeds[0].secret);
   });
 
   it("preserves the POPULATED fixture's lastUpdated* VERBATIM", async () => {
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     const loaded = await adapter.loadAll();
     expect(loaded.lastUpdatedAt).toBe(MODE2_LAST_UPDATED_AT);
     expect(loaded.lastUpdatedDevice).toBe(MODE2_LAST_UPDATED_DEVICE);
   });
 
   it("returns a defensive copy — mutating the fixture after hydration does not leak in", async () => {
-    const snapshot: CodexSnapshot = structuredClone(populatedKadenaSnapshot);
+    const snapshot: CodexSnapshot = structuredClone(populatedStoaChainSnapshot);
     const adapter = await hydrateFromPlaintextSnapshot(snapshot);
-    snapshot.kadenaSeeds.push(structuredClone(populatedKadenaSnapshot.kadenaSeeds[0]));
+    snapshot.kadenaSeeds.push(structuredClone(populatedStoaChainSnapshot.kadenaSeeds[0]));
     const loaded = await adapter.loadAll();
     // The adapter kept its own clone; the post-hydration push must not appear.
-    expect(loaded.kadenaSeeds).toHaveLength(populatedKadenaSnapshot.kadenaSeeds.length);
+    expect(loaded.kadenaSeeds).toHaveLength(populatedStoaChainSnapshot.kadenaSeeds.length);
   });
 });
 
@@ -151,12 +151,12 @@ describe("mode-1 (backup JSON): restoreBackupIntoStore via useCodexBackup().impo
     const loaded = await memAdapter.loadAll();
     // The wire field map: kadenaWallets→kadenaSeeds, ouronetWallets→ouroAccounts,
     // pureKeypairs→(pureKeypairs ?? []), addressBook, uiSettings.
-    expect(loaded.kadenaSeeds).toEqual(backupKadenaWallets);
+    expect(loaded.kadenaSeeds).toEqual(backupStoaChainWallets);
     expect(loaded.ouroAccounts).toEqual(backupOuronetWallets);
     expect(loaded.pureKeypairs).toEqual(backupPureKeypairs);
     expect(loaded.addressBook).toEqual(backupAddressBook);
     expect(loaded.uiSettings).toEqual(backupUiSettings);
-    expect(loaded.kadenaSeeds).toHaveLength(backupExpectedKadenaWalletsLength);
+    expect(loaded.kadenaSeeds).toHaveLength(backupExpectedStoaChainWalletsLength);
     expect(loaded.pureKeypairs).toHaveLength(backupExpectedPureKeypairsLength);
   });
 
@@ -186,7 +186,7 @@ describe("mode-1 (backup JSON): restoreBackupIntoStore via useCodexBackup().impo
 
     const loaded = await memAdapter.loadAll();
     // The encrypted blob passes through verbatim (decryption is the unlock path).
-    expect(loaded.kadenaSeeds[0].secret).toBe(backupKadenaWallets[0].secret);
+    expect(loaded.kadenaSeeds[0].secret).toBe(backupStoaChainWallets[0].secret);
     expect(loaded.ouroAccounts[0].secret).toBe(backupOuronetWallets[0].secret);
     expect(loaded.pureKeypairs[0].encryptedPrivateKey).toBe(
       backupPureKeypairs[0].encryptedPrivateKey,
@@ -219,16 +219,16 @@ describe("loadCodex dispatcher: explicit-mode dispatch (no sniff-and-guess)", ()
   it("mode 'plaintext' hydrates the snapshot and returns the adapter", async () => {
     const adapter = (await loadCodex({
       mode: "plaintext",
-      snapshot: populatedKadenaSnapshot,
+      snapshot: populatedStoaChainSnapshot,
     })) as MemoryCodexAdapter;
     expect(adapter).toBeInstanceOf(MemoryCodexAdapter);
-    expect(await adapter.loadAll()).toEqual(populatedKadenaSnapshot);
+    expect(await adapter.loadAll()).toEqual(populatedStoaChainSnapshot);
   });
 
   it("mode 'encrypted' restores the backup text through the mounted importFromCloud", async () => {
     const { memAdapter, importFromCloud } = await mountEmptyStore();
     await loadCodex({ mode: "encrypted", backupText: backupJson, importFromCloud });
-    expect((await memAdapter.loadAll()).kadenaSeeds).toEqual(backupKadenaWallets);
+    expect((await memAdapter.loadAll()).kadenaSeeds).toEqual(backupStoaChainWallets);
   });
 
   it("throws a clear error when 'encrypted' mode is handed a plaintext SNAPSHOT object (mismatch)", async () => {
@@ -236,7 +236,7 @@ describe("loadCodex dispatcher: explicit-mode dispatch (no sniff-and-guess)", ()
       // A snapshot object routed to the encrypted (backup-string) path.
       loadCodex({
         mode: "encrypted",
-        backupText: populatedKadenaSnapshot as unknown as string,
+        backupText: populatedStoaChainSnapshot as unknown as string,
         importFromCloud: async () => {},
       }),
     ).rejects.toThrow(/encrypted|backup|string/i);
@@ -344,7 +344,7 @@ describe("secret hygiene (N-06)", () => {
     const { importFromCloud } = await mountEmptyStore();
     await restoreBackupIntoStore(importFromCloud, backupJson);
 
-    const secret = backupKadenaWallets[0].secret;
+    const secret = backupStoaChainWallets[0].secret;
     const priv = backupPureKeypairs[0].encryptedPrivateKey;
     for (const spy of [logSpy, errSpy, warnSpy]) {
       for (const call of spy.mock.calls) {
@@ -357,11 +357,11 @@ describe("secret hygiene (N-06)", () => {
 
   it("an error on a wrong-version backup names the reason but never echoes a secret VALUE", async () => {
     const { importFromCloud } = await mountEmptyStore();
-    const secret = backupKadenaWallets[0].secret;
+    const secret = backupStoaChainWallets[0].secret;
     const wrongVersion = JSON.stringify({
       version: "1.1",
       exportedAt: "2026-07-03T12:00:00.000Z",
-      kadenaWallets: backupKadenaWallets,
+      kadenaWallets: backupStoaChainWallets,
       ouronetWallets: backupOuronetWallets,
       addressBook: backupAddressBook,
       uiSettings: backupUiSettings,

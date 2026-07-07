@@ -33,7 +33,7 @@ import {
   backupJson,
   backupPassword,
   emptySnapshot,
-  populatedKadenaSnapshot,
+  populatedStoaChainSnapshot,
 } from "../fixtures";
 
 afterEach(() => {
@@ -44,7 +44,7 @@ afterEach(() => {
 describe("Dashboard — renders a plaintext-hydrated store directly (dev/test seam)", () => {
   it("mounts the populated-StoaChain fixture and renders the dashboard with the StoaChain seed entry visible (no unlock)", async () => {
     const user = userEvent.setup();
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     render(
       <CodexProvider adapter={adapter} deviceVariant="dev">
         <Dashboard />
@@ -188,7 +188,7 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
 
     // Mount the dashboard directly against a hydrated store so the export button
     // is reachable without the encrypt/unlock round-trip.
-    const adapter = await hydrateFromPlaintextSnapshot(populatedKadenaSnapshot);
+    const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
     render(
       <CodexProvider adapter={adapter} deviceVariant="dev">
         <Dashboard />

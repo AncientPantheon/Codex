@@ -8,7 +8,7 @@
 // NOT paste any real mnemonic, private key, or password into this file.
 //
 // These fixtures feed the codex-playground devtool's two load modes:
-//   - mode-2 (plaintext snapshot): `emptySnapshot` / `populatedKadenaSnapshot`
+//   - mode-2 (plaintext snapshot): `emptySnapshot` / `populatedStoaChainSnapshot`
 //     are hydrated VERBATIM into a MemoryCodexAdapter, so their `lastUpdatedAt`
 //     / `lastUpdatedDevice` are KNOWN FIXED constants (see MODE2_* below) that a
 //     round-trip test can assert exactly.
@@ -21,7 +21,7 @@
 
 import type { CodexSnapshot } from "@ancientpantheon/codex-ouronet/adapters";
 import type {
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -89,7 +89,7 @@ const DEFAULT_UI_SETTINGS: UiSettings = {
   zbomExecutePosition: "top",
 };
 
-/** A valid but EMPTY CodexSnapshot (mode-2). No Kadena/Ouro entries. */
+/** A valid but EMPTY CodexSnapshot (mode-2). No StoaChain/Ouro entries. */
 export const emptySnapshot: CodexSnapshot = {
   kadenaSeeds: [],
   ouroAccounts: [],
@@ -104,14 +104,14 @@ export const emptySnapshot: CodexSnapshot = {
 };
 
 // ---------------------------------------------------------------------------
-// mode-2 fixture: POPULATED-Kadena plaintext snapshot.
+// mode-2 fixture: POPULATED-StoaChain plaintext snapshot.
 //
-// >= 1 Kadena seed + >= 1 Ouro account (+ address-book + pure keypair) so the
+// >= 1 StoaChain seed + >= 1 Ouro account (+ address-book + pure keypair) so the
 // dashboard renders visible content. Secrets are THROWAWAY encrypted blobs.
 // Known-fixed lastUpdated* for the verbatim round-trip.
 // ---------------------------------------------------------------------------
 
-const throwawayKadenaSeed: IKadenaSeed = {
+const throwawayStoaChainSeed: IStoaChainSeed = {
   id: "seed-throwaway-0001",
   name: "Throwaway Dev Seed",
   seedType: "chainweaver",
@@ -144,7 +144,7 @@ const throwawayOuroAccount: IOuroAccount = {
     pred: "keys-all",
     keys: ["0000000000000000000000000000000000000000000000000000throwaway01"],
   },
-  kadenaLedger: null,
+  stoaChainLedger: null,
   publicKey:
     "0000000000000000000000000000000000000000000000000000throwaway01",
   secret: THROWAWAY_ENCRYPTED_OURO_SECRET,
@@ -175,10 +175,10 @@ const throwawayAddressBookEntry: AddressBookEntry = {
   updatedAt: "2026-07-01T00:00:00.000Z",
 };
 
-/** A CodexSnapshot with >= 1 Kadena entry so the dashboard renders visible
+/** A CodexSnapshot with >= 1 StoaChain entry so the dashboard renders visible
  *  content (mode-2). Verbatim-hydrated; secrets are THROWAWAY encrypted. */
-export const populatedKadenaSnapshot: CodexSnapshot = {
-  kadenaSeeds: [throwawayKadenaSeed],
+export const populatedStoaChainSnapshot: CodexSnapshot = {
+  kadenaSeeds: [throwawayStoaChainSeed],
   ouroAccounts: [throwawayOuroAccount],
   pureKeypairs: [throwawayPureKeypair],
   addressBook: [throwawayAddressBookEntry],
@@ -207,7 +207,7 @@ export const populatedKadenaSnapshot: CodexSnapshot = {
 /** Parsed DATA slices of `backupJson`, exported so mode-1 tests deep-equal
  *  against SHARED constants (NOT the synthesized lastUpdated*). These are the
  *  values the restore adopts into the hydrated snapshot. */
-export const backupKadenaWallets: IKadenaSeed[] = [
+export const backupStoaChainWallets: IStoaChainSeed[] = [
   {
     id: "seed-backup-throwaway-0001",
     name: "Backup Throwaway Seed",
@@ -242,7 +242,7 @@ export const backupOuronetWallets: IOuroAccount[] = [
         "0000000000000000000000000000000000000000000000000000bkupacct01",
       ],
     },
-    kadenaLedger: null,
+    stoaChainLedger: null,
     publicKey:
       "0000000000000000000000000000000000000000000000000000bkupacct01",
     secret: THROWAWAY_ENCRYPTED_OURO_SECRET,
@@ -278,7 +278,7 @@ export const backupAddressBook: AddressBookEntry[] = [
 export const backupUiSettings: UiSettings = { ...DEFAULT_UI_SETTINGS };
 
 /** Length reference for the mode-1 data-slice assertions. */
-export const backupExpectedKadenaWalletsLength = backupKadenaWallets.length;
+export const backupExpectedStoaChainWalletsLength = backupStoaChainWallets.length;
 export const backupExpectedPureKeypairsLength = backupPureKeypairs.length;
 
 /** The augmented "1.2"+pureKeypairs backup file object (pre-serialization).
@@ -287,7 +287,7 @@ export const backupExpectedPureKeypairsLength = backupPureKeypairs.length;
 const backupFileObject = {
   version: "1.2" as const,
   exportedAt: "2026-07-03T12:00:00.000Z",
-  kadenaWallets: backupKadenaWallets,
+  kadenaWallets: backupStoaChainWallets,
   ouronetWallets: backupOuronetWallets,
   addressBook: backupAddressBook,
   uiSettings: backupUiSettings,
@@ -396,7 +396,7 @@ export const arweaveBackupPureKeypairs: PureKeypairEntry[] = [
 // ---------------------------------------------------------------------------
 
 const arweaveBackupObject: CodexExportV1_3<
-  IKadenaSeed,
+  IStoaChainSeed,
   IOuroAccount,
   AddressBookEntry,
   UiSettings,

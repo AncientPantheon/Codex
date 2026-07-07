@@ -41,8 +41,7 @@ import {
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
-import { CodexUiRoot, CodexTabs } from "@ancientpantheon/codex-ouronet/ui";
-import { NetworkSettingsCard } from "@ancientpantheon/codex-ui/ui";
+import { CodexUiRoot, CodexTabs, CodexSettingsSection } from "@ancientpantheon/codex-ouronet/ui";
 import {
   useCodex,
   useCodexAuth,
@@ -151,6 +150,15 @@ export function Dashboard({
     });
   }, []);
 
+  const setPythiaUrl = useCallback(
+    (url: string) => setNetwork((prev) => ({ ...prev, pythiaUrl: url })),
+    [],
+  );
+
+  // The Codex UI / Codex UI Settings view toggle (consumer-composed — CodexUiRoot
+  // is only a token-scope boundary; the split is the app's to build).
+  const [activeView, setActiveView] = useState<"ui" | "settings">("ui");
+
   return (
     <div className="cxpg-shell">
       <header className="cxpg-header">
@@ -160,6 +168,26 @@ export function Dashboard({
           </span>
           Codex
         </span>
+        <div className="cxpg-viewtabs" role="tablist" aria-label="Codex view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === "ui"}
+            className={`cxpg-viewtab${activeView === "ui" ? " cxpg-viewtab--active" : ""}`}
+            onClick={() => setActiveView("ui")}
+          >
+            Codex UI
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === "settings"}
+            className={`cxpg-viewtab${activeView === "settings" ? " cxpg-viewtab--active" : ""}`}
+            onClick={() => setActiveView("settings")}
+          >
+            Codex UI Settings
+          </button>
+        </div>
         <div className="cxpg-header-actions">
           <button
             type="button"
@@ -182,33 +210,46 @@ export function Dashboard({
 
       <main className="cxpg-main">
         <CodexUiRoot>
-          <CodexTabs />
-          {/* The Arweave path — the generic Foreign Chains tab wired to the
-              concrete ArweavePanel via the app (codex-ui stays Arweave-free). The
-              mock ⇄ real toggle drives the wiring mode; default is mock+offline. */}
-          <section className="cxpg-foreign" aria-label="Network">
-            <h2 className="cxpg-foreign-title">Network</h2>
-            {networkModel ? (
-              <NetworkSettingsCard
-                model={networkModel}
-                urls={{
-                  [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
-                  [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
-                }}
-                onSetChainUrl={setChainUrl}
-              />
-            ) : null}
-          </section>
-          <section className="cxpg-foreign" aria-label="Foreign chains">
-            <h2 className="cxpg-foreign-title">Foreign chains</h2>
-            <ArweaveModeToggle
-              initialMode={arweaveMode}
-              initialGatewayUrl={gatewayUrl}
-              onModeChange={setArweaveMode}
-              onGatewayUrlChange={setGatewayUrl}
+          {activeView === "ui" ? (
+            <>
+              <CodexTabs />
+              {/* The Arweave path — the generic Foreign Chains tab wired to the
+                  concrete ArweavePanel via the app (codex-ui stays Arweave-free).
+                  The mock ⇄ real toggle drives the wiring mode; default mock+offline.
+                  The foreign-chain UX itself is a later pass. */}
+              <section className="cxpg-foreign" aria-label="Foreign chains">
+                <h2 className="cxpg-foreign-title">Foreign chains</h2>
+                <ArweaveModeToggle
+                  initialMode={arweaveMode}
+                  initialGatewayUrl={gatewayUrl}
+                  onModeChange={setArweaveMode}
+                  onGatewayUrlChange={setGatewayUrl}
+                />
+                <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
+              </section>
+            </>
+          ) : (
+            /* Codex UI Settings — the packaged CodexSettingsSection. The Network
+               tab is INJECTED (the Codex holds no connections): Pythia (global) +
+               StoaChain/Arweave (local), resolved off the surfaced config. */
+            <CodexSettingsSection
+              consumerName="Codex Playground"
+              network={
+                networkModel
+                  ? {
+                      model: networkModel,
+                      urls: {
+                        [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
+                        [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
+                      },
+                      onSetChainUrl: setChainUrl,
+                      pythiaUrl: network.pythiaUrl,
+                      onSetPythiaUrl: setPythiaUrl,
+                    }
+                  : undefined
+              }
             />
-            <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
-          </section>
+          )}
         </CodexUiRoot>
       </main>
     </div>
