@@ -95,10 +95,13 @@ describe("tokens.css → ui.css artifact source", () => {
     expect(css).toContain(":root");
   });
 
-  it("is the source the T9.2 build copy-step emits as ui.css", () => {
+  it("is compiled into the self-contained dist/ui.css by the build:css step (tokens + Tailwind utilities)", () => {
     const pkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8"));
-    // T9.2 wired `copy:ui-css` to copy src/ui/tokens.css → dist/ui.css.
-    expect(pkg.scripts["copy:ui-css"]).toContain("src/ui/tokens.css");
+    // Variant B: `build:css` runs Tailwind over tw-utilities.css and prepends
+    // tokens.css → a self-contained dist/ui.css (no Tailwind needed downstream).
+    expect(pkg.scripts["build:css"]).toContain("tw-utilities.css");
+    expect(pkg.scripts["build:css"]).toContain("tokens.css");
+    expect(pkg.scripts.build).toContain("build:css");
     expect(pkg.exports["./ui.css"]).toBe("./dist/ui.css");
   });
 });

@@ -41,7 +41,13 @@ import {
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
-import { CodexUiRoot, CodexTabs, CodexSettingsSection } from "@ancientpantheon/codex-ouronet/ui";
+import {
+  CodexUiRoot,
+  CodexTabs,
+  CodexSettingsSection,
+  CodexDebouncerPanel,
+} from "@ancientpantheon/codex-ouronet/ui";
+import { ObservationalCodexIdDisplay, CodexLockControl } from "@ancientpantheon/codex-ui/ui";
 import {
   useCodex,
   useCodexAuth,
@@ -210,6 +216,19 @@ export function Dashboard({
 
       <main className="cxpg-main">
         <CodexUiRoot>
+          {/* The CodexID bar — present in both views (like OuronetUI). The
+              identity display self-sources; with no onDefineIdentity the "Define
+              Codex Identity" button is the disabled WIP state ("coming with
+              Mnemosyne"). The debouncer medallions + Unlock/Lock sit on the right. */}
+          <div className="cxpg-codexbar">
+            <div className="cxpg-codexbar-id">
+              <ObservationalCodexIdDisplay />
+            </div>
+            <div className="cxpg-codexbar-right">
+              <CodexDebouncerPanel />
+              <CodexLockControl />
+            </div>
+          </div>
           {activeView === "ui" ? (
             <>
               <CodexTabs />

@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-ui",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "React/browser interface layer of the Codex family — the chain-generic DOM shell: <CodexProvider> (injected store/resolver/zbom-toast seams), the 16 hooks + their *View types, the generic slot-driven shell components, and the ui.css stylesheet. No value @stoachain, no value Ouronet import (type-only OK).",
   "type": "module",
@@ -50,8 +50,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy:ui-css",
-    "copy:ui-css": "node -e \"require('fs').copyFileSync('src/ui/tokens.css','dist/ui.css')\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run build:css",
+    "build:css": "tailwindcss -i ./src/ui/tw-utilities.css -o ./dist/_util.css --minify && node -e \"const fs=require('fs');fs.writeFileSync('dist/ui.css',fs.readFileSync('src/ui/tokens.css','utf8')+'\\n'+fs.readFileSync('dist/_util.css','utf8'));fs.rmSync('dist/_util.css')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
@@ -77,7 +77,8 @@
     "jsdom": "^29.0.0",
     "lucide-react": "^0.483.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tailwindcss": "^3.4.19"
   },
   "repository": {
     "type": "git",

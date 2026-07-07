@@ -53,12 +53,18 @@ export interface NetworkSettings {
 /** The localStorage key the surfaced config persists under. */
 export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
 
-/** The surfaced defaults — standalone has no operator, so no global Pythia by
- *  default (both chains resolve LOCAL against real, editable, local/testnet
- *  endpoints). The operator can paste a Pythia URL to promote it to global. */
+/** A SUGGESTED StoaChain node (shown as the field placeholder), NOT a default
+ *  value — a standalone Codex ships wired to nothing (see below). */
+export const STOACHAIN_NODE_PLACEHOLDER = STOACHAIN_DEFAULT_NODE_URL;
+
+/** The surfaced defaults. A standalone Codex is connected to NOTHING out of the
+ *  box (owner directive): no operator Pythia, and the StoaChain node is EMPTY
+ *  until the user wires one in the Network tab — so it never silently reads a
+ *  chain "by its own power". The Arweave gateway keeps the local-testnet default
+ *  (localhost:1984, never mainnet). */
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   pythiaUrl: "",
-  stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+  stoaChainNodeUrl: "",
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
 };
 
@@ -122,14 +128,16 @@ export function resolveNetworkModel(
     global: pythiaUrl
       ? createPythiaConnection({ baseUrl: pythiaUrl, chainId: STOACHAIN_CHAIN_ID })
       : undefined,
+    // A LOCAL override exists only when the user actually entered a URL — an
+    // empty field means "not connected" (the row shows Not-connected + editable),
+    // never a phantom live-local against nothing.
     local: {
-      [STOACHAIN_CHAIN_ID]: createStoaChainConnection({
-        kind: "direct",
-        nodeUrl: settings.stoaChainNodeUrl,
-      }).connection,
-      [ARWEAVE_CHAIN_ID]: createArweaveConnection({
-        gatewayUrl: settings.arweaveGatewayUrl,
-      }),
+      [STOACHAIN_CHAIN_ID]: settings.stoaChainNodeUrl.trim()
+        ? createStoaChainConnection({ kind: "direct", nodeUrl: settings.stoaChainNodeUrl }).connection
+        : undefined,
+      [ARWEAVE_CHAIN_ID]: settings.arweaveGatewayUrl.trim()
+        ? createArweaveConnection({ gatewayUrl: settings.arweaveGatewayUrl })
+        : undefined,
     },
     locked: false,
   });

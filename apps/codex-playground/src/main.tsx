@@ -1,11 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-// The codex-ui stylesheet — an EXPLICIT bare `./ui.css` export (NOT auto-injected
-// by any JS import, and codex-ouronet does NOT re-export it). This entry is the
-// SINGLE place it is imported so the `.codex-ui` token scope binds once for the
-// whole mounted dashboard. codex-ui's `sideEffects` lists `dist/ui.css`, so the
-// import survives `vite build`'s tree-shaking and emits a real css asset.
+// The SELF-CONTAINED Codex stylesheet (variant B): codex-ouronet's build runs
+// Tailwind once over all the assembled-UI packages and ships dist/ui.css =
+// `--codex-*` tokens + a scoped `.codex-ui` reset + every utility class the
+// components use. Importing this ONE file styles the entire dashboard (settings
+// cards, the ZBOM modal, the Arweave panel) with NO Tailwind needed downstream.
 import "@ancientpantheon/codex-ui/ui.css";
 
 import { App } from "./App";

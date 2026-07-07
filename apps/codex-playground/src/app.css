@@ -277,6 +277,28 @@
   color: #0a0d16;
 }
 
+/* CodexID bar — identity display (left) + debouncer/lock (right), above the tabs. */
+.cxpg-codexbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.cxpg-codexbar-id {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+.cxpg-codexbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
 .cxpg-main {
   max-width: 1080px;
   margin: 0 auto;

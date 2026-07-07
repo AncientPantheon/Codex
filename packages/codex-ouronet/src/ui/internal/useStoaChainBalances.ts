@@ -62,7 +62,14 @@ function rowsOf(res: unknown): Array<{ account?: string; balance?: unknown; exis
   return Array.isArray(data) ? (data as Array<{ account?: string; balance?: unknown; exists?: boolean }>) : [];
 }
 
-export function useStoaChainBalances(addresses: string[], selectorAddresses: string[]): StoaBalancesView {
+/**
+ * @param enabled When false, NO chain read is issued and balances stay empty.
+ *   Consumers gate this on whether a StoaChain connection is actually wired (a
+ *   node URL / covering Pythia) — a standalone Codex with nothing connected must
+ *   NOT read chain data "by its own power" (it would otherwise fall through to
+ *   stoa-core's default node). Defaults true so existing callers are unchanged.
+ */
+export function useStoaChainBalances(addresses: string[], selectorAddresses: string[], enabled = true): StoaBalancesView {
   const [byAddress, setByAddress] = useState<Record<string, StoaAccountBalances>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +80,7 @@ export function useStoaChainBalances(addresses: string[], selectorAddresses: str
 
   useEffect(() => {
     const addrs = key ? key.split("|") : [];
-    if (!addrs.length) { setByAddress({}); setError(null); setLoading(false); return; }
+    if (!enabled || !addrs.length) { setByAddress({}); setError(null); setLoading(false); return; }
     const selAddrs = selKey ? selKey.split("|") : [];
 
     let cancelled = false;
@@ -142,7 +149,7 @@ export function useStoaChainBalances(addresses: string[], selectorAddresses: str
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, selKey, tick]);
+  }, [key, selKey, tick, enabled]);
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
   return { byAddress, loading, error, refresh };

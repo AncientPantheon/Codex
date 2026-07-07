@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-playground",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Internal, unpublished Vite + React dev playground for the Codex family — mounts the codex-ouronet shell against the workspace source for hot-reloading manual verification. Never published to any registry.",
   "type": "module",

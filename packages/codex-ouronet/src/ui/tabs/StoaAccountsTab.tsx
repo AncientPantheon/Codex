@@ -28,6 +28,8 @@ import { useWatchList } from "../../hooks/index.js";
 import { IconCopyBtn, IconStoaExplorerBtn, IconDeleteBtn } from "../internal/IconButtons.js";
 import { useStoaChainBalances, type StoaAccountBalances } from "../internal/useStoaChainBalances.js";
 import type { IStoaChainSeed } from "../../types/entities.js";
+import { useCodexStore } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/index.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const ADDR_PREFIXES = ["k:", "u:", "c:", "w:"];
@@ -191,7 +193,22 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
   const watchAddrs = useMemo(() => watchEntries.filter((w) => !codexAddressSet.has(w.address)), [watchEntries, codexAddressSet]);
 
   const allAddresses = useMemo(() => [...codexAddresses, ...watchAddrs.map((w) => w.address)], [codexAddresses, watchAddrs]);
-  const { byAddress, loading, error, refresh } = useStoaChainBalances(allAddresses, codexAddresses);
+
+  // Only read chain data when a StoaChain connection is actually wired. A node
+  // is wired when a PRESET is selected (OuronetUI's default) OR a non-empty
+  // custom node URL is set (the standalone Network tab). A standalone Codex with
+  // nothing connected (selectedNode "custom" + empty URL) must NOT read balances
+  // — otherwise it silently falls through to stoa-core's default node.
+  const store = useCodexStore();
+  const ui = store((s: CodexStoreState) => s.uiSettings as Record<string, unknown>);
+  const stoaChainConnected =
+    ui.selectedNode !== "custom" || String(ui.customNodeUrl ?? "").trim().length > 0;
+
+  const { byAddress, loading, error, refresh } = useStoaChainBalances(
+    allAddresses,
+    codexAddresses,
+    stoaChainConnected,
+  );
 
   const totalCodex = codexAddresses.length;
 

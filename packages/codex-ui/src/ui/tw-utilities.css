@@ -1,0 +1,22 @@
+/*
+ * Tailwind INPUT for the shipped, self-contained Codex stylesheet (variant B).
+ * codex-ui's `build:css` runs Tailwind over this file and prepends tokens.css to
+ * produce dist/ui.css — the ONE stylesheet consumers import (no Tailwind
+ * downstream).
+ *
+ * Preflight (Tailwind's global reset) is off; a SCOPED reset under `.codex-ui`
+ * supplies exactly what the utilities depend on — box-sizing + zeroed-but-solid
+ * borders in the codex border colour — so `border`, `border-l`, etc. render,
+ * WITHOUT resetting the host page's elements.
+ */
+.codex-ui,
+.codex-ui *,
+.codex-ui ::before,
+.codex-ui ::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+  border-color: var(--codex-border, #262626);
+}
+
+@tailwind utilities;

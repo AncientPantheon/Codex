@@ -48,11 +48,11 @@ beforeEach(() => {
 });
 
 describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
-  it("defaults the StoaChain node to STOACHAIN_DEFAULT_NODE_URL and the Arweave gateway to the local testnet gateway", () => {
+  it("ships with NO StoaChain node wired (empty by default) — a standalone Codex reads nothing by its own power", () => {
     const settings = loadNetworkSettings();
-    // Surfaced as REAL default values (not hidden): the StoaChain node is the
-    // explicit node2-host default, the Arweave gateway is the local testnet one.
-    expect(settings.stoaChainNodeUrl).toBe(STOACHAIN_DEFAULT_NODE_URL);
+    // The StoaChain node is EMPTY by default (not silently node2); the Arweave
+    // gateway keeps the local-testnet default.
+    expect(settings.stoaChainNodeUrl).toBe("");
     expect(settings.arweaveGatewayUrl).toBe(DEFAULT_GATEWAY_URL);
   });
 
@@ -115,7 +115,7 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     await screen.findByTestId(`network-url-${STOACHAIN_CHAIN_ID}`);
   }
 
-  it("renders the NetworkSettingsCard with a StoaChain row and an Arweave row seeded to their default URLs", async () => {
+  it("renders the Network tab with an EMPTY StoaChain field (nothing wired) + the Arweave testnet gateway", async () => {
     await mountDashboard();
 
     const stoaUrl = (await screen.findByTestId(
@@ -125,9 +125,9 @@ describe("Network card in the dashboard shell (CL-13)", () => {
       `network-url-${ARWEAVE_CHAIN_ID}`,
     ) as HTMLInputElement;
 
-    // The surfaced defaults are visible + real (N-03): the operator sees the
-    // live node + gateway, not an empty/hidden field.
-    expect(stoaUrl.value).toBe(STOACHAIN_DEFAULT_NODE_URL);
+    // Standalone ships wired to nothing: the StoaChain field is empty + editable
+    // until the operator enters a node; the Arweave gateway keeps its testnet default.
+    expect(stoaUrl.value).toBe("");
     expect(arweaveUrl.value).toBe(DEFAULT_GATEWAY_URL);
     expect(arweaveUrl.value).not.toContain("arweave.net");
   });
