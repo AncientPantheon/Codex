@@ -76,7 +76,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run copy:ui-css && npm run copy:pact-parser",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy:ui-css && npm run copy:pact-parser",
     "copy:ui-css": "node -e \"require('fs').copyFileSync('src/ui/tokens.css','dist/ui.css')\"",
     "copy:pact-parser": "node -e \"const fs=require('fs');fs.copyFileSync('src/zbom/lang-pact/pact.parser.js','dist/zbom/lang-pact/pact.parser.js');fs.copyFileSync('src/zbom/lang-pact/pact.parser.d.ts','dist/zbom/lang-pact/pact.parser.d.ts')\"",
     "gen:pact-parser": "lezer-generator src/zbom/lang-pact/pact.grammar -o src/zbom/lang-pact/pact.parser.js",

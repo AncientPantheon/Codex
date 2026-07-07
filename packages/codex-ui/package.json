@@ -50,7 +50,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run copy:ui-css",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy:ui-css",
     "copy:ui-css": "node -e \"require('fs').copyFileSync('src/ui/tokens.css','dist/ui.css')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
