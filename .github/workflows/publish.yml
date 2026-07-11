@@ -86,10 +86,17 @@ jobs:
       # checkouts. On a CI fresh checkout `dist/` is absent until the build
       # step creates it; a test importing a package by its bare specifier
       # before build would hit ERR_MODULE_NOT_FOUND.
-      - name: Typecheck + Build + Test (all packages)
+      - name: Build + Typecheck + Test (all packages)
+        # BUILD FIRST, then typecheck + test. On a fresh checkout no package has a
+        # `dist/` yet; some resolve a sibling's types via its `exports` → `dist`
+        # (codex + codex-arweave → the published @ancientpantheon/arweave-core;
+        # each member's vitest resolves siblings via dist too). Building first
+        # emits every dist. The root `build` bootstraps the codex-ui ↔
+        # codex-ouronet circular pair (see scripts/build-circular-pair.mjs) so a
+        # cold full build no longer deadlocks.
         run: |
-          npm run typecheck
           npm run build
+          npm run typecheck
           npm test
 
       # ------------------------------------------------------------------

@@ -49,11 +49,15 @@ jobs:
       - name: Dependency advisory audit (non-blocking)
         run: npm audit --audit-level=high --workspace=@ancientpantheon/arweave-core || true
 
+      # BUILD FIRST — a fresh checkout has no `dist/`, and typecheck + each
+      # package's vitest resolve siblings via their `exports` → `dist`. The root
+      # `build` bootstraps the codex-ui ↔ codex-ouronet circular pair
+      # (scripts/build-circular-pair.mjs) so a cold full build no longer deadlocks.
+      - name: Build (all packages)
+        run: npm run build
+
       - name: Type check
         run: npm run typecheck
 
       - name: Run tests
         run: npm test
-
-      - name: Build
-        run: npm run build
