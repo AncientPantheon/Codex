@@ -30,6 +30,10 @@
     "./address-book": {
       "types": "./dist/address-book/index.d.ts",
       "import": "./dist/address-book/index.js"
+    },
+    "./connection": {
+      "types": "./dist/connection/index.d.ts",
+      "import": "./dist/connection/index.js"
     }
   },
   "files": [

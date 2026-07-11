@@ -439,6 +439,9 @@ function LoadCodexScreen({
           ◈
         </div>
         <h1 className="cxpg-title">Codex</h1>
+        <span className="cxpg-version cxpg-version--landing" title="@ancientpantheon/codex-ouronet version">
+          v{__CODEX_VERSION__}
+        </span>
         <p className="cxpg-subtitle">
           Your multi-chain key vault — local &amp; offline.
         </p>

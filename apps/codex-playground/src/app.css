@@ -334,6 +334,12 @@ body {
   font-family: var(--cxpg-font-mono, ui-monospace, monospace);
 }
 
+/* On the landing card the pill sits between the centered title + subtitle. */
+.cxpg-version--landing {
+  display: inline-block;
+  margin-top: 10px;
+}
+
 .cxpg-viewtabs-wrap {
   flex: 1;
   display: flex;

@@ -1,5 +1,12 @@
 {
+  "//": "The aggregator's barrels re-export the member packages, which the workspace `paths` map resolves to their SRC (incl .tsx). So this typecheck config needs the same `jsx` + `DOM` lib the tsup bundle uses, and relaxes the unused-locals lint (we are re-checking the members' own already-linted source through the barrels).",
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

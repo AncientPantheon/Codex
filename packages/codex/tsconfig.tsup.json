@@ -1,0 +1,14 @@
+{
+  "//": "Dedicated tsconfig for the tsup bundle. It INHERITS the workspace `paths` map from tsconfig.base.json (which points every @ancientpantheon/codex-* member + subpath at its SRC index) so both the esbuild JS pass AND the rollup-plugin-dts type pass treat the four private members as internal source and INLINE them — JS into dist chunks, types into codex's own .d.ts. Resolving through src (not the members' exports→dist) is what lets the dts step follow subpath re-exports it otherwise leaves external. `jsx: react-jsx` is required because bundling from src compiles the members' TSX. Do NOT redefine `baseUrl` here — the inherited `paths` must stay resolved relative to the repo-root baseUrl declared in the base config.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", "src/**/*.test.ts"]
+}

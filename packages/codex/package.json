@@ -1,7 +1,7 @@
 {
   "name": "@ancientpantheon/codex",
-  "version": "0.0.1",
-  "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports.",
+  "version": "0.5.0",
+  "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports. The four internal member packages are bundled in; consumers never resolve them separately.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,23 +29,72 @@
     "./arweave": {
       "types": "./dist/arweave/index.d.ts",
       "import": "./dist/arweave/index.js"
-    }
+    },
+    "./ui.css": "./dist/ui.css"
   },
   "files": [
     "dist",
     "CHANGELOG.md",
     "README.md"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm run clean && node scripts/gen-readme-versions.mjs && tsup && node scripts/bundle-css.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "clean": "rimraf dist"
+  },
+  "_bundlingComment": "The four internal members (codex-core, codex-ui, codex-ouronet, codex-arweave) are bundled INTO this package's dist by tsup (see tsup.config.ts noExternal) and therefore live in devDependencies — they are build-time inputs, never installed by a consumer. Everything a consumer must actually resolve is in dependencies (externalized runtime libs + the published @ancientpantheon/arweave-core) or peerDependencies (react + the @stoachain chain primitives + @noble/curves + lucide-react, which the consumer already has one shared instance of).",
+  "peerDependencies": {
+    "@noble/curves": "1.9.7",
+    "@stoachain/dalos-crypto": ">=4.0.0",
+    "@stoachain/kadena-stoic-legacy": ">=4.3.0",
+    "@stoachain/ouronet-core": ">=4.3.0",
+    "@stoachain/stoa-core": ">=4.3.0",
+    "lucide-react": ">=0.400.0",
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
+  "dependencies": {
+    "@ancientpantheon/arweave-core": "^0.2.0",
+    "@ardrive/turbo-sdk": "^1.42.0",
+    "arweave": "^1.15.7",
+    "@codemirror/autocomplete": "^6.18.0",
+    "@codemirror/language": "^6.12.1",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.34.0",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/lr": "^1.4.8",
+    "@radix-ui/react-switch": "^1.1.3",
+    "@radix-ui/react-tooltip": "^1.1.8",
+    "@uiw/react-codemirror": "^4.25.4",
+    "clsx": "^2.1.1",
+    "sonner": "^2.0.1",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@ancientpantheon/codex-arweave": "*",
+    "@ancientpantheon/codex-core": "*",
+    "@ancientpantheon/codex-ouronet": "*",
+    "@ancientpantheon/codex-ui": "*",
+    "@noble/curves": "1.9.7",
+    "@stoachain/dalos-crypto": "^4.0.0",
+    "@stoachain/kadena-stoic-legacy": "^4.3.0",
+    "@stoachain/ouronet-core": "^4.3.0",
+    "@stoachain/stoa-core": "^4.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "lucide-react": "^0.483.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsup": "^8.3.5"
   },
   "repository": {
     "type": "git",
