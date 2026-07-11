@@ -113,7 +113,13 @@ export class SqliteLibraryStore implements LibraryStore {
   static async open(
     opts: OpenSqliteLibraryStoreOptions,
   ): Promise<SqliteLibraryStore> {
-    const probe = opts.importSqlite ?? (() => import("node:sqlite"));
+    // `/* @vite-ignore */` — never let a bundler try to BUNDLE the Node builtin
+    // `node:sqlite`. Under vitest's jsdom/client environment vite otherwise
+    // errors "Cannot bundle built-in module node:sqlite" (surfaces on the CI
+    // Linux runner). This is a lazy, availability-gated runtime import that Node
+    // must resolve itself; the directive tells vite to leave it untouched (esbuild
+    // / the codex tsup bundle already externalize node: builtins, so no effect there).
+    const probe = opts.importSqlite ?? (() => import(/* @vite-ignore */ "node:sqlite"));
 
     let mod: NodeSqliteModuleLike;
     try {
