@@ -87,7 +87,7 @@ describe("Arweave address validator registration (E-11)", () => {
 
   it("(b) the validator IGNORES the `type` argument — same result regardless of type", () => {
     expect(validateAddress(ARWEAVE_CHAIN_ID, CANONICAL_ADDR, "stoa")).toBe(true);
-    expect(validateAddress(ARWEAVE_CHAIN_ID, CANONICAL_ADDR, "anything")).toBe(true);
+    expect(validateAddress(ARWEAVE_CHAIN_ID, CANONICAL_ADDR, "anything" as never)).toBe(true);
     expect(validateAddress(ARWEAVE_CHAIN_ID, "too-short", "stoa")).toBe(false);
   });
 

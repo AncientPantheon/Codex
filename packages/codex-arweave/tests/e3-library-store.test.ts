@@ -32,6 +32,7 @@ import {
   type LibraryStore,
   type LibraryEntry,
 } from "../src/library";
+import type { IdbFactoryLike } from "../src/library/types";
 
 import { KNOWN_ADDRESS, CANONICAL_ID_A, CANONICAL_ID_B } from "./e3-helpers";
 
@@ -68,7 +69,7 @@ const impls: Array<{ name: string; make: () => Promise<LibraryStore> }> = [
     name: "IndexedDBLibraryStore",
     make: async () =>
       IndexedDBLibraryStore.open({
-        indexedDB: globalThis.indexedDB,
+        indexedDB: globalThis.indexedDB as unknown as IdbFactoryLike,
         databaseName: `codex-library-${Math.random().toString(36).slice(2)}`,
       }),
   },
@@ -204,7 +205,7 @@ describe.each(impls)("LibraryStore conformance — $name (E-07)", ({ make }) => 
 describe("LibraryStore async-correctness — IndexedDBLibraryStore (E-07, FIX-9)", () => {
   it("(f) a write is observable only AFTER the transaction completes (append resolves post-oncomplete)", async () => {
     const store = await IndexedDBLibraryStore.open({
-      indexedDB: globalThis.indexedDB,
+      indexedDB: globalThis.indexedDB as unknown as IdbFactoryLike,
       databaseName: `codex-library-async-${Math.random().toString(36).slice(2)}`,
     });
     await store.clear();

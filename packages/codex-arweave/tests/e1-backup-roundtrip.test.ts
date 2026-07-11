@@ -48,11 +48,6 @@ const throwawayJwk = JSON.parse(
 ) as ArweaveJwk;
 const legacyBackupJson = readFileSync(join(FIXTURES, "legacy-1-2-backup.json"), "utf8");
 
-const reversingSeam: CryptoSeam = {
-  encrypt: (p: string) => [...p].reverse().join(""),
-  decrypt: (c: string) => [...c].reverse().join(""),
-};
-
 // ── A REAL fresh-IV AES-GCM seam (WebCrypto, node global). Each encrypt draws a
 //    fresh random 12-byte IV, so two encrypts of the same plaintext yield two
 //    DISTINCT ciphertexts, both decrypting identically. This is the property
@@ -151,7 +146,7 @@ describe("codec — the 1.3 envelope must carry BOTH foreignKeys AND pureKeypair
     const json = serializeCodex(codex);
 
     // The reader must NOT reject pureKeypairs as an unknown field.
-    const parsed = deserializeCodex(json) as Record<string, unknown>;
+    const parsed = deserializeCodex(json) as unknown as Record<string, unknown>;
     expect(parsed.version).toBe("1.3");
     // foreignKeys travels as a {schemaVersion, keys} BLOCK...
     expect((parsed.foreignKeys as { keys: ForeignKeyEntry[] }).keys).toEqual([sampleForeignKey]);
@@ -177,7 +172,7 @@ describe("codec — the 1.3 envelope must carry BOTH foreignKeys AND pureKeypair
 
   it("(c) buildCodexExport on a codex carrying pureKeypairs EMITS them in the 1.3 envelope (the writer does not drop pureKeypairs)", () => {
     const codex = baseCodex({ pureKeypairs: [samplePureKeypair] });
-    const envelope = buildCodexExport(codex) as Record<string, unknown>;
+    const envelope = buildCodexExport(codex) as unknown as Record<string, unknown>;
     expect(envelope.version).toBe("1.3");
     expect(envelope.pureKeypairs).toEqual([samplePureKeypair]);
   });
@@ -204,7 +199,7 @@ describe("codec — the 1.3 envelope must carry BOTH foreignKeys AND pureKeypair
 
   it("(e) on the wire pureKeypairs is a BARE ARRAY while foreignKeys is a {schemaVersion,keys} BLOCK — the two keyrings have DIFFERENT shapes", () => {
     const codex = baseCodex({ pureKeypairs: [samplePureKeypair], foreignKeys: [sampleForeignKey] });
-    const envelope = buildCodexExport(codex) as Record<string, unknown>;
+    const envelope = buildCodexExport(codex) as unknown as Record<string, unknown>;
     expect(Array.isArray(envelope.pureKeypairs)).toBe(true);
     expect(Array.isArray(envelope.foreignKeys)).toBe(false);
     expect(envelope.foreignKeys).toMatchObject({ schemaVersion: expect.any(Number), keys: [sampleForeignKey] });
@@ -264,7 +259,7 @@ describe("backup rewire — 1.3 export carries foreignKeys+pureKeypairs; old 1.2
   it("(a) the rewired export path emits version 1.3 with foreignKeys+pureKeypairs (neither dropped, ciphertext never decrypted)", () => {
     // Models the rewired buildSnapshotFromState -> buildCodexExport writer.
     const codex = baseCodex({ pureKeypairs: [samplePureKeypair], foreignKeys: [sampleForeignKey] });
-    const envelope = buildCodexExport(codex) as Record<string, unknown>;
+    const envelope = buildCodexExport(codex) as unknown as Record<string, unknown>;
     expect(envelope.version).toBe("1.3");
     expect((envelope.foreignKeys as { keys: ForeignKeyEntry[] }).keys).toEqual([sampleForeignKey]);
     expect(envelope.pureKeypairs).toEqual([samplePureKeypair]);
@@ -278,7 +273,7 @@ describe("backup rewire — 1.3 export carries foreignKeys+pureKeypairs; old 1.2
     // The rewired reader must accept the augmented 1.2 file. The base codec
     // rejects pureKeypairs on 1.2 today, so this asserts the 1.2 golden parses
     // through the widened reader with pureKeypairs preserved and no throw.
-    const parsed = deserializeCodex(legacyBackupJson) as Record<string, unknown>;
+    const parsed = deserializeCodex(legacyBackupJson) as unknown as Record<string, unknown>;
     expect(parsed.version).toBe("1.2");
     expect(parsed.pureKeypairs).toHaveLength(1);
     expect((parsed.pureKeypairs as Array<{ id: string }>)[0].id).toBe("pk-legacy-1");
@@ -287,7 +282,7 @@ describe("backup rewire — 1.3 export carries foreignKeys+pureKeypairs; old 1.2
 
   it("(c) pureKeypairs survives the rewire (FIX-2 gate — a 1.3 with pureKeypairs is restorable)", () => {
     const codex = baseCodex({ pureKeypairs: [samplePureKeypair] });
-    const parsed = deserializeCodex(serializeCodex(codex)) as Record<string, unknown>;
+    const parsed = deserializeCodex(serializeCodex(codex)) as unknown as Record<string, unknown>;
     expect(parsed.pureKeypairs).toEqual([samplePureKeypair]);
   });
 

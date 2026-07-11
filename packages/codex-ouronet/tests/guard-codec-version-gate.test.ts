@@ -18,8 +18,8 @@
 
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
-import { realpathSync } from "node:fs";
-import { sep } from "node:path";
+import { realpathSync, existsSync, readFileSync } from "node:fs";
+import { sep, dirname, resolve, join } from "node:path";
 import {
   deserializeCodex,
   serializeCodex,
@@ -39,13 +39,24 @@ const WELL_FORMED_1_2 = {
 } as const;
 
 describe("codec version-gate provenance (the guard's validity depends on this)", () => {
-  it("resolves @stoachain/ouronet-core/codex to the published registry dist under this monorepo, not the stoa-js source tree", async () => {
+  it("resolves @stoachain/ouronet-core/codex to the published registry dist under this monorepo, not the stoa-js source tree", () => {
     // FAIL-VISIBLE C1 precondition: the whole guard is meaningless if the
-    // package can't be resolved. import.meta.resolve mirrors how vitest/Node
-    // resolve the `import`-conditioned `./codex` subpath (require.resolve does
-    // not, since the exports map has no `require` condition).
-    const url = await import.meta.resolve("@stoachain/ouronet-core/codex");
-    const real = realpathSync(fileURLToPath(url));
+    // package can't be located. The `./codex` subpath is `import`-only (no
+    // `require`/`default` condition), so NEITHER `require.resolve` NOR vitest's
+    // vite-node runner (which lacks `import.meta.resolve`) can resolve it. So we
+    // resolve it deterministically from disk instead: find the installed
+    // package (local or hoisted node_modules), read its exports["./codex"].import
+    // target, and realpath it — exactly what a conformant resolver would land on.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgDir = [
+      resolve(here, "../node_modules/@stoachain/ouronet-core"),
+      resolve(here, "../../../node_modules/@stoachain/ouronet-core"),
+    ].find((d) => existsSync(join(d, "package.json")));
+    expect(pkgDir, "@stoachain/ouronet-core not found in node_modules").toBeTruthy();
+    const codexTarget = JSON.parse(
+      readFileSync(join(pkgDir as string, "package.json"), "utf8"),
+    ).exports["./codex"].import as string;
+    const real = realpathSync(resolve(pkgDir as string, codexTarget));
 
     // Must be the built dist (…/dist/codex/…), proving we read the shipped
     // artifact and not a `src/` file: link into a working tree.
@@ -92,10 +103,10 @@ describe('frozen "1.2" codec version gate', () => {
       uiSettings: { theme: "light" },
     };
 
-    const built = buildCodexExport(codex);
+    const built = buildCodexExport(codex as unknown as Parameters<typeof buildCodexExport>[0]);
     expect(built.version).toBe("1.2");
 
-    const out = deserializeCodex(serializeCodex(codex));
+    const out = deserializeCodex(serializeCodex(codex as unknown as Parameters<typeof serializeCodex>[0]));
     expect(out.version).toBe("1.2");
     expect(out.kadenaWallets).toEqual(codex.kadenaWallets);
     expect(out.uiSettings).toEqual(codex.uiSettings);

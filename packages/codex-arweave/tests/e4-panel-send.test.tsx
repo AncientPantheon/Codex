@@ -18,6 +18,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, waitFor, cleanup, fireEvent } from "@testing-library/react";
 
 import { SendArea } from "../src/panel/SendArea";
+import type { ArweaveSendRequest } from "../src/panel/context";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 
 import {
@@ -44,8 +45,24 @@ beforeEach(() => {
 /** A book with one Arweave + one StoaChain contact — only the Arweave one is offerable. */
 function makeBook(): AddressBookEntry[] {
   return [
-    { id: "ab-1", name: "Alice (AR)", address: ARWEAVE_ADDRESS, type: "stoa", chainId: ARWEAVE_CHAIN_ID },
-    { id: "ab-2", name: "Bob (KDA)", address: "k:abcdef", type: "stoa", chainId: STOACHAIN_CHAIN_ID },
+    {
+      id: "ab-1",
+      name: "Alice (AR)",
+      address: ARWEAVE_ADDRESS,
+      type: "stoa",
+      chainId: ARWEAVE_CHAIN_ID,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    },
+    {
+      id: "ab-2",
+      name: "Bob (KDA)",
+      address: "k:abcdef",
+      type: "stoa",
+      chainId: STOACHAIN_CHAIN_ID,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    },
   ];
 }
 
@@ -53,7 +70,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
   return {
     addressBook: makeBook(),
     // The E2 send seam: resolves {id, reward} on success. Fakes throughout.
-    send: vi.fn(async (): Promise<{ id: string; reward: bigint }> => ({
+    send: vi.fn(async (_req: ArweaveSendRequest): Promise<{ id: string; reward: bigint }> => ({
       id: ARWEAVE_ADDRESS,
       reward: 1_000_000n,
     })),
@@ -288,7 +305,7 @@ describe("SendArea — secret hygiene", () => {
     await waitFor(() => expect(props.send).toHaveBeenCalled());
     // No private JWK field name appears with a secret value; the send seam only
     // ever receives {target, quantity, maxRewardWinston} — never key material.
-    const arg = props.send.mock.calls[0][0] as Record<string, unknown>;
+    const arg = props.send.mock.calls[0][0] as unknown as Record<string, unknown>;
     expect(arg).not.toHaveProperty("jwk");
     expect(arg).not.toHaveProperty("d");
   });

@@ -4,7 +4,7 @@ Framework-agnostic Arweave protocol library for the Codex family — the chain-n
 
 ## Status
 
-`0.1.0` on public npmjs — the first feature-complete, publish-ready cut. Ships the full Arweave protocol surface: key generation and keyfile import/export, canonical address derivation, Winston/AR unit conversion, a config-driven multi-endpoint gateway pool, native AR transfer, balance and transaction-status reads, permanent-storage uploads through the Turbo bundling service, and the GraphQL rebuild query that reconstructs an owner's uploads from the on-chain tag index.
+`0.2.0` on public npmjs — the full Arweave protocol surface with injectable gateway endpoints. Ships key generation and keyfile import/export, canonical address derivation, Winston/AR unit conversion, a config-driven multi-endpoint gateway pool (endpoints injectable at construction so a host can point it at its own connection tier), native AR transfer, balance and transaction-status reads, permanent-storage uploads through the Turbo bundling service, and the GraphQL rebuild query that reconstructs an owner's uploads from the on-chain tag index.
 
 ## Install
 
@@ -115,6 +115,8 @@ Uploads target the Turbo bundling service (`upload.ardrive.io`), not an Arweave 
 - **Tags are permanent, public, and indexed.** All tag names and values — including any `appMetadata` you supply and the `Codex-Item-Id` — are stored on-chain forever and are searchable by anyone via gateway GraphQL. **Never put PII or secrets in tags.** Encryption applies only to the data payload; it does not protect tag contents.
 
 ## Version history
+
+**v0.2.0** — Injectable gateway endpoints: the gateway pool accepts its endpoint list at construction so a host (the Codex connection layer) can drive it from its own network settings instead of a hard-coded default.
 
 **v0.1.0** — First feature-complete, publish-ready release: keys/address, Winston/AR units, config-driven gateway pool, native AR transfer, balance + transaction-status reads, Turbo permanent-storage uploads with the Codex tag schema, and the GraphQL rebuild query.
 

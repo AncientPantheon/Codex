@@ -26,8 +26,6 @@ import type { CodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import {
   CodexPrimeProtectedError,
   CodexPrimeSeedProtectedError,
-  CodexKickstartError,
-  CodexGuardError,
   CodexIdentityError,
 } from "@ancientpantheon/codex-ouronet/errors";
 import type {

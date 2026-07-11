@@ -13,8 +13,8 @@ import { CODEX_READ_REGISTRY, READ_BY_ID } from "@ancientpantheon/codex-ouronet/
 beforeEach(() => codexClock._reset());
 
 describe("readRegistry", () => {
-  it("is the 16-entry source of truth with unique ids + canonical names", () => {
-    expect(CODEX_READ_REGISTRY.length).toBe(16);
+  it("is the 17-entry source of truth with unique ids + canonical names", () => {
+    expect(CODEX_READ_REGISTRY.length).toBe(17);
     const ids = CODEX_READ_REGISTRY.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
     const canon = CODEX_READ_REGISTRY.map((r) => r.canonical);

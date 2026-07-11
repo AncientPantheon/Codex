@@ -16,6 +16,7 @@ import { render, screen, within, waitFor, cleanup, fireEvent } from "@testing-li
 // The not-yet-existing panel area (provisioned by T14.7, filled by T14.8). The
 // import resolution failure is the RED signal.
 import { KeyringArea } from "../src/panel/KeyringArea";
+import type { KeyringAreaProps } from "../src/panel/KeyringArea";
 
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
@@ -78,7 +79,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
     generateArweaveKey: vi.fn(async () => makeEntry()),
     importArweaveKey: vi.fn(async () => makeEntry()),
     decryptArweaveKey: vi.fn(async () => fixtureJwk),
-    addForeignKey: vi.fn(async () => {}),
+    addForeignKey: vi.fn(async (_entry: ForeignKeyEntry) => {}),
     renameForeignKey: vi.fn(async () => {}),
     deleteForeignKey: vi.fn(async () => {}),
     ...overrides,
@@ -92,7 +93,7 @@ beforeEach(() => {
 
 describe("KeyringArea — list", () => {
   it("renders each foreign key with its label and full 43-char address", () => {
-    render(<KeyringArea {...makeProps()} />);
+    render(<KeyringArea {...(makeProps() as unknown as KeyringAreaProps)} />);
     expect(screen.getByText("My Arweave key")).toBeInTheDocument();
     // The full canonical address is shown (not truncated to fewer chars).
     expect(screen.getByText(THROWAWAY_ADDRESS)).toBeInTheDocument();
@@ -100,7 +101,7 @@ describe("KeyringArea — list", () => {
   });
 
   it("shows an empty-state when the keyring has no entries", () => {
-    render(<KeyringArea {...makeProps({ foreignKeys: [] })} />);
+    render(<KeyringArea {...(makeProps({ foreignKeys: [] }) as unknown as KeyringAreaProps)} />);
     // No key label rendered; an explicit empty affordance is present.
     expect(screen.queryByText("My Arweave key")).not.toBeInTheDocument();
     expect(screen.getByTestId("keyring-empty")).toBeInTheDocument();
@@ -109,7 +110,7 @@ describe("KeyringArea — list", () => {
   it("exposes a copy control that writes the 43-char address to the clipboard", async () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
-    render(<KeyringArea {...makeProps()} />);
+    render(<KeyringArea {...(makeProps() as unknown as KeyringAreaProps)} />);
     fireEvent.click(screen.getByTestId("keyring-copy-address"));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(THROWAWAY_ADDRESS));
   });
@@ -119,7 +120,7 @@ describe("KeyringArea — create via off-thread keygen", () => {
   it("runs the injected KeygenRunner, shows coarse progress while pending, and disables re-entry", async () => {
     const keygenRunner = makeFakeKeygenRunner();
     const props = makeProps({ keygenRunner });
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     const createBtn = screen.getByTestId("keyring-create");
     fireEvent.click(createBtn);
@@ -133,7 +134,7 @@ describe("KeyringArea — create via off-thread keygen", () => {
 
   it("on resolve hands the plaintext JWK to generateArweaveKey/addForeignKey then clears it", async () => {
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
     fireEvent.click(screen.getByTestId("keyring-create"));
 
     // The resolved JWK is handed to the encrypt-at-rest keyring seam (the spy
@@ -154,7 +155,7 @@ describe("KeyringArea — create via off-thread keygen", () => {
   it("on keygen reject renders an error state and adds NO key", async () => {
     const keygenRunner = makeFakeKeygenRunner({ reject: true });
     const props = makeProps({ keygenRunner });
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
     fireEvent.click(screen.getByTestId("keyring-create"));
 
     await waitFor(() => expect(screen.getByTestId("keygen-error")).toBeInTheDocument());
@@ -165,7 +166,7 @@ describe("KeyringArea — create via off-thread keygen", () => {
 describe("KeyringArea — JWK hygiene (FIX-5)", () => {
   it("never renders any private JWK field value at any point in the create flow", async () => {
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
     assertNoPrivateJwkInDom();
 
     fireEvent.click(screen.getByTestId("keyring-create"));
@@ -180,7 +181,7 @@ describe("KeyringArea — JWK hygiene (FIX-5)", () => {
 describe("KeyringArea — import", () => {
   it("validates a pasted keyfile via importArweaveKey and adds it encrypted", async () => {
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-import-open"));
     fireEvent.change(screen.getByTestId("keyring-import-input"), {
@@ -200,7 +201,7 @@ describe("KeyringArea — import", () => {
       throw new InvalidKeyfileError("keyfile field 'd' is malformed");
     });
     const props = makeProps({ importArweaveKey });
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-import-open"));
     const secret = "SUPER-SECRET-PASTED-VALUE-abc123";
@@ -219,7 +220,7 @@ describe("KeyringArea — import", () => {
 describe("KeyringArea — rename", () => {
   it("calls renameForeignKey with the entry id and the new label", async () => {
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-rename-open"));
     fireEvent.change(screen.getByTestId("keyring-rename-input"), {
@@ -239,7 +240,7 @@ describe("KeyringArea — export (FIX-6, secret-critical)", () => {
       throw new CodexLockedError("decryptArweaveKey");
     });
     const props = makeProps({ decryptArweaveKey });
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-export-open"));
     // The warning about exposing the private keyfile gates the action.
@@ -258,7 +259,7 @@ describe("KeyringArea — export (FIX-6, secret-critical)", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-export-open"));
     fireEvent.click(screen.getByTestId("keyring-export-confirm"));
@@ -284,7 +285,7 @@ describe("KeyringArea — export (FIX-6, secret-critical)", () => {
 describe("KeyringArea — delete", () => {
   it("confirms then calls deleteForeignKey with the entry id", async () => {
     const props = makeProps();
-    render(<KeyringArea {...props} />);
+    render(<KeyringArea {...(props as unknown as KeyringAreaProps)} />);
 
     fireEvent.click(screen.getByTestId("keyring-delete-open"));
     fireEvent.click(screen.getByTestId("keyring-delete-confirm"));

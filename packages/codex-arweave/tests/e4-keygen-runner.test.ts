@@ -31,8 +31,6 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-import type { ArweaveJwk } from "@ancientpantheon/arweave-core";
-
 // RED: none of these exist yet (T14.10 GREEN provisions `../src/keygen`).
 import {
   createWorkerKeygenRunner,

@@ -121,6 +121,11 @@ const EXPECTED_UI_VALUE_EXPORTS = [
   "ReadFunctionsCard",
   // STAY-set: the Ouronet-composed settings aggregator (local)
   "CodexSettingsSection",
+  // Apollo-ownership verifier (/apollo-verify) — the generic RP verify page +
+  // its signing seam (the Apollo-curve @stoachain value edge).
+  "ApolloVerifyView",
+  "signApolloOwnership",
+  "buildApolloOwnershipMessage",
 ] as const;
 
 describe("ui barrel — forward lock (every named value export present)", () => {
@@ -135,14 +140,15 @@ describe("ui barrel — forward lock (every named value export present)", () => 
     },
   );
 
-  it("exports all 28 contracted value names (no silent drop below the floor)", () => {
+  it("exports all 31 contracted value names (no silent drop below the floor)", () => {
     // Guards the it.each roster itself: if the golden list is edited down, this
-    // pins the intended cardinality of the VALUE surface at exactly 28.
+    // pins the intended cardinality of the VALUE surface at exactly 31 (28 pre-
+    // carve names + the 3 Apollo-verifier exports).
     const present = EXPECTED_UI_VALUE_EXPORTS.filter(
       (name) => (ouronetUi as Record<string, unknown>)[name] !== undefined,
     );
     expect(present).toHaveLength(EXPECTED_UI_VALUE_EXPORTS.length);
-    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(28);
+    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(31);
   });
 });
 

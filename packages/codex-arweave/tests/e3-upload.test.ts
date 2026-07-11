@@ -62,7 +62,7 @@ function tagValue(tags: readonly Tag[], name: string): string | undefined {
 const PRIVATE_FIELDS = ["d", "p", "q", "dp", "dq", "qi"] as const;
 
 function privateValues(): string[] {
-  return PRIVATE_FIELDS.map((f) => (throwawayJwk as Record<string, string>)[f]).filter(
+  return PRIVATE_FIELDS.map((f) => (throwawayJwk as unknown as Record<string, string>)[f]).filter(
     (v): v is string => typeof v === "string" && v.length > 0,
   );
 }
@@ -72,7 +72,7 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     const adapter = createArweaveAdapter();
     const turbo = makeRecordingTurboClient({ id: CANONICAL_ID_A });
 
-    const result: UploadResult = await adapter.upload!(
+    const result = (await adapter.upload!(
       {
         jwk: throwawayJwk,
         data: "hello permaweb",
@@ -80,7 +80,7 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
         itemId: "item-xyz-1",
       },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     // The recording client saw exactly one upload — no real SDK, no real network.
     expect(turbo.calls).toHaveLength(1);
@@ -96,7 +96,7 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     const adapter = createArweaveAdapter();
     const turbo = makeRecordingTurboClient();
 
-    const result = await adapter.upload!(
+    const result = (await adapter.upload!(
       {
         jwk: throwawayJwk,
         data: "payload",
@@ -104,7 +104,7 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
         itemId: "item-schema",
       },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     // The four required names appear FIRST, in canonical order.
     expect(result.tags.slice(0, 4).map((t) => t.name)).toEqual([
@@ -132,10 +132,10 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     const turbo = makeRecordingTurboClient();
     const expectedOwner = await addressOf(throwawayJwk);
 
-    const result = await adapter.upload!(
+    const result = (await adapter.upload!(
       { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     expect(expectedOwner).toBe(KNOWN_ADDRESS);
     expect(tagValue(result.tags, TAG_CODEX_OWNER)).toBe(KNOWN_ADDRESS);
@@ -211,14 +211,14 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     expect(adapter).not.toHaveProperty("jwk");
 
     const turbo = makeRecordingTurboClient();
-    const r1 = await adapter.upload!(
+    const r1 = (await adapter.upload!(
       { jwk: throwawayJwk, data: "one", contentType: "text/plain", itemId: "i1" },
       { clientFactory: turbo.factory },
-    );
-    const r2 = await adapter.upload!(
+    )) as UploadResult;
+    const r2 = (await adapter.upload!(
       { jwk: throwawayJwk, data: "two", contentType: "text/plain", itemId: "i2" },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     // Both calls derived the owner from THEIR per-call jwk (same throwaway key
     // here → same address, but derived per-call, never a cached ctor value).
@@ -237,10 +237,10 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     const adapter = createArweaveAdapter();
     const turbo = makeRecordingTurboClient();
 
-    const result = await adapter.upload!(
+    const result = (await adapter.upload!(
       { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     const serialized = JSON.stringify(result);
     for (const secret of privateValues()) {
@@ -271,7 +271,7 @@ describe("E3 upload — the MANDATORY permanence warning (E-06, N-10)", () => {
     const adapter = createArweaveAdapter();
     const turbo = makeRecordingTurboClient();
 
-    const result = await adapter.upload!(
+    const result = (await adapter.upload!(
       {
         jwk: throwawayJwk,
         data: "manifest bytes",
@@ -279,7 +279,7 @@ describe("E3 upload — the MANDATORY permanence warning (E-06, N-10)", () => {
         itemId: "manifest-1",
       },
       { clientFactory: turbo.factory },
-    );
+    )) as UploadResult;
 
     // The manifest content-type round-trips verbatim through the applied tags —
     // the library layer detects it off THIS exact string.

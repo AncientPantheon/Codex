@@ -2,6 +2,10 @@
 
 All notable changes to `@ancientpantheon/arweave-core`.
 
+## 0.2.0 — 2026-07-11
+
+Injectable gateway endpoints. The gateway pool now accepts its endpoint list at construction, so a host — the Codex connection layer — can drive Arweave reads/posts from its own network settings instead of the package's hard-coded default pool. No breaking changes to the read/transfer/upload/rebuild surface.
+
 ## 0.1.0 — 2026-07-05
 
 First feature-complete, publish-ready release. Ships the full Arweave protocol surface:

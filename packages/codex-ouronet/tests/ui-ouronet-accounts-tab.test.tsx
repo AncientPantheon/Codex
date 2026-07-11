@@ -89,7 +89,10 @@ async function renderTab(
 
 /** Expand a collapsed account row by clicking its header button. */
 function expandRow(card: HTMLElement) {
-  const header = card.querySelector("button") as HTMLButtonElement;
+  // The expand toggle is the header row (a `role="button"` div). Do NOT use
+  // `querySelector("button")` — the first real <button> is now the Atom
+  // account-selector (it stops propagation and selects rather than expands).
+  const header = card.querySelector('[role="button"]') as HTMLElement;
   fireEvent.click(header);
 }
 

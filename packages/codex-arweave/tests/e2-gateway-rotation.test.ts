@@ -35,7 +35,7 @@ function makeRotatingApiFactory() {
         if (isA) throw new Error("gateway A down (getPrice)");
         return "5000000000";
       },
-      postTransaction: async (tx: { id: string }) => {
+      postTransaction: async (_tx: { id: string }) => {
         if (isA) throw new Error("gateway A down (post)");
         postedEndpoints.push(endpoint);
         return { status: 200, statusText: "OK" };
