@@ -45,6 +45,9 @@ import {
 
 import { useOuroAccounts } from "../../hooks/index.js";
 import { useStoaChainSeeds } from "../../hooks/index.js";
+import { useActiveWallet } from "../../hooks/index.js";
+import { getApiKeySelectorData, isApiKeyRegistered, type ApiKeyRow } from "../../zbom/pythia/deployApiKey.js";
+import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
 import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
@@ -56,6 +59,7 @@ import RotateSovereignModal from "../../zbom/modals/RotateSovereignModal.js";
 import RotateGovernorModal from "../../zbom/modals/RotateGovernorModal.js";
 import ActivateStandardAccountModal from "../../zbom/modals/ActivateStandardAccountModal.js";
 import ActivateSmartAccountModal from "../../zbom/modals/ActivateSmartAccountModal.js";
+import ActivateApolloPythiaKeyModal from "../../zbom/modals/ActivateApolloPythiaKeyModal.js";
 import { flattenStoaChainAccounts } from "../../zbom/cfm/seam.js";
 import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconRenameBtnRect } from "../internal/IconButtons.js";
 import { OuronetAddressHighlight } from "../internal/OuronetAddressHighlight.js";
@@ -187,8 +191,22 @@ function PrimeSeparator({ label }: { label: string }) {
   );
 }
 
+/** Format a Pact `time` value (serialized as `{ time: "…" }` / `{ timep: "…" }`
+ *  or a bare ISO string) to a human-readable local timestamp. */
+function formatPactTime(t: unknown): string {
+  if (t == null) return "—";
+  const raw =
+    typeof t === "string"
+      ? t
+      : (t as any)?.time ?? (t as any)?.timep ?? null;
+  if (!raw) return "—";
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? String(raw) : d.toLocaleString();
+}
+
 function AccountRow({
   account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, primeName,
+  apiKeyRow, apiKeyLoaded,
 }: {
   account: IOuroAccount;
   index: number;
@@ -201,6 +219,10 @@ function AccountRow({
   /** When set, this account is a prime CodexID half — shown with this name
    *  (StandardCodexID/SmartCodexID + original), locked + non-deletable. */
   primeName?: string;
+  /** The Pythia registration row for this Apollo, from the tab-level batch read
+   *  (DPL-UR.URC_0031). `null` = observational; undefined until loaded. */
+  apiKeyRow?: ApiKeyRow | null;
+  apiKeyLoaded?: boolean;
 }) {
   const { updateAccount, deleteAccount } = useOuroAccounts();
   const [localExpanded, setLocalExpanded] = useState(false);
@@ -229,6 +251,24 @@ function AccountRow({
   const guardKeyCount = account.guard?.keys?.length ?? 0;
   const isActivated = account.isActive === true;
 
+  // Global "selected Ouronet account" — the active DALOS account the Codex's
+  // operations (e.g. the Pythia deploy's owner-account) read. Only ACTIVATED,
+  // non-Apollo Ouronet accounts are selectable (an Apollo key can't be an owner
+  // and can't transact). The Atom icon is the toggle; the chevron still expands.
+  const { activeOuroAccountId, setActiveOuroAccount } = useActiveWallet();
+  // Any non-Apollo Ouronet account can be selected as the operations owner (an
+  // Apollo key can't own itself). We don't gate on the local `isActive` flag —
+  // on-chain guard resolution decides usability at operation time.
+  const canSelect = !isApollo;
+  const isSelected = canSelect && activeOuroAccountId === account.id;
+
+  // Pythia registration — derived from the tab-level batch read (URC_0031),
+  // delivered via props. No per-row chain read.
+  const isRegistered = isApollo && isApiKeyRegistered(apiKeyRow);
+  // For the Public-Key "matches chain" tag: activated Ouronet accounts carry
+  // `chainPublicKey`; a registered Apollo's chain key is the row's `public`.
+  const effectiveChainPub = account.chainPublicKey ?? (isRegistered ? apiKeyRow?.public : undefined);
+
   const paymentSource = account.stoaChainLedger
     ? identifyKeySource(account.stoaChainLedger, seeds, pureKeypairs)
     : { label: "", color: "#888" };
@@ -245,10 +285,13 @@ function AccountRow({
         borderRadius: 12, overflow: "hidden", backgroundColor: rowBgColor, transition: "all 0.2s",
       }}
     >
-      {/* Header */}
-      <button
-        type="button"
+      {/* Header — the row toggles expand/collapse; the Atom icon is a separate
+          account-selector button (activated non-Apollo Ouronet accounts only). */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setLocalExpanded(!localExpanded)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocalExpanded(!localExpanded); } }}
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
           textAlign: "left", background: "transparent", border: "none", cursor: "pointer",
@@ -257,9 +300,28 @@ function AccountRow({
         {expanded
           ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} />
           : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
-        <div style={{ width: 32, height: 32, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: "#262626" }}>
-          <Atom style={{ width: 20, height: 20, color: "#ceac5f" }} />
-        </div>
+        {canSelect ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setActiveOuroAccount(isSelected ? null : account.id); }}
+            title={isSelected ? "Selected Ouronet account — click to deselect" : "Select this Ouronet account (makes it the active owner for operations)"}
+            aria-pressed={isSelected}
+            style={{
+              width: 32, height: 32, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, cursor: "pointer", padding: 0,
+              backgroundColor: isSelected ? "#ceac5f22" : "#262626",
+              border: isSelected ? "2px solid #ceac5f" : "2px solid transparent",
+              boxShadow: isSelected ? "0 0 10px #ceac5f66" : "none",
+              transition: "all 0.15s",
+            }}
+          >
+            <Atom style={{ width: 20, height: 20, color: "#ceac5f" }} />
+          </button>
+        ) : (
+          <div style={{ width: 32, height: 32, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: "#262626" }}>
+            <Atom style={{ width: 20, height: 20, color: isApollo ? apolloAccent : "#555" }} />
+          </div>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: nameColor }}>{displayName}</span>
@@ -277,26 +339,33 @@ function AccountRow({
               {isStandard ? "Standard" : "Smart"}
             </span>
             {isApollo && (
-              <span style={pillStyle(apolloAccent + "15", apolloAccent, apolloAccent + "40")} title="APOLLO 1024-bit curve — observational only, cannot be activated on StoaChain™.">
-                APOLLO · observational
+              <span style={pillStyle(apolloAccent + "15", apolloAccent, apolloAccent + "40")} title={isRegistered ? "APOLLO (₱./Π.) — deployed on-chain as a Pythia API key." : "APOLLO (₱./Π.) — a Pythia API-key account. Observational until you deploy it as a Pythia key."}>
+                APOLLO · {isRegistered ? "registered" : (apiKeyLoaded ? "observational" : "…")}
               </span>
             )}
           </div>
         </div>
-        <span style={pillStyle(
-          isApollo ? apolloAccent + "20" : isActivated ? "#22c55e20" : "#8b1a1a20",
-          isApollo ? apolloAccent : isActivated ? "#4ade80" : "#c0392b",
-        )}>
-          {isApollo ? "Observational" : isActivated ? "Active" : "Inactive"}
-        </span>
-      </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {isSelected && (
+            <span style={pillStyle("#ceac5f20", "#ceac5f", "#ceac5f60")} title="This is the active Ouronet account used as the owner for operations.">
+              ★ Selected
+            </span>
+          )}
+          <span style={pillStyle(
+            isApollo ? (isRegistered ? "#22c55e20" : apolloAccent + "20") : isActivated ? "#22c55e20" : "#8b1a1a20",
+            isApollo ? (isRegistered ? "#4ade80" : apolloAccent) : isActivated ? "#4ade80" : "#c0392b",
+          )}>
+            {isApollo ? (isRegistered ? "Registered" : "Observational") : isActivated ? "Active" : "Inactive"}
+          </span>
+        </div>
+      </div>
 
       {/* Expanded content */}
       {expanded && (
         <div style={{ padding: "0 16px 12px", borderTop: "1px solid #262626" }}>
           {/* Ouronet Address */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, minWidth: 0, overflow: "hidden", backgroundColor: "#080808", border: "1px dashed #2a2a2a", borderRadius: 6, padding: "5px 6px 5px 8px" }}>
-            <span style={{ ...sectionLabel, letterSpacing: "0.08em" }}>Ouronet Account</span>
+            <span style={{ ...sectionLabel, letterSpacing: "0.08em" }}>{isApollo ? "Apollo Account" : "Ouronet Account"}</span>
             <Lock style={{ width: 12, height: 12, flexShrink: 0, color: "#444" }} />
             <OuronetAddressHighlight address={account.address} />
             <IconCopyBtn text={account.address} size={24} />
@@ -395,12 +464,12 @@ function AccountRow({
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={sectionLabel}>Public Key</span>
               <span style={pillStyle("#8b1a1a15", "#c0392b", "#8b1a1a40")} title="The public key is derived deterministically from the private key — it cannot be changed.">🔒 immutable</span>
-              {!isActivated ? (
-                <span style={pillStyle("#26262680", "#888")}>codex only (not activated)</span>
-              ) : account.chainPublicKey ? (
-                account.publicKey === account.chainPublicKey
+              {effectiveChainPub ? (
+                account.publicKey === effectiveChainPub
                   ? <span style={pillStyle("#22c55e20", "#4ade80")}>✓ codex matches chain</span>
                   : <span style={pillStyle("#8b1a1a20", "#c0392b")}>⚠ codex ≠ chain (rotated or corrupted)</span>
+              ) : (!isActivated && !isRegistered) ? (
+                <span style={pillStyle("#26262680", "#888")}>{isApollo ? "codex only (not registered)" : "codex only (not activated)"}</span>
               ) : null}
               <div style={{ flex: 1 }} />
             </div>
@@ -409,6 +478,50 @@ function AccountRow({
               <IconCopyBtn text={account.publicKey} size={28} />
             </div>
           </div>
+
+          {/* Pythia API Key — shown when the Apollo has been deployed on-chain. */}
+          {isRegistered && apiKeyRow && (
+            <div style={{ ...sectionBox, border: `1px solid ${apolloAccent}40` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={sectionLabel}>Pythia API Key</span>
+                <span style={pillStyle("#22c55e20", "#4ade80")}>registered on-chain</span>
+                <div style={{ flex: 1 }} />
+                <span style={{ fontSize: 10, color: "#666" }}>{account.isSmart ? "Π. smart / consumer half" : "₱. standard / slot half"}</span>
+              </div>
+
+              <div style={{ marginBottom: 8 }}>
+                <span style={sectionLabel}>Ouronet Account Owner</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, minWidth: 0 }}>
+                  <OuronetAddressHighlight address={apiKeyRow["owner-account"]} />
+                  <IconCopyBtn text={apiKeyRow["owner-account"]} size={24} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={sectionLabel}>API Key Counterpart</span>
+                  {apiKeyRow.counterpart !== "BAR" && (
+                    <span style={pillStyle("#8b1a1a15", "#c0392b", "#8b1a1a40")} title="The counterpart is written once at link time and is immutable.">🔒 immutable</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, minWidth: 0 }}>
+                  {apiKeyRow.counterpart === "BAR" ? (
+                    <span style={{ fontSize: 11, fontStyle: "italic", color: "#888" }}>— not yet linked (BAR)</span>
+                  ) : (
+                    <>
+                      <code style={{ fontFamily: MONO, fontSize: 11, wordBreak: "break-all", flex: 1, color: "#c0c0c0" }}>{apiKeyRow.counterpart}</code>
+                      <IconCopyBtn text={apiKeyRow.counterpart} size={24} />
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 10, color: "#888" }}>
+                <span>Registered: <span style={{ color: "#c0c0c0" }}>{formatPactTime(apiKeyRow["registered-at"])}</span></span>
+                <span>Updated: <span style={{ color: "#c0c0c0" }}>{formatPactTime(apiKeyRow["updated-at"])}</span></span>
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
@@ -435,9 +548,9 @@ function AccountRow({
                 <Zap style={{ width: 14, height: 14 }} /> Activate
               </button>
             )}
-            {!account.isActive && isApollo && !isCodexIdPrime && (
-              <button type="button" disabled title="APOLLO is observational — activation is not supported for ₱./Π. prefixes." style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: "#18181B", color: apolloAccent, border: `1px solid ${apolloAccent}30`, cursor: "not-allowed", opacity: 0.8 }}>
-                <Zap style={{ width: 14, height: 14 }} /> Activate
+            {!account.isActive && isApollo && !isCodexIdPrime && !isRegistered && apiKeyLoaded && (
+              <button type="button" onClick={() => setActiveOpId("activate-apollo-pythia")} title={`Deploy this Apollo public key on-chain as a ${account.isSmart ? "Smart" : "Standard"} Pythia key (charges STOA; pairing is a later Pythia-mediated step).`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: apolloAccent, color: "#0a0a0a", border: "1px solid transparent", cursor: "pointer" }}>
+                <Zap style={{ width: 14, height: 14 }} /> Activate as {account.isSmart ? "Smart" : "Standard"} Pythia Key
               </button>
             )}
             <div style={{ flex: 1 }} />
@@ -475,6 +588,9 @@ function AccountRow({
       {activeOpId === "activate-smart" && (
         <ActivateSmartAccountModal open onClose={() => setActiveOpId(null)} ouroAccount={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
       )}
+      {activeOpId === "activate-apollo-pythia" && (
+        <ActivateApolloPythiaKeyModal open onClose={() => setActiveOpId(null)} account={account} accounts={accounts} kadenaSeeds={seeds} stoaChainAccounts={stoaChainAccounts} />
+      )}
       <ViewSeedModal isOpen={viewSeedOpen} onClose={() => setViewSeedOpen(false)} account={account} name={displayName} />
       {void updateAccount /* reserved for optimistic post-rotate mirror */}
     </div>
@@ -509,6 +625,29 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   // same immutable Pact function My Codex uses; APOLLO accounts are excluded.
   const addresses = useMemo(() => accounts.map((a) => a.address), [accounts]);
   const { byAddress } = useAccountChainData(addresses);
+
+  // Batch Pythia registration read (DPL-UR.URC_0031) — ONE chain call for ALL
+  // Apollo accounts, index-aligned. Builds apolloAddress → row so each row shows
+  // registered vs observational without its own per-row read.
+  const apolloAddrs = useMemo(
+    () => accounts.filter((a) => detectOriginCurve(a) === "apollo").map((a) => a.address),
+    [accounts],
+  );
+  const [apiKeyMap, setApiKeyMap] = useState<Map<string, ApiKeyRow> | null>(null);
+  useEffect(() => {
+    if (!apolloAddrs.length) { setApiKeyMap(new Map()); return; }
+    let aborted = false;
+    setApiKeyMap(null);
+    codexClock.report("URC_0031", undefined, () => getApiKeySelectorData(apolloAddrs))
+      .then((rows) => {
+        if (aborted) return;
+        const m = new Map<string, ApiKeyRow>();
+        apolloAddrs.forEach((addr, i) => { const r = rows[i]; if (r) m.set(addr, r); });
+        setApiKeyMap(m);
+      })
+      .catch(() => { if (!aborted) setApiKeyMap(new Map()); });
+    return () => { aborted = true; };
+  }, [apolloAddrs]);
 
   // Codex at-rest + live chain overlay. Preserves codex order so index 0 stays
   // CodexPrime regardless of the display sort below.
@@ -613,8 +752,8 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
           );
         })}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <GoldenBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Standard Ouronet Account" onClick={() => setSpawnMode("standard")} />
-          <VioletBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Smart Ouronet Account" onClick={() => setSpawnMode("smart")} />
+          <GoldenBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Standard Account" onClick={() => setSpawnMode("standard")} />
+          <VioletBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Smart Account" onClick={() => setSpawnMode("smart")} />
           <button
             onClick={() => setAllExpanded(!allExpanded)}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 12, fontSize: 12, fontWeight: 500, border: "1px solid #262626", color: "#888", background: "transparent", cursor: "pointer" }}
@@ -643,6 +782,8 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
                   forceExpanded={allExpanded}
                   paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
                   primeName={primeName}
+                  apiKeyRow={apiKeyMap?.get(account.address) ?? null}
+                  apiKeyLoaded={apiKeyMap !== null}
                 />
               ))}
               {restList.length > 0 && <PrimeSeparator label={`Other ${activeTab} accounts`} />}
@@ -659,6 +800,8 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
               stoaChainAccounts={stoaChainAccounts}
               forceExpanded={allExpanded}
               paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
+              apiKeyRow={apiKeyMap?.get(account.address) ?? null}
+              apiKeyLoaded={apiKeyMap !== null}
             />
           ))}
         </div>

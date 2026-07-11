@@ -89,6 +89,16 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
     kind: "selector",
     reachable: false,
   },
+  {
+    id: "URC_0031",
+    canonical: "ouronet-ns.DPL-UR.URC_0031",
+    helper: "getApiKeySelectorData",
+    subpath: "codex-ouronet/zbom/pythia/deployApiKey (interim; upstream to ouronet-core)",
+    tier: "T5",
+    powers:
+      "Ouronet Accounts tab — batch Apollo→Pythia registration status (registered vs observational) + owner-account, counterpart, timestamps.",
+    kind: "selector",
+  },
 
   // ── Balances (T5) ───────────────────────────────────────────────────────────
   {

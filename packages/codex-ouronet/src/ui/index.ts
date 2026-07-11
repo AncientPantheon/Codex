@@ -98,3 +98,13 @@ export type { ReadFunctionsCardProps } from "./settings/ReadFunctionsCard.js";
 //    shell with the concrete cards + the zbom-specific subtab taxonomy) ──
 export { CodexSettingsSection } from "./settings/CodexSettingsSection.js";
 export type { CodexSettingsSectionProps, CodexNetworkTabConfig } from "./settings/CodexSettingsSection.js";
+
+// ── Apollo-ownership verifier (/apollo-verify) — generic RP verify page +
+//    signing seam (the Apollo-curve `@stoachain` value edge) ──
+export { ApolloVerifyView } from "../apollo-verify/ApolloVerifyView.js";
+export type { ApolloVerifyViewProps } from "../apollo-verify/ApolloVerifyView.js";
+export {
+  signApolloOwnership,
+  buildApolloOwnershipMessage,
+} from "../apollo-verify/signApolloOwnership.js";
+export type { ApolloProof } from "../apollo-verify/signApolloOwnership.js";

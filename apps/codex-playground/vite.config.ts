@@ -104,6 +104,13 @@ const cryptoShim = resolve(__dirname, "crypto.shim.ts").replace(/\\/g, "/");
 // externalizes `stream` to an empty stub, so the named bindings are missing.
 const streamShim = resolve(__dirname, "stream.shim.ts").replace(/\\/g, "/");
 
+// The "Codex version" surfaced in the header = the flagship @ancientpantheon/
+// codex-ouronet package version, read at build time so it auto-syncs with the
+// package bump (no hand-maintained constant to drift).
+const CODEX_VERSION = JSON.parse(
+  readFileSync(resolve(__dirname, "../../packages/codex-ouronet/package.json"), "utf8"),
+).version as string;
+
 export default defineConfig({
   plugins: [stoachainCjsInterop(), react()],
   // Bind the port assigned by the central LocalHost registry (key "codex" → 3009).
@@ -121,6 +128,7 @@ export default defineConfig({
   // surfaces under `vite build` — hence the build is the load-bearing gate.
   define: {
     global: "globalThis",
+    __CODEX_VERSION__: JSON.stringify(CODEX_VERSION),
   },
   resolve: {
     // Single React instance — prevents the two-React "Invalid hook call".

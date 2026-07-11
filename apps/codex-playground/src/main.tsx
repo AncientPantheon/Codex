@@ -1,3 +1,8 @@
+// Browser `Buffer` global polyfill — MUST be first, before any @stoachain
+// import, so the signing/decrypt paths (getKeyPairByPublicKey) don't throw
+// "Buffer is not defined". Mirrors OuronetUI's src/polyfills.ts.
+import "./polyfills";
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 

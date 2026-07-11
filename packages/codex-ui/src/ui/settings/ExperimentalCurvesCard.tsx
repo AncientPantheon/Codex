@@ -75,16 +75,16 @@ export function ExperimentalCurvesCard({
           padding: "8px",
         }}
       >
-        Exposes the{" "}
         <strong style={{ color: "var(--codex-warning)" }}>
-          APOLLO 1024-bit
+          No experimental curves are currently gated.
         </strong>{" "}
-        curve in the Create Account modal. APOLLO accounts are{" "}
-        <strong style={{ color: "var(--codex-warning)" }}>
-          observational only
-        </strong>{" "}
-        — StoaChain™ Pact contracts do not recognise ₱./Π. prefixes, so
-        activation and on-chain signing are blocked in the UI.
+        The{" "}
+        <strong style={{ color: "var(--codex-warning)" }}>APOLLO 1024-bit</strong>{" "}
+        curve has graduated from experimental — it is now a first-class{" "}
+        <strong style={{ color: "var(--codex-warning)" }}>Pythia API-key</strong>{" "}
+        account, always available in Spawn Account and able to activate + sign,
+        regardless of this toggle. This control is retained as an inert seam for
+        any future experimental curve.
       </p>
 
       <button

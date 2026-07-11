@@ -46,8 +46,9 @@ import {
   CodexTabs,
   CodexSettingsSection,
   CodexDebouncerPanel,
+  ApolloVerifyView,
 } from "@ancientpantheon/codex-ouronet/ui";
-import { ObservationalCodexIdDisplay, CodexLockControl } from "@ancientpantheon/codex-ui/ui";
+import { ObservationalCodexIdDisplay, CodexPasswordPrompt } from "@ancientpantheon/codex-ui/ui";
 import {
   useCodex,
   useCodexAuth,
@@ -74,6 +75,9 @@ import {
   type NetworkSettings,
 } from "./networkSettings";
 import "./app.css";
+
+// Injected by vite.config `define` from @ancientpantheon/codex-ouronet's version.
+declare const __CODEX_VERSION__: string;
 
 /** What the App is currently rendering: the load screen, or a mounted codex. */
 type LoadedState =
@@ -166,76 +170,89 @@ export function Dashboard({
   const [activeView, setActiveView] = useState<"ui" | "settings">("ui");
 
   return (
-    <div className="cxpg-shell">
-      <header className="cxpg-header">
-        <span className="cxpg-brand">
-          <span className="cxpg-brand-mark" aria-hidden="true">
-            ◈
-          </span>
-          Codex
-        </span>
-        <div className="cxpg-viewtabs" role="tablist" aria-label="Codex view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "ui"}
-            className={`cxpg-viewtab${activeView === "ui" ? " cxpg-viewtab--active" : ""}`}
-            onClick={() => setActiveView("ui")}
-          >
-            Codex UI
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "settings"}
-            className={`cxpg-viewtab${activeView === "settings" ? " cxpg-viewtab--active" : ""}`}
-            onClick={() => setActiveView("settings")}
-          >
-            Codex UI Settings
-          </button>
-        </div>
-        <div className="cxpg-header-actions">
-          <button
-            type="button"
-            className="cxpg-btn cxpg-btn--primary"
-            onClick={() => void downloadAsJson()}
-          >
-            Export codex to JSON
-          </button>
-          {onReset ? (
+    <div className="cxpg-container">
+      {/* Global codex password prompt — the modal the CodexID lock control opens.
+          Kept OUT of the header flow (mirrors OuronetUI's codex-ui route). */}
+      <CodexUiRoot>
+        <CodexPasswordPrompt />
+      </CodexUiRoot>
+
+      {/* ── Header — title + version + badge + tagline, section pills BELOW (all
+          left-aligned); the standalone Export/Load + the debouncer pinned right. */}
+      <div className="cxpg-topbar">
+        <div className="cxpg-topbar-left">
+          <div className="cxpg-titlerow">
+            <h1 className="cxpg-brand">
+              <span className="cxpg-brand-mark" aria-hidden="true">◈</span>
+              Codex
+            </h1>
+            <span className="cxpg-version" title="@ancientpantheon/codex-ouronet version">
+              v{__CODEX_VERSION__}
+            </span>
+            <span className="cxpg-badge">standalone</span>
+            <p className="cxpg-tagline">The standalone Codex — your multi-chain key vault, local &amp; offline.</p>
+          </div>
+          <div className="cxpg-viewtabs" role="tablist" aria-label="Codex view">
             <button
               type="button"
-              className="cxpg-btn cxpg-btn--ghost"
-              onClick={onReset}
+              role="tab"
+              aria-selected={activeView === "ui"}
+              className={`cxpg-viewtab${activeView === "ui" ? " cxpg-viewtab--active" : ""}`}
+              onClick={() => setActiveView("ui")}
             >
-              Load a different codex
+              Codex UI
             </button>
-          ) : null}
-        </div>
-      </header>
-
-      <main className="cxpg-main">
-        <CodexUiRoot>
-          {/* The CodexID bar — present in both views (like OuronetUI). The
-              identity display self-sources; with no onDefineIdentity the "Define
-              Codex Identity" button is the disabled WIP state ("coming with
-              Mnemosyne"). The debouncer medallions + Unlock/Lock sit on the right. */}
-          <div className="cxpg-codexbar">
-            <div className="cxpg-codexbar-id">
-              <ObservationalCodexIdDisplay />
-            </div>
-            <div className="cxpg-codexbar-right">
-              <CodexDebouncerPanel />
-              <CodexLockControl />
-            </div>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "settings"}
+              className={`cxpg-viewtab${activeView === "settings" ? " cxpg-viewtab--active" : ""}`}
+              onClick={() => setActiveView("settings")}
+            >
+              Codex UI Settings
+            </button>
           </div>
+        </div>
+        <div className="cxpg-topbar-right">
+          <div className="cxpg-codexbar-actions">
+            <button
+              type="button"
+              className="cxpg-btn cxpg-btn--primary cxpg-btn--sm"
+              onClick={() => void downloadAsJson()}
+            >
+              Export codex to JSON
+            </button>
+            {onReset ? (
+              <button
+                type="button"
+                className="cxpg-btn cxpg-btn--ghost cxpg-btn--sm"
+                onClick={onReset}
+              >
+                Load a different codex
+              </button>
+            ) : null}
+          </div>
+          <CodexUiRoot>
+            <CodexDebouncerPanel />
+          </CodexUiRoot>
+        </div>
+      </div>
+
+      {/* ── Body card — the CodexID surface + a golden separator + the tabs/settings,
+          unified into ONE card (mirrors OuronetUI). ObservationalCodexIdDisplay owns
+          its own Copy/Lock/details, so no separate lock control here. */}
+      <div className="cxpg-bodycard">
+        <CodexUiRoot>
+          <ObservationalCodexIdDisplay />
+        </CodexUiRoot>
+        <div className="cxpg-separator" aria-hidden="true" />
+        <CodexUiRoot>
           {activeView === "ui" ? (
             <>
               <CodexTabs />
               {/* The Arweave path — the generic Foreign Chains tab wired to the
-                  concrete ArweavePanel via the app (codex-ui stays Arweave-free).
-                  The mock ⇄ real toggle drives the wiring mode; default mock+offline.
-                  The foreign-chain UX itself is a later pass. */}
+                  concrete ArweavePanel via the app; mock ⇄ real toggle (default
+                  mock+offline). The foreign-chain UX itself is a later pass. */}
               <section className="cxpg-foreign" aria-label="Foreign chains">
                 <h2 className="cxpg-foreign-title">Foreign chains</h2>
                 <ArweaveModeToggle
@@ -248,9 +265,6 @@ export function Dashboard({
               </section>
             </>
           ) : (
-            /* Codex UI Settings — the packaged CodexSettingsSection. The Network
-               tab is INJECTED (the Codex holds no connections): Pythia (global) +
-               StoaChain/Arweave (local), resolved off the surfaced config. */
             <CodexSettingsSection
               consumerName="Codex Playground"
               network={
@@ -270,7 +284,7 @@ export function Dashboard({
             />
           )}
         </CodexUiRoot>
-      </main>
+      </div>
     </div>
   );
 }
@@ -335,8 +349,16 @@ function EncryptedSession({
   if (isLocked) {
     return <UnlockScreen />;
   }
-  return <Dashboard onReset={onReset} />;
+  return IS_APOLLO_VERIFY ? <ApolloVerifyView /> : <Dashboard onReset={onReset} />;
 }
+
+/** True when opened at the generic Apollo-ownership verifier route. The
+ *  playground is a Vite SPA (serves index.html for unknown paths), so we branch
+ *  on the pathname and render <ApolloVerifyView> instead of the Dashboard once
+ *  the loaded Codex is unlocked. Relying parties (Pythia et al.) deep-link here
+ *  as `/apollo-verify?accounts=…&challenge=…&rp=…&callback=…`. */
+const IS_APOLLO_VERIFY =
+  typeof window !== "undefined" && window.location.pathname === "/apollo-verify";
 
 export function App(): ReactElement {
   const [loaded, setLoaded] = useState<LoadedState>({ kind: "idle" });

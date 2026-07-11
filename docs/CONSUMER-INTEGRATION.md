@@ -128,6 +128,17 @@ when `locked`. This is what a regular user sees ("Connected via Pythia · StoaCh
 Live · Arweave Missing"); the admin surface (§2.1, behind the §0 gate) is where
 `global` is actually set.
 
+> ⚠ **Implementation gap (2026-07-11) — see `HANDOFF-codex-ui-managed-network-tab.md`.**
+> The shipped `NetworkSettingsCard` currently does `readOnly = locked || model.locked`
+> and `fieldEnabled = manualFieldEnabled && !readOnly`, so `locked` freezes **every**
+> per-chain field — contradicting this section (the not-globally-covered fields must
+> stay **editable** for a regular user's local layer). A **managed** consumer therefore
+> cannot today get "read-only Pythia + editable local nodes" at once. The referenced
+> handoff decouples them (`lockLocalFields`, not a blanket `locked`) and adds the
+> **consumer-key display**: for a managed consumer the read-only Pythia connector shows
+> the bound consumer Apollo **C** public key (or "Not wired in yet"). Until that lands,
+> a consumer must choose all-locked or all-editable.
+
 ---
 
 ## 3. The implementing agent's checklist (Codex wiring only)

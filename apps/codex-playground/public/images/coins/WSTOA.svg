@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="STOA">
+  <defs>
+    <linearGradient id="wstoa-face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6dc93"/>
+      <stop offset="0.5" stop-color="#e0b24e"/>
+      <stop offset="1" stop-color="#bd8c1c"/>
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="15" fill="url(#wstoa-face)" stroke="#7d5f12" stroke-width="1.4"/>
+  <circle cx="16" cy="16" r="11.6" fill="none" stroke="#7d5f12" stroke-width="1" opacity="0.45"/>
+  <text x="16" y="21.2" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" font-weight="700" fill="#5b420b">&#931;</text>
+</svg>

@@ -107,7 +107,6 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
   const { accounts, addAccount } = useOuroAccounts();
   const { getCurrentPassword, authenticate } = useCodexAuth();
   const { uiSettings } = useCodex();
-  const experimentalCurvesEnabled = uiSettings.experimentalCurvesEnabled === true;
   const ttl = typeof uiSettings.passwordCacheMinutes === "number" ? uiSettings.passwordCacheMinutes : undefined;
 
   const [curve, setCurve] = useState<OuronetOriginCurve>("dalos");
@@ -384,7 +383,7 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 9999, fontWeight: 700, fontSize: 11, color: accent, backgroundColor: accent + "20" }}>{addressPrefix.charAt(0)}</span>
           {curve === "apollo"
-            ? "OBSERVATIONAL — APOLLO accounts cannot be activated on StoaChain™."
+            ? "APOLLO (₱./Π.) — a Pythia API-key account. Observational until you activate it as a Pythia key; not a general transacting account."
             : isSmart ? "Adds a new Σ. Smart account — activate on-chain with a sovereign separately."
             : "Adds a new Ѻ. Standard account — activate on-chain separately."}
         </span>
@@ -392,40 +391,34 @@ export function SpawnAccountModal({ isSmart, onClose }: SpawnAccountModalProps):
       onClose={onClose}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {/* ── Curve badge / selector ── */}
-        {!experimentalCurvesEnabled ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", ...card(CURVE_META.dalos.color + "30", CURVE_META.dalos.color + "08") }}>
-            <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 9999, fontWeight: 700, fontSize: 13, color: CURVE_META.dalos.color, backgroundColor: CURVE_META.dalos.color + "20" }}>Ѻ</span>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#d2d3d4" }}>{CURVE_META.dalos.displayName}</span>
-              <span style={{ fontSize: 10, color: "#555" }}>{CURVE_META.dalos.subtitle}</span>
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {(["dalos", "apollo"] as const).map((c) => {
-              const m = CURVE_META[c];
-              const selected = curve === c;
-              return (
-                <button key={c} type="button" onClick={() => setCurve(c)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", textAlign: "left", cursor: "pointer", ...card(selected ? m.color : "#262626", selected ? m.color + "15" : "#0a0a0a") }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, flexShrink: 0, borderRadius: 9999, fontWeight: 700, fontSize: 13, color: m.color, backgroundColor: m.color + (selected ? "20" : "10") }}>{m.standardPrefix.charAt(0)}</span>
-                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: selected ? m.color : "#888" }}>
-                      {m.displayName}{c === "apollo" && <AlertTriangle style={{ width: 12, height: 12, display: "inline", marginLeft: 4, verticalAlign: "middle", color: m.color }} />}
-                    </span>
-                    <span style={{ fontSize: 10, color: "#555" }}>{m.subtitle}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* ── Curve selector — ALWAYS rendered ──
+            Apollo (₱./Π.) is now a first-class Pythia-API-key account, no longer
+            gated behind the experimental-curves toggle. The toggle + its
+            `uiSettings.experimentalCurvesEnabled` flag stay in place as an inert
+            seam for any FUTURE curve that needs gating (D1 option a). */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {(["dalos", "apollo"] as const).map((c) => {
+            const m = CURVE_META[c];
+            const selected = curve === c;
+            return (
+              <button key={c} type="button" onClick={() => setCurve(c)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", textAlign: "left", cursor: "pointer", ...card(selected ? m.color : "#262626", selected ? m.color + "15" : "#0a0a0a") }}>
+                <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, flexShrink: 0, borderRadius: 9999, fontWeight: 700, fontSize: 13, color: m.color, backgroundColor: m.color + (selected ? "20" : "10") }}>{m.standardPrefix.charAt(0)}</span>
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: selected ? m.color : "#888" }}>
+                    {m.displayName}{c === "apollo" && <AlertTriangle style={{ width: 12, height: 12, display: "inline", marginLeft: 4, verticalAlign: "middle", color: m.color }} />}
+                  </span>
+                  <span style={{ fontSize: 10, color: "#555" }}>{m.subtitle}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
         {curve === "apollo" && (
           <div style={warnBanner(CURVE_META.apollo.color)}>
             <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: CURVE_META.apollo.color }} />
             <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: "#f0a978" }}>
-              <strong>APOLLO is observational.</strong> The spawned account appears in your codex but <strong>cannot be activated or used to sign</strong> — StoaChain™ recognises DALOS Genesis (Ѻ./Σ.) prefixes only.
+              <strong>APOLLO is a Pythia API-key account.</strong> It stays <strong>observational</strong> until you activate it as a Pythia key, and it <strong>can sign</strong> the ownership-proof handshake. It is <strong>not</strong> a general transacting Ouronet account (Ѻ./Σ.) — no token operations. The seed never leaves the Codex; only the public key travels.
             </p>
           </div>
         )}

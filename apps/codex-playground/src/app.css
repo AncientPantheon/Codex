@@ -20,6 +20,16 @@
     Arial, sans-serif;
 }
 
+/* Global page background — the loaded-dashboard shell is now the centered
+   `.cxpg-container` (no full-bleed wrapper), so the dark base must live on
+   body/html or the viewport paints browser-default white behind + beside it. */
+html,
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--cxpg-bg);
+}
+
 /* ---- Landing / status screens -------------------------------------------- */
 
 .cxpg-app {
@@ -190,6 +200,7 @@
 }
 
 .cxpg-brand {
+  margin: 0;
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -299,10 +310,114 @@
   flex-shrink: 0;
 }
 
+/* Export / Load, stacked to the LEFT of the debouncer + lock. */
+.cxpg-codexbar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cxpg-btn--sm {
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+/* Codex version pill in the header + the centered view-toggle wrapper. */
+.cxpg-version {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--cxpg-text-dim);
+  border: 1px solid var(--cxpg-border);
+  font-family: var(--cxpg-font-mono, ui-monospace, monospace);
+}
+
+.cxpg-viewtabs-wrap {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
 .cxpg-main {
   max-width: 1080px;
   margin: 0 auto;
   padding: 22px;
+}
+
+/* ── OuronetUI-mirrored layout (container mx-auto + header + unified body card) ── */
+.cxpg-container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  box-sizing: border-box;
+}
+
+.cxpg-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin: 8px 0 24px;
+}
+
+.cxpg-topbar-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.cxpg-titlerow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.cxpg-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--cxpg-accent);
+  background: color-mix(in srgb, var(--cxpg-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cxpg-accent) 40%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cxpg-tagline {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cxpg-text-dim);
+}
+
+.cxpg-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.cxpg-bodycard {
+  border-radius: 16px;
+  border: 1px solid var(--cxpg-border);
+  background: #0a0a0a;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+}
+
+.cxpg-separator {
+  height: 1px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, transparent, #ceac5f, transparent);
 }
 
 /* The Foreign Chains section sits below the dashboard as its own panel. */
