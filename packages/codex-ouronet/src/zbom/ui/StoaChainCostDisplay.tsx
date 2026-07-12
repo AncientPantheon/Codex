@@ -7,8 +7,12 @@
  * kadena-discount is subunitary (0.55 = user pays 55% of full price).
  * 1.0 = no discount. Display: multiply by 100, no minus sign.
  *
- * NOTE: the WSTOA.svg coin asset is served from the host app's public
- * root (`/images/coins/WSTOA.svg`) — OuronetUI ships it. Kept verbatim.
+ * The STOA mark is the gold ❖ glyph (OuronetUI's canonical Stoa glyph,
+ * `#ceac5f`) rendered as inline text — NOT an <img>. An earlier version pointed
+ * at `/images/coins/WSTOA.svg` from the host app's public root, which broke
+ * (missing image) in any consumer that doesn't ship that asset (e.g. Mnemosyne
+ * consuming the bundled `@ancientpantheon/codex`). The glyph is self-contained
+ * in the bundle and renders identically everywhere.
  */
 
 import { InfoTooltip } from "./InfoTooltip.js";
@@ -27,7 +31,8 @@ export function StoaChainCostDisplay({ stoaChainNeed, stoaChainFull, stoaChainDi
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <img src="/images/coins/WSTOA.svg" alt="STOA" className="h-4 w-4 flex-shrink-0" />
+      <span aria-label="STOA" title="STOA" className="flex-shrink-0"
+        style={{ color: "#ceac5f", fontWeight: 700, lineHeight: 1, fontSize: "1rem" }}>❖</span>
 
       {/* Final price — kadena-need */}
       <span className="text-xs font-mono font-semibold" style={{ color: isFree ? "#555" : "#d2d3d4" }}>

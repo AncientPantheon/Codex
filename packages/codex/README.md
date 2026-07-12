@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.5.0` on public npmjs. The first real release of the aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.5.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.5.1** — Fix the zbom STOA fee mark (`StoaChainCostDisplay`): render the gold ❖ glyph inline instead of an `<img>` to a host-app asset that broke in consumers (e.g. Mnemosyne). Self-contained in the bundle. No API changes.
 
 **v0.5.0** — First functional aggregate: wired + bundled `codex-core`/`codex-ui`/`codex-ouronet`/`codex-arweave` through `provider`/`hooks`/`ui`/`ouronet`/`arweave` + `ui.css`; tsup dts-rollup so the `.d.ts` are self-contained.
 
@@ -45,7 +47,7 @@ Version `0.5.0` on public npmjs. The first real release of the aggregate: the si
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.5.0` |
+| `@ancientpantheon/codex-ouronet` | `0.5.1` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->
