@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports. The four internal member packages are bundled in; consumers never resolve them separately.",
   "type": "module",
   "main": "./dist/index.js",

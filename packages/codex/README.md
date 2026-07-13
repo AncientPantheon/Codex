@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.5.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.6.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.6.0** — Codex password rotation. New `rekeyCodex(snapshot, old, new)` — a pure, isomorphic transform (from `@ancientpantheon/codex/ouronet`) that re-encrypts the WHOLE secret inventory old→new (pre-flight verify, skip-not-drop, V2 output). Plus a `changeCodexPassword` store action wired as the default `onChangePassword`, so the change-password card works out of the box. Resolves Handoff 07.
 
 **v0.5.1** — Fix the zbom STOA fee mark (`StoaChainCostDisplay`): render the gold ❖ glyph inline instead of an `<img>` to a host-app asset that broke in consumers (e.g. Mnemosyne). Self-contained in the bundle. No API changes.
 
@@ -47,7 +49,7 @@ Version `0.5.1` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.5.1` |
+| `@ancientpantheon/codex-ouronet` | `0.6.0` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

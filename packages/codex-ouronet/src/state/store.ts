@@ -42,6 +42,7 @@ import type {
 } from "../codex-identity/index.js";
 import type { IKeyset } from "../types/entities.js";
 import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
+import { rekeyCodex, type RekeySkip } from "../rekey/index.js";
 import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { Apollo, DalosGenesis } from "@stoachain/dalos-crypto/registry";
 import type { FullKey } from "@stoachain/dalos-crypto/registry";
@@ -262,6 +263,13 @@ export interface CodexStoreActions {
   authenticate(password: string, ttlMinutes?: number): void;
   lock(): void;
   getPassword(): string;
+  /** Rotate the codex password: re-encrypt EVERY secret from `oldPassword` to
+   *  `newPassword` via the pure `rekeyCodex`, persist the re-keyed snapshot via
+   *  `saveAll`, mirror the re-keyed slices into state, and re-cache the session
+   *  under the new password. Throws `WrongPasswordError` (from rekeyCodex's
+   *  pre-flight) on a bad old password BEFORE anything is persisted. Returns any
+   *  fields that could not be re-keyed (skip-not-dropped, kept verbatim). */
+  changeCodexPassword(oldPassword: string, newPassword: string): Promise<{ skipped: RekeySkip[] }>;
 
   // ----- password prompt -----
   /** Request the user enters their password. Returns a Promise that
@@ -969,6 +977,32 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
 
       lock() {
         set({ passwordCache: null, locked: true });
+      },
+
+      async changeCodexPassword(oldPassword: string, newPassword: string) {
+        // Assemble the COMPLETE current snapshot (all slices) from live state,
+        // then re-key it purely. rekeyCodex verifies oldPassword pre-flight and
+        // throws WrongPasswordError BEFORE we touch the adapter, so a wrong
+        // password never persists a partial state.
+        const current = buildForeignKeySnapshot(get(), get().foreignKeys);
+        const { snapshot: rekeyed, skipped } = await rekeyCodex(
+          current,
+          oldPassword,
+          newPassword,
+        );
+        // Persist the fully re-keyed snapshot (adapter-guarded + touch), then
+        // mirror the re-keyed secret slices into state and re-cache the session
+        // under the new password so signing / seed-reveal keep working.
+        await persistAndTouch((a) => a.saveAll(rekeyed));
+        set({
+          kadenaSeeds: rekeyed.kadenaSeeds,
+          ouroAccounts: rekeyed.ouroAccounts,
+          pureKeypairs: rekeyed.pureKeypairs,
+          foreignKeys: rekeyed.foreignKeys ?? [],
+          codexIdentity: rekeyed.codexIdentity,
+        });
+        get().actions.authenticate(newPassword);
+        return { skipped };
       },
 
       getPassword(): string {

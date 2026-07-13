@@ -90,6 +90,7 @@ export default defineConfig({
       // Includes "/state" and "/codex-identity" which are NOT in package.json's
       // `exports` map (intentionally private). Tests reach them via these aliases;
       // external consumers cannot.
+      { find: /^@ancientpantheon\/codex-ouronet\/rekey$/, replacement: `${codexOuronetSrc}/rekey/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/adapters$/, replacement: `${codexOuronetSrc}/adapters/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/provider$/, replacement: `${codexOuronetSrc}/provider/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/hooks$/, replacement: `${codexOuronetSrc}/hooks/index.ts` },

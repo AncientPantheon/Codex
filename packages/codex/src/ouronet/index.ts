@@ -6,6 +6,11 @@
 // errors, and the entity types. The React pieces of this same package are on the
 // dedicated aggregator subpaths (`/provider`, `/hooks`, `/ui`) so a headless
 // Ouronet consumer never pulls React through here.
+//
+// `rekeyCodex` (the pure, isomorphic password-rotation transform) is exported
+// here so a server consumer (e.g. Mnemosyne) can `import { rekeyCodex } from
+// "@ancientpantheon/codex/ouronet"` and re-key a snapshot in Node.
+export * from "@ancientpantheon/codex-ouronet/rekey";
 export * from "@ancientpantheon/codex-ouronet/adapters";
 export * from "@ancientpantheon/codex-ouronet/connection";
 export * from "@ancientpantheon/codex-ouronet/codex-identity";

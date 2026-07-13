@@ -22,7 +22,9 @@
  * host app. All visual structure uses `--codex-*` tokens.
  */
 
-import { type CSSProperties } from "react";
+import { type CSSProperties, useCallback } from "react";
+import { useCodexStore } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/store.js";
 import {
   ChangePasswordCard,
   type ChangePasswordPayload,
@@ -116,6 +118,18 @@ export function CodexSettingsSection({
   className,
   network,
 }: CodexSettingsSectionProps) {
+  // Default the change-password seam to the store's own `changeCodexPassword`
+  // (rekey every secret old→new + saveAll + re-cache the session), so the card
+  // works out of the box. A consumer-supplied `onChangePassword` still wins.
+  const actions = useCodexStore()((s: CodexStoreState) => s.actions);
+  const defaultChangePassword = useCallback(
+    async ({ currentPassword, newPassword }: ChangePasswordPayload) => {
+      await actions.changeCodexPassword(currentPassword, newPassword);
+    },
+    [actions],
+  );
+  const changePasswordSeam = onChangePassword ?? defaultChangePassword;
+
   const subtabs: CodexSettingsSubtab[] = [
     {
       key: "operations",
@@ -147,7 +161,7 @@ export function CodexSettingsSection({
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={cardGrid(220)}>
-            <ChangePasswordCard onChangePassword={onChangePassword} />
+            <ChangePasswordCard onChangePassword={changePasswordSeam} />
             <EncryptionCard onUpgradeEncryption={onUpgradeEncryption} />
             <CodexGuardCard />
           </div>

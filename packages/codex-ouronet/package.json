@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex-ouronet",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "The Ouronet-native Codex module (lifted from stoa-js): the Kadena/Pact signer, the double-Apollo ICodexIdentity, CodexPrime, CodexGuard, seed derivation, the zbom Pact editor, and ouronet-ns.CODEX registration.",
   "private": true,
   "type": "module",
@@ -46,6 +46,10 @@
     "./codex-identity": {
       "types": "./dist/codex-identity/index.d.ts",
       "import": "./dist/codex-identity/index.js"
+    },
+    "./rekey": {
+      "types": "./dist/rekey/index.d.ts",
+      "import": "./dist/rekey/index.js"
     },
     "./ui": {
       "types": "./dist/ui/index.d.ts",
