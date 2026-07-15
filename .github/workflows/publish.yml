@@ -209,12 +209,12 @@ jobs:
       # .npmrc at the repo root so npm picks it up regardless of working
       # directory. `always-auth` + the registry-specific _authToken line is the
       # canonical pattern npm documents for CI publishing. The token comes from
-      # the AncientPantheon org secret NPM_TOKEN; its value is never echoed —
+      # the AncientPantheon org secret NPM_PUBLISHER; its value is never echoed —
       # only a redacted structure print is emitted.
       - name: Write .npmrc with auth token
         run: |
           cat > .npmrc <<EOF
-          //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          //registry.npmjs.org/:_authToken=${{ secrets.NPM_PUBLISHER }}
           @ancientpantheon:registry=https://registry.npmjs.org
           always-auth=true
           EOF
@@ -222,7 +222,7 @@ jobs:
           sed 's|=.*|=***|' .npmrc
 
       # Fail-fast auth gate. A bare `npm whoami` (no `|| echo` fallback) so a
-      # missing or expired NPM_TOKEN hard-fails the job here — before any
+      # missing or expired NPM_PUBLISHER hard-fails the job here — before any
       # publish is attempted. This step needs only the .npmrc written above.
       - name: Verify npm auth
         run: |
