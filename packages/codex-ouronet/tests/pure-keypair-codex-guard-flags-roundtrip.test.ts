@@ -9,7 +9,7 @@
  *   (c) LocalStorageCodexAdapter.savePureKeypairs/loadAll (JSON per-slice)
  *
  * OUT OF SCOPE (deferred to Phase 11 — G-001):
- *   - @stoachain/ouronet-core wire-format codec (v1.2) — cross-device
+ *   - @ouronet/ouronet-core wire-format codec (v1.2) — cross-device
  *     export/restore via the on-disk backup file. The codec lives in
  *     ouronet-core (frozen at "1.2"); v0.3.0 flag preservation across
  *     Google Drive backups is handled by Phase 11's atomic ouronet-core

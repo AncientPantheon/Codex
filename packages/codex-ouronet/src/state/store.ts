@@ -44,8 +44,8 @@ import type { IKeyset } from "../types/entities.js";
 import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
 import { rekeyCodex, type RekeySkip } from "../rekey/index.js";
 import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
-import { Apollo, DalosGenesis } from "@stoachain/dalos-crypto/registry";
-import type { FullKey } from "@stoachain/dalos-crypto/registry";
+import { Apollo, DalosGenesis } from "@ouronet/dalos-crypto/registry";
+import type { FullKey } from "@ouronet/dalos-crypto/registry";
 import { ed25519 } from "@noble/curves/ed25519";
 
 /** Fresh UUID for a new codex entity. Mirrors the inline pattern already used

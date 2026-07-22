@@ -19,7 +19,7 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance } from "../debouncer/monitoredReads.js";
-import { getRotateGuardInfo, rotateGuard } from "@stoachain/ouronet-core/interactions/guardFunctions";
+import { getRotateGuardInfo, rotateGuard } from "@ouronet/ouronet-core/interactions/guardFunctions";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
 import { Shield, Loader2 } from "lucide-react";

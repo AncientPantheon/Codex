@@ -21,8 +21,8 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { getAccountSelectorData } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
-import type { AccountSelectorData } from "@stoachain/ouronet-core/interactions/ouroTypes";
+import { getAccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 
 const DALOS_PREFIXES = ["Ѻ.", "Σ."];
@@ -34,7 +34,7 @@ export const CODEX_CHAIN_READ_FUNCTIONS = [
     name: "ouronet-ns.DPL-UR.URC_0027_AccountSelectorMapper",
     purpose:
       "Live account state for Ouronet accounts — activation, account guard, smart/standard, payment key + guard + balance, on-chain public key, sovereign, governor, and StoicTag.",
-    via: "getAccountSelectorData (@stoachain/ouronet-core)",
+    via: "getAccountSelectorData (@ouronet/ouronet-core)",
   },
 ] as const;
 

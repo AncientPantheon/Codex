@@ -39,7 +39,7 @@ import { ZbomLayout } from "../cfm/ZbomLayout.js";
 import {
   getDeploySmartAccountInfoOnly,
   getDeploySmartAccountInfo,
-} from "@stoachain/ouronet-core/interactions/activateFunctions";
+} from "@ouronet/ouronet-core/interactions/activateFunctions";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Key, Loader2, Zap,
 } from "lucide-react";
@@ -50,13 +50,13 @@ import { StringEntryInput, GuardEntryInput, type GuardChangeValue } from "../cfm
 import { publicKeyFromPrivateKey, publicKeyFromExtendedKey } from "@stoachain/stoa-core/signing";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
-import { buildDeploySmartAccountPactCode } from "@stoachain/ouronet-core/pact";
+import { buildDeploySmartAccountPactCode } from "@ouronet/ouronet-core/pact";
 import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
-} from "@stoachain/ouronet-core/constants";
+} from "@ouronet/ouronet-core/constants";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 
 // ─── Zone tokens ──────────────────────────────────────────────────────────────

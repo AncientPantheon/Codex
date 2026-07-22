@@ -19,7 +19,7 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance } from "../debouncer/monitoredReads.js";
-import { getRotateKadenaInfo as getRotateStoaChainInfo, rotateKadenaPaymentKey as rotateStoaChainPaymentKey } from "@stoachain/ouronet-core/interactions/ouroRotateFunctions";
+import { getRotateKadenaInfo as getRotateStoaChainInfo, rotateKadenaPaymentKey as rotateStoaChainPaymentKey } from "@ouronet/ouronet-core/interactions/ouroRotateFunctions";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
 import { publicKeyFromPrivateKey, publicKeyFromExtendedKey } from "@stoachain/stoa-core/signing";

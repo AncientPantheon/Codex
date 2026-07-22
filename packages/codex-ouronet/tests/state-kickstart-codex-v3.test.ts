@@ -25,7 +25,7 @@ import type {
   KickstartArgsV3,
   KickstartResultV3,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
-import { Apollo } from "@stoachain/dalos-crypto/registry";
+import { Apollo } from "@ouronet/dalos-crypto/registry";
 
 const PW = "kickstart-test-password";
 const T = { timeout: 120_000 };

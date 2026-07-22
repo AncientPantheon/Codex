@@ -51,7 +51,13 @@ function collectSourceFiles(dir: string): string[] {
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
+    // Split on both line-ending styles. On a CRLF checkout, splitting on "\n"
+    // alone leaves a trailing "\r" on every line, and `\/\/.*$` then fails to
+    // match: "." cannot cross a carriage return, so it never reaches "$". The
+    // line comment survives stripping and this guard reports documentation
+    // *about* arweave.net as a reachable hardcoded literal — a false positive
+    // that fires on Windows and never in CI.
+    .split(/\r?\n/)
     .map((line) => line.replace(/\/\/.*$/, ""))
     .join("\n");
 }

@@ -2,7 +2,7 @@
  * codex-core canonical envelope types.
  *
  * `PlaintextCodex` and `CodexExportV1_2` are ported verbatim from
- * `@stoachain/ouronet-core`'s `codex/types.ts` so the moved envelope keeps the
+ * `@ouronet/ouronet-core`'s `codex/types.ts` so the moved envelope keeps the
  * exact same in-memory + wire contracts. codex-core becomes the CANONICAL
  * owner of the "1.3" envelope; ouronet-core keeps an independent duplicated
  * peer (no cross-org runtime edge).

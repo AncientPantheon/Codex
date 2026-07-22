@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { pactRead } from "@stoachain/stoa-core/reads";
 import { STOA_CHAINS, getPactUrl } from "@stoachain/stoa-core/constants";
-import { getStoaAccountSelectorData } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
+import { getStoaAccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 
 export interface ChainBalance {

@@ -1,5 +1,5 @@
 import { encryptString, decryptString } from "@stoachain/stoa-core/crypto";
-import { migrateSeedType } from "@stoachain/ouronet-core/codex";
+import { migrateSeedType } from "@ouronet/ouronet-core/codex";
 import { CodexAdapterError } from "../errors/types.js";
 import {
   DEFAULT_UI_SETTINGS,

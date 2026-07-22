@@ -2,6 +2,25 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.6.1 — 2026-07-22
+
+**PATCH — dependency rename, no behaviour change.**
+
+The Ouronet libraries moved out of `StoaChain/stoa-js` into [`OuroborosNetwork/ouronet-libs`](https://github.com/OuroborosNetwork/ouronet-libs) in the Phase-4 reorganisation, so that published identity matches org ownership. The peer and dev dependencies follow:
+
+| Was | Now |
+|---|---|
+| `@stoachain/ouronet-core` | `@ouronet/ouronet-core` |
+| `@stoachain/dalos-crypto` | `@ouronet/dalos-crypto` |
+
+The old names are deprecated on npm. The chain-level packages (`@stoachain/stoa-core`, `@stoachain/kadena-stoic-legacy`) are unchanged — they still ship from `stoa-js`.
+
+**Codec version gate updated.** The published core's `deserializeCodex` now accepts BOTH `"1.2"` and `"1.3"` while `buildCodexExport` still stamps `"1.2"`. `guard-codec-version-gate` previously asserted that `"1.3"` must be *rejected*; that was correct while this scope pinned a 1.2-only dist, and wrong once the core widened its reader. The load-bearing assertion is the WRITER staying at `"1.2"` — a reader narrower than the writer is the funds-loss direction, never the reverse. The gate now asserts the writer pin and that the reader accepts 1.3 forward-compatibly.
+
+Also fixes a Windows-only false positive in the `arweave.net` hardcoded-endpoint guard, whose comment-stripper missed `//` comments on a CRLF checkout.
+
+**1570 specs pass.**
+
 ## 0.6.0 — 2026-07-12
 
 Add codex password rotation — the transform was missing from the package (only the `ChangePasswordCard` form + a consumer seam existed; the actual re-encryption lived in OuronetUI's app).

@@ -22,12 +22,12 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { txPending } from "../toast/toastManager.js";
 import { KeyRound, Loader2, AlertTriangle } from "lucide-react";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
-import { getWrapperPaymentKey, getPaymentKeyBalance } from "@stoachain/ouronet-core/interactions/wrapFunctions";
+import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
-} from "@stoachain/ouronet-core/constants";
+} from "@ouronet/ouronet-core/constants";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { classifyPaymentKey, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";

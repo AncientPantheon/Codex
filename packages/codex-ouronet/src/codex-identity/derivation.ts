@@ -12,7 +12,7 @@
  *     Same `(seedInput, mode, splitOverride)` → byte-identical output, always.
  *   - SYNCHRONOUS: APOLLO's `generateFrom*` paths are synchronous.
  *   - APOLLO is entered via the registry-mediated primitive
- *     (`@stoachain/dalos-crypto/registry`) so addresses carry APOLLO's own
+ *     (`@ouronet/dalos-crypto/registry`) so addresses carry APOLLO's own
  *     `₱.` / `Π.` prefixes rather than DALOS Genesis's `Ѻ.` / `Σ.`.
  *
  * Split rule (matches the Phase 3 ICodexIdentity invariant):
@@ -34,9 +34,9 @@
  * client-side before calling.
  */
 
-import { Apollo } from "@stoachain/dalos-crypto/registry";
-import type { FullKey } from "@stoachain/dalos-crypto/registry";
-import { BASE49_ALPHABET, parseBigIntInBase } from "@stoachain/dalos-crypto/gen1";
+import { Apollo } from "@ouronet/dalos-crypto/registry";
+import type { FullKey } from "@ouronet/dalos-crypto/registry";
+import { BASE49_ALPHABET, parseBigIntInBase } from "@ouronet/dalos-crypto/gen1";
 import { CodexIdentityError } from "../errors/index.js";
 
 /** The four cached private-key representations of one APOLLO half. */

@@ -27,8 +27,8 @@ import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
-} from "@stoachain/ouronet-core/constants";
-import { buildRotateSovereignPactCode } from "@stoachain/ouronet-core/pact";
+} from "@ouronet/ouronet-core/constants";
+import { buildRotateSovereignPactCode } from "@ouronet/ouronet-core/pact";
 
 import { useSignTransaction } from "../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../zbom/hooks/useEnsureCodexUnlocked.js";

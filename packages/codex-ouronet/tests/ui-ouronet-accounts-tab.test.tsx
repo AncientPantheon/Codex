@@ -30,7 +30,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 // hanging network read; left in-flight, those reads race across tests and make
 // the modal-open spec flaky. Stub it to return no rows — the codex-only view
 // these specs assert is exactly what the tab renders when chain data is absent.
-vi.mock("@stoachain/ouronet-core/interactions/ouroAccountFunctions", async (importOriginal) => {
+vi.mock("@ouronet/ouronet-core/interactions/ouroAccountFunctions", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, getAccountSelectorData: async () => [] };
 });

@@ -1,19 +1,31 @@
 /**
- * FROZEN "1.2" CODEC VERSION-GATE guard.
+ * CODEC VERSION-GATE guard: the WRITER is pinned at "1.2"; the READER runs
+ * ahead of it.
  *
  * The Codex backup-JSON codec lives in the PUBLISHED registry dist
- * `@stoachain/ouronet-core/codex` (4.3.6) — it was NOT moved into this
- * monorepo. Its gate is frozen: `deserializeCodex` accepts ONLY
- * `version:"1.2"` and hard-throws on anything else. This guard asserts that
- * frozen behavior stays frozen. It does NOT widen the codec or add a "1.3"
- * path — that is a later sub-program's work on the SOURCE codec, not here.
+ * `@ouronet/ouronet-core/codex` — it was NOT moved into this monorepo. As of
+ * core 4.4.0 the codec `deserializeCodex` accepts BOTH "1.2" and "1.3", while
+ * `buildCodexExport` still stamps "1.2".
  *
- * Why this guard's provenance matters: a later sub-program widens the codec
- * SOURCE (in the sibling stoa-js working tree) to accept "1.3". If this
- * guard ever resolved that mutable source instead of the published dist, its
- * "1.3-must-throw" case would silently invert and stop protecting the C-scope
- * "codec frozen at 1.2" invariant. So the guard first pins WHERE the codec
- * resolves from before it trusts what the codec does.
+ * That asymmetry is the whole point, and it is what this guard protects:
+ *
+ *   - The WRITER must stay at "1.2" until the entire ecosystem reads "1.3".
+ *     A writer running ahead produces backups this app's own siblings cannot
+ *     open. That is the funds-loss direction.
+ *   - The READER accepting "1.3" is not a leak, it is the prerequisite for a
+ *     safe future bump. A reader narrower than the writer is the failure mode;
+ *     a reader wider than the writer is the goal.
+ *
+ * This file used to assert the opposite — that "1.3" must throw — on the
+ * premise that this scope pinned a frozen 1.2-only dist. Core 4.3.6/4.3.7
+ * briefly shipped a 1.3 WRITER, which broke the ordering and is exactly what
+ * this guard caught; 4.4.0 restored the writer to "1.2" and kept the widened
+ * reader. The load-bearing assertion is therefore the writer case, not a
+ * closed reader.
+ *
+ * The provenance check below still matters: the guard pins WHERE the codec
+ * resolves from (published dist, not a mutable sibling working tree) before it
+ * trusts what the codec does.
  */
 
 import { describe, it, expect } from "vitest";
@@ -24,7 +36,7 @@ import {
   deserializeCodex,
   serializeCodex,
   buildCodexExport,
-} from "@stoachain/ouronet-core/codex";
+} from "@ouronet/ouronet-core/codex";
 
 // A well-formed "1.2" envelope: the four collection/settings fields the codec
 // shape-validates, carrying identifiable values so the accept case can prove a
@@ -39,7 +51,7 @@ const WELL_FORMED_1_2 = {
 } as const;
 
 describe("codec version-gate provenance (the guard's validity depends on this)", () => {
-  it("resolves @stoachain/ouronet-core/codex to the published registry dist under this monorepo, not the stoa-js source tree", () => {
+  it("resolves @ouronet/ouronet-core/codex to the published registry dist under this monorepo, not the stoa-js source tree", () => {
     // FAIL-VISIBLE C1 precondition: the whole guard is meaningless if the
     // package can't be located. The `./codex` subpath is `import`-only (no
     // `require`/`default` condition), so NEITHER `require.resolve` NOR vitest's
@@ -49,10 +61,10 @@ describe("codec version-gate provenance (the guard's validity depends on this)",
     // target, and realpath it — exactly what a conformant resolver would land on.
     const here = dirname(fileURLToPath(import.meta.url));
     const pkgDir = [
-      resolve(here, "../node_modules/@stoachain/ouronet-core"),
-      resolve(here, "../../../node_modules/@stoachain/ouronet-core"),
+      resolve(here, "../node_modules/@ouronet/ouronet-core"),
+      resolve(here, "../../../node_modules/@ouronet/ouronet-core"),
     ].find((d) => existsSync(join(d, "package.json")));
-    expect(pkgDir, "@stoachain/ouronet-core not found in node_modules").toBeTruthy();
+    expect(pkgDir, "@ouronet/ouronet-core not found in node_modules").toBeTruthy();
     const codexTarget = JSON.parse(
       readFileSync(join(pkgDir as string, "package.json"), "utf8"),
     ).exports["./codex"].import as string;
@@ -112,13 +124,29 @@ describe('frozen "1.2" codec version gate', () => {
     expect(out.uiSettings).toEqual(codex.uiSettings);
   });
 
-  // Every non-"1.2" version discriminator MUST be rejected with the frozen
-  // message shape. "1.3" is the load-bearing case: it is the format a later
-  // sub-program teaches the SOURCE codec to accept, and the frozen C-scope dist
-  // MUST still reject it — proving no 1.3 widening leaked into this scope.
+  // The reader is FORWARD-compatible on purpose: it accepts "1.3" even though
+  // the writer still stamps "1.2". That ordering — reader widened first, writer
+  // advanced later — is what makes a format bump safe, so a 1.3 file produced
+  // by some other tool (or by a future writer) can already be restored here.
+  //
+  // This case previously asserted the opposite, that 1.3 must throw. That was
+  // right while this scope pinned a 1.2-only dist, and wrong once the published
+  // core widened its reader. What actually protects the invariant is the WRITER
+  // assertion above (`built.version === "1.2"`), not a closed reader: a reader
+  // narrower than the writer is the funds-loss direction, never the reverse.
+  it("accepts a well-formed 1.3 envelope — the reader runs ahead of the writer", () => {
+    const wire = JSON.stringify({ ...WELL_FORMED_1_2, version: "1.3" });
+    const out = deserializeCodex(wire);
+    expect(out.version).toBe("1.3");
+    expect(out.kadenaWallets).toEqual(WELL_FORMED_1_2.kadenaWallets);
+    expect(out.uiSettings).toEqual(WELL_FORMED_1_2.uiSettings);
+  });
+
+  // "1.3" is deliberately NOT in this table any more — see the accept case
+  // above. Everything the codec genuinely does not understand must still be
+  // rejected with the frozen message shape.
   const rejectedVersions: ReadonlyArray<[label: string, version: unknown]> = [
     ["1.1 (older format)", "1.1"],
-    ["1.3 (D-phase format — must STILL be rejected here)", "1.3"],
     ["2.0 (future major)", "2.0"],
     ["missing/undefined", undefined],
     ["non-string number", 1.2],

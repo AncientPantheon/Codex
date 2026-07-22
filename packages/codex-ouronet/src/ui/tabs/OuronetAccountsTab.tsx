@@ -70,7 +70,7 @@ import { useAccountChainData } from "../internal/useAccountChainData.js";
 import { MONO, GoldenBtn, VioletBtn, GreenBtn, pillStyle, sectionBox, sectionLabel } from "../internal/accountFields.js";
 import { ViewSeedModal } from "../internal/ViewSeedModal.js";
 import { SpawnAccountModal } from "../internal/SpawnAccountModal.js";
-import type { AccountSelectorData } from "@stoachain/ouronet-core/interactions/ouroTypes";
+import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IStoaChainWallet } from "../../types/entities.js";
 
 /** Overlay live URC_0027 chain state onto a codex account for display. The

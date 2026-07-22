@@ -1,7 +1,7 @@
 // @ancientpantheon/codex-ouronet — root entry intentionally near-empty.
 //
 // Per the established stoa-js monorepo convention (matching the empty roots
-// of @stoachain/ouronet-core and @stoachain/stoa-core), consumers MUST import
+// of @ouronet/ouronet-core and @stoachain/stoa-core), consumers MUST import
 // from a subpath for tree-shaking:
 //
 //   import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";   // good

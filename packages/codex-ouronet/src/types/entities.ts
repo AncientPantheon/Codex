@@ -10,7 +10,7 @@
  * Future evolution policy:
  *   - Additive fields only at minor bumps (consumer can ignore unknown fields).
  *   - Breaking shape changes only at major bumps with explicit codex migration.
- *   - The v1.2 codex file format (defined in @stoachain/ouronet-core/codex)
+ *   - The v1.2 codex file format (defined in @ouronet/ouronet-core/codex)
  *     is the wire-level contract; these types are the in-memory contract
  *     that hydrates from it. They share the same shape but evolve
  *     independently from the wire format (which is frozen at 1.2).

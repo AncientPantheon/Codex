@@ -14,9 +14,9 @@ import { AlertCircle, Lock, Plus, Minus, Unlock, CheckCircle2, Loader2, ChevronD
 import { AddressBookPicker } from "./AddressBookPicker.js";
 import { StoicTagPicker } from "./StoicTagPicker.js";
 import { toast } from "sonner";
-import { describeKeyset } from "@stoachain/ouronet-core/interactions/guardFunctions";
-import type { IDescribedKeyset } from "@stoachain/ouronet-core/interactions/guardFunctions";
-import type { NonKeyGuardConstructor } from "@stoachain/ouronet-core/pact";
+import { describeKeyset } from "@ouronet/ouronet-core/interactions/guardFunctions";
+import type { IDescribedKeyset } from "@ouronet/ouronet-core/interactions/guardFunctions";
+import type { NonKeyGuardConstructor } from "@ouronet/ouronet-core/pact";
 import CodeMirror from "@uiw/react-codemirror";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { EditorView } from "@codemirror/view";

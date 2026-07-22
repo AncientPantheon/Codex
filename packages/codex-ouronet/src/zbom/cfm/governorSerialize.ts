@@ -8,7 +8,7 @@
  * shared between inputs.tsx and the modal without tripping React Fast Refresh.
  */
 
-import type { NonKeyGuardConstructor } from "@stoachain/ouronet-core/pact";
+import type { NonKeyGuardConstructor } from "@ouronet/ouronet-core/pact";
 import { detectGuardKind } from "../../ui/internal/GuardTree.js";
 import type { UserGuard, CapabilityGuard, KeysetGuard, KeysetRefGuard } from "../../ui/internal/GuardTree.js";
 

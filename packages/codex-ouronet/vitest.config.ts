@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 // bare-root alias so vitest picks the most-specific match first.
 //
 // Cross-package aliases were DROPPED in the lift out of stoa-js. The chain
-// primitives (@stoachain/stoa-core, @stoachain/ouronet-core, @stoachain/dalos-crypto)
+// primitives (@stoachain/stoa-core, @ouronet/ouronet-core, @ouronet/dalos-crypto)
 // now live in a separate repository and are consumed from the registry: they
 // resolve from `node_modules/@stoachain/*/dist` via each package's `exports` map.
 // There is no sibling `../stoa-core/src` / `../ouronet-core/src` on disk to alias to.

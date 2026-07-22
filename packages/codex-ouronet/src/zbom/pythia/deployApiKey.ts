@@ -3,7 +3,7 @@
  *
  * The deploy + INFO are the Apollo→Pythia equivalents of ouronet-core's StoicTag
  * builders, authored HERE (codex-ouronet) against the LIVE PYTHIA Pact surface
- * until `@stoachain/ouronet-core` ships them. When it does, delete this file and
+ * until `@ouronet/ouronet-core` ships them. When it does, delete this file and
  * re-point `ActivateApolloPythiaKeyModal` at the package.
  *
  * FINALIZED on-chain surface (4 args — no consumer-lane; ONE ungated function
@@ -17,7 +17,7 @@
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_NAMESPACE } from "@stoachain/ouronet-core/constants";
+import { KADENA_NAMESPACE } from "@ouronet/ouronet-core/constants";
 
 /** The 4 args the deploy + INFO take (no consumer-lane — the contract no longer
  *  needs any user-typed input). */

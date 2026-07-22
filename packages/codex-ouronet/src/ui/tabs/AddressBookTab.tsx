@@ -23,8 +23,8 @@ import {
   getRegisteredChains,
   validateAddress,
 } from "../../hooks/addressBookChain.js";
-import { getStoicTagSelectorData } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
-import type { StoicTagSelectorData } from "@stoachain/ouronet-core/interactions/ouroTypes";
+import { getStoicTagSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import type { StoicTagSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import {
   IconCopyBtn,

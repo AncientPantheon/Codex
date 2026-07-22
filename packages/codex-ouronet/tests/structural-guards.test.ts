@@ -344,7 +344,7 @@ describe("dependency graph — codex-ui carries no VALUE @stoachain / Ouronet ed
 });
 
 describe("dependency graph — allowed direction + frozen-package fence", () => {
-  it("codex-ouronet/src does NOT re-import the frozen @stoachain/ouronet-codex (N-02)", () => {
+  it("codex-ouronet/src does NOT re-import the frozen @ouronet/ouronet-codex (N-02)", () => {
     // The Ouronet package MAY consume @stoachain/{stoa-core,ouronet-core,…} from
     // the registry (allowed @ancientpantheon → @stoachain direction), but the
     // frozen live wallet package must never be pulled back in.
@@ -352,7 +352,7 @@ describe("dependency graph — allowed direction + frozen-package fence", () => 
       const src = readFileSync(file, "utf8");
       return importStatements(
         src,
-        (m) => m === "@stoachain/ouronet-codex" || m.startsWith("@stoachain/ouronet-codex/"),
+        (m) => m === "@ouronet/ouronet-codex" || m.startsWith("@ouronet/ouronet-codex/"),
       ).map((s) => ({ file, module: s.module }));
     });
     expect(offenders).toEqual([]);

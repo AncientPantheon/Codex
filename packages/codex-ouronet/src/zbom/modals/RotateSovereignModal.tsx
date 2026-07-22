@@ -44,8 +44,8 @@ import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETW
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
-} from "@stoachain/ouronet-core/constants";
-import { buildRotateSovereignPactCode } from "@stoachain/ouronet-core/pact";
+} from "@ouronet/ouronet-core/constants";
+import { buildRotateSovereignPactCode } from "@ouronet/ouronet-core/pact";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";

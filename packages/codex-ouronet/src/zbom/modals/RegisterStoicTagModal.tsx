@@ -22,14 +22,14 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { txPending } from "../toast/toastManager.js";
 import { Tag, Loader2, AlertTriangle, Trash2 } from "lucide-react";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
-import { getWrapperPaymentKey, getPaymentKeyBalance } from "@stoachain/ouronet-core/interactions/wrapFunctions";
-import { getRegisterStoicTagInfo } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
+import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getRegisterStoicTagInfo } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
-} from "@stoachain/ouronet-core/constants";
-import { buildRegisterStoicTagPactCode } from "@stoachain/ouronet-core/pact";
+} from "@ouronet/ouronet-core/constants";
+import { buildRegisterStoicTagPactCode } from "@ouronet/ouronet-core/pact";
 import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { classifyPaymentKey, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";

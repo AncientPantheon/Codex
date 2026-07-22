@@ -1,5 +1,5 @@
 /**
- * monitoredReads — thin instrumented wrappers around the `@stoachain/ouronet-core`
+ * monitoredReads — thin instrumented wrappers around the `@ouronet/ouronet-core`
  * read helpers the CodexUI calls directly (outside the FunctionInfoZone fetcher
  * path). Each wrapper preserves the exact signature of the core helper and only
  * routes the call through `codexClock.report(<registry id>, …)` so the read shows
@@ -10,8 +10,8 @@
  * `pactRead` reader; this layer only times it.
  */
 
-import { getIgnisBalance as _getIgnisBalance } from "@stoachain/ouronet-core/interactions/ouroBalanceFunctions";
-import { getKadenaAccountGuard as _getStoaChainAccountGuard } from "@stoachain/ouronet-core/interactions/ouroAccountFunctions";
+import { getIgnisBalance as _getIgnisBalance } from "@ouronet/ouronet-core/interactions/ouroBalanceFunctions";
+import { getKadenaAccountGuard as _getStoaChainAccountGuard } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
 import { codexClock } from "./codexClock.js";
 
 /** IGNIS balance read — registry id `UR_AccountSupply`. */

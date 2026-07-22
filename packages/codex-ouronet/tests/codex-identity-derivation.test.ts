@@ -16,8 +16,8 @@ import {
   deriveDoubleApollo,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
 import { CodexIdentityError } from "@ancientpantheon/codex-ouronet/errors";
-import { Apollo } from "@stoachain/dalos-crypto/registry";
-import { bigIntToBase49 } from "@stoachain/dalos-crypto/gen1";
+import { Apollo } from "@ouronet/dalos-crypto/registry";
+import { bigIntToBase49 } from "@ouronet/dalos-crypto/gen1";
 
 // ---------------------------------------------------------------------------
 // Helpers
