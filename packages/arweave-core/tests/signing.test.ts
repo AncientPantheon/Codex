@@ -240,8 +240,13 @@ describe("signing-isolation allowlist (structural)", () => {
       fileURLToPath(new URL("../src/signing/sign.ts", import.meta.url)),
       "utf8",
     );
+    // Split on both line-ending styles. On a CRLF checkout, splitting on "\n"
+    // alone leaves a trailing "\r" on every line, and the specifier regex below
+    // cannot consume it (`.` does not match a carriage return) — so the
+    // extracted specifier is "arweave\r", which matches nothing in the
+    // allowlist and fails the test on Windows while passing on Linux.
     const importLines = source
-      .split("\n")
+      .split(/\r?\n/)
       .filter((line) => /^\s*import\b/.test(line) && /\bfrom\b/.test(line));
 
     for (const line of importLines) {
