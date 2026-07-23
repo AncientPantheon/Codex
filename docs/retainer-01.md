@@ -4,8 +4,12 @@
 built + published `@ancientpantheon/codex` into future sessions. Read this first
 when resuming work on this repo. (Successors: `retainer-02.md`, `03`, … as needed.)
 
-**Repo:** `D:/_Claude/AncientPantheon/Codex` · **Branch:** `feat/codex-migration-c-d`
-(NOT `main` — work + tags happen on this feature branch). **Also see** the
+**Repo:** `D:/_Claude/AncientPantheon/constructors/Codex` · **Branch:** `main`
+(single-trunk — work, releases + tags ALL happen on `main`, like the sibling repos).
+Historical note: everything through v0.6.1 was developed on `feat/codex-migration-c-d`
+while `main` sat frozen at the bootstrap commit. On 2026-07-23 `main` was
+fast-forwarded onto it (pure FF, no merge commit) and the feature branch was
+deleted local + remote. Do NOT recreate a long-lived release branch. **Also see** the
 auto-memory at `~/.claude/projects/D---Claude-AncientPantheon-Codex/memory/`
 (MEMORY.md indexes it) — especially `codex-aggregator-distribution.md`.
 
@@ -117,7 +121,7 @@ the harness (run sqlite tests in the node env) and drop the exclusion.
    - Replicate the doc-parity greps for the tag version.
    - `npm pack --dry-run --workspace=@ancientpantheon/codex` → valid tarball.
    - Grep the built `packages/codex/dist` to confirm the fix is actually in the bundle.
-5. Commit, push branch. Then tag + push: `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`.
+5. Commit, push `main`. Then tag + push: `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z`.
    The workflow matches tag→package version (`v0.6.0` → only codex, since
    arweave-core is 0.2.0). To publish BOTH, push two tags.
 6. `publish.yml` runs build+typecheck+test, then `npm publish --provenance`, then
@@ -163,7 +167,7 @@ correct as the snapshot shape evolves — that's the whole reason it's in the pa
 
 ---
 
-## 5. Release history (all on branch feat/codex-migration-c-d)
+## 5. Release history (cut on `feat/codex-migration-c-d`; now all reachable from `main`)
 
 - **0.5.0** (2026-07-11, tags v0.2.0+v0.5.0) — first functional aggregate: wired
   + bundled the members; tsup dts-rollup. Getting publish.yml green (it had NEVER
