@@ -10,7 +10,15 @@
 // `rekeyCodex` (the pure, isomorphic password-rotation transform) is exported
 // here so a server consumer (e.g. Mnemosyne) can `import { rekeyCodex } from
 // "@ancientpantheon/codex/ouronet"` and re-key a snapshot in Node.
+//
+// `autoSignApolloChallenge` (docs/HANDOFF-pythia-autonomous-connector.md) is
+// exported here for the same reason: a server-side Automaton (Pythia first)
+// needs to prove Apollo-account ownership on a recurring timer with zero
+// browser/human involvement. It lives in codex-ouronet's React-free
+// `./apollo-verify` subpath, not `./ui` (which additionally carries the
+// browser `ApolloVerifyView` for the one-time human-driven flow).
 export * from "@ancientpantheon/codex-ouronet/rekey";
+export * from "@ancientpantheon/codex-ouronet/apollo-verify";
 export * from "@ancientpantheon/codex-ouronet/adapters";
 export * from "@ancientpantheon/codex-ouronet/connection";
 export * from "@ancientpantheon/codex-ouronet/codex-identity";

@@ -101,6 +101,7 @@ export default defineConfig({
       { find: /^@ancientpantheon\/codex-ouronet\/google-drive$/, replacement: `${codexOuronetSrc}/google-drive/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/codex-identity$/, replacement: `${codexOuronetSrc}/codex-identity/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/ui$/, replacement: `${codexOuronetSrc}/ui/index.ts` },
+      { find: /^@ancientpantheon\/codex-ouronet\/apollo-verify$/, replacement: `${codexOuronetSrc}/apollo-verify/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/zbom$/, replacement: `${codexOuronetSrc}/zbom/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/state$/, replacement: `${codexOuronetSrc}/state/index.ts` },
       // Connection subpath (Phase 3): the Kadena connection helper barrel. Phase 4

@@ -2,6 +2,22 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.7.0 — 2026-07-30
+
+**MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`
+is unchanged at this tag).
+
+**`autoSignApolloChallenge`** — a new export from `@ancientpantheon/codex/ouronet`
+letting a server-side Automaton (Pythia first) prove ₱./Π. Apollo-account
+ownership autonomously, on a recurring timer, with zero browser and zero human
+prompt (docs/HANDOFF-pythia-autonomous-connector.md). Given an already-decrypted
+Codex snapshot + codex password, it reuses the exact canonical challenge
+message and `dalos-apollo` Schnorr signing already proven by the existing
+browser `/apollo-verify` flow, so a signature it produces verifies against
+Pythia's existing verifier unchanged. Same precedent as `rekeyCodex` in
+0.6.0 — a pure, server-callable primitive surfaced through this barrel for a
+headless consumer.
+
 ## 0.6.1 — 2026-07-22
 
 **PATCH — dependency rename, no behaviour change.**
