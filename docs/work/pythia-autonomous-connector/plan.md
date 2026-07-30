@@ -75,5 +75,5 @@ See `design.md` for full context, resolved open questions, and acceptance criter
 
 ## Wave 5 — close out (depends on Wave 4)
 
-- [ ] **T11. Local commit(s).** No push (no credentials in this sandbox — see design.md).
+- [x] **T11. Local commit(s).** No push (no credentials in this sandbox — see design.md).
       Report exact `git push` / tag commands for the user.
