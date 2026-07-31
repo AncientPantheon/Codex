@@ -34,6 +34,8 @@ Version `0.6.1` on public npmjs. The aggregate: the six subpath barrels wired to
 
 ## Version history
 
+**v0.7.0** — additive, no breaking changes. Adds `autoSignApolloChallenge`, exported from `@ancientpantheon/codex/ouronet`: lets a server-side Automaton (Pythia first) prove ₱./Π. Apollo-account ownership autonomously, on a recurring timer, with zero browser and zero human prompt. Reuses the exact canonical challenge message and `dalos-apollo` Schnorr signing already proven by the existing browser `/apollo-verify` flow, so a signature it produces verifies against Pythia's existing verifier unchanged. `codex`-only release (`arweave-core` unchanged).
+
 **v0.6.1** — dependency rename, no behaviour change. Released 2026-07-22. The Ouronet libraries moved to `@ouronet/ouronet-core` and `@ouronet/dalos-crypto` in the Phase-4 reorganisation; the old names are deprecated. The codec version gate now reflects the core's widened reader (accepts `"1.2"` and `"1.3"`) while asserting the writer stays pinned at `"1.2"`. **1570 specs pass.**
 
 **v0.6.0** — Codex password rotation. New `rekeyCodex(snapshot, old, new)` — a pure, isomorphic transform (from `@ancientpantheon/codex/ouronet`) that re-encrypts the WHOLE secret inventory old→new (pre-flight verify, skip-not-drop, V2 output). Plus a `changeCodexPassword` store action wired as the default `onChangePassword`, so the change-password card works out of the box. Resolves Handoff 07.
@@ -51,7 +53,7 @@ Version `0.6.1` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.6.1` |
+| `@ancientpantheon/codex-ouronet` | `0.7.0` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->
