@@ -30,7 +30,7 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.6.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.7.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
 
