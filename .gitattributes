@@ -1,0 +1,10 @@
+# This is a Node/TS monorepo with no Windows-specific tooling — every text file
+# should check out as LF regardless of the committer's OS or how the working
+# copy was provisioned/synced onto a given machine. Without this, a text-mode
+# transfer (seen 2026-07: a bulk provisioning sync converted ~470 files to
+# CRLF in one pass, byte-identical content otherwise) silently drifts the
+# whole working tree away from what's committed, one file at a time, with no
+# guard to catch it. `text=auto` keeps git's own binary-detection heuristic
+# (so images etc. are left alone); `eol=lf` pins every detected text file to
+# LF on checkout.
+* text=auto eol=lf
