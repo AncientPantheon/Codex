@@ -13,3 +13,19 @@
 export { InternalCodexResolver } from "./InternalCodexResolver.js";
 export type { InternalCodexResolverOptions } from "./InternalCodexResolver.js";
 export type { KeyResolver, IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
+
+// Headless, server-safe Kadena resolver for Khronoton automatons (Pythia,
+// Mnemosyne). A pre-bound `KeyResolver` a consumer adopts binding NO `@stoachain`
+// crypto itself — delegating all seedType-aware derivation to Codex's one
+// canonical path. See docs/work/khronoton-headless-kadena-resolver/design.md.
+export { createHeadlessKadenaResolver } from "./headlessKadenaResolver.js";
+export type { HeadlessKadenaResolverOptions } from "./headlessKadenaResolver.js";
+// The structural snapshot types a consumer needs to type its `loadSnapshot`
+// thunk, surfaced here so it never reaches into codex-core directly.
+export type {
+  SnapshotSlice,
+  StoaChainSeedLike,
+  PureKeypairLike,
+  StoaChainSeedType,
+  ResolvedStoaChainKeypair,
+} from "@ancientpantheon/codex-core";

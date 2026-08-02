@@ -2,6 +2,24 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.8.0 — 2026-08-03
+
+**MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`
+unchanged).
+
+**`createHeadlessKadenaResolver`** — a new export from
+`@ancientpantheon/codex/ouronet`: a server-safe, pre-bound Kadena `KeyResolver`
+(`{ getKeyPairByPublicKey, listCodexPubs }`) for headless Khronoton automatons
+(Pythia, Mnemosyne). A consumer supplies only a `loadSnapshot` + `getPassword`
+thunk pair and binds **zero** `@stoachain` crypto itself — all seedType-aware
+derivation (koala / chainweaver / eckowallet / pure-foreign, with the wrong-key
+refusal guard) is delegated to Codex's one canonical headless resolver. This
+replaces the per-consumer hand-rolled `KeyResolver` derivations that had drifted
+koala-only and caused a live signing failure on non-koala operator seeds.
+Importing it from `/ouronet` loads no React/DOM (headless Node-safe). The
+existing browser `InternalCodexResolver` now shares the exact same derivation
+binding (extracted, not duplicated).
+
 ## 0.7.0 — 2026-07-30
 
 **MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`

@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.7.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.8.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.8.0** — additive, no breaking changes. Adds `createHeadlessKadenaResolver`, exported from `@ancientpantheon/codex/ouronet`: a server-safe, pre-bound Kadena `KeyResolver` for headless Khronoton automatons (Pythia, Mnemosyne). A consumer supplies a `loadSnapshot` + `getPassword` thunk pair and binds **zero** `@stoachain` crypto itself — all seedType-aware derivation (koala / chainweaver / eckowallet / pure-foreign, with the wrong-key refusal guard) is delegated to Codex's one canonical headless resolver instead of hand-rolled per consumer. Loads no React/DOM from `/ouronet`. `codex`-only release (`arweave-core` unchanged).
 
 **v0.7.0** — additive, no breaking changes. Adds `autoSignApolloChallenge`, exported from `@ancientpantheon/codex/ouronet`: lets a server-side Automaton (Pythia first) prove ₱./Π. Apollo-account ownership autonomously, on a recurring timer, with zero browser and zero human prompt. Reuses the exact canonical challenge message and `dalos-apollo` Schnorr signing already proven by the existing browser `/apollo-verify` flow, so a signature it produces verifies against Pythia's existing verifier unchanged. `codex`-only release (`arweave-core` unchanged).
 
@@ -53,7 +55,7 @@ Version `0.7.0` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.7.0` |
+| `@ancientpantheon/codex-ouronet` | `0.8.0` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->
