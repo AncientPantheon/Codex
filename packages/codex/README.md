@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.8.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.8.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.8.1** — bug fix. The Ouronet account card no longer hides an account's Payment Key when that payment-key address has never held STOA. The chain's `payment-key-existance` flag reports funding (virgin vs funded), not whether a payment key exists — every registered account has one — so the card now shows the payment-key address regardless of funding, with a "virgin · never funded" marker instead of dropping the whole section.
 
 **v0.8.0** — additive, no breaking changes. Adds `createHeadlessKadenaResolver`, exported from `@ancientpantheon/codex/ouronet`: a server-safe, pre-bound Kadena `KeyResolver` for headless Khronoton automatons (Pythia, Mnemosyne). A consumer supplies a `loadSnapshot` + `getPassword` thunk pair and binds **zero** `@stoachain` crypto itself — all seedType-aware derivation (koala / chainweaver / eckowallet / pure-foreign, with the wrong-key refusal guard) is delegated to Codex's one canonical headless resolver instead of hand-rolled per consumer. Loads no React/DOM from `/ouronet`. `codex`-only release (`arweave-core` unchanged).
 
@@ -55,7 +57,7 @@ Version `0.8.0` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.8.0` |
+| `@ancientpantheon/codex-ouronet` | `0.8.1` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

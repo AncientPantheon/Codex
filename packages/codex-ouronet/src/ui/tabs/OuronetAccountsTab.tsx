@@ -85,7 +85,15 @@ function hydrate(account: IOuroAccount, d?: AccountSelectorData): IOuroAccount {
     ...account,
     isActive: d["iz-activated"],
     guard: accountGuard && accountGuard !== false ? accountGuard : account.guard,
-    stoaChainLedger: d["payment-key-existance"] ? d["payment-key"] : account.stoaChainLedger,
+    // Every registered Ouronet account ALWAYS has a payment key assigned at
+    // activation. `payment-key-existance` does NOT mean "has a payment key" — it
+    // reports whether that payment-key ADDRESS has ever held STOA (has a row in
+    // the coin table): virgin (never funded) vs funded. So surface the payment
+    // key address whenever the chain returns one, regardless of funding; gating
+    // on `payment-key-existance` here wrongly hid the entire section for a virgin
+    // (never-funded) payment key. The funding flag only drives the balance / the
+    // "virgin" marker (see `paymentKeyFunded` below), never whether it shows.
+    stoaChainLedger: d["payment-key"] || account.stoaChainLedger,
     paymentKeyGuard: pkGuard !== false && pkGuard != null ? pkGuard : account.paymentKeyGuard,
     chainPublicKey: d["public-key"] || account.chainPublicKey,
     sovereign: sovereign !== false ? (sovereign as string) : account.sovereign,
@@ -205,7 +213,7 @@ function formatPactTime(t: unknown): string {
 }
 
 function AccountRow({
-  account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, primeName,
+  account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, paymentKeyFunded, primeName,
   apiKeyRow, apiKeyLoaded,
 }: {
   account: IOuroAccount;
@@ -216,6 +224,10 @@ function AccountRow({
   stoaChainAccounts: IStoaChainWallet[];
   forceExpanded: boolean;
   paymentBalance: string | number | null;
+  /** Chain `payment-key-existance`: whether the payment-key address has ever
+   *  held STOA (funded) vs never (virgin). `null` until the chain read resolves.
+   *  Drives only the "virgin" marker — never whether the payment key shows. */
+  paymentKeyFunded: boolean | null;
   /** When set, this account is a prime CodexID half — shown with this name
    *  (StandardCodexID/SmartCodexID + original), locked + non-deletable. */
   primeName?: string;
@@ -377,6 +389,14 @@ function AccountRow({
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={sectionLabel}>Payment Key</span>
                 {paymentBalance !== null && <span style={{ fontSize: 10, fontFamily: MONO, color: "#ceac5f" }}>{paymentBalance} STOA</span>}
+                {/* Virgin = the payment-key address has never held STOA (no coin-table
+                    row). The key still exists (assigned at activation); this only
+                    explains the absent balance + guard. */}
+                {paymentKeyFunded === false && (
+                  <span style={pillStyle("#3f3f46", "#a1a1aa")} title="This payment-key address has never held STOA — it has no coin-table row yet (virgin). It still exists and can receive STOA.">
+                    virgin · never funded
+                  </span>
+                )}
                 <div style={{ flex: 1 }} />
                 <GoldenBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Payment Key" onClick={() => setActiveOpId("rotate-payment-key")} />
               </div>
@@ -781,6 +801,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
                   stoaChainAccounts={stoaChainAccounts}
                   forceExpanded={allExpanded}
                   paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
+                  paymentKeyFunded={byAddress[account.address]?.["payment-key-existance"] ?? null}
                   primeName={primeName}
                   apiKeyRow={apiKeyMap?.get(account.address) ?? null}
                   apiKeyLoaded={apiKeyMap !== null}
@@ -800,6 +821,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
               stoaChainAccounts={stoaChainAccounts}
               forceExpanded={allExpanded}
               paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
+                  paymentKeyFunded={byAddress[account.address]?.["payment-key-existance"] ?? null}
               apiKeyRow={apiKeyMap?.get(account.address) ?? null}
               apiKeyLoaded={apiKeyMap !== null}
             />

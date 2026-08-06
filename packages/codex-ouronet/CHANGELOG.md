@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.1 — 2026-08-03
+
+**PATCH — bug fix.** The Ouronet account card no longer hides an account's
+Payment Key when that payment-key address has never held STOA. Every registered
+Ouronet account is assigned a payment key at activation; the chain's
+`payment-key-existance` flag reports only whether that address has ever held
+STOA (a coin-table row) — virgin (never funded) vs funded — not whether a
+payment key exists. The card wrongly gated the whole Payment Key section on that
+flag, so a virgin payment key vanished entirely. It now surfaces the payment-key
+address whenever the chain returns one (regardless of funding) and shows a
+subtle "virgin · never funded" marker instead of dropping the section; the
+funding flag drives only the balance/marker. (`OuronetAccountsTab`.)
+
 ## 0.8.0 — 2026-08-03
 
 **MINOR — additive, no breaking changes.** Adds `createHeadlessKadenaResolver`

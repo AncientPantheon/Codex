@@ -2,6 +2,18 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.8.1 — 2026-08-03
+
+**PATCH — bug fix.** The Ouronet account card no longer hides an account's
+Payment Key when that payment-key address has never held STOA. Every registered
+Ouronet account is assigned a payment key at activation; the chain's
+`payment-key-existance` flag reports only whether that address has ever held
+STOA (virgin vs funded), not whether a payment key exists — but the card gated
+the whole Payment Key section on it, so a virgin (never-funded) payment key
+vanished entirely. It now shows the payment-key address whenever the chain
+returns one, with a "virgin · never funded" marker instead of dropping the
+section.
+
 ## 0.8.0 — 2026-08-03
 
 **MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`
