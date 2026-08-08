@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.8.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.9.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.9.0** — Pythia consumer-API-key management. Two new Ouronet-account sub-tabs — **Single API** (link Apollo ₱./Π. halves into a dual API key) and **Dual API** (manage the linked composite keys) — with three both-owner-authorized ZBOM transaction modals: **Link** (no fee), **Rename lane** (100 STOA, 4-way split), and **Revoke** (1 IGNIS kill-switch); costs + split receivers are read from the on-chain INFO so they never drift. Adds a **post-transaction refresh** so the accounts view re-reads chain state automatically after any tx confirms (no manual reload). `codex`-only release.
 
 **v0.8.1** — bug fix. The Ouronet account card no longer hides an account's Payment Key when that payment-key address has never held STOA. The chain's `payment-key-existance` flag reports funding (virgin vs funded), not whether a payment key exists — every registered account has one — so the card now shows the payment-key address regardless of funding, with a "virgin · never funded" marker instead of dropping the whole section.
 
@@ -57,7 +59,7 @@ Version `0.8.1` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.8.1` |
+| `@ancientpantheon/codex-ouronet` | `0.9.0` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

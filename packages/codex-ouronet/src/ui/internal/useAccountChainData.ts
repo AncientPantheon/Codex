@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { getAccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
+import { usePostTxRefresh } from "../../zbom/toast/usePostTxRefresh.js";
 
 const DALOS_PREFIXES = ["Ѻ.", "Σ."];
 const isDalos = (addr: string) => DALOS_PREFIXES.some((p) => addr.startsWith(p));
@@ -51,6 +52,10 @@ export function useAccountChainData(addresses: string[]): AccountChainData {
   const [byAddress, setByAddress] = useState<Record<string, AccountSelectorData>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Re-read whenever ANY Codex transaction confirms — so activation, guard,
+  // payment-key, StoicTag (and everything URC_0027 carries) reflect on-chain
+  // state without a manual reload.
+  const txNonce = usePostTxRefresh();
 
   const key = addresses.filter(isDalos).sort().join("|");
   const dalos = useMemo(() => addresses.filter(isDalos), [key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -82,7 +87,7 @@ export function useAccountChainData(addresses: string[]): AccountChainData {
 
   useEffect(() => {
     void fetchData();
-  }, [fetchData]);
+  }, [fetchData, txNonce]);
 
   return { byAddress, loading, error, refresh: () => void fetchData() };
 }

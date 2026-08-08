@@ -224,7 +224,11 @@ export function SigningZone({
     return [...caps, ...extraCaps];
   }, [gasStationPub, stoaChainNeed, stoaChainReceivers, stoaChainAmounts, extraCaps]);
 
-  const noAccounts = !patronAccount && !accountAccount;
+  // "Waiting for account data…" is a loading placeholder for the patron/account
+  // guards. A modal that signs via `additionalGuards` ONLY (e.g. the no-fee
+  // owner-signed Link, which passes no patron/account) still has signer data —
+  // so it must NOT be treated as "no accounts", or the spinner never clears.
+  const noAccounts = !patronAccount && !accountAccount && additionalGuards.length === 0;
 
   // Collapsible Zone 3 — reads zbomZone3 from settings
   const zone3DefaultOpen = useUiSetting("zbomZone3", false);

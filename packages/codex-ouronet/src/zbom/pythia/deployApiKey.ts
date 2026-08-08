@@ -103,6 +103,8 @@ export interface ApiKeyRow {
   "registered-at": unknown;
   "updated-at": unknown;
   "apollo-account": string;
+  /** Explicit registration flag the mapper emits (verified live). */
+  "is-registered"?: boolean;
 }
 
 /** Reads `ouronet-ns.PYTHIA.UR_ApiKeyRowOrNull` for a SINGLE Apollo account.
@@ -143,12 +145,122 @@ export async function getApiKeySelectorData(
   }
 }
 
-/** Is an Apollo's selector/row registered on-chain? A deployed key always carries
- *  a non-empty `owner-account`; an explicit `iz-registered:false` (if the mapper
- *  emits one) also counts as not-registered. */
+/** Is an Apollo's selector/row registered (deployed) on-chain? The mapper emits an
+ *  explicit `is-registered` boolean (verified live); prefer it. Fallback: a
+ *  deployed key always carries a non-empty `owner-account`. */
 export function isApiKeyRegistered(row: ApiKeyRow | null | undefined): boolean {
   if (!row) return false;
-  if ((row as any)["iz-registered"] === false) return false;
+  const flag = (row as { "is-registered"?: unknown })["is-registered"];
+  if (typeof flag === "boolean") return flag;
   const owner = row["owner-account"];
   return typeof owner === "string" && owner.length > 0;
+}
+
+// ── Dual-link (Standard|Smart composite) reads + Pythia pricing ──────────────
+
+/** The APOLLO account prefixes: ₱. (standard, U+20B1) / Π. (smart, U+03A0). A
+ *  linked half's `counterpart` is the OTHER half's Apollo account — so it always
+ *  carries one of these prefixes. An UNLINKED half's counterpart is a sentinel
+ *  (its exact value is a Pact-side detail and has changed over time), which never
+ *  does — so we detect linkage by "counterpart IS an Apollo account", not by
+ *  guessing the sentinel string. */
+const APOLLO_PREFIXES = ["₱.", "Π."] as const; // ₱.  Π.
+
+/** The separator joining a Standard ₱. half to its Smart Π. half in the on-chain
+ *  `PYTHIA|T|DualLinks` composite key. Standard comes FIRST. */
+export const DUAL_LINK_BAR = "|";
+
+/** Build the composite dual-API key `"<standard>|<smart>"` (standard first). */
+export function buildDualKey(standardApollo: string, smartApollo: string): string {
+  return `${standardApollo}${DUAL_LINK_BAR}${smartApollo}`;
+}
+
+/** Split a composite dual-API key back into its halves (null if malformed). */
+export function splitDualKey(dualKey: string): { standard: string; smart: string } | null {
+  const i = dualKey.indexOf(DUAL_LINK_BAR);
+  if (i <= 0 || i >= dualKey.length - 1) return null;
+  return { standard: dualKey.slice(0, i), smart: dualKey.slice(i + 1) };
+}
+
+/** A registered half is LINKED once its `counterpart` is written to the OTHER
+ *  half's Apollo account. Detect that by "counterpart is an Apollo account" (₱./Π.
+ *  prefix) rather than by comparing to a sentinel string — the unlinked sentinel
+ *  is a Pact-side detail that has changed, and any non-Apollo counterpart (empty,
+ *  "BAR", or whatever the current sentinel is) means UNLINKED. */
+export function isApiKeyLinked(row: ApiKeyRow | null | undefined): boolean {
+  const c = row?.counterpart;
+  if (typeof c !== "string") return false;
+  return APOLLO_PREFIXES.some((p) => c.startsWith(p));
+}
+
+/**
+ * The `PYTHIA|S|DualLink` row for one linked pair, keyed by the `standard|smart`
+ * composite. Field names are the Pact schema names (hyphenated). `iz-active` is
+ * the revocable kill-switch (owner flips true→false; the Cronoton link flips
+ * false→true after the off-chain dual-ownership proof).
+ *
+ * NOTE (iteration 1): the exact shape of `UR_DualLinkRowOrNull` is only
+ * confirmable against the live node — this is the documented shape; consumers
+ * render it DEFENSIVELY (show these fields when present + any extras) so the
+ * real row surfaces on inspection. Indexed so unexpected keys are still typed.
+ */
+export interface DualLinkRow {
+  "standard-apollo"?: string;
+  "smart-apollo"?: string;
+  "consumer-lane"?: string;
+  /** The revocable kill-switch: true = active, false = revoked. */
+  "iz-active"?: boolean;
+  /** True once the dual-link row genuinely exists on-chain (verified live). A
+   *  malformed/absent composite comes back with this false + epoch-0 times. */
+  "is-registered"?: boolean;
+  "linked-at"?: unknown;
+  "updated-at"?: unknown;
+  /** The `standard|smart` composite the row is keyed by. */
+  "dual-link-key"?: string;
+  [key: string]: unknown;
+}
+
+/** BATCH dual-link read — `ouronet-ns.DPL-UR.URC_0033_DualApiKeyMapper [dualKey…]`
+ *  — maps `PYTHIA.UR_DualLinkRowOrNull` over each `standard|smart` composite,
+ *  returning one entry per input IN ORDER (index-aligned; `null` where the
+ *  composite has no dual-link row). Mirrors `getApiKeySelectorData`. */
+export async function getDualApiKeySelectorData(
+  dualKeys: string[],
+): Promise<Array<DualLinkRow | null>> {
+  if (!dualKeys.length) return [];
+  try {
+    const list = dualKeys.map((k) => `"${k}"`).join(" ");
+    const pactCode = `(${KADENA_NAMESPACE}.DPL-UR.URC_0033_DualApiKeyMapper [${list}])`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result && response.result.status !== "failure") {
+      return (response.result.data as Array<DualLinkRow | null>) ?? [];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/** The Pythia deploy/rename STOA prices (`URC_0034_PythiaPrices`). `*-text` are
+ *  the pre-formatted human strings the contract emits. */
+export interface PythiaPrices {
+  "deploy-price": number;
+  "rename-price": number;
+  "deploy-price-text": string;
+  "rename-price-text": string;
+}
+
+/** Read `ouronet-ns.DPL-UR.URC_0034_PythiaPrices` — the deploy/rename STOA prices
+ *  for Apollo-half deploy + dual-link consumer-lane rename. */
+export async function getPythiaPrices(): Promise<PythiaPrices | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.DPL-UR.URC_0034_PythiaPrices)`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result && response.result.status !== "failure") {
+      return (response.result.data as PythiaPrices) ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

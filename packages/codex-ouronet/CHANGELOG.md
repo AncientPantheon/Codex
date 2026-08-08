@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.9.0 — 2026-08-08
+
+**MINOR — additive, no breaking changes.** Pythia consumer-API-key management in
+the Ouronet accounts view.
+
+- **Two new account sub-tabs** (after Standard/Smart):
+  - **Single API** — two columns of the codex's Apollo halves (Standard ₱. left,
+    Smart Π. right), each with search + pagination and a live UNLINKED / LINKED /
+    not-deployed status (read from `DPL-UR.URC_0031`). Pick one unlinked half from
+    each side and **Link** them into a dual API key.
+  - **Dual API** — the codex's mutually-linked ₱.|Π. composite keys, read via the
+    new `DPL-UR.URC_0033_DualApiKeyMapper` (`UR_DualLinkRowOrNull` per composite)
+    with Pythia deploy/rename prices from `DPL-UR.URC_0034_PythiaPrices`. Shows
+    consumer-lane, active/revoked status, and per-key **Rename lane** / **Revoke**.
+- **Three ZBOM transaction modals**, authorized by BOTH half-owners (`P|TS`):
+  **Link** (no fee), **Rename lane** (100 STOA, undiscounted, 4-way split derived
+  from INFO), **Revoke** (1 IGNIS kill-switch). Costs + split receivers come from
+  the on-chain INFO, so they never drift when prices change. Both half-owners'
+  ownership guards are resolved from chain, deduped when shared, and any owner key
+  the Codex doesn't hold is requested via the standard manual-key input.
+- **Post-transaction UI refresh** — a `usePostTxRefresh` hook subscribes to the
+  `onTxConfirmed` event (which nothing consumed before), so `URC_0027` account
+  state, `URC_0031` API-key status, and the dual-link/price reads all re-fetch
+  automatically once any Codex transaction confirms — no manual reload.
+- New read helpers on the `./zbom`-adjacent pythia seam:
+  `getDualApiKeySelectorData`, `getPythiaPrices`, `isApiKeyLinked`, `buildDualKey`
+  / `splitDualKey`, and the Link/Rename/Revoke builders. `isApiKeyRegistered` now
+  reads the mapper's explicit `is-registered` flag (owner-account fallback), and
+  linkage is detected by "counterpart is an Apollo account" rather than a sentinel
+  string (fixes registered-but-unlinked halves reading as linked). Also fixes
+  `SigningZone` showing a permanent "Waiting for account data…" spinner for
+  owner-only (no-patron) transactions.
+
 ## 0.8.1 — 2026-08-03
 
 **PATCH — bug fix.** The Ouronet account card no longer hides an account's

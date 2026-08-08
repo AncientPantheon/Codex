@@ -46,7 +46,7 @@ import {
 import { useOuroAccounts } from "../../hooks/index.js";
 import { useStoaChainSeeds } from "../../hooks/index.js";
 import { useActiveWallet } from "../../hooks/index.js";
-import { getApiKeySelectorData, isApiKeyRegistered, type ApiKeyRow } from "../../zbom/pythia/deployApiKey.js";
+import { getApiKeySelectorData, isApiKeyRegistered, isApiKeyLinked, type ApiKeyRow } from "../../zbom/pythia/deployApiKey.js";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
@@ -67,9 +67,12 @@ import { GuardTree } from "../internal/GuardTree.js";
 import { detectOriginCurve } from "../internal/originCurve.js";
 import { addrColor, identifyKeySource } from "../internal/keySource.js";
 import { useAccountChainData } from "../internal/useAccountChainData.js";
+import { usePostTxRefresh } from "../../zbom/toast/usePostTxRefresh.js";
 import { MONO, GoldenBtn, VioletBtn, GreenBtn, pillStyle, sectionBox, sectionLabel } from "../internal/accountFields.js";
 import { ViewSeedModal } from "../internal/ViewSeedModal.js";
 import { SpawnAccountModal } from "../internal/SpawnAccountModal.js";
+import { SingleApiPanel } from "./SingleApiPanel.js";
+import { DualApiPanel } from "./DualApiPanel.js";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IStoaChainWallet } from "../../types/entities.js";
 
@@ -635,7 +638,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   const stdPrimeId = idCfg.enabled ? idCfg.standardId : "";
   const smtPrimeId = idCfg.enabled ? idCfg.smartId : "";
 
-  const [activeTab, setActiveTab] = useState<"standard" | "smart">("standard");
+  const [activeTab, setActiveTab] = useState<"standard" | "smart" | "single-api" | "dual-api">("standard");
   const [page, setPage] = useState(0);
   const [allExpanded, setAllExpanded] = useState(false);
   const [spawnMode, setSpawnMode] = useState<"standard" | "smart" | null>(null);
@@ -645,6 +648,11 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   // same immutable Pact function My Codex uses; APOLLO accounts are excluded.
   const addresses = useMemo(() => accounts.map((a) => a.address), [accounts]);
   const { byAddress } = useAccountChainData(addresses);
+
+  // Re-read the API-key registration/link status after ANY tx confirms (e.g. a
+  // deploy or a Link) so the Apollo pills + Single/Dual API tabs update without a
+  // manual reload. useAccountChainData wires the same nonce for URC_0027.
+  const txNonce = usePostTxRefresh();
 
   // Batch Pythia registration read (DPL-UR.URC_0031) — ONE chain call for ALL
   // Apollo accounts, index-aligned. Builds apolloAddress → row so each row shows
@@ -667,7 +675,7 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
       })
       .catch(() => { if (!aborted) setApiKeyMap(new Map()); });
     return () => { aborted = true; };
-  }, [apolloAddrs]);
+  }, [apolloAddrs, txNonce]);
 
   // Codex at-rest + live chain overlay. Preserves codex order so index 0 stays
   // CodexPrime regardless of the display sort below.
@@ -688,6 +696,26 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
       smartAccounts: sorted.filter((a) => a.isSmart),
     };
   }, [hydratedAccounts]);
+
+  // Apollo (₱./Π.) halves per side — the source lists for the Single/Dual API
+  // tabs. Standard ₱. halves (left) and Smart Π. halves (right).
+  const standardApollo = useMemo(
+    () => standardAccounts.filter((a) => detectOriginCurve(a) === "apollo"),
+    [standardAccounts],
+  );
+  const smartApollo = useMemo(
+    () => smartAccounts.filter((a) => detectOriginCurve(a) === "apollo"),
+    [smartAccounts],
+  );
+  const apolloHalfCount = standardApollo.length + smartApollo.length;
+  // Dual-key count = codex Standard halves that are registered AND linked — matches
+  // the exact set DualApiPanel builds its list from.
+  const dualCount = apiKeyMap
+    ? standardApollo.filter((a) => {
+        const r = apiKeyMap.get(a.address);
+        return isApiKeyRegistered(r) && isApiKeyLinked(r);
+      }).length
+    : null;
 
   // Flat kadena signing material (IStoaChainWallet[]) the ZBOM modals need for
   // payment-key / guard pub-set lookup — derived the same way My Codex's
@@ -727,11 +755,17 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   const prevStdCount = useRef(standardAccounts.length);
   const prevSmartCount = useRef(smartAccounts.length);
   useEffect(() => {
-    if (smartAccounts.length > prevSmartCount.current && activeTab !== "smart") setActiveTab("smart");
-    else if (standardAccounts.length > prevStdCount.current && activeTab !== "standard") setActiveTab("standard");
+    // Only auto-jump between the account lists — never yank the user off the
+    // Single/Dual API tabs when an account count changes.
+    if (activeTab === "standard" || activeTab === "smart") {
+      if (smartAccounts.length > prevSmartCount.current && activeTab !== "smart") setActiveTab("smart");
+      else if (standardAccounts.length > prevStdCount.current && activeTab !== "standard") setActiveTab("standard");
+    }
     prevStdCount.current = standardAccounts.length;
     prevSmartCount.current = smartAccounts.length;
   }, [standardAccounts.length, smartAccounts.length, activeTab]);
+
+  const isAccountList = activeTab === "standard" || activeTab === "smart";
 
   const Pagination = () => totalPages > 1 ? (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -771,19 +805,48 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
             </button>
           );
         })}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <GoldenBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Standard Account" onClick={() => setSpawnMode("standard")} />
-          <VioletBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Smart Account" onClick={() => setSpawnMode("smart")} />
-          <button
-            onClick={() => setAllExpanded(!allExpanded)}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 12, fontSize: 12, fontWeight: 500, border: "1px solid #262626", color: "#888", background: "transparent", cursor: "pointer" }}
-          >
-            <ChevronsUpDown style={{ width: 14, height: 14 }} />
-            {allExpanded ? "Collapse All" : "Expand All"}
-          </button>
-        </div>
+        {/* API-key tabs: Single (link halves) + Dual (linked composite keys). */}
+        {([
+          { key: "single-api", label: "Single API", accent: "#4ade80", count: apolloHalfCount },
+          { key: "dual-api", label: "Dual API", accent: "#38bdf8", count: dualCount },
+        ] as const).map(({ key, label, accent, count }) => {
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                padding: "8px 16px", borderRadius: 12, fontSize: 14, fontWeight: 600,
+                border: `2px solid ${active ? accent : "#262626"}`,
+                backgroundColor: active ? accent + "15" : "#0a0a0a",
+                color: active ? accent : "#888", cursor: "pointer",
+              }}
+            >
+              {label} ({count ?? "…"})
+            </button>
+          );
+        })}
+        {isAccountList && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <GoldenBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Standard Account" onClick={() => setSpawnMode("standard")} />
+            <VioletBtn icon={<PlusCircle style={{ width: 16, height: 16 }} />} label="Spawn Smart Account" onClick={() => setSpawnMode("smart")} />
+            <button
+              onClick={() => setAllExpanded(!allExpanded)}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 12, fontSize: 12, fontWeight: 500, border: "1px solid #262626", color: "#888", background: "transparent", cursor: "pointer" }}
+            >
+              <ChevronsUpDown style={{ width: 14, height: 14 }} />
+              {allExpanded ? "Collapse All" : "Expand All"}
+            </button>
+          </div>
+        )}
       </div>
 
+      {activeTab === "single-api" ? (
+        <SingleApiPanel standardApollo={standardApollo} smartApollo={smartApollo} apiKeyMap={apiKeyMap} accounts={hydratedAccounts} />
+      ) : activeTab === "dual-api" ? (
+        <DualApiPanel standardApollo={standardApollo} smartApollo={smartApollo} apiKeyMap={apiKeyMap} accounts={hydratedAccounts} />
+      ) : (
+      <>
       <Pagination />
 
       {(primeRows.length > 0 || pageAccounts.length > 0) ? (
@@ -834,6 +897,8 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
       )}
 
       <Pagination />
+      </>
+      )}
 
       {spawnMode && (
         <SpawnAccountModal isSmart={spawnMode === "smart"} onClose={() => setSpawnMode(null)} />

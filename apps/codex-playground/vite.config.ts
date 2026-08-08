@@ -5,16 +5,22 @@ import react from "@vitejs/plugin-react";
 import { alias, dedupe } from "./resolve.shared";
 
 // Resolve this app's dev port from the central LocalHost registry
-// (D:/_Claude/LocalHost/registry.json — key "codex") so it never collides with
-// the other _Claude localhost sites and the LocalHost aggregator dashboard binds
-// the same port it starts. Falls back to Vite's default if the registry is
-// absent, so the playground still runs standalone. Nested one level deeper than
-// the StoaOuronet Vite apps, hence four `..` up to the _Claude root.
+// (<workspace-root>/LocalHost/registry.json — key "codex") so it never collides
+// with the other localhost sites and the LocalHost aggregator dashboard binds the
+// same port it starts. Falls back to Vite's default if the registry is absent, so
+// the playground still runs standalone.
+//
+// Path depth: this app lives at
+//   <root>/AncientPantheon/constructors/Codex/apps/codex-playground
+// and the registry is at <root>/LocalHost — so it is FIVE `..` up to the workspace
+// root, then into LocalHost. (It was four before the 2026-07-14 reorg moved Codex
+// under `constructors/`; the extra level is why a stale four-`..` path silently
+// missed the registry and fell back to :5173, which strictPort then failed on.)
 function localhostPort(key: string, fallback: number): number {
   try {
     const reg = JSON.parse(
       readFileSync(
-        resolve(__dirname, "../../../../LocalHost/registry.json"),
+        resolve(__dirname, "../../../../../LocalHost/registry.json"),
         "utf8",
       ),
     ) as { projects?: Array<{ key: string; port: number }> };
@@ -113,7 +119,7 @@ const CODEX_VERSION = JSON.parse(
 
 export default defineConfig({
   plugins: [stoachainCjsInterop(), react()],
-  // Bind the port assigned by the central LocalHost registry (key "codex" → 3009).
+  // Bind the port assigned by the central LocalHost registry (key "codex" → 3007).
   // strictPort fails loudly on a collision instead of silently hopping ports.
   server: {
     port: localhostPort("codex", 5173),

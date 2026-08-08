@@ -2,6 +2,23 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.9.0 — 2026-08-08
+
+**MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`
+unchanged).
+
+Pythia consumer-API-key management in the Ouronet accounts view. Two new account
+sub-tabs — **Single API** (link Apollo ₱./Π. halves into a dual API key) and
+**Dual API** (manage the linked composite keys) — plus three ZBOM transaction
+modals authorized by both half-owners: **Link** (no fee), **Rename lane** (100
+STOA, 4-way split), and **Revoke** (1 IGNIS kill-switch). Costs and split
+receivers are read from the on-chain INFO so they never drift. Also adds a
+**post-transaction refresh**: the whole accounts view now re-reads chain state
+automatically once any Codex transaction confirms (activation, guard, payment
+key, API-key status, dual links), instead of requiring a manual reload. Fixes
+registered-but-unlinked API halves reading as linked, and a stale signing-zone
+spinner on owner-only transactions.
+
 ## 0.8.1 — 2026-08-03
 
 **PATCH — bug fix.** The Ouronet account card no longer hides an account's
