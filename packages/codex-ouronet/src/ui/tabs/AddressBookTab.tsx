@@ -32,6 +32,8 @@ import {
   IconOuronetExplorerBtn,
   IconDeleteBtn,
 } from "../internal/IconButtons.js";
+import { MiddleEllipsis } from "../internal/MiddleEllipsis.js";
+import { OuronetAddressHighlight } from "../internal/OuronetAddressHighlight.js";
 import type { AddressBookEntry } from "../../types/entities.js";
 
 type TabType = AddressBookEntry["type"];
@@ -388,14 +390,14 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
             </p>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: "12px" }}>
+          // minmax(0,1fr): the single column can't blow out past the page width
+          // when a row holds a long unbreakable address (an implicit `auto` track
+          // would otherwise expand to the nowrap content).
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "12px" }}>
             {visible.map((entry) => {
               const isTag = entry.type === "stoic-tag";
               const displayValue = isTag ? `§${entry.address}` : entry.address;
               const copyText = displayValue;
-              // Read-time chain default (D-10): a legacy entry with no chainId
-              // resolves to StoaChain without rewriting the stored entry.
-              const chainId = entry.chainId ?? STOACHAIN_CHAIN_ID;
               return (
                 <div
                   key={entry.id}
@@ -456,30 +458,23 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span
-                        style={{
-                          fontFamily: MONO, fontSize: "13px",
-                          color: isTag ? "#4ade80" : "var(--codex-text)", fontWeight: isTag ? 700 : 400,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}
-                      >
-                        {displayValue}
-                      </span>
+                      {entry.type === "ouronet" ? (
+                        // Same component the Ouronet Accounts tab uses for its
+                        // "OURONET ACCOUNT" field — blue-highlighted first-3/last-3,
+                        // fills the width, centered middle-truncation.
+                        <OuronetAddressHighlight address={displayValue} />
+                      ) : (
+                        <MiddleEllipsis
+                          text={displayValue}
+                          style={{
+                            fontFamily: MONO, fontSize: "13px",
+                            color: isTag ? "#4ade80" : "var(--codex-text)", fontWeight: isTag ? 700 : 400,
+                          }}
+                        />
+                      )}
                       {isTag && renderTagStatus(entry.address)}
                     </div>
                     <span style={{ display: "inline-flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
-                      <span
-                        data-chain-id={chainId}
-                        title={`Chain: ${chainId}`}
-                        style={{
-                          fontSize: 10, fontWeight: 600, letterSpacing: "0.03em",
-                          textTransform: "uppercase", padding: "2px 6px", borderRadius: 4,
-                          color: cfg.accent, backgroundColor: `${cfg.accent}1a`,
-                          border: `1px solid ${cfg.accent}40`, whiteSpace: "nowrap",
-                        }}
-                      >
-                        {chainId}
-                      </span>
                       <IconCopyBtn text={copyText} size={28} />
                       {entry.type === "stoa" && <IconStoaExplorerBtn href={explorerUrl(entry.address)} size={28} />}
                       {entry.type === "ouronet" && <IconOuronetExplorerBtn size={28} />}

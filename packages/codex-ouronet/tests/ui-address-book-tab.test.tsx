@@ -66,7 +66,10 @@ describe("<AddressBookTab>", () => {
     // The new entry's name surfaces in the list — proves addEntry persisted
     // and the list re-derived from the store.
     expect(await screen.findByText("Alice")).toBeTruthy();
-    expect(screen.getByText("Ѻ.alice-account")).toBeTruthy();
+    // The address is rendered via <MiddleEllipsis>, which splits it across a
+    // head/tail span pair for CSS middle-truncation — so the full string is not
+    // in a single text node. It IS the element's `title` (hover-to-read).
+    expect(screen.getByTitle("Ѻ.alice-account")).toBeTruthy();
   });
 
   it("edits an entry's name in place so updateEntry is wired to the rename control", async () => {

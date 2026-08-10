@@ -2,6 +2,26 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.9.1 — 2026-08-10
+
+**PATCH — Address Book display fixes, no API changes. `codex`-only release**
+(`arweave-core` unchanged).
+
+- **No more horizontal bulge.** Long, unbreakable Ouronet addresses in the
+  Address Book no longer expand a card past the page width. The entry-list grid
+  now uses `grid-template-columns: minmax(0, 1fr)` so the single column is clamped
+  to the container and long rows truncate instead of overflowing. Fixes all three
+  sub-tabs (Ouronet, StoaChain™, StoicTags) in one change.
+- **Consistent address rendering.** Ouronet Address Book entries now use the same
+  `OuronetAddressHighlight` component as the Ouronet Accounts tab — blue-bold
+  first-3/last-3 highlight, fills the available width, centered `start … end`
+  middle-truncation.
+- **No display "retract".** `MiddleEllipsis` and `OuronetAddressHighlight` render
+  directly in their final truncated form (kept hidden until the measured width
+  settles) — no visible "long → shrink" flash on mount.
+- **Removed the erroneous `KADENA:MAINNET` chain chip** from Address Book rows —
+  everything sits on StoaChain, which is mainnet-only.
+
 ## 0.9.0 — 2026-08-08
 
 **MINOR — additive, no breaking changes. `codex`-only release** (`arweave-core`

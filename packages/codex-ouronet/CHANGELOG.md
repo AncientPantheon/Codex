@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1 — 2026-08-10
+
+**PATCH — Address Book display fixes, no API changes.**
+
+- **`AddressBookTab`** — the entry list grid now uses
+  `grid-template-columns: minmax(0, 1fr)` so a long unbreakable address can no
+  longer blow the card (and the page) out past the viewport width; rows truncate
+  instead of overflowing. Fixes all three sub-tabs (Ouronet, StoaChain™,
+  StoicTags). Ouronet entries now render via `OuronetAddressHighlight` (matching
+  the Ouronet Accounts tab). Removes the erroneous `KADENA:MAINNET` chain chip.
+- **`MiddleEllipsis`** — balanced, width-filling, centered `start … end`
+  middle-truncation measured against the container; kept hidden until the width
+  settles so it renders directly in its final form (no "retract" flash).
+- **`OuronetAddressHighlight`** — same settle-until-stable rendering; no visible
+  shrink on mount.
+
 ## 0.9.0 — 2026-08-08
 
 **MINOR — additive, no breaking changes.** Pythia consumer-API-key management in

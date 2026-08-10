@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.9.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.9.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.9.1** — Address Book display fix. Long Ouronet addresses no longer bulge past the page width — the entry-list grid is clamped with `minmax(0, 1fr)` so unbreakable addresses truncate instead of overflowing (fixes all three sub-tabs: Ouronet, StoaChain, StoicTags). Ouronet entries now render with the same blue-highlighted, width-filling, centered middle-truncation component as the Ouronet Accounts tab, and render directly in their final form (no visible "retract" flash). Removes the erroneous `KADENA:MAINNET` chain chip from the Address Book (StoaChain is mainnet-only). `codex`-only release.
 
 **v0.9.0** — Pythia consumer-API-key management. Two new Ouronet-account sub-tabs — **Single API** (link Apollo ₱./Π. halves into a dual API key) and **Dual API** (manage the linked composite keys) — with three both-owner-authorized ZBOM transaction modals: **Link** (no fee), **Rename lane** (100 STOA, 4-way split), and **Revoke** (1 IGNIS kill-switch); costs + split receivers are read from the on-chain INFO so they never drift. Adds a **post-transaction refresh** so the accounts view re-reads chain state automatically after any tx confirms (no manual reload). `codex`-only release.
 
@@ -59,7 +61,7 @@ Version `0.9.0` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.9.0` |
+| `@ancientpantheon/codex-ouronet` | `0.9.1` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->
