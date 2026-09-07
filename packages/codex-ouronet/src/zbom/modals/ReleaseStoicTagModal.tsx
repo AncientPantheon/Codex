@@ -28,7 +28,7 @@ import {
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
 import { buildReleaseStoicTagPactCode } from "@ouronet/ouronet-core/pact";
-import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
+import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
@@ -283,14 +283,15 @@ export default function ReleaseStoicTagModal({
       const accountAuthGuard = isSmart ? authSelection.chosenKeyset : accountGuard;
 
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }: { gasLimit: number; capsKeyPub: string; guardPubs: string[] }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
           let builder = Pact.builder
             .execution(pactCode)
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
-              creationTime:  safeCreationTime(),
+              creationTime,
               chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
+              gasPrice,
             })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [

@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.9.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.10.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.10.0** — Transaction gas-price fix (affects every signed transaction). All 13 transaction-building sites omitted `meta.gasPrice`, so Pact's `1e-8` default went out on the wire instead of the live Yin Engine floor. Re-pinned to `@stoachain/stoa-core` / `@stoachain/kadena-stoic-legacy` **>=4.4.0** and `@ouronet/ouronet-core` **>=4.6.0**, whose `CodexSigningStrategy.execute()` now performs ONE `stoaGasMeta()` clock read per call and injects `gasPrice` + `creationTime` into every `build(ctx)` callback (alongside `gasLimit`). Every site now takes both from that ctx instead of re-reading the clock — which also fixes a latent request-key bug, since `build()` runs twice (simulation + real) and a per-call `safeCreationTime()` produced a different command hash between the two passes. **Consumers must have `@stoachain/stoa-core >=4.4.0` and `@ouronet/ouronet-core >=4.6.0`.** `codex`-only release.
 
 **v0.9.1** — Address Book display fix. Long Ouronet addresses no longer bulge past the page width — the entry-list grid is clamped with `minmax(0, 1fr)` so unbreakable addresses truncate instead of overflowing (fixes all three sub-tabs: Ouronet, StoaChain, StoicTags). Ouronet entries now render with the same blue-highlighted, width-filling, centered middle-truncation component as the Ouronet Accounts tab, and render directly in their final form (no visible "retract" flash). Removes the erroneous `KADENA:MAINNET` chain chip from the Address Book (StoaChain is mainnet-only). `codex`-only release.
 
@@ -61,7 +63,7 @@ Version `0.9.1` on public npmjs. The aggregate: the six subpath barrels wired to
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.2.0` |
 | `@ancientpantheon/codex-ui` | `0.4.0` |
-| `@ancientpantheon/codex-ouronet` | `0.9.1` |
+| `@ancientpantheon/codex-ouronet` | `0.10.0` |
 | `@ancientpantheon/codex-arweave` | `0.2.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

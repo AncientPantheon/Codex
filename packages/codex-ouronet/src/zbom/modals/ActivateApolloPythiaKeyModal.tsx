@@ -28,7 +28,7 @@ import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
-import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
+import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { classifyPaymentKey, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
@@ -355,14 +355,15 @@ export default function ActivateApolloPythiaKeyModal({
       });
 
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }: { gasLimit: number; capsKeyPub: string; guardPubs: string[] }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
           let builder = Pact.builder
             .execution(pactCode)
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
-              creationTime:  safeCreationTime(),
+              creationTime,
               chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
+              gasPrice,
             })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [

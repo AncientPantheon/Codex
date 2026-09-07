@@ -69,7 +69,7 @@
   "_devDependenciesComment": "react/react-dom/lucide-react are mirrored here at peer-satisfying ranges so the workspace install materializes them (npm does not auto-install a package's own peerDeps). @ancientpantheon/codex-ouronet AND @stoachain/stoa-core are TYPE-ONLY: codex-ui `import type`s the byte-stable entity View types from '@ancientpantheon/codex-ouronet/types' and the Kadena signing View types (IKadenaKeypair, PactClient, CodexSigningStrategy) from '@stoachain/stoa-core/signing' — both erased at runtime under verbatimModuleSyntax, so they stay out of `dependencies`, but are declared here so the emitted .d.ts are self-contained (a downstream/isolated tsc can resolve the referenced types). @stoachain/stoa-core is NOT hoisted to the workspace root (it lives in codex-ouronet/node_modules), so codex-ui must declare it for its own tsc to resolve the type-only import.",
   "devDependencies": {
     "@ancientpantheon/codex-ouronet": "*",
-    "@stoachain/stoa-core": ">=4.3.0",
+    "@stoachain/stoa-core": ">=4.4.0",
     "@testing-library/jest-dom": "^6.6.4",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.0.0",

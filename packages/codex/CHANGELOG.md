@@ -2,6 +2,52 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.10.0 — 2026-08-10
+
+**MINOR — fixes a real transaction bug on every signed transaction; raises two
+peer floors. `codex`-only release** (`arweave-core` unchanged).
+
+### Fixed — `meta.gasPrice` was never set
+
+All **13** signed/submitted transaction-building sites omitted `gasPrice`
+entirely, so Pact's client default (`1e-8`) went out on the wire instead of the
+live Yin Engine floor — under-priced commands that chainweb can reject.
+
+`@stoachain/stoa-core@4.4.0` exports the canonical Yin Engine gas formula
+(`minGasPriceAnu`, `anuToStoaNumber`, `stoaGasMeta` from
+`@stoachain/stoa-core/gas`), and `CodexSigningStrategy.execute()` now performs
+**one** `stoaGasMeta()` clock read per call and injects `gasPrice` +
+`creationTime` into every `build(ctx)` callback, alongside the `gasLimit` it
+already injected. Every site now accepts both from that ctx and spreads them
+into `.setMeta({...})`, consistently — no site calls `stoaGasMeta()` or
+`safeCreationTime()` itself.
+
+This also fixes a **latent request-key bug**: the strategy invokes `build()`
+twice (a gas-measuring simulation pass, then the real pass). The old per-call
+`safeCreationTime()` produced a *different* `creationTime` between the two
+passes, changing the command hash. Taking `creationTime` from the injected ctx
+guarantees both passes see identical values.
+
+Two operations (`RotateGuard`, `RotatePaymentKey`) additionally exist as
+delegating modals that call `rotateGuard()` / `rotateKadenaPaymentKey()` in
+`@ouronet/ouronet-core`; those were fixed upstream and need no local change —
+the re-pin alone corrects them.
+
+### Added
+
+- `tests/tx-gas-meta-surface.test.ts` — a shape guard locking the exact inventory
+  of transaction sites and asserting every one passes `gasPrice` + `creationTime`
+  from the injected ctx (and re-reads no clock). A new transaction site fails the
+  suite until it satisfies the gas contract.
+
+### Changed — peer floors (action required)
+
+Consumers **must** provide:
+
+- `@stoachain/stoa-core` **>=4.4.0** (was >=4.3.0)
+- `@stoachain/kadena-stoic-legacy` **>=4.4.0** (was >=4.3.0)
+- `@ouronet/ouronet-core` **>=4.6.0** (was >=4.3.0)
+
 ## 0.9.1 — 2026-08-10
 
 **PATCH — Address Book display fixes, no API changes. `codex`-only release**

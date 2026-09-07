@@ -44,7 +44,6 @@ import { publicKeyFromPrivateKey, publicKeyFromExtendedKey } from "@stoachain/st
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { buildDeployStandardAccountPactCode } from "@ouronet/ouronet-core/pact";
-import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
@@ -335,15 +334,16 @@ export default function ActivateStandardAccountModal({
       };
 
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }: { gasLimit: number; capsKeyPub: string; guardPubs: string[] }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
           let builder = Pact.builder
             .execution(pactCode)
             .addData("ks", { keys: effectiveGuardKeys, pred: effectiveGuardPred })
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
-              creationTime:  safeCreationTime(),
+              creationTime,
               chainId:       STOACHAIN_CHAIN_ID,
               gasLimit,
+              gasPrice,
             })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [

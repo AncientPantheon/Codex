@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.10.0 — 2026-08-10
+
+**MINOR — fixes `meta.gasPrice` on every signed transaction; raises peer floors.**
+
+- **All 13 transaction-building sites now set `gasPrice`.** They previously
+  omitted it, so Pact's `1e-8` default shipped instead of the live Yin Engine
+  floor. Each `build(ctx)` closure now destructures `gasPrice` + `creationTime`
+  from the strategy-injected ctx (`@stoachain/stoa-core >=4.4.0`
+  `CodexSigningStrategy.execute()` does one `stoaGasMeta()` read per call) and
+  spreads both into `.setMeta({...})`:
+  - `components/`: `RotateGuardModal`, `RotatePaymentKeyModal`, `RotateSovereignModal`
+  - `zbom/modals/`: `ActivateApolloPythiaKeyModal`, `ActivateSmartAccountModal`,
+    `ActivateStandardAccountModal`, `LinkDualApiKeyModal`, `RegisterStoicTagModal`,
+    `ReleaseStoicTagModal`, `RenameDualLaneModal`, `RevokeDualLinkModal`,
+    `RotateGovernorModal`, `RotateSovereignModal`
+- **Dropped the per-call `safeCreationTime()`** from those closures. `build()` is
+  invoked twice (simulation + real); a fresh clock read per invocation yielded a
+  different `creationTime`, and therefore a different command hash, between the
+  two passes. `creationTime` now comes from the injected ctx.
+- **No change needed** for the delegating `zbom/modals/RotateGuardModal` /
+  `RotatePaymentKeyModal` — they call `rotateGuard()` /
+  `rotateKadenaPaymentKey()` in `@ouronet/ouronet-core`, fixed upstream.
+- **Added `tests/tx-gas-meta-surface.test.ts`** — locks the transaction-site
+  inventory and the `gasPrice`/`creationTime`-from-ctx contract.
+- **Peer floors raised**: `@stoachain/stoa-core` and
+  `@stoachain/kadena-stoic-legacy` to `>=4.4.0`, `@ouronet/ouronet-core` to
+  `>=4.6.0`.
+
 ## 0.9.1 — 2026-08-10
 
 **PATCH — Address Book display fixes, no API changes.**

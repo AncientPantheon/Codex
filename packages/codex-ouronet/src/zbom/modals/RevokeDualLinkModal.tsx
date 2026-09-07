@@ -22,7 +22,7 @@ import { txPending } from "../toast/toastManager.js";
 import { getStoaChainAccountGuard, getIgnisBalance } from "../debouncer/monitoredReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import { KADENA_NAMESPACE as STOACHAIN_NAMESPACE, STOA_AUTONOMIC_OURONETGASSTATION } from "@ouronet/ouronet-core/constants";
-import { safeCreationTime, mayComeWithDeimal } from "@stoachain/stoa-core/pact";
+import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount } from "../../types/entities.js";
@@ -221,10 +221,10 @@ export default function RevokeDualLinkModal({
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
       const pactCode = buildRevokeDualLinkPactCode({ patron: patronAccount.address, dualLinkKey });
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }: { gasLimit: number; capsKeyPub: string; guardPubs: string[] }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
           let builder = Pact.builder
             .execution(pactCode)
-            .setMeta({ senderAccount: STOA_AUTONOMIC_OURONETGASSTATION, creationTime: safeCreationTime(), chainId: STOACHAIN_CHAIN_ID, gasLimit })
+            .setMeta({ senderAccount: STOA_AUTONOMIC_OURONETGASSTATION, creationTime, chainId: STOACHAIN_CHAIN_ID, gasLimit, gasPrice })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
               w(`${STOACHAIN_NAMESPACE}.DALOS.GAS_PAYER`, "", { int: 0 }, { decimal: "0.0" }),

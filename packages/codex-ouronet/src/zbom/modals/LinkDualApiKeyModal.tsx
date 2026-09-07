@@ -32,7 +32,6 @@ import { txPending } from "../toast/toastManager.js";
 import { getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import { KADENA_NAMESPACE as STOACHAIN_NAMESPACE, STOA_AUTONOMIC_OURONETGASSTATION } from "@ouronet/ouronet-core/constants";
-import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount } from "../../types/entities.js";
@@ -206,7 +205,7 @@ export default function LinkDualApiKeyModal({
         consumerLane: consumerLane.trim(),
       });
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }: { gasLimit: number; capsKeyPub: string; guardPubs: string[] }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
           // Gas via the Ouronet gas station (GAS_PAYER on the caps key). The
           // ownership guard keys (from BOTH owners) sign their enforce-keysets.
           // No coin.TRANSFER — no fee.
@@ -214,9 +213,10 @@ export default function LinkDualApiKeyModal({
             .execution(pactCode)
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
-              creationTime: safeCreationTime(),
+              creationTime,
               chainId: STOACHAIN_CHAIN_ID,
               gasLimit,
+              gasPrice,
             })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [

@@ -23,7 +23,6 @@ import {
   KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID,
   KADENA_NETWORK as STOACHAIN_NETWORK,
 } from "@stoachain/stoa-core/constants";
-import { safeCreationTime } from "@stoachain/stoa-core/pact";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
@@ -140,14 +139,15 @@ export function RotateSovereignModal({
       }
 
       const { requestKey } = await execute({
-        build: ({ gasLimit, capsKeyPub, guardPubs }) => {
+        build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }) => {
           let builder = Pact.builder
             .execution(pactCode)
             .setMeta({
               senderAccount: STOA_AUTONOMIC_OURONETGASSTATION,
-              creationTime: safeCreationTime(),
+              creationTime,
               chainId: STOACHAIN_CHAIN_ID,
               gasLimit,
+              gasPrice,
             })
             .setNetworkId(STOACHAIN_NETWORK)
             .addSigner(capsKeyPub, (w: any) => [
