@@ -25,6 +25,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -35,6 +36,12 @@ import { App, Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import { DEFAULT_GATEWAY_URL } from "../src/ArweaveModeToggle";
 import { populatedStoaChainSnapshot } from "../fixtures";
+
+/** The chain rail renders ids Capitalised for display ("arweave" -> "Arweave"),
+ *  so match the id case-insensitively rather than hardcoding the display form —
+ *  the id stays the single source of truth. */
+const railName = (id: string) => new RegExp(`^${id}$`, "i");
+
 
 afterEach(() => {
   cleanup();
@@ -64,8 +71,11 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
         <Dashboard />
       </CodexProvider>,
     );
-    // The REAL dashboard mounted (a shipped STAY tab is present).
-    await screen.findByRole("tab", { name: /seed words/i });
+    // The REAL dashboard mounted. The Class IA top level is the THREE Class tabs
+    // (T5 collapsed Seed Words / Pure Key Pairs / Stoa Accounts into Class 2 →
+    // Chainweb), so the shell is pinned by a Class tab, not by a removed one.
+    await screen.findByRole("tab", { name: /ouronet accounts/i });
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
   }
 
   it("renders the real codex dashboard, the export affordance, the Foreign Chains section, and the Arweave subtab together (no error)", async () => {
@@ -76,29 +86,45 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
       screen.getByRole("button", { name: /export.*json/i }),
     ).toBeInTheDocument();
 
-    // The Foreign Chains section composes the wired tab; its Arweave subtab is
-    // dispatched from the injected foreignChains (mock adapter's id reached the
-    // list) — proving the T15.4 tab mount is composed into the standalone shell.
-    const foreignChains = screen.getByRole("region", { name: /foreign chains/i });
+    // Class 2 ("Blockchain Accounts") composes the wired rail; its Arweave entry
+    // is dispatched from the injected foreignChains (the mock adapter's id
+    // reached the list) — proving the chain rail is composed into the standalone
+    // shell. The rail mounts only once Class 2 is the active Class tab, so this
+    // selects it first (the old standalone `region` wrapper is gone).
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /blockchain accounts/i }));
+    const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
     expect(
-      await within(foreignChains).findByRole("tab", { name: ARWEAVE_CHAIN_ID }),
+      await within(rail).findByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }),
     ).toBeInTheDocument();
   });
 
-  it("mounts the mock/real Arweave mode toggle defaulting to mock+offline, gateway seeded to the testnet/local default (funds-safety)", async () => {
+  it("boots Arweave in mock+offline with the gateway on the testnet/local default (funds-safety)", async () => {
     await mountDashboard();
 
-    // The mode toggle (T15.6) is composed next to the Foreign Chains tab: it
-    // boots in mock+offline (default), so NO real-mode funds warning is shown,
-    // and its gateway input is seeded to the testnet/local default (never mainnet).
-    const modeSection = screen.getByRole("region", { name: /arweave mode/i });
-    const gatewayInput = within(modeSection).getByLabelText(
-      /gateway/i,
-    ) as HTMLInputElement;
-    expect(gatewayInput.value).toBe(DEFAULT_GATEWAY_URL);
-    expect(gatewayInput.value).not.toContain("arweave.net");
-    // Default is mock+offline — no funds-safety alert until the user opts into real.
-    expect(within(modeSection).queryByRole("alert")).toBeNull();
+    // Funds-safety, asserted at the level that still carries it.
+    //
+    // Two things changed under this test: the on-screen mock/real toggle was
+    // removed from the shell (unstyled dev chrome), and every Arweave category
+    // is now an empty placeholder pending real wiring. So the DOM no longer
+    // renders ANY adapter output — it cannot prove "mock mode is live" any more,
+    // and asserting on panel text here would be asserting on a placeholder.
+    //
+    // What survives, and is what actually protects funds: the shell reaches
+    // Arweave without contacting a gateway, and the gateway default is pinned
+    // away from mainnet. Adapter-mode selection itself is covered where the
+    // wiring is built (e5-foreign-chains-mock).
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /blockchain accounts/i }));
+    const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
+    await user.click(
+      await within(rail).findByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }),
+    );
+
+    // The category strip mounts (chain reachable) with no network in play.
+    expect(await screen.findByTestId("arweave-subtab-seeds")).toBeInTheDocument();
+    // Never mainnet by default.
+    expect(DEFAULT_GATEWAY_URL).not.toContain("arweave.net");
   });
 });
 

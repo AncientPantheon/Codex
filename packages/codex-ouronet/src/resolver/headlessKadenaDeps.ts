@@ -11,10 +11,20 @@
  * (`HANDOFF-codex-headless-kadena-resolver.md`): no consumer, and no sibling
  * resolver, ever reimplements seed derivation.
  *
- * SERVER-SAFE: every runtime import here is `@stoachain/*` or codex-core — no
- * React, no DOM, no zustand. It is safe to pull into a headless Node automaton
- * through the `/ouronet` subpath (the browser-only store/auth wiring stays in
- * `InternalCodexResolver.ts`).
+ * SERVER-SAFE: every runtime import here is `@stoachain/*`, `@ouronet/
+ * dalos-crypto` (the Stoic/"Stoa Dalos" path, see `resolveStoicKeypair`
+ * below), or codex-core — no React, no DOM, no zustand. It is safe to pull
+ * into a headless Node automaton through the `/ouronet` subpath (the
+ * browser-only store/auth wiring stays in `InternalCodexResolver.ts`).
+ *
+ * `resolveStoicKeypair` is NOT routed through codex-core's factory: a stoic
+ * seed's `secret` decrypts to a 1600-bit DALOS bitstring, not a mnemonic, so
+ * feeding it to the mnemonic-only `HeadlessResolverDeps.deriveStoaChainKeypair`
+ * seam would be wrong. Both `InternalCodexResolver.ts` and
+ * `headlessKadenaResolver.ts` call this FIRST and only fall through to
+ * `HEADLESS` when it returns `undefined` (no stoic seed owns the requested
+ * pubkey) — see `../wallet/stoaDalosKeygen.ts`'s module doc for the full
+ * "why not codex-core" reasoning.
  */
 
 import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
@@ -33,6 +43,7 @@ import {
 } from "@ancientpantheon/codex-core";
 
 import { CodexKeyMissingError } from "../errors/types.js";
+import { deriveStoaDalosKeypairAtIndex } from "../wallet/stoaDalosKeygen.js";
 
 /** Non-empty transient password used to re-scramble a reconstructed extended
  *  key before handing it to the WASM signer. The value is arbitrary — it only
@@ -111,6 +122,59 @@ export const REAL_STOA_DEPS: HeadlessResolverDeps = {
 export const HEADLESS: HeadlessCodexResolver = createHeadlessCodexResolver(REAL_STOA_DEPS);
 
 export { EXTENDED_FOREIGN_SCRAMBLE_PW };
+
+/**
+ * `IKadenaKeypair` widened to allow `seedType: "stoic"`.
+ *
+ * `@stoachain/stoa-core`'s published `IKadenaKeypair.seedType` union
+ * (`"koala" | "chainweaver" | "eckowallet" | "foreign"`) doesn't include
+ * `"stoic"` — `resolveStoicKeypair` uses this widened type to honestly tag
+ * stoic-derived keypairs instead of misrepresenting them as `"koala"` or
+ * silently omitting `seedType`. A single cast back to `IStoaChainKeypair` at
+ * `resolveStoicKeypair`'s return statement is the only place this widening
+ * leaks into code that talks to `KeyResolver`'s real contract. (Confirmed via
+ * `universalSignTransaction`'s compiled dispatch: it checks ONLY `seedType
+ * === "chainweaver" || seedType === "eckowallet"` for its WASM branch, so a
+ * `"stoic"` tag naturally falls through to the nacl branch using
+ * `secretKey`/`privateKey` directly — no stoa-core change needed.) */
+export type StoicKeypair = Omit<IStoaChainKeypair, "seedType"> & { readonly seedType: "stoic" };
+
+/** Minimal structural shape `resolveStoicKeypair` reads off a StoaChain seed —
+ *  a subset of `IStoaChainSeed` (Ouronet-side), kept local so this SERVER-SAFE
+ *  module doesn't import Ouronet's entity types. */
+export interface StoicSeedLookup {
+  secret: string;
+  seedType: string;
+  accounts: ReadonlyArray<{ publicKey: string; index: number }>;
+}
+
+/**
+ * Resolve a Stoic ("Stoa Dalos") seed's keypair for `publicKey`, or
+ * `undefined` when no `seedType: "stoic"` seed in `kadenaSeeds` owns it.
+ *
+ * MUST be called BEFORE `HEADLESS.getKeyPairByPublicKey` — codex-core's
+ * factory assumes every seed's `secret` decrypts to a mnemonic
+ * (`deps.deriveStoaChainKeypair`), which is false for stoic seeds (their
+ * `secret` is a DALOS bitstring). See the module doc above.
+ */
+export async function resolveStoicKeypair(
+  kadenaSeeds: readonly StoicSeedLookup[],
+  publicKey: string,
+  password: string,
+): Promise<IStoaChainKeypair | undefined> {
+  for (const seed of kadenaSeeds) {
+    if (seed.seedType !== "stoic") continue;
+    const account = seed.accounts.find((a) => a.publicKey === publicKey);
+    if (!account) continue;
+    const bitString = await smartDecrypt(seed.secret, password);
+    const { publicKey: pub, privateKey } = deriveStoaDalosKeypairAtIndex(bitString, account.index);
+    const stoicKeypair: StoicKeypair = { publicKey: pub, privateKey, seedType: "stoic" };
+    // Widening cast — see the `StoicKeypair` doc above for why stoa-core's
+    // published `seedType` union doesn't (yet) include "stoic".
+    return stoicKeypair as unknown as IStoaChainKeypair;
+  }
+  return undefined;
+}
 
 /**
  * Structural type-guard for codex-core's `CodexKeyMissingError` (matched by the

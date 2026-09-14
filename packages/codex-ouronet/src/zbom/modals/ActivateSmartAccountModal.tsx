@@ -30,7 +30,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { ZbomModalFrame } from "../ui/ZbomModalFrame.js";
 import { InfoTooltip } from "../ui/InfoTooltip.js";
-import { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
 import { useUiSetting } from "../cfm/seam.js";
 import { StoaChainBrand } from "../ui/StoaChainBrand.js";
 import { toast } from "sonner";

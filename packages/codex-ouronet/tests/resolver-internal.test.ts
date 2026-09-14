@@ -38,6 +38,8 @@ import { universalSignTransaction } from "@stoachain/stoa-core/signing";
 import { kadenaDecrypt } from "@stoachain/kadena-stoic-legacy/hd-wallet";
 import { binToHex } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
 import { ed25519 } from "@noble/curves/ed25519";
+import { seedWordsToBitString } from "@ouronet/dalos-crypto/gen1";
+import { deriveStoaDalosKeypairAtIndex } from "../src/wallet/stoaDalosKeygen";
 
 const PASSWORD = "hunter2-test-password";
 
@@ -97,6 +99,40 @@ async function makeKoalaSeed(): Promise<{
       ],
     },
     derivedPub: publicKey,
+  };
+}
+
+/** Build a real STOIC ("Stoa Dalos") seed: real DALOS seed words →
+ *  `seedWordsToBitString` → the 1600-bit bitstring encrypted at PASSWORD as
+ *  the seed's `secret` (never the mnemonic path) → Key #0 derived via the
+ *  direct `@ouronet/dalos-crypto/chainweb` binding. The resolver test then
+ *  asks for that pubkey and the resolver's `"stoic"` pre-check (NOT
+ *  codex-core's mnemonic-only factory) should return a matching keypair. */
+async function makeStoicSeed(): Promise<{
+  seed: IStoaChainSeed;
+  derivedPub: string;
+  derivedPriv: string;
+}> {
+  const words = ["alpha", "bravo", "charlie", "delta", "echo"];
+  const bitString = seedWordsToBitString(words);
+  const { publicKey, privateKey } = deriveStoaDalosKeypairAtIndex(bitString, 0);
+  const encryptedBitString = await smartEncrypt(bitString, PASSWORD, "1.0");
+  return {
+    seed: {
+      id: "seed-stoic-1",
+      name: "Stoa Dalos Seed",
+      seedType: "stoic",
+      version: "1.0",
+      index: 0,
+      secret: encryptedBitString,
+      main: `k:${publicKey}`,
+      createdAt: "2026-05-25T10:00:00.000Z",
+      accounts: [
+        { index: 0, publicKey, derivationPath: "m'/44'/626'/0'" },
+      ],
+    },
+    derivedPub: publicKey,
+    derivedPriv: privateKey,
   };
 }
 
@@ -180,6 +216,13 @@ describe("InternalCodexResolver", () => {
       expect(set.has(derivedPub)).toBe(true);
     });
 
+    it("includes derived-account pubkeys from a stoic ('Stoa Dalos') seed", async () => {
+      const { seed, derivedPub } = await makeStoicSeed();
+      await store.getState().actions.addStoaChainSeed(seed);
+      const set = resolver.listCodexPubs() as Set<string>;
+      expect(set.has(derivedPub)).toBe(true);
+    });
+
     it("re-reads the store on each call (reflects mutations)", async () => {
       expect((resolver.listCodexPubs() as Set<string>).size).toBe(0);
       const kp = await makePureKeypair();
@@ -230,6 +273,62 @@ describe("InternalCodexResolver", () => {
       // universalSign WASM-vs-nacl branch to route correctly downstream.
       expect(result.encryptedSecretKey).toBeDefined();
       expect(result.password).toBe(PASSWORD);
+    }, 10000);
+
+    it("returns a directly-derived keypair for a stoic ('Stoa Dalos') seed account (bypasses the mnemonic path)", async () => {
+      const { seed, derivedPub, derivedPriv } = await makeStoicSeed();
+      await store.getState().actions.addStoaChainSeed(seed);
+      store.getState().actions.authenticate(PASSWORD, 60);
+
+      const result = await resolver.getKeyPairByPublicKey(derivedPub);
+      expect(result.publicKey).toBe(derivedPub);
+      expect(result.seedType).toBe("stoic");
+      // A stoic key is a plain 32-byte Ed25519 seed (64 hex chars) — matches
+      // the direct @ouronet/dalos-crypto/chainweb derivation exactly, proving
+      // the resolver never routed this through the mnemonic-based factory
+      // (which would either throw on a non-mnemonic secret or derive a
+      // completely different key).
+      expect(result.privateKey).toHaveLength(64);
+      expect(result.privateKey).toBe(derivedPriv);
+      // Unlike chainweaver/eckowallet, no WASM-signing material is attached —
+      // this keypair must fall through universalSignTransaction's nacl branch.
+      expect(result.encryptedSecretKey).toBeUndefined();
+    }, 10000);
+
+    it("produces a VALID Ed25519 signature for a stoic ('Stoa Dalos') key (end-to-end, zero stoa-core changes)", async () => {
+      const { seed, derivedPub } = await makeStoicSeed();
+      await store.getState().actions.addStoaChainSeed(seed);
+      store.getState().actions.authenticate(PASSWORD, 60);
+
+      const keypair = await resolver.getKeyPairByPublicKey(derivedPub);
+
+      const hashBytes = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) hashBytes[i] = (i * 53 + 7) & 0xff;
+      const tx = makeUnsignedCommandFor(derivedPub, hashBytes);
+
+      // universalSignTransaction has no "stoic" branch at all — its ONLY
+      // seedType check selects the WASM path for "chainweaver"/"eckowallet";
+      // everything else (including "stoic") falls through to nacl using
+      // `secretKey`. This proves that fallthrough produces a real, valid
+      // signature with zero changes needed in stoa-core.
+      const signed: any = await universalSignTransaction(tx, [
+        {
+          publicKey: keypair.publicKey,
+          secretKey: keypair.privateKey,
+          seedType: keypair.seedType,
+        },
+      ]);
+
+      const sigHex: string = signed.sigs?.[0]?.sig;
+      expect(sigHex, "a signature should be attached").toBeTruthy();
+      const ok = ed25519.verify(
+        Uint8Array.from(Buffer.from(sigHex, "hex")),
+        hashBytes,
+        Uint8Array.from(Buffer.from(derivedPub, "hex"))
+      );
+      expect(ok, "signature must verify against the stoic-derived key's pubkey").toBe(
+        true
+      );
     }, 10000);
 
     it("routes a 128-hex Chainweaver pure keypair through the WASM extended-key signer", async () => {

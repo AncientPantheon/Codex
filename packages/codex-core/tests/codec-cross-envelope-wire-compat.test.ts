@@ -189,7 +189,10 @@ describe("(c) POPULATED — codex-core emits the block; ouronet-core omits by de
     const codex = makeCodexWithForeignKeys();
     const inputEntries = codex.foreignKeys as ForeignKeyEntry[];
     const exp = buildCodexExport(codex) as CodexExportV1_3;
-    expect(exp.foreignKeys?.schemaVersion).toBe(1);
+    // Deliberately a LITERAL, not the exported constant: a wire-format bump
+    // must force a human to acknowledge it here. Raised 1 -> 2 when
+    // ForeignKeyEntry gained optional seedId/index/address provenance.
+    expect(exp.foreignKeys?.schemaVersion).toBe(2);
     expect(exp.foreignKeys?.keys).toEqual(inputEntries);
   });
 

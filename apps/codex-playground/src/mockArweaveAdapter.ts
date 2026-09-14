@@ -7,9 +7,13 @@
 //     canonical `ARWEAVE_CHAIN_ID` (imported, never re-spelled). ALL methods are
 //     async (F-004) so they match the `Promise<T>` seams the panel `await`s.
 //   - `buildMockPanelDeps()` — the E4 `ArweavePanelDeps` bundle filled with fakes
-//     (a fake keyring seeded with one ciphertext-only entry, an in-memory
-//     `MemoryLibraryStore`, a `FakeKeygenRunner`, a no-op gateway pool, an empty
-//     address book, and fake balance/send/upload seams).
+//     (an in-memory `MemoryLibraryStore`, a `FakeKeygenRunner`, a no-op gateway
+//     pool, and fake balance/send/upload seams). The non-fake seams are the two
+//     CODEX-LOCAL lists the caller passes in: the address book (so the Send
+//     recipient picker is exercised against the user's own saved addresses) and
+//     the foreign-key slice (so Arweave → Accounts lists the Codex's real keys).
+//     Neither touches the network, and the `send` seam itself stays fake, so
+//     nothing moves.
 //
 // FUNDS-SAFETY / SECRET HYGIENE (N-06): the fake keyring entry carries an
 // ENCRYPTED-blob placeholder (never a plaintext JWK field); the fake JWK the
@@ -28,6 +32,7 @@ import type {
   ArweavePanelDeps,
   KeygenProgress,
   KeygenRunner,
+  PanelAddressBookEntry,
 } from "@ancientpantheon/codex-arweave/panel";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 
@@ -61,13 +66,28 @@ export const MOCK_FAKE_JWK: ArweaveJwk = {
   qi: "",
 };
 
-/** A single fake keyring entry — ciphertext-only (N-06), seeding the keyring list. */
-export const MOCK_FOREIGN_KEY_ENTRY: ForeignKeyEntry = {
-  id: "mock-arweave-key-1",
-  label: "Mock Arweave key",
-  chainId: ARWEAVE_CHAIN_ID,
-  encryptedKeyfile: "mock-encrypted-keyfile-blob",
-};
+/**
+ * The ciphertext-only (N-06) entry the fake generate/import seams RESOLVE.
+ *
+ * It is NOT seeded into the keyring list any more (E5/T8): the mock stack used
+ * to hand `buildMockPanelDeps` a hardcoded `mock-arweave-key-1` /
+ * "Mock Arweave key" entry, so Arweave → Accounts rendered a populated list —
+ * under "Unassigned", since no seed can claim it — in a Codex holding no
+ * Arweave material at all. An empty Codex must show the empty state; the real
+ * `foreignKeys` slice is the only source of that list now.
+ *
+ * Its id is the mock ADDRESS, mirroring the real keyring (which uses the
+ * canonical 43-char address as the stable entry id) instead of a demo label.
+ */
+function mockKeyringEntry(label?: string): ForeignKeyEntry {
+  const entry: ForeignKeyEntry = {
+    id: MOCK_FAKE_ADDRESS,
+    chainId: ARWEAVE_CHAIN_ID,
+    encryptedKeyfile: "mock-encrypted-keyfile-blob",
+  };
+  if (label !== undefined) entry.label = label;
+  return entry;
+}
 
 /**
  * The MOCK `ForeignChainAdapter` (D3 contract) — `id === ARWEAVE_CHAIN_ID`, all
@@ -131,31 +151,52 @@ function createNoopGatewayPool(): GatewayPool {
   };
 }
 
+/** Options for {@link buildMockPanelDeps}. */
+export interface BuildMockPanelDepsOptions {
+  /** The panel-shaped address book (the app maps the CODEX address-book slice
+   *  into this shape — see `ForeignChainsWiring.toPanelAddressBook`). The Send
+   *  area filters it down to `chainId === ARWEAVE_CHAIN_ID`, so an empty seam
+   *  means a saved Arweave address can never be picked as a recipient. Defaults
+   *  to empty for the non-React callers (`buildMockPanelDeps()` with no store). */
+  addressBook?: PanelAddressBookEntry[];
+  /** The codex's REAL foreign-key entries (ciphertext-only), passed through
+   *  from the mounted store by `ForeignChainsWiring`. The Arweave panel filters
+   *  them to `chainId === ARWEAVE_CHAIN_ID` and groups them by `seedId` in the
+   *  Accounts category, so an empty Codex shows the empty state. Defaults to
+   *  empty for the non-React callers — NEVER to a demo entry (E5/T8). */
+  foreignKeys?: ForeignKeyEntry[];
+}
+
 /**
- * Assemble the E4 `ArweavePanelDeps` filled entirely with fakes disconnected
- * from any real store or network. The fake keyring is a local in-memory list
- * (NOT bridged to the codex store — F-002); the LibraryStore is a fresh empty
- * `MemoryLibraryStore`; the keygen runner is E4's `FakeKeygenRunner`.
+ * Assemble the E4 `ArweavePanelDeps` filled with fakes for every NETWORK seam,
+ * disconnected from any gateway. The LibraryStore is a fresh empty
+ * `MemoryLibraryStore`; the keygen runner is a local `FakeKeygenRunner`.
+ *
+ * TWO seams are NOT fakes — both are codex-local (no network, no funds), so
+ * faking them would only hide the user's own data from the panel:
+ *   - `addressBook` — the real codex entries, so the Send recipient picker is
+ *     exercised against the user's own saved addresses.
+ *   - `foreignKeys` — the real keyring slice, so Arweave → Accounts lists the
+ *     Codex's actual Arweave keys and an EMPTY Codex shows the empty state
+ *     (E5/T8; the old hardcoded demo entry made an empty Codex look populated).
+ * The mutating keyring seams stay no-ops here: mock mode must never write fake
+ * key material into the user's real codex.
  */
-export function buildMockPanelDeps(): ArweavePanelDeps {
+export function buildMockPanelDeps(
+  { addressBook = [], foreignKeys = [] }: BuildMockPanelDepsOptions = {},
+): ArweavePanelDeps {
   const adapter = createMockArweaveAdapter();
   const libraryStore: LibraryStore = new MemoryLibraryStore();
   const pool = createNoopGatewayPool();
 
-  // A local fake keyring, seeded with one ciphertext-only entry so the keyring
-  // area renders the list (not the empty state). Disconnected from the codex
-  // store on purpose (mock mode) — the real-store round-trip is asserted
-  // elsewhere against the actual slice, never against this fake.
-  const foreignKeys: ForeignKeyEntry[] = [MOCK_FOREIGN_KEY_ENTRY];
-
   return {
     address: MOCK_FAKE_ADDRESS,
 
-    // keyring seams (fakes)
+    // keyring — the LIST is the codex's own slice; the mutating seams are fakes.
     foreignKeys,
     keygenRunner: createFakeKeygenRunner(),
-    generateArweaveKey: async () => MOCK_FOREIGN_KEY_ENTRY,
-    importArweaveKey: async () => MOCK_FOREIGN_KEY_ENTRY,
+    generateArweaveKey: async ({ label }) => mockKeyringEntry(label),
+    importArweaveKey: async (_raw, opts) => mockKeyringEntry(opts?.label),
     decryptArweaveKey: async () => MOCK_FAKE_JWK,
     addForeignKey: async () => {},
     renameForeignKey: async () => {},
@@ -179,7 +220,8 @@ export function buildMockPanelDeps(): ArweavePanelDeps {
     libraryStore,
     pool,
 
-    // address book (D5) — empty in mock mode
-    addressBook: [],
+    // address book (D5) — the codex entries the app mapped in (empty when the
+    // caller supplied none).
+    addressBook,
   };
 }

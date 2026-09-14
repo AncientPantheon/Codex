@@ -53,18 +53,21 @@ export interface NetworkSettings {
 /** The localStorage key the surfaced config persists under. */
 export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
 
-/** A SUGGESTED StoaChain node (shown as the field placeholder), NOT a default
- *  value — a standalone Codex ships wired to nothing (see below). */
+/** The StoaChain node field's placeholder — now identical to the real
+ *  default below (kept as its own export since the field still shows it
+ *  as placeholder text when the persisted value is ever cleared). */
 export const STOACHAIN_NODE_PLACEHOLDER = STOACHAIN_DEFAULT_NODE_URL;
 
-/** The surfaced defaults. A standalone Codex is connected to NOTHING out of the
- *  box (owner directive): no operator Pythia, and the StoaChain node is EMPTY
- *  until the user wires one in the Network tab — so it never silently reads a
- *  chain "by its own power". The Arweave gateway keeps the local-testnet default
- *  (localhost:1984, never mainnet). */
+/** The surfaced defaults (owner directive, updated): no operator Pythia by
+ *  default, but StoaChain now defaults to the real, public `node2.stoachain.com`
+ *  gateway out of the box — a standalone Codex should be able to read/send on
+ *  Chainweb immediately, not require the user to paste a node URL in the
+ *  Network tab first. Still fully user-editable there. The Arweave gateway
+ *  keeps the local-testnet default (localhost:1984, never mainnet) —
+ *  unaffected by this change. */
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   pythiaUrl: "",
-  stoaChainNodeUrl: "",
+  stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
 };
 

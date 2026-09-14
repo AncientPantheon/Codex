@@ -48,6 +48,13 @@ import {
   StubPanelC,
 } from "./fixtures/stub-foreign-chain.js";
 
+/** The rail renders each id Capitalised for display ("stub-a" -> "Stub-a") and
+ *  reserves a square brand-mark slot before it. The id remains the contract —
+ *  these helpers assert the DISPLAY form without hardcoding it twice. */
+const shown = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+const railTab = (id: string) => new RegExp(`^${id}$`, "i");
+
+
 afterEach(cleanup);
 
 // ---------------------------------------------------------------------------
@@ -89,7 +96,7 @@ describe("ForeignChainsTab — registry-driven subtab dispatch", () => {
 
     const tabs = screen.getAllByRole("tab");
     // The strip is derived SOLELY from the injected list — same ids, same order.
-    expect(tabs.map((t) => t.textContent)).toEqual(registry.list());
+    expect(tabs.map((t) => t.textContent)).toEqual(registry.list().map(shown));
     expect(registry.list()).toEqual(["stub-a", "stub-b"]);
   });
 
@@ -109,7 +116,7 @@ describe("ForeignChainsTab — registry-driven subtab dispatch", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "stub-b" }));
+    fireEvent.click(screen.getByRole("tab", { name: railTab("stub-b") }));
 
     expect(screen.getByTestId("stub-panel-b")).toBeTruthy();
     expect(screen.queryByTestId("stub-panel-a")).toBeNull();
@@ -131,7 +138,7 @@ describe("ForeignChainsTab — registry-driven subtab dispatch", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "stub-b" }));
+    fireEvent.click(screen.getByRole("tab", { name: railTab("stub-b") }));
 
     // A missing slot is a graceful, id-naming fallback — not a crash, not blank.
     expect(screen.getByText(/no panel contributed for stub-b/i)).toBeTruthy();
@@ -181,7 +188,7 @@ describe("ForeignChainsTab — stub-adapter zero-generic-change gate", () => {
     );
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["stub-a", "stub-b", "stub-c"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["stub-a", "stub-b", "stub-c"].map(shown));
   });
 
   it("keeps the generic source id-blind — no chain-id literal in src/ui/foreign-chains/**", () => {
@@ -233,5 +240,115 @@ describe("ForeignChainsTab — PanelProps contract", () => {
     expect(received).not.toHaveProperty("keyring");
     expect(received).not.toHaveProperty("adapter");
     expect(received).not.toHaveProperty("jwk");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vertical rail layout + count-gated search (Class 2 relayout)
+// ---------------------------------------------------------------------------
+//
+// The chain list is a VERTICAL left rail, not a horizontal strip, so it scales
+// past a handful of chains. The search field earns its space: it renders only
+// once the injected list exceeds the threshold, so a 2-chain deployment is not
+// taxed with a filter box it does not need. These cases catch (a) a silent
+// regression back to a horizontal strip, (b) an off-by-one in the count gate,
+// and (c) a filter that either fails to narrow the rail or unmounts the active
+// panel when nothing matches — leaving the user staring at a blank page.
+
+/** Seven throwaway ids — one over the gate — chosen so a needle can select a
+ *  strict subset and a different needle can select nothing at all. */
+const SEVEN_CHAIN_IDS = [
+  "alpha",
+  "beta",
+  "gamma",
+  "delta",
+  "epsilon",
+  "zeta",
+  "omega",
+];
+
+describe("ForeignChainsTab — vertical rail layout", () => {
+  it("marks the chain list as a vertically oriented tablist (a rail, not a horizontal strip)", () => {
+    render(
+      <ForeignChainsTab
+        foreignChains={[stubAdapterA.id, stubAdapterB.id]}
+        foreignChainPanels={{ [stubAdapterA.id]: StubPanelA }}
+      />,
+    );
+
+    // Assistive tech (and arrow-key conventions) distinguish a rail from a strip
+    // solely by this attribute — a relayout back to horizontal would drop it.
+    expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe(
+      "vertical",
+    );
+  });
+});
+
+describe("ForeignChainsTab — count-gated rail search", () => {
+  it("renders NO search field for a short chain list (2 chains, and at the 6-chain gate boundary)", () => {
+    const { container, rerender } = render(
+      <ForeignChainsTab
+        foreignChains={[stubAdapterA.id, stubAdapterB.id]}
+        foreignChainPanels={{ [stubAdapterA.id]: StubPanelA }}
+      />,
+    );
+    expect(container.querySelector("input")).toBeNull();
+
+    // Boundary: the gate is "more than 6", so exactly 6 still shows no field.
+    rerender(
+      <ForeignChainsTab
+        foreignChains={SEVEN_CHAIN_IDS.slice(0, 6)}
+        foreignChainPanels={{ alpha: StubPanelA }}
+      />,
+    );
+    expect(container.querySelector("input")).toBeNull();
+  });
+
+  it("renders a search field once the chain list exceeds the gate (7 chains)", () => {
+    const { container } = render(
+      <ForeignChainsTab
+        foreignChains={SEVEN_CHAIN_IDS}
+        foreignChainPanels={{ alpha: StubPanelA }}
+      />,
+    );
+
+    expect(container.querySelector("input")).not.toBeNull();
+    expect(screen.getAllByRole("tab")).toHaveLength(SEVEN_CHAIN_IDS.length);
+  });
+
+  it("narrows the rail to the case-insensitively matching ids as the user types", () => {
+    const { container } = render(
+      <ForeignChainsTab
+        foreignChains={SEVEN_CHAIN_IDS}
+        foreignChainPanels={{ alpha: StubPanelA }}
+      />,
+    );
+
+    const search = container.querySelector("input") as HTMLInputElement;
+    // Uppercase needle against lowercase ids — the match must be case-blind, or
+    // a user typing naturally sees an empty rail.
+    fireEvent.change(search, { target: { value: "GA" } });
+
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(
+      ["gamma", "omega"].map(shown),
+    );
+  });
+
+  it("shows 'No matching chains' but KEEPS the active panel mounted when the filter matches nothing", () => {
+    const { container } = render(
+      <ForeignChainsTab
+        foreignChains={SEVEN_CHAIN_IDS}
+        foreignChainPanels={{ alpha: StubPanelA }}
+      />,
+    );
+    expect(screen.getByTestId("stub-panel-a")).toBeTruthy();
+
+    const search = container.querySelector("input") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "zzzz" } });
+
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.getByText(/no matching chains/i)).toBeTruthy();
+    // Filtering the RAIL must never unmount the panel the user is working in.
+    expect(screen.getByTestId("stub-panel-a")).toBeTruthy();
   });
 });

@@ -8,3 +8,9 @@
 //
 // The stylesheet ships separately as `@ancientpantheon/codex/ui.css`.
 export * from "@ancientpantheon/codex-ouronet/ui";
+
+// The aggregate-only wiring: `CodexTabs` with Class 2's rail pre-bound to the
+// two chain panels this package (and only this package) can see. Plain
+// `CodexTabs` above stays available for a consumer wiring its own chains.
+export { CodexTabsWired } from "./CodexTabsWired.js";
+export type { CodexTabsWiredProps } from "./CodexTabsWired.js";

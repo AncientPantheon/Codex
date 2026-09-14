@@ -93,10 +93,10 @@
     "test:watch": "vitest",
     "clean": "rimraf dist"
   },
-  "_peerDependenciesComment": "@stoachain/dalos-crypto range is '>=4.0.0' (NOT >=4.3.0) on purpose: dalos-crypto tracks an independent v4.x line (current 4.0.3) separate from the kadena-stoic-legacy/stoa-core/ouronet-core 4.3 co-release triplet. A '>=4.3.0' pin would be unsatisfiable. Used directly by src/codex-identity/derivation.ts (Apollo curve key-gen). @noble/curves is pinned to 1.9.7 to match @stoachain/stoa-core's exact peer pin (single shared instance); used directly by src/state/store.ts for fresh ED25519 CodexGuard / Duo Pure Prime keypair generation.",
+  "_peerDependenciesComment": "@ouronet/dalos-crypto is pinned '>=4.4.0': 4.4.0 is the first version shipping the ./rsa4096 subpath (seeded RSA-4096 Arweave key generation). A lower floor lets a consumer resolve 4.0.x and fail at runtime on the missing subpath. dalos-crypto tracks an independent v4.x line separate from the kadena-stoic-legacy/stoa-core/ouronet-core co-release triplet. Used by src/codex-identity/derivation.ts (Apollo curve key-gen). @noble/curves is pinned to 1.9.7 to match @stoachain/stoa-core's exact peer pin (single shared instance); used by src/state/store.ts for ED25519 CodexGuard / Duo Pure Prime keypair generation.",
   "peerDependencies": {
     "@noble/curves": "1.9.7",
-    "@ouronet/dalos-crypto": ">=4.0.0",
+    "@ouronet/dalos-crypto": ">=4.4.0",
     "@ouronet/ouronet-core": ">=4.6.0",
     "@stoachain/kadena-stoic-legacy": ">=4.4.0",
     "@stoachain/stoa-core": ">=4.4.0",
@@ -125,7 +125,7 @@
   "devDependencies": {
     "@lezer/generator": "^1.8.0",
     "@noble/curves": "1.9.7",
-    "@ouronet/dalos-crypto": "^4.0.0",
+    "@ouronet/dalos-crypto": "^4.5.1",
     "@ouronet/ouronet-core": "^4.6.0",
     "@stoachain/kadena-stoic-legacy": "^4.4.0",
     "@stoachain/stoa-core": "^4.4.0",

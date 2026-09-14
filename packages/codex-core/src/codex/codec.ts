@@ -33,8 +33,17 @@ import { CodexError, CodexUnknownFieldError } from "./errors.js";
  * `foreignKeys` block. A codec-level constant: the in-memory source is a bare
  * `ForeignKeyEntry[]`, so a source that happened to carry its own
  * `schemaVersion` can never silently downgrade the stamped block version.
+ *
+ * History — WRITE the latest, READ every past stamp:
+ *   1 — `{ id, label?, chainId, encryptedKeyfile }`.
+ *   2 — adds OPTIONAL seed provenance (`seedId` / `index` / `address`) so a
+ *       key can be grouped under the Arweave seed that produced it.
+ * The bump is forward-stamp only. Because the new fields are OPTIONAL, a
+ * block stamped 1 is still a VALID block: the reader accepts ANY numeric
+ * `schemaVersion` and never refuses an older one, so codexes exported before
+ * provenance existed keep deserializing unchanged.
  */
-const FOREIGN_KEYS_BLOCK_SCHEMA_VERSION = 1;
+const FOREIGN_KEYS_BLOCK_SCHEMA_VERSION = 2;
 
 /**
  * Build a codex-export payload from a PlaintextCodex. Stamps the current

@@ -44,7 +44,7 @@ import {
 
 import type { CodexStoreState } from "../state/store.js";
 import { CodexKeyMissingError, CodexLockedError } from "../errors/types.js";
-import { HEADLESS, remapCoreKeyMissing } from "./headlessKadenaDeps.js";
+import { HEADLESS, remapCoreKeyMissing, resolveStoicKeypair } from "./headlessKadenaDeps.js";
 
 type CodexStore = UseBoundStore<StoreApi<CodexStoreState>>;
 
@@ -85,6 +85,14 @@ export class InternalCodexResolver implements KeyResolver {
       throw new CodexLockedError("getKeyPairByPublicKey");
     }
     const password = cache.value;
+
+    // Stoic ("Stoa Dalos") seeds are NOT mnemonic-based — a stoic seed's
+    // `secret` decrypts to a 1600-bit DALOS bitstring, not a mnemonic, so
+    // codex-core's mnemonic-only factory would derive the wrong thing (or
+    // throw) if it ever saw one. Resolve them HERE, before ever reaching
+    // `HEADLESS` — see headlessKadenaDeps.ts's `resolveStoicKeypair` doc.
+    const stoicKeypair = await resolveStoicKeypair(state.kadenaSeeds, publicKey, password);
+    if (stoicKeypair) return stoicKeypair;
 
     // Delegate the decrypt PLUMBING to the canonical headless factory, feeding
     // it the store snapshot slice + the cached password. The `> 64` truncation,

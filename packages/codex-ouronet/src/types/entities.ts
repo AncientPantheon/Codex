@@ -17,9 +17,22 @@
  */
 
 /** Wallet-software origin of a kadena HD seed. Determines which signing path
- *  the universal-sign pipeline routes to (koala/foreign → nacl,
- *  chainweaver/eckowallet → WASM). */
-export type SeedType = "koala" | "chainweaver" | "eckowallet";
+ *  the universal-sign pipeline routes to (koala/foreign/stoic → nacl,
+ *  chainweaver/eckowallet → WASM).
+ *
+ *  `"chainweaver"` and `"eckowallet"` are byte-for-byte the same wallet at
+ *  the crypto level — the "Add Seed" picker offers ONE unified option for
+ *  that family (always emitting `"chainweaver"` for anything newly created),
+ *  but `"eckowallet"` stays a valid value forever so seeds already persisted
+ *  under it keep working — see `keySource.ts` / `SeedWordsTab.tsx` for the
+ *  display-side lookups that still recognize both.
+ *
+ *  `"stoic"` (user-facing label "Stoa Dalos") reuses the codex's own existing
+ *  Ouronet (DALOS) seed material, or brand-new DALOS seed words, rather than
+ *  a fresh BIP39/Chainweaver mnemonic — its `secret` is an encrypted 1600-bit
+ *  DALOS bitstring, not a mnemonic. See `CreateStoaChainSeedModal.tsx` and
+ *  `wallet/stoaDalosKeygen.ts`. */
+export type SeedType = "koala" | "chainweaver" | "eckowallet" | "stoic";
 
 /** DALOS-family cryptographic curve that produced an ouro account's keys.
  *  Stamped at spawn time; legacy accounts without this field fall back to
@@ -87,6 +100,39 @@ export interface IStoaChainWallet extends WalletAccount {
   balance?: string;
   paired?: string[];
   seedType?: SeedType;
+}
+
+/** An Arweave seed: the 1600-bit DALOS bitstring every RSA-4096 Arweave key of
+ *  the codex is deterministically derived from (docs/work/arweave-seeds/design.md).
+ *
+ *  FUNDS/RECOVERY-CRITICAL. The seed is the ONLY thing that can reproduce its
+ *  keys, so it is a first-class codex entity — never component state. It lives
+ *  in the `arweaveSeeds` snapshot shard and survives an unmount of whatever UI
+ *  defined it (the Class-2 chain rail unmounts the Arweave panel on every chain
+ *  switch; before this slice existed that switch destroyed the seed and orphaned
+ *  its keys).
+ *
+ *  `secret` is CIPHERTEXT, exactly like `IStoaChainSeed.secret`: the caller
+ *  encrypts the bitstring at the codex password (`encryptStringV2`) BEFORE it
+ *  reaches the store, and `addArweaveSeed` refuses a raw bitstring. Plaintext
+ *  key material never enters the slice, the snapshot, or localStorage. */
+export interface IArweaveSeed {
+  id: string;
+  /** Display label. The Prime Arweave Seed is conventionally "Prime Arweave
+   *  Seed"; naming is the consumer's, not the store's. */
+  name?: string;
+  /** `encryptStringV2(bitString, codexPassword)` — CIPHERTEXT, never the
+   *  1600-bit plaintext. */
+  secret: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  /** Prime Arweave Seed marker — the FIRST seed ever added to the codex.
+   *  Exactly one per codex: `addArweaveSeed` auto-flags the first seed and
+   *  throws `CodexKickstartError("id-conflict")` on a second explicit prime.
+   *  Unlike `IStoaChainSeed.isPrime`, it does NOT block deletion: design.md
+   *  keeps the Prime Arweave Seed deletable in development builds (the block
+   *  lands before release). */
+  isPrime?: boolean;
 }
 
 /** A raw Pact -g keypair stored directly in the codex (not derived from a
@@ -205,13 +251,14 @@ export interface IOuroAccount {
 
 /** Address-book entry — a labeled recipient address for the address picker.
  *  `stoic-tag` entries store the BARE tag name (no `§` sigil) in `address`;
- *  the sigil is added for display/copy and the name is resolved on-chain. */
+ *  the sigil is added for display/copy and the name is resolved on-chain.
+ *  `arweave` entries store a canonical 43-char base64url Arweave address. */
 export interface AddressBookEntry {
   id: string;
   name: string;
   address: string;
   notes?: string;
-  type: "ouronet" | "stoa" | "stoic-tag";
+  type: "ouronet" | "stoa" | "stoic-tag" | "arweave";
   /** Chain this recipient lives on (D-10). OPTIONAL and additive: an entry
    *  persisted before the field existed has no `chainId` and reads as the
    *  StoaChain default (`entry.chainId ?? STOACHAIN_CHAIN_ID`) — the stored entry is
@@ -426,4 +473,28 @@ export interface ICodexIdentity {
    *  Empty string for codices created outside Mnemosyne (e.g. via OuronetUI
    *  directly). Stored for audit; not used for authorization. */
   createdBy?: string;
+}
+
+/**
+ * The `arweaveSeeds` snapshot shard, declared by INTERFACE AUGMENTATION rather
+ * than inline in `adapters/types.ts`.
+ *
+ * WHY here: `CodexSnapshot` is owned by the adapter-contract module, which this
+ * task's scope fence excludes. Augmenting it from the entity module that already
+ * defines the slice's element type keeps the field fully typed everywhere (the
+ * store builders, the LocalStorage shard, the tests) with no edit to the
+ * contract file and no `as` casts on the persistence path. Fold it into
+ * `adapters/types.ts` proper (and drop this block) when that file is next open —
+ * the shape is identical either way.
+ *
+ * ADDITIVE-OPTIONAL, like `foreignKeys`: a codex written before the slice
+ * existed has no such field and loads cleanly. Readers coalesce to `[]`; writers
+ * that OMIT it must leave the stored shard untouched (see the adapter's
+ * `saveAll` — an absent slice must never wipe seed material).
+ */
+declare module "../adapters/types.js" {
+  interface CodexSnapshot {
+    /** Arweave seeds — ciphertext `secret`s only (see {@link IArweaveSeed}). */
+    arweaveSeeds?: IArweaveSeed[];
+  }
 }

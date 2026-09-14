@@ -6,14 +6,51 @@
  * Base-49), a mask/Reveal toggle, the origin chip, and the standard address.
  *
  * APOLLO (₱./Π.) accounts re-derive on the 1024-bit curve (32×32 bitmap);
- * DALOS Genesis on 1600 bits (40×40). Registry is built per-render
- * (createDefaultRegistry + register(Apollo) when the curve is apollo) — the
- * same construction OuronetUI's getOuronetRegistry uses.
+ * DALOS Genesis on 1600 bits (40×40).
+ *
+ * The re-derivation itself lives in `src/codex-identity/rebuildFullKey.ts` —
+ * it was lifted out of this file unchanged so the Arweave seed flow can reuse
+ * it to read an account's bitstring. This component only renders the result.
  */
 
 import * as React from "react";
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, Eye, EyeOff, Grid3x3, Hash, Binary, Copy } from "lucide-react";
+import { AlertTriangle, Check, Eye, EyeOff, Grid3x3, Hash, Binary, Copy, Download } from "lucide-react";
+import { encodeBitmapBMP } from "@ancientpantheon/codex-core";
+
+/** Uniform "Download BMP" tag, styled to match `CopyValueBtn` — the Bitmap
+ *  panel's only field with a downloadable value instead of (or alongside) a
+ *  copyable text one. Produces a REAL uncompressed 1bpp Windows BMP (one
+ *  pixel per bit, row-major) via the shared `encodeBitmapBMP` codec — the
+ *  same format `decodeBitmapBMP`/the Spawn modal's bitmap import expects. */
+function downloadBitmapBMP(bits: string, cols: number, rows: number, curve: string): void {
+  const buf = encodeBitmapBMP(bits, cols);
+  const url = URL.createObjectURL(new Blob([buf], { type: "image/bmp" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${curve}-key-${cols}x${rows}.bmp`;
+  a.click();
+  // Give the browser's download handoff time to read the blob before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function DownloadBitmapBtn({ bits, cols, rows, curve }: { bits: string; cols: number; rows: number; curve: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => downloadBitmapBMP(bits, cols, rows, curve)}
+      title={`Download the ${cols}×${rows} 1-bit black-and-white bitmap (.bmp) — uncompressed, one pixel per bit`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 6,
+        fontSize: 11, fontWeight: 600, flexShrink: 0, cursor: "pointer",
+        border: "1px solid #262626", background: "transparent", color: "#888",
+      }}
+    >
+      <Download style={{ width: 12, height: 12 }} />
+      Download BMP
+    </button>
+  );
+}
 
 /** Uniform "Copy Value" tag — same look + placement (field header, outside the
  *  value) for every field in the reveal. */
@@ -37,16 +74,11 @@ function CopyValueBtn({ value }: { value: string }) {
   );
 }
 import {
-  Apollo,
-  createDefaultRegistry,
-  createOuronetAccount,
-  parseAsciiBitmap,
   BITMAP_ROWS,
   BITMAP_COLS,
   BITMAP_TOTAL_BITS,
-  type CreateAccountOptions,
-  type FullKey,
 } from "@stoachain/stoa-core/dalos";
+import { rebuildFullKey } from "../../codex-identity/rebuildFullKey.js";
 import type { OuroOriginMode, OuroOriginSeedTab, OuronetOriginCurve } from "../../types/entities.js";
 
 const MONO = "var(--codex-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)";
@@ -56,47 +88,6 @@ const COLORS = {
   chainweaver: "#3b82f6", dalosCustom: "#ceac5f", koala: "#ec4899",
   bitmap: "#22c55e", bitstring: "#0ea5e9", int10: "#a855f7", int49: "#eab308", apollo: "#f97316",
 } as const;
-
-function rebuildFullKey(plaintext: string, originMode: OuroOriginMode, originCurve: OuronetOriginCurve): FullKey | null {
-  try {
-    const primitiveId = originCurve === "apollo" ? "dalos-apollo" : "dalos-gen-1";
-    const registry = createDefaultRegistry();
-    if (originCurve === "apollo") registry.register(Apollo);
-
-    let options: CreateAccountOptions;
-    switch (originMode) {
-      case "seedWords": {
-        const words = plaintext.trim().split(/\s+/).filter(Boolean);
-        if (!words.length) return null;
-        options = { mode: "seedWords", data: words, primitiveId };
-        break;
-      }
-      case "bitmap": {
-        const lines = plaintext.split(",");
-        if (originCurve === "apollo") {
-          let bits = "";
-          for (const row of lines) for (const ch of row) bits += (ch === "#" || ch === "1") ? "1" : "0";
-          options = { mode: "bitString", data: bits, primitiveId };
-        } else {
-          const bmp = parseAsciiBitmap(lines);
-          options = { mode: "bitmap", data: bmp, primitiveId };
-        }
-        break;
-      }
-      case "bitString": options = { mode: "bitString", data: plaintext, primitiveId }; break;
-      case "integerBase10": options = { mode: "integerBase10", data: plaintext, primitiveId }; break;
-      case "integerBase49": options = { mode: "integerBase49", data: plaintext, primitiveId }; break;
-      default: {
-        const words = plaintext.trim().split(/\s+/).filter(Boolean);
-        options = { mode: "seedWords", data: words, primitiveId };
-      }
-    }
-    return createOuronetAccount(registry, options);
-  } catch (err) {
-    console.error("rebuildFullKey failed:", err);
-    return null;
-  }
-}
 
 function originColor(mode: OuroOriginMode, seedTab?: OuroOriginSeedTab, curve?: OuronetOriginCurve): string {
   if (curve === "apollo") return COLORS.apollo;
@@ -142,6 +133,22 @@ const masked = (unmasked: boolean): React.CSSProperties => ({
   filter: unmasked ? "none" : "blur(4px)", transition: "filter 120ms ease",
 });
 
+/** A seed word longer than this wraps to enough lines in the 8-column grid
+ *  that the grid stops being readable (the DALOS charset allows up to 256
+ *  glyphs per word — the grid was designed for short, dictionary-style
+ *  words). Past this length the WHOLE seed switches to one word per line,
+ *  single line, middle-truncated — never a mix of the two layouts. */
+const LONG_SEED_WORD_THRESHOLD = 24;
+
+/** Keeps the first `head` and last `tail` characters, replacing the middle
+ *  with a single "…" — the same "the tail is what you check a value by"
+ *  convention the RSA-parameter panels already use, applied here because a
+ *  256-glyph word cannot render on one line otherwise. */
+function truncateMiddle(value: string, head: number, tail: number): string {
+  if (value.length <= head + tail + 1) return value;
+  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
+}
+
 function RepPanel({ value, unmasked, label, color, icon }: { value: string; unmasked: boolean; label: string; color: string; icon: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -163,9 +170,18 @@ export interface DalosSecretRevealProps {
   originSeedTab?: OuroOriginSeedTab;
   originCurve?: OuronetOriginCurve;
   isSmart?: boolean;
+  /** Overrides the generic "Created from <X>" text with a caller-supplied
+   *  provenance string, e.g. "Ouronet account \"Explorer\"" — for callers
+   *  (like the Arweave seed reveal) whose real source isn't expressible by
+   *  originMode/originCurve alone, since they only ever pass originMode:
+   *  "bitString" regardless of the seed's actual origin. */
+  sourceLabelOverride?: string;
+  /** Hides the derived Smart/Standard address block entirely — for callers
+   *  (like the Arweave seed reveal) where an Ouronet address has no meaning. */
+  hideAddress?: boolean;
 }
 
-export function DalosSecretReveal({ plaintext, originMode = "seedWords", originSeedTab, originCurve = "dalos", isSmart = false }: DalosSecretRevealProps) {
+export function DalosSecretReveal({ plaintext, originMode = "seedWords", originSeedTab, originCurve = "dalos", isSmart = false, sourceLabelOverride, hideAddress = false }: DalosSecretRevealProps) {
   const [active, setActive] = useState<string>(originMode === "seedWords" ? "seed" : originMode === "bitmap" ? "bitmap" : originMode === "bitString" ? "bitstring" : originMode === "integerBase10" ? "int10" : originMode === "integerBase49" ? "int49" : "seed");
   const [unmasked, setUnmasked] = useState(false);
 
@@ -191,7 +207,7 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
       {/* Origin chip + Reveal toggle */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Check style={{ width: 14, height: 14, color: "#22c55e", flexShrink: 0 }} />
-        <span style={{ fontSize: 12, color: "#888" }}>Created from <strong style={{ color }}>{originLabel(originMode, originSeedTab, originCurve)}</strong></span>
+        <span style={{ fontSize: 12, color: "#888" }}>Created from <strong style={{ color }}>{sourceLabelOverride ?? originLabel(originMode, originSeedTab, originCurve)}</strong></span>
         <div style={{ flex: 1 }} />
         <button type="button" onClick={() => setUnmasked((u) => !u)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, fontSize: 12, border: "1px solid #262626", background: "transparent", color: "#d2d3d4", cursor: "pointer" }}>
           {unmasked ? <EyeOff style={{ width: 14, height: 14 }} /> : <Eye style={{ width: 14, height: 14 }} />}{unmasked ? "Hide" : "Reveal"}
@@ -229,18 +245,126 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
               <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color }}>Seed · {seedWords.length} words</span>
               <CopyValueBtn value={plaintext} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-              {seedWords.map((w, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, border: `1px solid ${color}30`, backgroundColor: color + "10" }}>
-                  <span style={{ fontSize: 10, color: color + "99", fontFamily: MONO, minWidth: 18, textAlign: "right" }}>{i + 1}.</span>
-                  <span style={{ fontSize: 13, fontFamily: MONO, wordBreak: "break-word", color: "#d2d3d4", ...masked(unmasked) }}>{w}</span>
-                </div>
-              ))}
-            </div>
+            {seedWords.some((w) => w.length > LONG_SEED_WORD_THRESHOLD) ? (
+              // Long words (up to 256 DALOS glyphs each) cannot read on a
+              // grid — wrapping a 256-character word across many lines is
+              // what made the grid unreadable. One word per line, ONE
+              // physical line each, middle-truncated, with its own copy
+              // button (`Copy Value` above copies the whole plaintext, not
+              // any one word) — never a mix with the short-word grid below.
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {seedWords.map((w, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: `1px solid ${color}30`,
+                      backgroundColor: color + "10",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: color + "99",
+                        fontFamily: MONO,
+                        minWidth: 32,
+                        textAlign: "right",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {i + 1}.
+                    </span>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 13,
+                        fontFamily: MONO,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        color: "#d2d3d4",
+                        ...masked(unmasked),
+                      }}
+                    >
+                      {truncateMiddle(w, 48, 8)}
+                    </span>
+                    <CopyValueBtn value={w} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              // Short (dictionary-style) words: an 8-per-row grid, the
+              // position rendered as a medallion straddling the cell's top
+              // edge — not inline text stealing width from the word itself.
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: "14px 8px" }}>
+                {seedWords.map((w, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: "relative",
+                      display: "flex",
+                      justifyContent: "center",
+                      padding: "10px 8px 8px",
+                      borderRadius: 8,
+                      border: `1px solid ${color}30`,
+                      backgroundColor: color + "10",
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: -9,
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        fontFamily: MONO,
+                        color: "#0a0a0a",
+                        backgroundColor: color,
+                        border: "2px solid #0a0a0a",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontFamily: MONO,
+                        wordBreak: "break-word",
+                        textAlign: "center",
+                        color: "#d2d3d4",
+                        ...masked(unmasked),
+                      }}
+                    >
+                      {w}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {active === "bitmap" && (full ? (
           <div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+              <DownloadBitmapBtn
+                bits={full.privateKey.bitString}
+                cols={cols}
+                rows={rows}
+                curve={originCurve}
+              />
+            </div>
             <BitmapGrid bits={full.privateKey.bitString} rows={rows} cols={cols} color={COLORS.bitmap} />
             <p style={{ textAlign: "center", marginTop: 8, fontSize: 11, color: "#555" }}>
               <Grid3x3 style={{ width: 12, height: 12, display: "inline", verticalAlign: "middle", marginRight: 4 }} />
@@ -254,7 +378,7 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
       </div>
 
       {/* Derived address — Smart (Σ./Π.) for smart accounts, Standard (Ѻ./₱.) otherwise */}
-      {full && (
+      {full && !hideAddress && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: "#555" }}>{isSmart ? "Smart address" : "Standard address"}</span>

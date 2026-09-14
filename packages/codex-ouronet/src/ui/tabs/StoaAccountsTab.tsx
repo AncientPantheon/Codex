@@ -34,7 +34,10 @@ import type { CodexStoreState } from "../../state/index.js";
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const ADDR_PREFIXES = ["k:", "u:", "c:", "w:"];
 const ADDR_COLORS: Record<string, string> = { "k:": "#c0c0c0", "u:": "#92400e", "c:": "#3b82f6", "w:": "#a78bfa" };
-const SEED_TYPE_COLOR: Record<string, string> = { chainweaver: "#3b82f6", eckowallet: "#f97316", koala: "#ec4899" };
+// Chainweaver and EckoWallet share one color (same wallet underneath, see
+// CreateStoaChainSeedModal.tsx); Stoic ("Stoa Dalos") gets its own yellow so
+// a group derived from it doesn't visually read as any of the others.
+const SEED_TYPE_COLOR: Record<string, string> = { chainweaver: "#3b82f6", eckowallet: "#3b82f6", koala: "#ec4899", stoic: "#eab308" };
 
 const truncAddr = (a: string) => (a.length > 24 ? `${a.slice(0, 12)}…${a.slice(-10)}` : a);
 const fmt12 = (n: number) => n.toFixed(12);

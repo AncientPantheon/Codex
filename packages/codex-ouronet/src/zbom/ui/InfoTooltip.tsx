@@ -5,7 +5,7 @@
  * `title` tooltip) so the packaged ZBOM zones read pixel-identically to My
  * Codex. `@radix-ui/react-tooltip` is a package dependency for this reason.
  */
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 
 interface InfoTooltipProps {

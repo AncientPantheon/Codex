@@ -145,3 +145,55 @@ describe("<AddressBookTab>", () => {
     expect(screen.queryByText("§mytag")).toBeNull();
   });
 });
+
+/**
+ * Arweave sub-tab (Class IA, T4). Arweave recipients have no home in the book
+ * without this fourth sub-tab, so the Send flow's recipient picker can never be
+ * fed one. The address gate matters for funds: an Arweave address is exactly 43
+ * base64url chars, and a malformed string saved here would be offered as a
+ * transfer target.
+ */
+describe("<AddressBookTab> — Arweave sub-tab", () => {
+  it("offers Arweave as a fourth sub-tab with its own empty state", async () => {
+    await renderTab();
+    // Four sub-tabs: Ouronet, StoaChain™, StoicTags, Arweave.
+    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    expect(screen.getByText(/No Arweave Addresses/i)).toBeTruthy();
+  });
+
+  it("saves a canonical 43-character Arweave address and lists it", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add arweave/i }));
+
+    const address = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 43 chars
+    expect(address).toHaveLength(43);
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "AR Vault" } });
+    fireEvent.change(screen.getByLabelText(/^address/i), { target: { value: address } });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    expect(await screen.findByText("AR Vault")).toBeTruthy();
+    // Rendered through the existing non-Ouronet <MiddleEllipsis> path, which
+    // splits the string across head/tail spans — the full value is the `title`.
+    expect(screen.getByTitle(address)).toBeTruthy();
+  });
+
+  it("rejects a malformed Arweave address instead of saving it", async () => {
+    await renderTab();
+    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add arweave/i }));
+
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "Typo" } });
+    fireEvent.change(screen.getByLabelText(/^address/i), {
+      target: { value: "not-an-address" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    // The form stays open with the hint surfaced as the error…
+    expect(screen.getByRole("alert").textContent).toMatch(/43-character base64url/i);
+    // …and nothing was persisted: the empty state is still what the list shows.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.getByText(/No Arweave Addresses/i)).toBeTruthy();
+    expect(screen.queryByText("Typo")).toBeNull();
+  });
+});

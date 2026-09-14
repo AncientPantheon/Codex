@@ -48,11 +48,12 @@ beforeEach(() => {
 });
 
 describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
-  it("ships with NO StoaChain node wired (empty by default) — a standalone Codex reads nothing by its own power", () => {
+  it("ships wired to the real node2.stoachain.com gateway by default (owner directive, updated) — a standalone Codex can read/send on Chainweb immediately", () => {
     const settings = loadNetworkSettings();
-    // The StoaChain node is EMPTY by default (not silently node2); the Arweave
-    // gateway keeps the local-testnet default.
-    expect(settings.stoaChainNodeUrl).toBe("");
+    // The StoaChain node now defaults to the real, public node2 host (still
+    // fully editable in the Network tab); the Arweave gateway keeps the
+    // local-testnet default — unaffected by this change.
+    expect(settings.stoaChainNodeUrl).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(settings.arweaveGatewayUrl).toBe(DEFAULT_GATEWAY_URL);
   });
 
@@ -107,7 +108,11 @@ describe("Network card in the dashboard shell (CL-13)", () => {
         <Dashboard />
       </CodexProvider>,
     );
-    await screen.findByRole("tab", { name: /seed words/i });
+    // Pin the mounted dashboard on a Class IA top-level tab: T5 removed the
+    // Seed Words tab this used to wait for (Chainweb seeds now live at Class 2 →
+    // chainweb → Seeds), and this test only needs the shell to be up before it
+    // switches to the settings view.
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
     // The network connectors now live in the packaged settings: switch to the
     // "Codex UI Settings" view, then open the injected "Network" subtab.
     fireEvent.click(screen.getByRole("tab", { name: /codex ui settings/i }));
@@ -115,7 +120,7 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     await screen.findByTestId(`network-url-${STOACHAIN_CHAIN_ID}`);
   }
 
-  it("renders the Network tab with an EMPTY StoaChain field (nothing wired) + the Arweave testnet gateway", async () => {
+  it("renders the Network tab with the real node2.stoachain.com StoaChain default + the Arweave testnet gateway", async () => {
     await mountDashboard();
 
     const stoaUrl = (await screen.findByTestId(
@@ -125,9 +130,9 @@ describe("Network card in the dashboard shell (CL-13)", () => {
       `network-url-${ARWEAVE_CHAIN_ID}`,
     ) as HTMLInputElement;
 
-    // Standalone ships wired to nothing: the StoaChain field is empty + editable
-    // until the operator enters a node; the Arweave gateway keeps its testnet default.
-    expect(stoaUrl.value).toBe("");
+    // Standalone now ships wired to the real node2 gateway (still editable);
+    // the Arweave gateway keeps its testnet default.
+    expect(stoaUrl.value).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(arweaveUrl.value).toBe(DEFAULT_GATEWAY_URL);
     expect(arweaveUrl.value).not.toContain("arweave.net");
   });

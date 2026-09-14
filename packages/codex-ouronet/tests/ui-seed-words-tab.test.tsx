@@ -110,6 +110,19 @@ describe("<SeedWordsTab>", () => {
     expect(screen.getByText(/2 keys/i)).toBeTruthy();
   });
 
+  it("renders a legacy 'eckowallet' seed under the unified Chainweaver/EckoWallet badge (collapse regression)", async () => {
+    await renderTab([
+      seedFx({ id: "p", name: "Prime" }),
+      seedFx({ id: "s1", name: "Legacy Ecko Seed", seedType: "eckowallet" }),
+    ]);
+    const card = (await screen.findByText("Legacy Ecko Seed")).closest("[data-seed-id]") as HTMLElement;
+    // Old "eckowallet" data still renders, sharing the SAME unified label +
+    // color as "chainweaver" — not a separate orange "EckoWallet" badge.
+    const badge = within(card).getByText("Chainweaver / EckoWallet");
+    expect(badge).toBeTruthy();
+    expect(badge.style.color).toBe("rgb(59, 130, 246)"); // #3b82f6
+  });
+
   it("expands a seed row to reveal its per-key list", async () => {
     await renderTab([
       seedFx({ id: "p", name: "Prime" }),

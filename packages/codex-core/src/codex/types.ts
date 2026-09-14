@@ -70,7 +70,7 @@ export interface PlaintextCodex<
   /**
    * OPTIONAL seedless foreign-key source. A BARE `ForeignKeyEntry[]` — NOT a
    * `ForeignKeysBlock`. The writer wraps this array into
-   * `{ schemaVersion: 1, keys }` on emit, where `schemaVersion` is a
+   * `{ schemaVersion: FOREIGN_KEYS_BLOCK_SCHEMA_VERSION, keys }` on emit, where it is a
    * codec-level constant; keeping the source a bare array prevents a source
    * that carries its own `schemaVersion` from silently downgrading the
    * writer's stamped block version.

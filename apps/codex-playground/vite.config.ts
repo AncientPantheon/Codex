@@ -136,6 +136,21 @@ export default defineConfig({
     global: "globalThis",
     __CODEX_VERSION__: JSON.stringify(CODEX_VERSION),
   },
+  // The real-mode keygen worker (codex-arweave's `src/keygen/worker.ts`, spawned
+  // by realArweaveAdapter's `new Worker(new URL(...), { type: "module" })`) does
+  // a LAZY `await import("@ancientpantheon/arweave-core")` so the heavy RSA/
+  // WebCrypto surface stays off the light entry. That makes the worker a
+  // CODE-SPLIT bundle, and Vite's default `worker.format: "iife"` cannot split:
+  // `vite build` dies with `Invalid value "iife" for option "worker.format" —
+  // UMD and IIFE output formats are not supported for code-splitting builds`.
+  // ES module workers can split, and the worker is already spawned with
+  // `{ type: "module" }`, so this matches how it is constructed. INVISIBLE to
+  // `vite dev` (which serves the worker transformed, never bundled) and to the
+  // jsdom suite (which injects a fake worker) — the build is the only gate that
+  // sees it.
+  worker: {
+    format: "es",
+  },
   resolve: {
     // Single React instance — prevents the two-React "Invalid hook call".
     dedupe,

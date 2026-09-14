@@ -13,7 +13,7 @@
  * pill palette, indentation, and S-expression layout are preserved.
  */
 
-import { FC } from "react";
+import type { FC } from "react";
 import { Copy } from "lucide-react";
 
 const MONO = "var(--codex-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)";

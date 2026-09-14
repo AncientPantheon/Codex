@@ -43,7 +43,6 @@ import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import {
   CodexUiRoot,
-  CodexTabs,
   CodexSettingsSection,
   CodexDebouncerPanel,
   ApolloVerifyView,
@@ -58,10 +57,11 @@ import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
 
 import { UnlockScreen } from "./UnlockScreen";
-// The E5 app-side wiring of the generic Foreign Chains tab to the concrete
-// Arweave panel. Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
+// THE Codex tab shell for the playground: `ForeignChainsWiring` renders
+// `CodexTabs` with Class 2 already fed the Arweave + Chainweb rail. Mounting a
+// bare `<CodexTabs />` here instead would leave Blockchain Accounts empty.
+// Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
 import { ForeignChainsWiring } from "./ForeignChainsWiring";
-import { ArweaveModeToggle } from "./ArweaveModeToggle";
 import {
   ARWEAVE_WIRING_MODE_MOCK,
   type ArweaveWiringMode,
@@ -110,14 +110,11 @@ export function Dashboard({
   // wiring below only constructs the real E1-E3 stack once mode === "real".
   // The gateway seed comes from the surfaced network state so the Network card
   // and the toggle read one source of truth.
-  const [arweaveMode, setArweaveMode] = useState<ArweaveWiringMode>(
-    ARWEAVE_WIRING_MODE_MOCK,
-  );
+  // Fixed at mock+offline: the on-screen mock/real toggle was removed (unstyled
+  // dev chrome on the Codex surface). This keeps the funds-safety default —
+  // real Arweave is never contacted unless this is deliberately changed.
+  const arweaveMode: ArweaveWiringMode = ARWEAVE_WIRING_MODE_MOCK;
   const gatewayUrl = network.arweaveGatewayUrl;
-  const setGatewayUrl = useCallback(
-    (url: string) => setNetwork((prev) => ({ ...prev, arweaveGatewayUrl: url })),
-    [],
-  );
 
   // Persist the surfaced config on every edit so it survives a reload.
   useEffect(() => {
@@ -249,20 +246,17 @@ export function Dashboard({
         <CodexUiRoot>
           {activeView === "ui" ? (
             <>
-              <CodexTabs />
-              {/* The Arweave path — the generic Foreign Chains tab wired to the
-                  concrete ArweavePanel via the app; mock ⇄ real toggle (default
-                  mock+offline). The foreign-chain UX itself is a later pass. */}
-              <section className="cxpg-foreign" aria-label="Foreign chains">
-                <h2 className="cxpg-foreign-title">Foreign chains</h2>
-                <ArweaveModeToggle
-                  initialMode={arweaveMode}
-                  initialGatewayUrl={gatewayUrl}
-                  onModeChange={setArweaveMode}
-                  onGatewayUrlChange={setGatewayUrl}
-                />
-                <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
-              </section>
+              {/* The Arweave mock ⇄ real toggle is intentionally NOT rendered:
+                  it was unstyled dev chrome bleeding into the Codex surface.
+                  `arweaveMode` still defaults to mock+offline below, so the
+                  funds-safety guarantee (never hit real Arweave by accident)
+                  is unchanged — only the on-screen control is gone. Re-mount
+                  <ArweaveModeToggle> here if real-mode switching is needed. */}
+              {/* THE single Codex tab shell. `ForeignChainsWiring` renders
+                  `CodexTabs` itself, fed the Arweave+Chainweb rail — so the
+                  Blockchain Accounts Class tab IS the wired rail rather than an
+                  empty Class 2 with a duplicate rail section beside it. */}
+              <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
             </>
           ) : (
             <CodexSettingsSection

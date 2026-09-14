@@ -10,13 +10,14 @@
  */
 
 import * as React from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Eraser, ArrowRightLeft, Shuffle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Eraser, ArrowRightLeft, Shuffle, Upload } from "lucide-react";
 import {
   BITMAP_ROWS as CORE_BITMAP_ROWS,
   BITMAP_COLS as CORE_BITMAP_COLS,
   type Bitmap,
 } from "@stoachain/stoa-core/dalos";
+import { decodeBitmapBMP } from "@ancientpantheon/codex-core";
 
 const emptyBitmap = (rows: number, cols: number): Bitmap => {
   const out: number[][] = [];
@@ -57,6 +58,20 @@ export interface BitmapKeyInputProps {
   rows?: number;
   cols?: number;
   dimensionsLabel?: string;
+  /**
+   * A bitmap to start FROM, instead of a blank grid — for a caller that
+   * already has bits from elsewhere (e.g. converting a typed BitString/
+   * scalar into this same input's grid when a user switches which
+   * representation they are editing). Read ONLY at mount time (this
+   * component stays deliberately UNCONTROLLED, matching its existing
+   * onChange-only contract — there is no live two-way binding). A caller
+   * that wants to inject a NEW preset into an ALREADY-mounted instance must
+   * remount it (e.g. by keying on whatever triggered the new preset, or by
+   * only ever rendering this component behind a condition that itself
+   * causes a fresh mount, as `ArweaveSeedsArea`'s Direct generator already
+   * does by conditionally rendering it per selected input kind).
+   */
+  initialBitmap?: Bitmap;
 }
 
 export function BitmapKeyInput({
@@ -66,11 +81,14 @@ export function BitmapKeyInput({
   rows = CORE_BITMAP_ROWS,
   cols = CORE_BITMAP_COLS,
   dimensionsLabel,
+  initialBitmap,
 }: BitmapKeyInputProps): React.JSX.Element {
   const totalBits = rows * cols;
   const label = dimensionsLabel ?? `${rows} × ${cols} bitmap`;
 
-  const [bitmap, setBitmap] = useState<Bitmap>(() => emptyBitmap(rows, cols));
+  const [bitmap, setBitmap] = useState<Bitmap>(() =>
+    initialBitmap ? cloneBitmap(initialBitmap, rows, cols) : emptyBitmap(rows, cols),
+  );
 
   // Rebuild internal state when dimensions change (curve toggle in spawn modal).
   useEffect(() => {
@@ -81,6 +99,8 @@ export function BitmapKeyInput({
   }, [rows, cols]);
 
   const [isDragging, setIsDragging] = useState<false | 0 | 1>(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const interactive = !disabled;
 
   const emit = useCallback(
@@ -152,6 +172,49 @@ export function BitmapKeyInput({
     emit(next as unknown as Bitmap);
   };
 
+  const handleImportClick = () => {
+    if (!disabled) fileInputRef.current?.click();
+  };
+
+  const handleImportFile = useCallback(
+    async (file: File) => {
+      setImportError(null);
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await file.arrayBuffer();
+      } catch {
+        setImportError("Could not read the selected file.");
+        return;
+      }
+      const result = decodeBitmapBMP(buffer);
+      if (!result.ok) {
+        setImportError(result.error);
+        return;
+      }
+      const { bitmap: decoded } = result;
+      if (decoded.cols !== cols || decoded.rows !== rows) {
+        setImportError(
+          `This bitmap is ${decoded.cols}×${decoded.rows}, but ${label} is required for the selected curve.`,
+        );
+        return;
+      }
+      const next: number[][] = [];
+      for (let r = 0; r < rows; r++) {
+        const row: number[] = [];
+        for (let c = 0; c < cols; c++) row.push(decoded.bits[r * cols + c] === "1" ? 1 : 0);
+        next.push(row);
+      }
+      emit(next as unknown as Bitmap);
+    },
+    [cols, rows, label, emit],
+  );
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-importing the same filename later
+    if (file) void handleImportFile(file);
+  };
+
   const blackCount = useMemo(() => countBlackPixels(bitmap, rows, cols), [bitmap, rows, cols]);
   const fillPct = ((blackCount / totalBits) * 100).toFixed(1);
   const gridSize = rows * cellSize;
@@ -202,7 +265,7 @@ export function BitmapKeyInput({
         <span style={{ color: "#555" }}>{label}</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
         <button type="button" onClick={handleClear} disabled={disabled || blackCount === 0} style={{ ...ctrlBtn, opacity: disabled || blackCount === 0 ? 0.4 : 1 }}>
           <Eraser style={{ width: 14, height: 14 }} /> Clear
         </button>
@@ -212,7 +275,26 @@ export function BitmapKeyInput({
         <button type="button" onClick={handleRandomise} disabled={disabled} style={{ ...ctrlBtn, opacity: disabled ? 0.4 : 1 }}>
           <Shuffle style={{ width: 14, height: 14 }} /> Randomise
         </button>
+        <button type="button" onClick={handleImportClick} disabled={disabled} style={{ ...ctrlBtn, opacity: disabled ? 0.4 : 1 }}>
+          <Upload style={{ width: 14, height: 14 }} /> Import
+        </button>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/bmp,.bmp"
+        data-testid="bitmap-import-input"
+        onChange={handleFileInputChange}
+        disabled={disabled}
+        style={{ display: "none" }}
+      />
+
+      {importError && (
+        <p role="alert" style={{ margin: 0, padding: "8px 12px", borderRadius: 8, fontSize: 11, lineHeight: 1.5, backgroundColor: "#8b1a1a15", border: "1px solid #8b1a1a40", color: "#f87171" }}>
+          {importError}
+        </p>
+      )}
 
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, borderRadius: 8, border: "1px solid #262626", backgroundColor: "#18181B", padding: "8px 12px" }}>
         <RefreshCw style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: "#ceac5f" }} />

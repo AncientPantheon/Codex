@@ -1,13 +1,17 @@
 /**
- * Seedless foreign-key keyring model.
+ * Self-contained foreign-key keyring model.
  *
  * A foreign key is cryptographic material for a NON-StoaChain chain (e.g. an
- * Arweave JWK) that rides inside a codex backup. This model is SEEDLESS BY
- * CONSTRUCTION: there is NO shared seed and NO derivation field anywhere in
- * the shape. Each entry's `encryptedKeyfile` is a self-contained,
- * INDEPENDENTLY-encrypted blob — the keyring is a flat list of unrelated
- * ciphertexts, never a set of keys derived from one root. Restoring one entry
- * never depends on any other.
+ * Arweave JWK) that rides inside a codex backup. Every entry is RESTORE-
+ * INDEPENDENT: each `encryptedKeyfile` is a self-contained, INDEPENDENTLY-
+ * encrypted blob, so restoring one entry never depends on any other and no
+ * seed is ever needed to read one back.
+ *
+ * The OPTIONAL `seedId`/`index` pair below is PROVENANCE, not a derivation
+ * dependency: an Arweave key IS derived from a 1600-bit seed, and the Accounts
+ * view groups keys by the seed that produced them, but the stored blob remains
+ * the whole key — the seed is never required to restore it. No seed material
+ * ever appears in this shape.
  *
  * At-rest secrecy: `encryptedKeyfile` is ALWAYS ciphertext — the same
  * "codec wraps ciphertext, never plaintext" discipline as a kadena seed's
@@ -51,6 +55,16 @@ export type ForeignKeyEntry = {
   /** Already-encrypted keyfile ciphertext. NEVER plaintext; NEVER logged or
    *  transmitted in cleartext; NEVER echoed in an error message. */
   encryptedKeyfile: string;
+  /** OPTIONAL seed provenance — the Arweave seed this key was derived from.
+   *  Absent on every entry written before seed provenance existed. */
+  seedId?: string;
+  /** OPTIONAL position within THAT seed's OWN index space (`#0` is per-seed,
+   *  never global), so `(seedId, index)` addresses the key. A non-negative
+   *  integer; meaningless — and rejected — without a `seedId`. */
+  index?: number;
+  /** OPTIONAL plaintext Arweave address, so a list renders without decrypting
+   *  `encryptedKeyfile`. Public material only — never secret. */
+  address?: string;
 };
 
 /**
@@ -71,6 +85,17 @@ export type ForeignKeysBlock = {
  * decrypts. Used by the codec's deserialize path to fail closed on a
  * malformed entry before it reaches a restore. `label` is accepted when
  * absent (optional) but rejected when present with a non-string type.
+ *
+ * BOTH shapes are valid, deliberately:
+ *   - LEGACY — an entry with NONE of the seed-provenance fields. Every codex
+ *     exported before provenance existed looks like this; rejecting one would
+ *     make an old backup unrestorable, so it stays valid forever.
+ *   - SEEDED — an entry carrying provenance. Because `index` is a position in
+ *     one seed's OWN index space, an `index` is only meaningful alongside the
+ *     `seedId` that names that space: a present `index` must be a NON-NEGATIVE
+ *     INTEGER and `seedId` a NON-EMPTY string. An orphan index is refused
+ *     rather than guessed at, since a key placed under the wrong seed collides
+ *     with whatever already holds that position.
  */
 export function isForeignKeyEntry(x: unknown): x is ForeignKeyEntry {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
@@ -80,6 +105,16 @@ export function isForeignKeyEntry(x: unknown): x is ForeignKeyEntry {
   if (typeof entry.encryptedKeyfile !== "string") return false;
   if ("label" in entry && entry.label !== undefined && typeof entry.label !== "string") {
     return false;
+  }
+  if (entry.seedId !== undefined && (typeof entry.seedId !== "string" || entry.seedId === "")) {
+    return false;
+  }
+  if (entry.address !== undefined && typeof entry.address !== "string") return false;
+  if (entry.index !== undefined) {
+    if (typeof entry.index !== "number" || !Number.isInteger(entry.index) || entry.index < 0) {
+      return false;
+    }
+    if (typeof entry.seedId !== "string") return false;
   }
   return true;
 }

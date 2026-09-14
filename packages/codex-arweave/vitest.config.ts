@@ -29,7 +29,27 @@ const self = toPosix(`${__dirname}/src`);
 const reactDir = toPosix(resolve(__dirname, "node_modules/react"));
 const reactDomDir = toPosix(resolve(__dirname, "node_modules/react-dom"));
 
+// lucide-react is hoisted to the repo root with no `exports` map, so vitest
+// externalizes its bare-specifier ESM barrel and Node-resolves the barrel's
+// `import { forwardRef } from "react"` against the root react 18.3.1 — its icon
+// elements then carry an 18-era forward_ref symbol that nested react-dom 19
+// rejects ("a React Element from an older version of React was rendered").
+// `server.deps.inline` did not un-externalize the bare barrel. Aliasing the bare
+// specifier to the barrel's absolute path makes vitest treat it as an in-graph
+// module, so it is transformed and its `react` import flows through the react
+// alias below onto the single nested react 19.2.7. Same 3-part fix as
+// `codex-ouronet/vitest.config.ts` (that package's own `DalosSecretReveal` — now
+// mounted here too, via the reveal button on each Arweave seed row — is the
+// first lucide-react-using component this package renders under vitest).
+const lucideReactEsm = toPosix(resolve(__dirname, "../../node_modules/lucide-react/dist/esm/lucide-react.js"));
+
 export default defineConfig({
+  // Keep lucide-react out of the esbuild dep pre-bundle. Pre-bundling snapshots
+  // its `react`/`react/jsx-runtime` imports against the root react 18.3.1 before
+  // resolve.alias runs, so its icon elements come from a second React copy and
+  // nested react-dom 19 rejects them. Excluding it defers resolution to the
+  // aliased inline transform, which pins it to the single nested react 19.2.7.
+  optimizeDeps: { exclude: ["lucide-react"] },
   test: {
     globals: true,
     // The Arweave panel `.tsx` tests need a DOM; jsdom is the default. Node-logic
@@ -79,7 +99,7 @@ export default defineConfig({
     // natively — sqliteStore already lazy-loads + availability-gates it at runtime.
     server: {
       deps: {
-        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/],
+        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/, /lucide-react/],
         external: [/^node:sqlite$/],
       },
     },
@@ -96,6 +116,7 @@ export default defineConfig({
       { find: /^react-dom\/client$/, replacement: `${reactDomDir}/client.js` },
       { find: /^react-dom$/, replacement: `${reactDomDir}/index.js` },
       { find: /^react$/, replacement: `${reactDir}/index.js` },
+      { find: /^lucide-react$/, replacement: lucideReactEsm },
       { find: /^@ancientpantheon\/codex-core\/(.*)$/, replacement: `${core}/$1/index.ts` },
       { find: /^@ancientpantheon\/codex-core$/, replacement: `${core}/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/(.*)$/, replacement: `${ouronet}/$1/index.ts` },

@@ -36,6 +36,15 @@ export {
   type PureKeypairEntry,
 } from "./codex/pureKeypairs.js";
 
+// ----- 1-bit "key bitmap" BMP codec -----
+
+export {
+  encodeBitmapBMP,
+  decodeBitmapBMP,
+  type DecodedBitmap,
+  type DecodeBitmapResult,
+} from "./codex/bitmapCodec.js";
+
 // ----- typed error family -----
 
 export {

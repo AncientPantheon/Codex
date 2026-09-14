@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type {
   IStoaChainSeed,
+  IArweaveSeed,
   IOuroAccount,
   IPureKeypair,
   AddressBookEntry,
@@ -15,6 +16,7 @@ import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
 import type { CodexAdapter, CodexSnapshot } from "../adapters/types.js";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import {
+  CodexError,
   CodexLockedError,
   CodexPrimeProtectedError,
   CodexPrimeSeedProtectedError,
@@ -211,6 +213,12 @@ export interface CodexStoreState {
 
   // Codex content (mirrors adapter)
   kadenaSeeds: IStoaChainSeed[];
+  /** Arweave seeds (docs/work/arweave-seeds/design.md). Each entry's `secret` is
+   *  CIPHERTEXT — the slice never holds the 1600-bit plaintext. Persists via the
+   *  full-snapshot `saveAll`, like `foreignKeys`: the seed is the ONLY thing that
+   *  can reproduce its RSA keys, so it belongs to the codex, never to the panel
+   *  that defined it (a chain-rail switch unmounts that panel). */
+  arweaveSeeds: IArweaveSeed[];
   pureKeypairs: IPureKeypair[];
   ouroAccounts: IOuroAccount[];
   addressBook: AddressBookEntry[];
@@ -290,6 +298,21 @@ export interface CodexStoreActions {
   addStoaChainSeed(seed: IStoaChainSeed): Promise<void>;
   updateStoaChainSeed(seed: IStoaChainSeed): Promise<void>;
   deleteStoaChainSeed(id: string): Promise<void>;
+
+  // ----- arweave seeds -----
+  /** Append (or replace-by-id) an Arweave seed. `seed.secret` MUST already be
+   *  ciphertext — a raw bitstring is refused, never stored. The FIRST seed of a
+   *  codex is auto-flagged `isPrime` (the Prime Arweave Seed); passing
+   *  `isPrime: true` when another prime exists throws
+   *  `CodexKickstartError("id-conflict")`. */
+  addArweaveSeed(seed: IArweaveSeed): Promise<void>;
+  /** Replace an Arweave seed by id (rename). Same ciphertext rule as add. */
+  updateArweaveSeed(seed: IArweaveSeed): Promise<void>;
+  /** Remove an Arweave seed by id. Deliberately NOT prime-protected: design.md
+   *  keeps the Prime Arweave Seed deletable in development builds. The cascade
+   *  that removes the keys derived from it is the consumer's (the store does not
+   *  know which foreign keys a seed produced beyond their `seedId`). */
+  deleteArweaveSeed(id: string): Promise<void>;
 
   // ----- codex lifecycle (kickstart / recover) -----
   /** Atomically install the Prime Codex Seed + CodexPrime ouro account
@@ -455,11 +478,49 @@ function buildForeignKeySnapshot(
     // Threaded from live state so a foreign-key write never overwrites the
     // on-disk identity/settings shards with a stale/undefined value.
     codexIdentity: state.codexIdentity,
+    // Same rule for the Arweave seeds: omitting them here would let a
+    // foreign-key write overwrite the seed shard — and a lost seed can never be
+    // recovered, unlike a key it can regenerate.
+    arweaveSeeds: state.arweaveSeeds,
     foreignKeys,
     schemaVersion: state.schemaVersion,
     lastUpdatedAt: state.lastUpdatedAt,
     lastUpdatedDevice: state.lastUpdatedDevice,
   };
+}
+
+/**
+ * The same COMPLETE snapshot, with the Arweave seeds overridden — the builder
+ * behind every `arweaveSeeds` write. Delegates to {@link buildForeignKeySnapshot}
+ * so there is ONE every-field inventory to keep in sync (the cascade rule).
+ */
+function buildArweaveSeedSnapshot(
+  state: CodexStoreState,
+  arweaveSeeds: IArweaveSeed[]
+): CodexSnapshot {
+  return { ...buildForeignKeySnapshot(state, state.foreignKeys), arweaveSeeds };
+}
+
+/** The shape of a raw DALOS bitstring: the 1600-bit PLAINTEXT an Arweave seed
+ *  is derived from. Anything matching this is unencrypted key material. */
+const RAW_BITSTRING_RE = /^[01]{64,}$/;
+
+/**
+ * Refuse an Arweave seed whose `secret` is still plaintext.
+ *
+ * The seed reproduces EVERY RSA key under it, so storing it unencrypted would
+ * put private key material in the snapshot and in localStorage. Callers encrypt
+ * at the codex password (`encryptStringV2`) before the store sees it — the same
+ * seam `IStoaChainSeed.secret` uses — and this is the last line of defence when
+ * a caller forgets. The thrown message names the SEED, never the secret.
+ */
+function assertArweaveSeedSecretIsCiphertext(seed: IArweaveSeed): void {
+  if (seed.secret.length === 0 || RAW_BITSTRING_RE.test(seed.secret)) {
+    throw new CodexError(
+      `Arweave seed ${seed.id}: secret must be ciphertext (encrypted at the ` +
+        `codex password), never the plaintext bitstring.`
+    );
+  }
 }
 
 const initialState: Omit<CodexStoreState, "actions"> = {
@@ -469,6 +530,7 @@ const initialState: Omit<CodexStoreState, "actions"> = {
   passwordCache: null,
   pendingPasswordRequest: null,
   kadenaSeeds: [],
+  arweaveSeeds: [],
   pureKeypairs: [],
   ouroAccounts: [],
   addressBook: [],
@@ -897,6 +959,10 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // through the migration builder keeps a foreign-key mutation/restore
             // from silently dropping the key on the next load (funds-critical).
             foreignKeys: snap.foreignKeys ?? [],
+            // Arweave seeds. Absent on codices written before the slice existed;
+            // coalesce to []. Threading it through the migration builder is what
+            // keeps a migrating load from persisting a snapshot with no seeds.
+            arweaveSeeds: snap.arweaveSeeds ?? [],
             schemaVersion: snap.schemaVersion,
             lastUpdatedAt: snap.lastUpdatedAt,
             lastUpdatedDevice: snap.lastUpdatedDevice,
@@ -941,6 +1007,10 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // this the key rides the backup and the adapter but never reappears
             // in the store, silently lost on the next export (funds-critical).
             foreignKeys: migrated.foreignKeys ?? [],
+            // Hydrate the Arweave seeds so a seed defined in an earlier session
+            // is present after init — this is what makes a seed survive the
+            // chain-rail switch that unmounts the Arweave panel.
+            arweaveSeeds: migrated.arweaveSeeds ?? [],
             schemaVersion: migrated.schemaVersion,
             lastUpdatedAt: migrated.lastUpdatedAt,
             lastUpdatedDevice: migrated.lastUpdatedDevice,
@@ -1143,6 +1213,54 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           await a.saveStoaChainSeeds(nextSeeds);
           await a.saveOuroAccounts(nextOuros);
         });
+      },
+
+      // ----- arweave seeds -----
+      //
+      // Mirrors the kadena-seed actions above, with two deliberate divergences:
+      //   - persistence goes through the full-snapshot `saveAll` (like
+      //     `foreignKeys`), because adding a `saveArweaveSeeds` method would
+      //     extend the adapter CONTRACT; `buildArweaveSeedSnapshot` therefore
+      //     builds a COMPLETE snapshot so no other shard is wiped.
+      //   - the prime seed is NOT delete-protected: design.md keeps the Prime
+      //     Arweave Seed deletable in development builds.
+
+      async addArweaveSeed(seed: IArweaveSeed) {
+        assertArweaveSeedSecretIsCiphertext(seed);
+        const existing = get().arweaveSeeds;
+        const existingPrime = existing.find((s) => s.isPrime);
+
+        // Exactly one Prime Arweave Seed per codex — same rule (and same error)
+        // as the Prime Codex Seed: the first seed ever defined is the prime, and
+        // a second explicit prime is a conflict, not a silent overwrite.
+        if (seed.isPrime === true && existingPrime && existingPrime.id !== seed.id) {
+          throw new CodexKickstartError(
+            "id-conflict",
+            `A prime Arweave seed (${existingPrime.id}) already exists.`
+          );
+        }
+        const enriched =
+          seed.isPrime === undefined && existing.length === 0
+            ? { ...seed, isPrime: true }
+            : seed;
+
+        const next = [...existing.filter((s) => s.id !== enriched.id), enriched];
+        set({ arweaveSeeds: next });
+        await persistAndTouch((a) => a.saveAll(buildArweaveSeedSnapshot(get(), next)));
+      },
+
+      async updateArweaveSeed(seed: IArweaveSeed) {
+        assertArweaveSeedSecretIsCiphertext(seed);
+        const next = get().arweaveSeeds.map((s) => (s.id === seed.id ? seed : s));
+        set({ arweaveSeeds: next });
+        await persistAndTouch((a) => a.saveAll(buildArweaveSeedSnapshot(get(), next)));
+      },
+
+      async deleteArweaveSeed(id: string) {
+        // Missing id falls through to a no-op filter (mirrors deleteForeignKey).
+        const next = get().arweaveSeeds.filter((s) => s.id !== id);
+        set({ arweaveSeeds: next });
+        await persistAndTouch((a) => a.saveAll(buildArweaveSeedSnapshot(get(), next)));
       },
 
       // ----- codex lifecycle (kickstart / recover) -----
@@ -1775,6 +1893,14 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // undefined. Without this the runner would receive stale input and
           // the subsequent saveAll could overwrite the on-disk identity.
           codexIdentity: state.codexIdentity,
+          // Live seeds, same reason as codexIdentity: the saveAll below writes
+          // whatever this builder produced.
+          arweaveSeeds: state.arweaveSeeds,
+          // Live foreign-chain keyring, same reason as arweaveSeeds: omitting
+          // it here would make the saveAll below wipe the on-disk foreignKeys
+          // shard (LocalStorageCodexAdapter.saveAll writes
+          // `snapshot.foreignKeys ?? []` unconditionally).
+          foreignKeys: state.foreignKeys,
           schemaVersion: state.schemaVersion,
           lastUpdatedAt: state.lastUpdatedAt,
           lastUpdatedDevice: state.lastUpdatedDevice,
@@ -1804,6 +1930,8 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // Reflect a migration that synthesizes/transforms codexIdentity;
           // value-type slot stays undefined-typed (getter coalesces to null).
           codexIdentity: migrated.codexIdentity,
+          arweaveSeeds: migrated.arweaveSeeds ?? [],
+          foreignKeys: migrated.foreignKeys ?? [],
           schemaVersion: migrated.schemaVersion,
           lastUpdatedAt: migrated.lastUpdatedAt,
           lastUpdatedDevice: migrated.lastUpdatedDevice,

@@ -30,6 +30,10 @@ async function makeSnapshot(pw: string): Promise<CodexSnapshot> {
     ouroAccounts: [{ id: "oa1", secret: await enc("oa1-secret"), backup: await enc("oa1-backup") }],
     pureKeypairs: [{ id: "pk1", encryptedPrivateKey: await enc("pk1") }],
     foreignKeys: [{ id: "fk1", encryptedKeyfile: await enc("fk1") }],
+    // An Arweave seed holds the 1600-bit value that reproduces EVERY RSA key
+    // beneath it. If rekey skips it, a password change leaves it sealed under
+    // the old password and every derived key becomes unreproducible.
+    arweaveSeeds: [{ id: "as1", secret: await enc("as1-bits") }],
     codexIdentity: {
       encryptedSeedWords: await enc("id-seed"),
       encryptedStandardBitstring: await enc("id-std-bits"),
@@ -55,6 +59,7 @@ describe("rekeyCodex", () => {
     expect(await smartDecrypt(out.ouroAccounts[0].backup, NEW)).toBe("plain:oa1-backup");
     expect(await smartDecrypt(out.pureKeypairs[0].encryptedPrivateKey, NEW)).toBe("plain:pk1");
     expect(await smartDecrypt(out.foreignKeys![0].encryptedKeyfile, NEW)).toBe("plain:fk1");
+    expect(await smartDecrypt(out.arweaveSeeds![0].secret, NEW)).toBe("plain:as1-bits");
     expect(await smartDecrypt(out.codexIdentity!.encryptedSeedWords, NEW)).toBe("plain:id-seed");
     expect(await smartDecrypt(out.codexIdentity!.encryptedStandardBitstring, NEW)).toBe("plain:id-std-bits");
 
@@ -93,8 +98,15 @@ describe("rekeyCodex", () => {
   }, T.timeout);
 
   it("collectCodexPasswordSecrets covers the FULL inventory (not just the legacy 3 slices)", () => {
-    // 1 kadena + 2 ouro(secret,backup) + 1 pure + 1 foreign + 2 identity = 7.
-    expect(collectCodexPasswordSecrets(snap)).toHaveLength(7);
+    // 1 kadena + 2 ouro(secret,backup) + 1 pure + 1 foreign + 1 arweaveSeed
+    // + 2 identity = 8. This count is deliberately hardcoded: adding a secret
+    // slice without re-keying it leaves it sealed under the OLD password, so a
+    // new slice MUST break this test and force the author to wire it in.
+    const refs = collectCodexPasswordSecrets(snap);
+    expect(refs).toHaveLength(8);
+    // Name the new slice explicitly: the count alone would still pass if a
+    // future edit swapped one secret for another.
+    expect(refs).toContain(snap.arweaveSeeds![0].secret);
   });
 
   it("inventory guard: the identity secret-field list is non-empty and unique", () => {

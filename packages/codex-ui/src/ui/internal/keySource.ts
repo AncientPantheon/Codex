@@ -16,10 +16,21 @@ export interface KeySourceInfo {
   color: string;
 }
 
+// Chainweaver and EckoWallet are the same wallet underneath (same 12-word
+// mnemonic → keypair derivation); both keys stay valid so an existing seed
+// persisted under either value renders correctly, but they now share one
+// color so the two badges read as the same wallet rather than two different
+// ones. Only "chainweaver" is ever chosen for a NEW seed (see
+// CreateStoaChainSeedModal.tsx) — "eckowallet" survives here purely for
+// legacy display/normalization of already-stored data.
 export const SEED_COLORS: Record<SeedType, string> = {
   koala: "#f472b6",
-  eckowallet: "#f97316",
+  eckowallet: "#3b82f6",
   chainweaver: "#3b82f6",
+  // Stoic ("Stoa Dalos") reuses the user's existing Ouronet (DALOS) seed
+  // rather than a fresh StoaChain mnemonic — a distinct color from
+  // koala/chainweaver so its badge reads as its own family.
+  stoic: "#eab308",
 };
 
 /** Normalize legacy/stale seedType values that may survive persistence. */
@@ -29,6 +40,7 @@ const SEED_TYPE_NORMALIZE: Record<string, SeedType> = {
   eckowallet: "eckowallet",
   chainweaver: "chainweaver",
   legacy: "chainweaver",
+  stoic: "stoic",
 };
 
 export function normalizeSeedType(raw: string | undefined): SeedType {

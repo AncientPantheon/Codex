@@ -30,3 +30,15 @@ export type {
 export {
   buildCodexIdentityFromDerivation,
 } from "./encryption.js";
+
+// Arweave seeds (T1) — reusable re-derivation of an account's DALOS FullKey /
+// bitstring from its decrypted `secret` plaintext. Lifted out of
+// src/ui/internal/DalosSecretReveal.tsx, which now imports it from here.
+export {
+  rebuildFullKey,
+  bitStringOf,
+  curveOf,
+} from "./rebuildFullKey.js";
+export type {
+  BitStringAccount,
+} from "./rebuildFullKey.js";

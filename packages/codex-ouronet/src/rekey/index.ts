@@ -85,6 +85,15 @@ function* iterateCodexSecretRefs(snapshot: CodexSnapshot): Generator<SecretRef> 
   for (const f of snapshot.foreignKeys ?? []) {
     yield { slice: "foreignKeys", id: f.id, field: "encryptedKeyfile", read: () => f.encryptedKeyfile, write: (v) => { f.encryptedKeyfile = v; } };
   }
+  // Arweave seeds hold the 1600-bit value that deterministically reproduces
+  // EVERY RSA key beneath them, sealed under the codex password. Omitting them
+  // here does not lose the rows — rekey structuredClones the snapshot — but it
+  // leaves them encrypted under the OLD password, so after a password change
+  // they silently stop decrypting and every key under them becomes
+  // unreproducible. They must re-key with every other secret slice.
+  for (const s of snapshot.arweaveSeeds ?? []) {
+    yield { slice: "arweaveSeeds", id: s.id, field: "secret", read: () => s.secret, write: (v) => { s.secret = v; } };
+  }
   const identity = snapshot.codexIdentity;
   if (identity) {
     for (const field of CODEX_IDENTITY_SECRET_FIELDS) {

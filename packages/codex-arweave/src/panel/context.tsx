@@ -25,6 +25,11 @@ import type {
   KeygenWorkerMsg,
 } from "../keygen/index.js";
 import type { LibraryEntry, LibraryStore } from "../library/types.js";
+import type {
+  ArweaveSeedAccountSource,
+  ArweaveSeedChainwebSource,
+  ArweaveSeedDeletion,
+} from "./ArweaveSeedsArea.js";
 
 /**
  * The subset of the D5 `AddressBookEntry` the Send recipient picker reads. The
@@ -87,6 +92,29 @@ export interface ArweavePanelDeps {
   renameForeignKey: (id: string, label: string) => Promise<void>;
   /** Delete an entry by id. */
   deleteForeignKey: (id: string) => Promise<void>;
+
+  // ── Arweave seeds (Class-IA seeded RSA) ──
+  // OPTIONAL: the panel forwards each straight through to `ArweaveSeedsArea`.
+  // A consumer that omits one leaves exactly that affordance disabled — the
+  // area degrades per-source rather than failing, so a host with no decrypt
+  // seam still gets Free Seed Input and the Accounts list.
+  /** Activated, dalos-curve Ouronet accounts offered by define-seed Option 2. */
+  ouronetAccounts?: readonly ArweaveSeedAccountSource[];
+  /** Decrypts an Ouronet account's stored secret (unlock-gated) for Option 2. */
+  revealAccountSecret?: (accountId: string) => Promise<string | null> | string | null;
+  /** Chainweb seeds offered by define-seed Option 3. */
+  chainwebSeeds?: readonly ArweaveSeedChainwebSource[];
+  /** Decrypts a Chainweb seed's stored mnemonic into its words (unlock-gated),
+   *  for Option 3. LAZY on purpose — eagerly decrypting every seed just to
+   *  populate a picker would hold every mnemonic in memory at once. */
+  revealSeedWords?: (seedId: string) => Promise<readonly string[] | null>;
+  /** Spawns the off-main-thread keygen worker. Bundler-specific, so it is
+   *  injected by the APP — never hardcoded in this package (`worker.ts` and
+   *  `worker.js` resolve differently in src vs dist). */
+  workerFactory?: () => Worker;
+  /** Deletes a seed AND the keys derived from it. Without it a delete only
+   *  clears the row locally and the entries orphan in the store. */
+  onDeleteSeed?: (request: ArweaveSeedDeletion) => Promise<void> | void;
 
   // ── balance / send (E2) ──
   /** E2 balance read: winston bigint for an address. */

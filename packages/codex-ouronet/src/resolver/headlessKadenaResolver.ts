@@ -40,7 +40,7 @@ import type {
   ResolvedStoaChainKeypair,
 } from "@ancientpantheon/codex-core";
 
-import { HEADLESS, remapCoreKeyMissing } from "./headlessKadenaDeps.js";
+import { HEADLESS, remapCoreKeyMissing, resolveStoicKeypair } from "./headlessKadenaDeps.js";
 
 export interface HeadlessKadenaResolverOptions {
   /**
@@ -87,9 +87,16 @@ export function createHeadlessKadenaResolver(
         Promise.resolve(opts.getPassword()),
       ]);
 
+      // Stoic ("Stoa Dalos") seeds are NOT mnemonic-based — resolve them
+      // HERE, before ever reaching `HEADLESS`'s mnemonic-only factory. See
+      // headlessKadenaDeps.ts's `resolveStoicKeypair` doc.
+      const slice = toSlice(snapshot);
+      const stoicKeypair = await resolveStoicKeypair(slice.kadenaSeeds, publicKey, password);
+      if (stoicKeypair) return stoicKeypair;
+
       let resolved: ResolvedStoaChainKeypair;
       try {
-        resolved = await HEADLESS.getKeyPairByPublicKey(toSlice(snapshot), publicKey, password);
+        resolved = await HEADLESS.getKeyPairByPublicKey(slice, publicKey, password);
       } catch (e) {
         // Re-throw core's CodexKeyMissingError as the ouronet-side class (same
         // structured counts); any other error passes through unchanged.

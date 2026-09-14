@@ -68,6 +68,11 @@ export type { StoaAccountsTabProps } from "./tabs/StoaAccountsTab.js";
 export { OuronetAccountsTab } from "./tabs/OuronetAccountsTab.js";
 export type { OuronetAccountsTabProps } from "./tabs/OuronetAccountsTab.js";
 
+// ── STAY-set: the Chainweb chain panel (re-parents the three @stoachain-edged
+//    Chainweb tabs under Seeds / Pure Keys / Accounts for codex-ui's
+//    ForeignChainsTab slot) ──
+export { ChainwebPanel } from "./chains/ChainwebPanel.js";
+
 // ── STAY-set: the Ouronet-composed tabs aggregator (fills CodexTabsShell) ──
 export { CodexTabs } from "./CodexTabs.js";
 export type { CodexTabsProps, CodexTabKey } from "./CodexTabs.js";
@@ -98,6 +103,19 @@ export type { ReadFunctionsCardProps } from "./settings/ReadFunctionsCard.js";
 //    shell with the concrete cards + the zbom-specific subtab taxonomy) ──
 export { CodexSettingsSection } from "./settings/CodexSettingsSection.js";
 export type { CodexSettingsSectionProps, CodexNetworkTabConfig } from "./settings/CodexSettingsSection.js";
+
+// ── STAY-set: the DALOS secret reveal (Seed/Bitmap/BitString/Base-10/Base-49
+//    tabbed view), decoupled from `IOuroAccount` — takes plaintext + origin
+//    mode/curve and re-derives via `rebuildFullKey`. Reused by
+//    `@ancientpantheon/codex-arweave`'s per-seed "View Seed" reveal. ──
+export { DalosSecretReveal } from "./internal/DalosSecretReveal.js";
+export type { DalosSecretRevealProps } from "./internal/DalosSecretReveal.js";
+
+export { CodexModalShell } from "./internal/CodexModalShell.js";
+export type { CodexModalShellProps } from "./internal/CodexModalShell.js";
+
+export { BitmapKeyInput } from "./internal/BitmapKeyInput.js";
+export type { BitmapKeyInputProps } from "./internal/BitmapKeyInput.js";
 
 // ── Apollo-ownership verifier (/apollo-verify) — generic RP verify page +
 //    signing seam (the Apollo-curve `@stoachain` value edge) ──

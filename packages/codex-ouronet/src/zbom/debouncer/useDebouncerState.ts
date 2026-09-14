@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { tierClock } from "./tierClock.js";
 import {
-  PactQueryTier,
+  type PactQueryTier,
   ALL_TIERS,
   getTierInterval,
   getTierName,

@@ -20,6 +20,11 @@ export interface CodexModalShellProps {
   /** Accent for the title + top rule. Defaults to the codex gold. */
   accent?: string;
   maxWidth?: number;
+  /** `data-testid` on the dialog root. Optional — omitted callers get no
+   *  attribute, exactly as before this was added. */
+  dialogTestId?: string;
+  /** `data-testid` on the close (×) button. Optional, same reasoning. */
+  closeTestId?: string;
 }
 
 export function CodexModalShell({
@@ -29,11 +34,14 @@ export function CodexModalShell({
   children,
   accent = "#ceac5f",
   maxWidth = 520,
+  dialogTestId,
+  closeTestId,
 }: CodexModalShellProps) {
   return (
     <div
       role="dialog"
       aria-modal="true"
+      data-testid={dialogTestId}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: "fixed",
@@ -77,6 +85,7 @@ export function CodexModalShell({
           <button
             type="button"
             aria-label="Close"
+            data-testid={closeTestId}
             onClick={onClose}
             style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",

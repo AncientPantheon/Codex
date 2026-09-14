@@ -22,12 +22,14 @@
 // ============================================================================
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 
 import { App, Dashboard } from "../src/App";
+import { CHAINWEB_RAIL_ID } from "../src/ForeignChainsWiring";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import {
   backupJson,
@@ -36,10 +38,44 @@ import {
   populatedStoaChainSnapshot,
 } from "../fixtures";
 
+/** The chain rail renders ids Capitalised for display ("arweave" -> "Arweave"),
+ *  so match the id case-insensitively rather than hardcoding the display form —
+ *  the id stays the single source of truth. */
+const railName = (id: string) => new RegExp(`^${id}$`, "i");
+
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+/**
+ * Navigate a mounted dashboard to the Chainweb SEEDS surface.
+ *
+ * The Chainweb seed words used to be a TOP-LEVEL "Seed Words" tab. Class IA (T5)
+ * collapsed the top level to three Class tabs, so that same `<SeedWordsTab />` is
+ * now re-parented under Class 2: the Blockchain Accounts Class tab, then the
+ * blockchain rail's `chainweb` entry, then the `Seeds` category of
+ * `ChainwebPanel`. That full three-step walk is the REAL user path — the rail no
+ * longer has a shortcut surface of its own outside the Class tabs (T9).
+ */
+async function openChainwebSeeds(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLElement> {
+  await user.click(
+    await screen.findByRole("tab", { name: /blockchain accounts/i }),
+  );
+  const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
+  await user.click(
+    await within(rail).findByRole("tab", { name: railName(CHAINWEB_RAIL_ID) }),
+  );
+  const panel = await screen.findByTestId("chainweb-panel");
+  // ChainwebPanel lands on `accounts`, so Seeds must be selected explicitly.
+  await user.click(within(panel).getByTestId("chainweb-subtab-seeds"));
+  // The panel's single tabpanel holds ONLY the active category's content, so
+  // scoping assertions to it proves they read the Seeds surface specifically.
+  return within(panel).getByRole("tabpanel");
+}
 
 describe("Dashboard — renders a plaintext-hydrated store directly (dev/test seam)", () => {
   it("mounts the populated-StoaChain fixture and renders the dashboard with the StoaChain seed entry visible (no unlock)", async () => {
@@ -51,16 +87,17 @@ describe("Dashboard — renders a plaintext-hydrated store directly (dev/test se
       </CodexProvider>,
     );
 
-    // The dashboard mounts directly — the tab strip (real shell) is present and
-    // there is NO unlock prompt (a hydrated plaintext store has no locked secrets).
-    const seedTab = await screen.findByRole("tab", { name: /seed words/i });
+    // The dashboard mounts directly — the Class IA tab strip (real shell) is
+    // present and there is NO unlock prompt (a hydrated plaintext store has no
+    // locked secrets).
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
     expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
 
-    // The Seed Words tab surfaces the fixture's ONE StoaChain seed — the index-0
+    // Chainweb → Seeds surfaces the fixture's ONE StoaChain seed — the index-0
     // seed renders as "Prime Codex Seed", proving the real store hydrated from
     // the fixture (not an empty codex, which shows the empty-state text).
-    await user.click(seedTab);
-    expect(await screen.findByText(/prime codex seed/i)).toBeInTheDocument();
+    const seeds = await openChainwebSeeds(user);
+    expect(await within(seeds).findByText(/prime codex seed/i)).toBeInTheDocument();
   });
 
   it("mounts the empty fixture and renders an empty codex dashboard (no StoaChain seeds)", async () => {
@@ -72,11 +109,12 @@ describe("Dashboard — renders a plaintext-hydrated store directly (dev/test se
       </CodexProvider>,
     );
 
-    const seedTab = await screen.findByRole("tab", { name: /seed words/i });
-    await user.click(seedTab);
-    // The empty fixture hydrates a valid-but-empty codex — the seed tab shows
+    const seeds = await openChainwebSeeds(user);
+    // The empty fixture hydrates a valid-but-empty codex — Chainweb → Seeds shows
     // its empty state, NOT a seed count of 1.
-    expect(await screen.findByText(/no seeds in the codex/i)).toBeInTheDocument();
+    expect(
+      await within(seeds).findByText(/no seeds in the codex/i),
+    ).toBeInTheDocument();
   });
 });
 
@@ -97,7 +135,7 @@ describe("App — encrypted backup: load screen → upload → restore → unloc
     // shown — the sequence is mount → restore → unlock → (authenticate) → dashboard.
     const passwordInput = await screen.findByLabelText(/^password$/i);
     expect(passwordInput).toHaveAttribute("type", "password");
-    expect(screen.queryByRole("tab", { name: /seed words/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /blockchain accounts/i })).toBeNull();
 
     // Authenticate with the throwaway password — the real useCodexAuth path.
     await user.type(passwordInput, backupPassword);
@@ -105,10 +143,10 @@ describe("App — encrypted backup: load screen → upload → restore → unloc
 
     // The dashboard now renders, hydrated from the restored backup: the backup's
     // ONE StoaChain seed is present (restore mapped kadenaWallets → kadenaSeeds); the
-    // index-0 seed renders as "Prime Codex Seed".
-    const seedTab = await screen.findByRole("tab", { name: /seed words/i });
-    await user.click(seedTab);
-    expect(await screen.findByText(/prime codex seed/i)).toBeInTheDocument();
+    // index-0 seed renders as "Prime Codex Seed" under Chainweb → Seeds.
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
+    const seeds = await openChainwebSeeds(user);
+    expect(await within(seeds).findByText(/prime codex seed/i)).toBeInTheDocument();
   });
 
   it("surfaces a secret-free error and offers the load screen (never hangs) when a wrong-version backup is uploaded", async () => {
@@ -194,7 +232,7 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
         <Dashboard />
       </CodexProvider>,
     );
-    await screen.findByRole("tab", { name: /seed words/i });
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
 
     const exportBtn = screen.getByRole("button", { name: /export.*json/i });
     await user.click(exportBtn);
@@ -208,5 +246,42 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
     const blobArg = createObjectURL.mock.calls[0][0] as Blob;
     expect(blobArg).toBeInstanceOf(Blob);
     expect(blobArg.type).toBe("application/json");
+  });
+});
+
+describe("Dashboard — Class 2 is wired into the REAL shell (not a second, parallel surface)", () => {
+  it("reveals the chainweb AND arweave rail entries when the Blockchain Accounts Class tab is selected", async () => {
+    // WHY: the shell used to render a BARE <CodexTabs /> — no foreignChains /
+    // foreignChainPanels — so Blockchain Accounts showed "No foreign chains."
+    // while the working rail lived in a SEPARATE section below it. Two
+    // disconnected surfaces. This is the guard that the Class 2 tab a user
+    // actually clicks in the dashboard is the one carrying the wired rail: it
+    // fails the moment anyone reverts to an unwired <CodexTabs />.
+    const user = userEvent.setup();
+    const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
+    );
+
+    // The rail is INSIDE Class 2's panel, and the shell mounts only the active
+    // Class tab's content — so on the landing tab there must be no rail at all.
+    // A rail visible here means it is mounted as a SECOND, parallel surface.
+    expect(screen.queryByRole("tablist", { name: /foreign chains/i })).toBeNull();
+
+    await user.click(
+      await screen.findByRole("tab", { name: /blockchain accounts/i }),
+    );
+
+    const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
+    expect(
+      within(rail).getByRole("tab", { name: railName(CHAINWEB_RAIL_ID) }),
+    ).toBeInTheDocument();
+    expect(
+      within(rail).getByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }),
+    ).toBeInTheDocument();
+    // The empty state of an unwired Class 2 must be gone, not merely shadowed.
+    expect(screen.queryByText(/no foreign chains\./i)).toBeNull();
   });
 });

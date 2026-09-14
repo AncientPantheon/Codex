@@ -126,6 +126,18 @@ const EXPECTED_UI_VALUE_EXPORTS = [
   "ApolloVerifyView",
   "signApolloOwnership",
   "buildApolloOwnershipMessage",
+  // Class-IA chain panels (Class 2 "Blockchain Accounts" slot-map entries)
+  "ChainwebPanel",
+  // Secret Reveal (Seed/Bitmap/BitString/Base-10/Base-49) — reused by the
+  // Arweave panel's seed reveal (arweave-seed-reveal-v1) as well as Ouronet's.
+  "DalosSecretReveal",
+  // The popup chrome ViewSeedModal already used — reused by the Arweave
+  // panel's seed reveal so both surfaces share ONE modal, not just a
+  // matching width.
+  "CodexModalShell",
+  // The Spawn modal's draw/randomize/import bitmap grid — reused by the
+  // Arweave panel's Direct Deterministic RSA Generation Bitmap input.
+  "BitmapKeyInput",
 ] as const;
 
 describe("ui barrel — forward lock (every named value export present)", () => {
@@ -140,15 +152,17 @@ describe("ui barrel — forward lock (every named value export present)", () => 
     },
   );
 
-  it("exports all 31 contracted value names (no silent drop below the floor)", () => {
+  it("exports all 35 contracted value names (no silent drop below the floor)", () => {
     // Guards the it.each roster itself: if the golden list is edited down, this
-    // pins the intended cardinality of the VALUE surface at exactly 31 (28 pre-
-    // carve names + the 3 Apollo-verifier exports).
+    // pins the intended cardinality of the VALUE surface at exactly 35 (28 pre-
+    // carve names + the 3 Apollo-verifier exports + ChainwebPanel + the
+    // arweave-seed-reveal-v1 DalosSecretReveal + CodexModalShell + BitmapKeyInput
+    // exports).
     const present = EXPECTED_UI_VALUE_EXPORTS.filter(
       (name) => (ouronetUi as Record<string, unknown>)[name] !== undefined,
     );
     expect(present).toHaveLength(EXPECTED_UI_VALUE_EXPORTS.length);
-    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(31);
+    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(35);
   });
 });
 

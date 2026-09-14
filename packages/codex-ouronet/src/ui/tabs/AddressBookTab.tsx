@@ -4,7 +4,7 @@
  * `react-redux` / `wallet-context`. Styled via `--codex-*` tokens + per-type
  * accents (inline `style`), so a consumer reskins by overriding the tokens.
  *
- * Three subsections, mirroring My Codex:
+ * Four subsections, mirroring My Codex:
  *   • Ouronet     — Ѻ. recipient addresses (blue accent)
  *   • StoaChain™  — k:/c:/w:/u: addresses (gold accent)
  *   • StoicTags   — bare §tag names (green accent); resolved on-chain via
@@ -12,6 +12,8 @@
  *                   account / released / not-registered status. The bare name
  *                   is stored in `address`; the `§` sigil is added for
  *                   display/copy and stripped on save.
+ *   • Arweave     — 43-character base64url addresses (amber accent); rendered
+ *                   through the same plain middle-ellipsis path as StoaChain.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -80,9 +82,19 @@ const TAB_CONFIG: Record<TabType, TabConfig> = {
     emptyAction: "StoicTag",
     validate: (v) => stripSigil(v).length > 0,
   },
+  arweave: {
+    label: "Arweave",
+    accent: "#f0a500",
+    addressLabel: "Address",
+    placeholder: "43-character Arweave address…",
+    hint: "A 43-character base64url Arweave address",
+    emptyTitle: "No Arweave Addresses",
+    emptyAction: "Arweave Address",
+    validate: (v) => /^[A-Za-z0-9_-]{43}$/.test(v.trim()),
+  },
 };
 
-const TAB_ORDER: TabType[] = ["ouronet", "stoa", "stoic-tag"];
+const TAB_ORDER: TabType[] = ["ouronet", "stoa", "stoic-tag", "arweave"];
 
 // Register the StoaChain chain validator on the module-level default registry so
 // the tab dispatches every address check through the pluggable per-chain seam
@@ -179,8 +191,15 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
     // Dispatch validation through the chain-aware registry: the StoaChain chain
     // validator internally re-runs the per-type check (dispatching on the
     // orthogonal address-KIND), so the three per-type rules are preserved.
+    // `arweave` is NOT a StoaChain address-KIND — its chain validator is owned
+    // by codex-arweave, which codex-ouronet must not depend on, so it validates
+    // against its own tab-config rule here.
     const candidate = activeTab === "stoic-tag" ? raw : formAddress.trim();
-    if (!validateAddress(STOACHAIN_CHAIN_ID, candidate, activeTab)) {
+    const isValid =
+      activeTab === "arweave"
+        ? cfg.validate(candidate)
+        : validateAddress(STOACHAIN_CHAIN_ID, candidate, activeTab);
+    if (!isValid) {
       setFormError(cfg.hint);
       return;
     }

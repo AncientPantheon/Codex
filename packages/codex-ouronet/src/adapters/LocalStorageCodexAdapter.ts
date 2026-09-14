@@ -4,6 +4,7 @@ import { CodexAdapterError } from "../errors/types.js";
 import {
   DEFAULT_UI_SETTINGS,
   type IStoaChainSeed,
+  type IArweaveSeed,
   type IOuroAccount,
   type IPureKeypair,
   type AddressBookEntry,
@@ -45,6 +46,10 @@ import { emptySnapshot } from "./types.js";
  *                              ForeignKeyEntry; each `encryptedKeyfile` is
  *                              ciphertext at rest; absent on pre-keyring
  *                              codices → [])
+ *   - "arweaveSeeds"           Arweave seeds (JSON array of IArweaveSeed; each
+ *                              `secret` is ciphertext at rest — NEVER the
+ *                              1600-bit plaintext; absent on pre-seed codices
+ *                              → [])
  *   - "codex_schema_version"   in-band schema version (string -> int)
  *   - "codex_last_updated"     ISO timestamp
  *   - "codex_device"           "dev" | "main"
@@ -87,6 +92,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       const consumerSettings = this.loadConsumerSettings();
       const codexIdentity = this.loadCodexIdentity();
       const foreignKeys = this.parseArray<ForeignKeyEntry>("foreignKeys");
+      const arweaveSeeds = this.parseArray<IArweaveSeed>("arweaveSeeds");
       const schemaVersion = this.loadSchemaVersion();
       const lastUpdatedAt = window.localStorage.getItem("codex_last_updated");
       const lastUpdatedDevice = this.loadDeviceVariant();
@@ -101,6 +107,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         consumerSettings,
         codexIdentity,
         foreignKeys,
+        arweaveSeeds,
         schemaVersion,
         lastUpdatedAt,
         lastUpdatedDevice,
@@ -135,6 +142,17 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         "foreignKeys",
         JSON.stringify(snapshot.foreignKeys ?? [])
       );
+      // Arweave-seed shard. Written ONLY when the snapshot carries the slice:
+      // unlike every other field here it is NOT coalesced to `[]`, because a
+      // snapshot builder that forgot the slice would otherwise ERASE seeds that
+      // nothing can reconstruct (a seed is the only way to reproduce its RSA
+      // keys). Absent field → the stored shard is left exactly as it was.
+      if (snapshot.arweaveSeeds !== undefined) {
+        window.localStorage.setItem(
+          "arweaveSeeds",
+          JSON.stringify(snapshot.arweaveSeeds)
+        );
+      }
       window.localStorage.setItem("codex_schema_version", String(snapshot.schemaVersion));
       if (snapshot.lastUpdatedAt) {
         window.localStorage.setItem("codex_last_updated", snapshot.lastUpdatedAt);
@@ -313,6 +331,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         "consumerSettings",
         "codexIdentity",
         "foreignKeys",
+        "arweaveSeeds",
         "codex_schema_version",
         "codex_last_updated",
         "codex_device",

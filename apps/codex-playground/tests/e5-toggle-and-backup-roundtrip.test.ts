@@ -200,10 +200,20 @@ describe("PG-02 — '1.3'+foreignKeys round-trip through the REAL useCodexBackup
       foreignKeys?: unknown;
     };
     // Distinct from the bare-array restored-slice check above: the EXPORTED wire
-    // shape must carry the `{schemaVersion, keys}` BLOCK verbatim (foreignKeys
-    // survive upload→export). Both the bare-array and block checks are required.
+    // shape must carry the `{schemaVersion, keys}` BLOCK (foreignKeys survive
+    // upload→export). Both the bare-array and block checks are required.
+    //
+    // The block is NOT byte-identical to the uploaded one, and must not be: the
+    // codec WRITES the latest block version while READING every past stamp. The
+    // upload fixture is stamped 1; the re-export is re-stamped with the writer's
+    // current version. What must survive verbatim is `keys` — that is the
+    // funds-critical property this case exists to protect.
     expect(reExported.version).toBe("1.3");
-    expect(reExported.foreignKeys).toEqual(expectedForeignKeysBlock);
+    const block = reExported.foreignKeys as { schemaVersion: number; keys: unknown };
+    expect(block.keys).toEqual(expectedForeignKeysBlock.keys);
+    expect(block.schemaVersion).toBeGreaterThanOrEqual(
+      expectedForeignKeysBlock.schemaVersion,
+    );
   });
 
   it("pureKeypairs also survive the round-trip (reader-before-writer carries both keyrings)", async () => {
