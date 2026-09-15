@@ -249,6 +249,36 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
   });
 });
 
+describe("Dashboard — the Arweave mock/real mode toggle is actually reachable", () => {
+  // WHY: `arweaveMode` was hardcoded to mock (commit 12c135d0), and the
+  // on-screen <ArweaveModeToggle> was left unmounted with a "re-mount here if
+  // real-mode switching is needed" comment — so there was NO way, from the
+  // real running app, to ever reach real mode. Every Arweave balance/send
+  // read silently fell back to the mock adapter's FIXED fake balance
+  // (1.5 AR for every address, regardless of its real on-chain balance),
+  // which is exactly the bug this guards against regressing to.
+  it("renders the toggle, defaults to mock, and flipping it to real updates the on-screen mode + shows the funds-safety warning", async () => {
+    const user = userEvent.setup();
+    const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
+    );
+
+    const modeSection = screen.getByRole("region", { name: /arweave mode/i });
+    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
+    expect(within(modeSection).queryByRole("alert")).toBeNull();
+
+    await user.click(
+      within(modeSection).getByRole("button", { name: /switch to real arweave/i }),
+    );
+
+    expect(within(modeSection).getByText("real")).toBeInTheDocument();
+    expect(within(modeSection).getByRole("alert")).toBeInTheDocument();
+  });
+});
+
 describe("Dashboard — Class 2 is wired into the REAL shell (not a second, parallel surface)", () => {
   it("reveals the chainweb AND arweave rail entries when the Blockchain Accounts Class tab is selected", async () => {
     // WHY: the shell used to render a BARE <CodexTabs /> — no foreignChains /

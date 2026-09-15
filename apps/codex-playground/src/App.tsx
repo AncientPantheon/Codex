@@ -62,6 +62,7 @@ import { UnlockScreen } from "./UnlockScreen";
 // bare `<CodexTabs />` here instead would leave Blockchain Accounts empty.
 // Mock+offline by DEFAULT; the mock ⇄ real toggle drives the mode.
 import { ForeignChainsWiring } from "./ForeignChainsWiring";
+import { ArweaveModeToggle } from "./ArweaveModeToggle";
 import {
   ARWEAVE_WIRING_MODE_MOCK,
   type ArweaveWiringMode,
@@ -105,15 +106,24 @@ export function Dashboard({
   const [network, setNetwork] = useState<NetworkSettings>(() => loadNetworkSettings());
 
   // The Arweave path defaults to MOCK + OFFLINE (funds-safety, N-11): the app
-  // boots mock; the user must explicitly opt into real via the toggle. The
-  // toggle owns the mode + gateway-URL UI and reports them upward here, so the
-  // wiring below only constructs the real E1-E3 stack once mode === "real".
-  // The gateway seed comes from the surfaced network state so the Network card
-  // and the toggle read one source of truth.
-  // Fixed at mock+offline: the on-screen mock/real toggle was removed (unstyled
-  // dev chrome on the Codex surface). This keeps the funds-safety default —
-  // real Arweave is never contacted unless this is deliberately changed.
-  const arweaveMode: ArweaveWiringMode = ARWEAVE_WIRING_MODE_MOCK;
+  // boots mock; the user must explicitly opt into real via the toggle below.
+  // The toggle owns the mode UI and reports it upward here, so the wiring
+  // below only constructs the real E1-E3 stack once mode === "real". The
+  // gateway URL itself is NOT owned by the toggle (it would otherwise be a
+  // second, divergent gateway field alongside the Settings tab's Network
+  // card) — it stays sourced from `network.arweaveGatewayUrl`, the same
+  // state the Network card edits, via `setChainUrl`.
+  //
+  // A prior revision hardcoded this to mock and unmounted the toggle
+  // entirely ("unstyled dev chrome") — which silently made real mode
+  // UNREACHABLE from the running app: every balance/send read fell back to
+  // the mock adapter's fixed fake balance for every address, regardless of
+  // the address's real on-chain balance. Restored as real state + a
+  // (minimally) styled mount below, not re-removed, since "real mode
+  // unreachable" is strictly worse than "unstyled control."
+  const [arweaveMode, setArweaveMode] = useState<ArweaveWiringMode>(
+    ARWEAVE_WIRING_MODE_MOCK,
+  );
   const gatewayUrl = network.arweaveGatewayUrl;
 
   // Persist the surfaced config on every edit so it survives a reload.
@@ -246,12 +256,21 @@ export function Dashboard({
         <CodexUiRoot>
           {activeView === "ui" ? (
             <>
-              {/* The Arweave mock ⇄ real toggle is intentionally NOT rendered:
-                  it was unstyled dev chrome bleeding into the Codex surface.
-                  `arweaveMode` still defaults to mock+offline below, so the
-                  funds-safety guarantee (never hit real Arweave by accident)
-                  is unchanged — only the on-screen control is gone. Re-mount
-                  <ArweaveModeToggle> here if real-mode switching is needed. */}
+              {/* The Arweave mock <-> real toggle. Scoped, minimal inline
+                  styling (not the component's own bare markup) so it reads
+                  as a small settings control rather than dev chrome. The
+                  gateway URL field it also renders is bound to the SAME
+                  `network.arweaveGatewayUrl` state as the Settings tab's
+                  Network card, via `setChainUrl` — one source of truth, not
+                  two independent gateway fields. */}
+              <div style={ARWEAVE_MODE_TOGGLE_STYLE}>
+                <ArweaveModeToggle
+                  initialMode={arweaveMode}
+                  initialGatewayUrl={gatewayUrl}
+                  onModeChange={setArweaveMode}
+                  onGatewayUrlChange={(url) => setChainUrl(ARWEAVE_CHAIN_ID, url)}
+                />
+              </div>
               {/* THE single Codex tab shell. `ForeignChainsWiring` renders
                   `CodexTabs` itself, fed the Arweave+Chainweb rail — so the
                   Blockchain Accounts Class tab IS the wired rail rather than an
@@ -353,6 +372,20 @@ function EncryptedSession({
  *  as `/apollo-verify?accounts=…&challenge=…&rp=…&callback=…`. */
 const IS_APOLLO_VERIFY =
   typeof window !== "undefined" && window.location.pathname === "/apollo-verify";
+
+/** Minimal card styling for <ArweaveModeToggle>'s bare, unstyled markup — the
+ *  component itself renders plain <section>/<p>/<button> elements with no
+ *  class hooks, so this wrapper is what keeps it from reading as dev chrome
+ *  bleeding into the Codex surface, without editing the component itself. */
+const ARWEAVE_MODE_TOGGLE_STYLE = {
+  marginBottom: 16,
+  padding: "14px 18px",
+  borderRadius: 12,
+  border: "1px solid #262626",
+  backgroundColor: "#141414",
+  color: "#ccc",
+  fontSize: 13,
+} as const;
 
 export function App(): ReactElement {
   const [loaded, setLoaded] = useState<LoadedState>({ kind: "idle" });

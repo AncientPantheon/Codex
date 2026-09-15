@@ -1,15 +1,21 @@
 // ============================================================================
-// ArweaveModeToggle — the PG-02 mock ⇄ real Arweave toggle (funds-safety UI).
+// ArweaveModeToggle — the PG-02 mock ⇄ real Arweave toggle.
 //
-// DEFAULT is MOCK+OFFLINE (funds-safety): the app boots mock; the real adapter
-// is NOT constructed until the user explicitly flips to real. The toggle carries:
-//   - a gateway URL text input (labeled /gateway/i) defaulting to a TESTNET/LOCAL
-//     endpoint (`DEFAULT_GATEWAY_URL` — NEVER mainnet `arweave.net`), fed to
-//     `createGatewayPool` by the real wiring when real mode is active;
+// DEFAULT is MOCK+OFFLINE: the app boots mock; the real adapter is NOT
+// constructed until the user explicitly flips to real. The toggle carries:
+//   - a gateway URL text input (labeled /gateway/i) defaulting to the REAL
+//     Arweave mainnet reference gateway (`DEFAULT_GATEWAY_URL` =
+//     `https://arweave.net`), fed to `createGatewayPool` by the real wiring
+//     when real mode is active — the deliberate default is real mainnet
+//     reads, not a testnet placeholder, so balance/send behavior reflects
+//     the real chain out of the box. The user-editable input is the escape
+//     hatch: point it at a testnet/local gateway during development by
+//     typing over the default;
 //   - a button flipping mock ⇄ real;
 //   - a VISIBLE `role="alert"` funds-safety warning shown ONLY in real mode
-//     (real mode transacts against the configured gateway — do not point it at
-//     mainnet with real funds).
+//     (real mode transacts against the configured gateway with real funds —
+//     the warning exists so a user flipping to real understands that before
+//     signing anything).
 //
 // The toggle owns only the mode + gateway-URL UI state and reports it upward via
 // `onModeChange`/`onGatewayUrlChange`; the mode-aware adapter construction lives
@@ -26,18 +32,19 @@ import {
 } from "./ForeignChainsWiring";
 
 /**
- * The DEFAULT gateway URL the toggle's input seeds. A LOCAL/testnet endpoint
- * (the arlocal/localhost dev gateway) — deliberately NOT the arweave.net
- * mainnet gateway. Pointing the default at mainnet would let a real-mode
- * transaction spend real funds by accident; the funds-safety invariant is that
- * this default NEVER contains "arweave.net".
+ * The DEFAULT gateway URL the toggle's input seeds. The REAL Arweave mainnet
+ * reference gateway — deliberately `https://arweave.net`, not a testnet/local
+ * placeholder, so real-mode balance reads and sends reflect the actual chain
+ * by default. The user-editable "Gateway URL" input on this same component
+ * remains the escape hatch for pointing at a testnet/alternate gateway during
+ * development.
  */
-export const DEFAULT_GATEWAY_URL = "http://localhost:1984" as const;
+export const DEFAULT_GATEWAY_URL = "https://arweave.net" as const;
 
 export interface ArweaveModeToggleProps {
   /** The initial mode; defaults to mock+offline (funds-safety). */
   initialMode?: ArweaveWiringMode;
-  /** The initial gateway URL; defaults to the testnet/local `DEFAULT_GATEWAY_URL`. */
+  /** The initial gateway URL; defaults to the real mainnet `DEFAULT_GATEWAY_URL`. */
   initialGatewayUrl?: string;
   /** Reports mode flips so the app can rebuild the (mode-aware) wiring. */
   onModeChange?: (mode: ArweaveWiringMode) => void;
@@ -99,9 +106,10 @@ export function ArweaveModeToggle({
 
       {isReal ? (
         <p role="alert">
-          Real mode transacts against the configured gateway. Do NOT point it at
-          Arweave mainnet with real funds — use a testnet/local gateway and a
-          throwaway keyfile only.
+          Real mode transacts against the configured gateway using REAL funds.
+          The default gateway is Arweave mainnet — any send you confirm here
+          executes for real. Point the Gateway URL above at a testnet/local
+          gateway instead if you want to test without real funds.
         </p>
       ) : null}
     </section>
