@@ -6,8 +6,11 @@
 // chains are surfaced as LOCAL, user-editable endpoints:
 //   - the StoaChain node URL, defaulting to the explicit node2-host
 //     default `STOACHAIN_DEFAULT_NODE_URL` (never a hidden hardcoded node);
-//   - the Arweave gateway URL, defaulting to the local testnet gateway
-//     `DEFAULT_GATEWAY_URL` (= http://localhost:1984 — NEVER mainnet, N-04).
+//   - the Arweave gateway URL, defaulting to the real mainnet reference
+//     gateway `DEFAULT_GATEWAY_URL` (= https://arweave.net) — a deliberate
+//     default so balance reads/sends reflect the real chain out of the box;
+//     the field remains fully user-editable to point at a testnet/alternate
+//     gateway during development.
 //
 // The config is persisted to localStorage (browser-scoped) so an edit survives a
 // reload. `resolveNetworkModel` builds a codex-core `NetworkSettingsModel` off
@@ -63,8 +66,9 @@ export const STOACHAIN_NODE_PLACEHOLDER = STOACHAIN_DEFAULT_NODE_URL;
  *  gateway out of the box — a standalone Codex should be able to read/send on
  *  Chainweb immediately, not require the user to paste a node URL in the
  *  Network tab first. Still fully user-editable there. The Arweave gateway
- *  keeps the local-testnet default (localhost:1984, never mainnet) —
- *  unaffected by this change. */
+ *  now defaults to the real mainnet reference gateway (`https://arweave.net`,
+ *  via `DEFAULT_GATEWAY_URL`) for the same reason — real balance reads/sends
+ *  out of the box, still fully user-editable to a testnet/alternate gateway. */
 export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   pythiaUrl: "",
   stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
