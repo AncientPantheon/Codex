@@ -18,6 +18,7 @@
  */
 
 import { useMemo, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   ChevronDown, ChevronRight, Eye, RefreshCw, Loader2, Plus, Check, X, Pencil,
 } from "lucide-react";
@@ -27,6 +28,12 @@ import { usePureKeypairs } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
 import { IconCopyBtn, IconStoaExplorerBtn, IconDeleteBtn } from "../internal/IconButtons.js";
 import { useStoaChainBalances, type StoaAccountBalances } from "../internal/useStoaChainBalances.js";
+import { useUrStoaBalances, type UrStoaAccountBalances } from "../internal/useUrStoaBalances.js";
+import { TransferUrStoaModal } from "../internal/TransferUrStoaModal.js";
+import { StakeUrStoaModal } from "../internal/StakeUrStoaModal.js";
+import { UnstakeUrStoaModal } from "../internal/UnstakeUrStoaModal.js";
+import { CollectUrStoaModal } from "../internal/CollectUrStoaModal.js";
+import { SendStoaModal } from "../internal/SendStoaModal.js";
 import type { IStoaChainSeed } from "../../types/entities.js";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/index.js";
@@ -43,6 +50,82 @@ const truncAddr = (a: string) => (a.length > 24 ? `${a.slice(0, 12)}…${a.slice
 const fmt12 = (n: number) => n.toFixed(12);
 const explorerUrl = (a: string) => `https://explorer.stoachain.com/accounts/${a}`;
 
+/** The Stoa/UrStoa header toggle's two states. */
+type BalanceMode = "stoa" | "urstoa";
+
+/** Every k: address's public key IS its address suffix — there is no separate
+ *  lookup. Non-`k:` addresses (u:/c:/w:) have no single public key, so the
+ *  vault-action + Send buttons (all of which resolve a signing keypair by
+ *  public key) simply don't render for those rows. */
+const publicKeyOf = (address: string): string | undefined =>
+  address.startsWith("k:") ? address.slice(2) : undefined;
+
+/** Small square action-button chrome, matching `IconButtons.tsx`'s
+ *  `IconCopyBtn`/`IconHideBtn` resting palette (28px square, 2px border,
+ *  dark fill) so the new Transfer/Stake/Unstake/Collect/Send buttons sit
+ *  visually consistent with the copy/explorer buttons already in this row. */
+const actionBtnStyle: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
+  width: 28, height: 28, borderRadius: 6, flexShrink: 0, cursor: "pointer",
+  backgroundColor: "#141414", color: "#777", border: "2px solid #252525",
+};
+const actionIconStyle: React.CSSProperties = { width: 13, height: 13 };
+
+/** Inline SVG glyphs — deliberately NOT `lucide-react` for these five new
+ *  action icons (mirrors `ArweaveAccountsArea.tsx`'s own local-glyph
+ *  convention for the same "established visual language" reason: square,
+ *  small, self-contained). */
+const svgIconBase = {
+  viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2,
+  strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true,
+};
+const TransferGlyph = ({ style }: { style?: React.CSSProperties }) => (
+  <svg {...svgIconBase} style={style}><path d="M7 8h10l-3-3M17 16H7l3 3" /></svg>
+);
+const StakeGlyph = ({ style }: { style?: React.CSSProperties }) => (
+  <svg {...svgIconBase} style={style}><path d="M12 19V5M12 5l-5 5M12 5l5 5" /></svg>
+);
+const UnstakeGlyph = ({ style }: { style?: React.CSSProperties }) => (
+  <svg {...svgIconBase} style={style}><path d="M12 5v14M12 19l-5-5M12 19l5-5" /></svg>
+);
+const CollectGlyph = ({ style }: { style?: React.CSSProperties }) => (
+  <svg {...svgIconBase} style={style}><circle cx="12" cy="12" r="8" /><path d="M12 8v8M9 11h6" /></svg>
+);
+const SendGlyph = ({ style }: { style?: React.CSSProperties }) => (
+  <svg {...svgIconBase} style={style}><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7Z" /></svg>
+);
+
+/** Wraps a single action button (the merged Send/Transfer, Stake, Unstake, or
+ *  Collect button) in a Radix tooltip using `InfoTooltip.tsx`'s EXACT visual
+ *  styling (colors/border/shadow/arrow) — but with the action button ITSELF
+ *  as the trigger (`asChild`), not a separate "ⓘ" icon. The row is compact;
+ *  four extra info-icons next to four action buttons would clutter it. */
+function ActionTooltip({ content, children }: { content: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="top"
+            sideOffset={5}
+            className="max-w-[220px] text-[11px] leading-relaxed px-3 py-2 rounded-lg shadow-xl"
+            style={{
+              backgroundColor: "#1a1a1a",
+              color: "#d2d3d4",
+              border: "1px solid #3a3a3a",
+              zIndex: 99999,
+            }}
+          >
+            {content}
+            <Tooltip.Arrow style={{ fill: "#1a1a1a" }} />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
 interface AddrEntry { address: string; sublabel: string; watchId?: string }
 
 export interface StoaAccountsTabProps {
@@ -51,24 +134,42 @@ export interface StoaAccountsTabProps {
 
 /* ─────────────── Address row ─────────────── */
 function AddressRow({
-  entry, bal, loading, onRemove, onRelabel,
+  entry, bal, urBal, mode, loading, onRemove, onRelabel, onActionSuccess,
 }: {
   entry: AddrEntry;
   bal: StoaAccountBalances | undefined;
+  urBal: UrStoaAccountBalances | undefined;
+  mode: BalanceMode;
   loading: boolean;
   onRemove?: () => void;
   onRelabel?: (label: string) => void;
+  /** Called after ANY of this row's action modals (Transfer/Stake/Unstake/
+   *  Collect/Send) succeeds — always the CURRENTLY ACTIVE balance hook's
+   *  `refresh()`, so the row updates without a manual reload. */
+  onActionSuccess: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.sublabel);
+  const [activeModal, setActiveModal] = useState<null | "transfer" | "stake" | "unstake" | "collect" | "send">(null);
   const prefix = entry.address.slice(0, 2);
   const prefixColor = ADDR_COLORS[prefix] ?? "#888";
+  const publicKey = publicKeyOf(entry.address);
 
-  const totalLabel = !bal || bal.isEmpty ? "Empty" : bal.total === 0 ? "0.0 STOA" : `${fmt12(bal.total)} STOA`;
-  const totalColor = bal && !bal.isEmpty && bal.total > 0 ? "#ceac5f" : "#555";
+  const totalLabel =
+    mode === "urstoa"
+      ? !urBal || !urBal.exists ? "Empty" : `${fmt12(urBal.balance)} [${fmt12(urBal.staked)}]`
+      : !bal || bal.isEmpty ? "Empty" : bal.total === 0 ? "0.0 STOA" : `${fmt12(bal.total)} STOA`;
+  const totalColor =
+    mode === "urstoa"
+      // Gold whenever the account holds ANY value — liquid, staked, or
+      // unclaimed earnings. A large STAKED balance with zero currently-liquid
+      // balance is not "empty" and must not render gray.
+      ? urBal && urBal.exists && (urBal.balance > 0 || urBal.staked > 0 || urBal.earnings > 0) ? "#ceac5f" : "#555"
+      : bal && !bal.isEmpty && bal.total > 0 ? "#ceac5f" : "#555";
 
   return (
+    <>
     <div data-stoa-address={entry.address} style={{ border: "1px solid #262626", borderRadius: 12, overflow: "hidden", backgroundColor: "#18181B" }}>
       <div onClick={() => setOpen((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer" }}>
         {open ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} /> : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
@@ -88,6 +189,40 @@ function AddressRow({
           )}
         </div>
         <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}>
+          {/* One mode-dependent slot: "Send" (native Stoa) in Stoa mode,
+             "Transfer" (UrStoa) in UrStoa mode — same position, same chrome,
+             just a different modal/icon/tooltip depending on the toggle. */}
+          {publicKey && (
+            <ActionTooltip
+              content={
+                mode === "urstoa"
+                  ? "Transfer UrStoa to another account."
+                  : "Send native Stoa to another account."
+              }
+            >
+              <button
+                type="button"
+                title={mode === "urstoa" ? "Transfer UrStoa" : "Send STOA"}
+                onClick={() => setActiveModal(mode === "urstoa" ? "transfer" : "send")}
+                style={actionBtnStyle}
+              >
+                {mode === "urstoa" ? <TransferGlyph style={actionIconStyle} /> : <SendGlyph style={actionIconStyle} />}
+              </button>
+            </ActionTooltip>
+          )}
+          {publicKey && mode === "urstoa" && (
+            <>
+              <ActionTooltip content={`Stake your liquid UrStoa into the vault. ${fmt12(urBal?.balance ?? 0)} UrStoa available.`}>
+                <button type="button" title="Stake UrStoa" onClick={() => setActiveModal("stake")} style={actionBtnStyle}><StakeGlyph style={actionIconStyle} /></button>
+              </ActionTooltip>
+              <ActionTooltip content={`Unstake UrStoa from the vault. ${fmt12(urBal?.staked ?? 0)} UrStoa staked.`}>
+                <button type="button" title="Unstake UrStoa" onClick={() => setActiveModal("unstake")} style={actionBtnStyle}><UnstakeGlyph style={actionIconStyle} /></button>
+              </ActionTooltip>
+              <ActionTooltip content={`Collect ${fmt12(urBal?.earnings ?? 0)} STOA in earned vault rewards.`}>
+                <button type="button" title="Collect UrStoa earnings" onClick={() => setActiveModal("collect")} style={actionBtnStyle}><CollectGlyph style={actionIconStyle} /></button>
+              </ActionTooltip>
+            </>
+          )}
           <IconCopyBtn text={entry.address} size={28} />
           <IconStoaExplorerBtn href={explorerUrl(entry.address)} size={28} />
           {onRemove && <IconDeleteBtn onClick={onRemove} size={28} />}
@@ -138,6 +273,16 @@ function AddressRow({
         </div>
       )}
     </div>
+    {publicKey && (
+      <>
+        <TransferUrStoaModal isOpen={activeModal === "transfer"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+        <StakeUrStoaModal isOpen={activeModal === "stake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+        <UnstakeUrStoaModal isOpen={activeModal === "unstake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+        <CollectUrStoaModal isOpen={activeModal === "collect"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+        <SendStoaModal isOpen={activeModal === "send"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+      </>
+    )}
+    </>
   );
 }
 
@@ -164,6 +309,7 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
   const [subTab, setSubTab] = useState<"codex" | "watch">("codex");
   const [watchInput, setWatchInput] = useState("");
   const [watchError, setWatchError] = useState<string | null>(null);
+  const [balanceMode, setBalanceMode] = useState<BalanceMode>("stoa");
 
   // Build the codex groups (one per seed + a Pure Key Pairs group).
   const groups = useMemo(() => {
@@ -212,8 +358,24 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
     codexAddresses,
     stoaChainConnected,
   );
+  // Only issue the UrStoa batched read while the toggle is actually on
+  // UrStoa — no point paying for a chain "0" read nobody's looking at.
+  const {
+    byAddress: urByAddress,
+    loading: urLoading,
+    error: urError,
+    refresh: urRefresh,
+  } = useUrStoaBalances(allAddresses, stoaChainConnected && balanceMode === "urstoa");
+
+  const activeLoading = balanceMode === "urstoa" ? urLoading : loading;
+  const activeError = balanceMode === "urstoa" ? urError : error;
+  const activeRefresh = balanceMode === "urstoa" ? urRefresh : refresh;
 
   const totalCodex = codexAddresses.length;
+
+  // Per-row loading flag, sourced from whichever balance hook is active.
+  const rowLoading = (addr: string) =>
+    balanceMode === "urstoa" ? urLoading && !urByAddress[addr] : loading && !byAddress[addr];
 
   const handleAddWatch = async () => {
     setWatchError(null);
@@ -239,15 +401,29 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
           <div style={{ fontSize: 22, fontWeight: 700, color: "#d2d3d4" }}>{totalCodex + watchAddrs.length}</div>
         </div>
         <div style={{ flex: 1 }} />
+        {/* Stoa / UrStoa balance-source toggle */}
+        <div style={{ display: "inline-flex", borderRadius: 8, border: "1px solid #262626", overflow: "hidden" }}>
+          {(["stoa", "urstoa"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={balanceMode === m}
+              onClick={() => setBalanceMode(m)}
+              style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", backgroundColor: balanceMode === m ? "#ceac5f" : "transparent", color: balanceMode === m ? "#0a0a0a" : "#888" }}
+            >
+              {m === "stoa" ? "Stoa" : "UrStoa"}
+            </button>
+          ))}
+        </div>
         {/* Live-chain status */}
-        {loading ? (
+        {activeLoading ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#888" }}><RefreshCw style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> Reading balances…</span>
-        ) : error ? (
+        ) : activeError ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#c0392b" }}>⚠ Balance read failed</span>
         ) : (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#4ade80" }}>✓ Live balances</span>
         )}
-        <button type="button" onClick={refresh} title="Refresh balances" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, border: "1px solid #262626", background: "transparent", color: "#888", cursor: "pointer", fontSize: 11 }}><RefreshCw style={{ width: 11, height: 11 }} /> Refresh</button>
+        <button type="button" onClick={activeRefresh} title="Refresh balances" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, border: "1px solid #262626", background: "transparent", color: "#888", cursor: "pointer", fontSize: 11 }}><RefreshCw style={{ width: 11, height: 11 }} /> Refresh</button>
       </div>
 
       {/* Codex / Watched toggle */}
@@ -272,7 +448,15 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
             groups.map((g) => (
               <GroupRow key={g.id} name={g.name} color={g.color} count={g.entries.length}>
                 {g.entries.map((e) => (
-                  <AddressRow key={e.address} entry={e} bal={byAddress[e.address]} loading={loading && !byAddress[e.address]} />
+                  <AddressRow
+                    key={e.address}
+                    entry={e}
+                    bal={byAddress[e.address]}
+                    urBal={urByAddress[e.address]}
+                    mode={balanceMode}
+                    loading={rowLoading(e.address)}
+                    onActionSuccess={activeRefresh}
+                  />
                 ))}
               </GroupRow>
             ))
@@ -300,9 +484,12 @@ export function StoaAccountsTab({ className }: StoaAccountsTabProps) {
                 key={w.id}
                 entry={{ address: w.address, sublabel: w.label || "", watchId: w.id }}
                 bal={byAddress[w.address]}
-                loading={loading && !byAddress[w.address]}
+                urBal={urByAddress[w.address]}
+                mode={balanceMode}
+                loading={rowLoading(w.address)}
                 onRemove={() => void deleteEntry(w.id)}
                 onRelabel={(label) => void addEntry({ ...w, label })}
+                onActionSuccess={activeRefresh}
               />
             ))
           )}

@@ -4,7 +4,7 @@
  *
  * WHY THIS EXISTS
  * Chainweb rejects (or silently under-prices) a command whose `meta.gasPrice` is
- * below the live Yin Engine floor. Historically all 13 build sites here omitted
+ * below the live Yin Engine floor. Historically all 14 build sites here omitted
  * `gasPrice` entirely, so Pact's client default (1e-8) went out on the wire.
  *
  * `CodexSigningStrategy.execute()` (@stoachain/stoa-core >= 4.4.0) now performs ONE
@@ -23,7 +23,7 @@
  *
  * WHAT IS LOCKED (source-text scan, so it holds for sites a unit test can't easily
  * reach — these closures live inside heavy React modals):
- *   (a) inventory — exactly the 13 known `.setMeta(` sites exist. A NEW transaction
+ *   (a) inventory — exactly the 14 known `.setMeta(` sites exist. A NEW transaction
  *       site fails here until it is added below AND satisfies (b)-(d), so the gas
  *       contract can't be forgotten by a future modal.
  *   (b) every `.setMeta({...})` passes `gasPrice`.
@@ -48,7 +48,7 @@ import { join, relative, resolve } from "node:path";
 // package's vitest transform does not hand these specs a file: URL.
 const SRC = resolve(__dirname, "../src");
 
-/** The 13 confirmed signed/submitted transaction-building sites. Three operations
+/** The 14 confirmed signed/submitted transaction-building sites. Three operations
  *  (RotateSovereign, RotateGuard, RotatePaymentKey) exist as TWO independent copies
  *  across `components/` and `zbom/modals/` — they share no code, so both copies are
  *  listed and both must satisfy the gas contract. */
@@ -66,6 +66,7 @@ const EXPECTED_TX_SITES = [
   "zbom/modals/RevokeDualLinkModal.tsx",
   "zbom/modals/RotateGovernorModal.tsx",
   "zbom/modals/RotateSovereignModal.tsx",
+  "ui/internal/SendStoaModal.tsx",
 ].sort();
 
 function walk(dir: string, out: string[] = []): string[] {
