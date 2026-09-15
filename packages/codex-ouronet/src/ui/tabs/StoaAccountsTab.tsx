@@ -22,7 +22,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   ChevronDown, ChevronRight, Eye, RefreshCw, Loader2, Plus, Check, X, Pencil,
 } from "lucide-react";
-import { STOA_CHAINS } from "@stoachain/stoa-core/constants";
+import { STOA_CHAINS, KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID } from "@stoachain/stoa-core/constants";
 import { useStoaChainSeeds } from "../../hooks/index.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
@@ -279,7 +279,7 @@ function AddressRow({
         <StakeUrStoaModal isOpen={activeModal === "stake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
         <UnstakeUrStoaModal isOpen={activeModal === "unstake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
         <CollectUrStoaModal isOpen={activeModal === "collect"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
-        <SendStoaModal isOpen={activeModal === "send"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
+        <SendStoaModal isOpen={activeModal === "send"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} senderChainBalance={bal?.perChain[STOACHAIN_CHAIN_ID]?.balance} onSuccess={onActionSuccess} />
       </>
     )}
     </>

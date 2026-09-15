@@ -71,14 +71,27 @@ export interface SendStoaModalProps {
   publicKey: string;
   /** Sender's native Stoa (Kadena) address, e.g. `k:<publicKey>`. */
   address: string;
+  /** Sender's balance ON THE CHAIN this transfer actually executes on
+   *  (STOACHAIN_CHAIN_ID) — NOT an aggregate across all 10 Stoa chains. Native
+   *  Stoa is a braided multi-chain coin; a balance on chain 3 doesn't fund a
+   *  send that runs on chain 0. Undefined renders as "—" (unknown), never a
+   *  stale/misleading 0. The caller (StoaAccountsTab) already has this value
+   *  from useStoaChainBalances's perChain map — no extra read here. */
+  senderChainBalance?: number;
   onSuccess?: (requestKey: string) => void;
 }
+
+/** Sends and receives on the SAME chain (Kadena coin.transfer is single-chain
+ *  by protocol — cross-chain requires a separate SPV continuation flow this
+ *  modal doesn't do), so one constant names both "from" and "to". */
+const fmt12 = (n: number): string => n.toFixed(12);
 
 export function SendStoaModal({
   isOpen,
   onClose,
   publicKey,
   address,
+  senderChainBalance,
   onSuccess,
 }: SendStoaModalProps): React.JSX.Element | null {
   const { execute } = useSignTransaction();
@@ -198,9 +211,20 @@ export function SendStoaModal({
 
   return (
     <CodexModalShell title="Send STOA" subtitle="coin.C_Transfer / coin.C_TransferAnew" onClose={onClose}>
-      <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>
-        Sends native STOA from <code>{address}</code>. Gas is paid by the Ouronet Gas Station.
-      </p>
+      <div style={{ fontSize: 12, color: "#888", margin: "0 0 12px", padding: "10px 12px", borderRadius: 8, border: "1px solid #1a1a1a", backgroundColor: "#0a0a0a" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Sending on <strong style={{ color: "#ceac5f" }}>StoaChain — Chain {STOACHAIN_CHAIN_ID}</strong></span>
+          <span>
+            Balance: <strong style={{ color: "#d2d3d4", fontFamily: "var(--codex-font-mono, ui-monospace, monospace)" }}>
+              {senderChainBalance === undefined ? "—" : `${fmt12(senderChainBalance)} STOA`}
+            </strong>
+          </span>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          From <code>{address}</code> to a receiver on the same chain (Chain {STOACHAIN_CHAIN_ID}) — native Stoa transfers don't cross chains.
+        </div>
+        <div style={{ marginTop: 6, color: "#666" }}>Gas is paid by the Ouronet Gas Station.</div>
+      </div>
       <label style={modalLabel} htmlFor="send-stoa-receiver">Receiver address</label>
       <input
         id="send-stoa-receiver"

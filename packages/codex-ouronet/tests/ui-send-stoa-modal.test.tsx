@@ -102,6 +102,30 @@ describe("<SendStoaModal>", () => {
     expect((submit as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("shows the sending chain and the sender's balance on that chain when senderChainBalance is provided", () => {
+    render(
+      <SendStoaModal
+        isOpen
+        onClose={() => {}}
+        publicKey={PUBLIC_KEY}
+        address={ADDRESS}
+        senderChainBalance={42.5}
+      />
+    );
+    expect(screen.getAllByText(/chain 0/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/42\.5/)).toBeTruthy();
+    // The address stays visible too — a complete send popup names sender
+    // chain, sender balance, sender address, AND (same-chain transfer)
+    // receiving chain together, not just the bare address.
+    expect(screen.getByText(ADDRESS)).toBeTruthy();
+  });
+
+  it("shows a balance-unknown state (never a crash or a stale zero) when senderChainBalance is omitted", () => {
+    render(<SendStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
+    expect(screen.getAllByText(/chain 0/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/—/).length).toBeGreaterThan(0);
+  });
+
   it("rejects a non-numeric amount and keeps submit disabled", () => {
     render(<SendStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
     fireEvent.change(screen.getByLabelText(/receiver/i), { target: { value: RECEIVER_EXISTING } });
