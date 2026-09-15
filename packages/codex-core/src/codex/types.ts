@@ -17,6 +17,35 @@ import type { ForeignKeyEntry, ForeignKeysBlock } from "./foreignKeys.js";
 import type { PureKeypairEntry } from "./pureKeypairs.js";
 
 /**
+ * The wire shape of one Arweave seed inside a "1.3" export envelope — the
+ * `IArweaveSeed` core fields (id / secret / createdAt), with the optional
+ * `name` label and `isPrime` marker (the field the reported incident lost)
+ * riding through unchanged. Declared here rather than in a dedicated model
+ * file (unlike `ForeignKeyEntry`/`PureKeypairEntry`) because codex-core has no
+ * other Arweave-specific module yet; the consumer's richer `IArweaveSeed`
+ * (codex-ouronet) is structurally compatible and passes through verbatim.
+ *
+ * `secret` is ALWAYS ciphertext (`encryptStringV2(bitString, codexPassword)`)
+ * — it must NEVER be logged, transmitted in cleartext, or echoed in an error
+ * message; it is the only copy of the user's Arweave seed material.
+ */
+export type ArweaveSeedEntry = {
+  /** Stable identifier for this seed (addresses it on restore). */
+  id: string;
+  /** Optional human label; a labelless entry is valid. */
+  name?: string;
+  /** Encrypted seed material — ciphertext at rest. NEVER plaintext; NEVER
+   *  logged or echoed in an error message. */
+  secret: string;
+  /** ISO timestamp the seed was created. */
+  createdAt: string;
+  /** Prime Arweave Seed marker — the field a real incident lost entirely
+   *  (a Prime seed reloaded as "Undefined" after this marker + the seed's
+   *  whole record silently dropped out of the backup round-trip). */
+  isPrime?: boolean;
+};
+
+/**
  * PlaintextCodex — the portable shape of an Ouronet user's in-memory
  * codex state. Consumers decide the concrete element types for each list
  * via generics (OuronetUI plugs in its IStoaChainSeed / IOuroAccount / etc;
@@ -40,6 +69,7 @@ export interface PlaintextCodex<
   PureKeypair      = unknown,
   AddressBookEntry = unknown,
   UiSettings       = unknown,
+  ArweaveSeed      = unknown,
 > {
   /** HD seeds (koala / chainweaver / eckowallet variants) known to this codex. */
   readonly kadenaWallets: StoaChainSeed[];
@@ -78,6 +108,21 @@ export interface PlaintextCodex<
    * OPTIONAL so existing StoaChain-only consumers compile unchanged.
    */
   readonly foreignKeys?: ForeignKeyEntry[];
+
+  /**
+   * OPTIONAL Arweave-seed keyring source — a BARE `ArweaveSeed[]`, mirroring
+   * `pureKeypairs`' wire shape (NOT a `{schemaVersion, keys}` block like
+   * `foreignKeys` — an Arweave seed carries no per-block schema version). Kept
+   * OPTIONAL, like `foreignKeys`, so existing consumers built before Arweave
+   * seeds existed compile unchanged.
+   *
+   * FUNDS-CRITICAL: this is the field a real incident lost entirely — a Prime
+   * Arweave Seed vanished across a save+reload because the codec had no
+   * awareness of it at all. Every consumer that builds a `PlaintextCodex`
+   * source for export MUST thread its live `arweaveSeeds` state through here,
+   * or the seed silently drops out of the backup on the next round-trip.
+   */
+  readonly arweaveSeeds?: ArweaveSeed[];
 }
 
 /**
@@ -130,6 +175,12 @@ export interface CodexExportV1_2<
  *
  * `ForeignKeysBlock` and `PureKeypairEntry` are imported from their single-owner
  * models — never re-declared here.
+ *
+ * `arweaveSeeds` (the fix for the reported Prime-Arweave-Seed-vanishes
+ * incident) rides the envelope the SAME way as `pureKeypairs` — a BARE ARRAY
+ * of `ArweaveSeedEntry`, OMITTED when the source carries no Arweave seeds. It
+ * is NOT block-wrapped like `foreignKeys`: an Arweave seed carries no
+ * per-block schema version either.
  */
 export interface CodexExportV1_3<
   StoaChainSeed       = unknown,
@@ -137,6 +188,7 @@ export interface CodexExportV1_3<
   AddressBookEntry = unknown,
   UiSettings       = unknown,
   PureKeypair      = PureKeypairEntry,
+  ArweaveSeed      = ArweaveSeedEntry,
 > {
   readonly version: "1.3";
   readonly exportedAt: string;
@@ -146,4 +198,5 @@ export interface CodexExportV1_3<
   readonly uiSettings: UiSettings;
   readonly foreignKeys?: ForeignKeysBlock;
   readonly pureKeypairs?: PureKeypair[];
+  readonly arweaveSeeds?: ArweaveSeed[];
 }

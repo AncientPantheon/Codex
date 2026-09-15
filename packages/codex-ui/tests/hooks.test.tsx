@@ -22,7 +22,7 @@ import * as React from "react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 
-import { CodexProvider } from "../src/provider/index.js";
+import { CodexProvider, useCodexStore } from "../src/provider/index.js";
 import {
   useCodex,
   useActiveWallet,
@@ -43,7 +43,10 @@ import { CodexImportError } from "../src/hooks/errors.js";
 
 // Value imports here are TEST-only (tests/ is not scanned by the graph guard).
 // codex-ui/src carries no value edge to these — the store is injected.
-import { createCodexStore } from "@ancientpantheon/codex-ouronet/state";
+import {
+  createCodexStore,
+  type CodexStoreState,
+} from "@ancientpantheon/codex-ouronet/state";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { CodexPrimeProtectedError } from "@ancientpantheon/codex-ouronet/errors";
 import type {
@@ -53,6 +56,12 @@ import type {
   AddressBookEntry,
   WatchListEntry,
 } from "@ancientpantheon/codex-ouronet/types";
+
+/** The seed entity, reached through the store state rather than the `/types`
+ *  barrel: `IArweaveSeed` is declared in `types/entities.ts` but the barrel
+ *  that re-exports the entity names does not (yet) include it — mirrors
+ *  codex-ouronet's own `state-arweave-seeds.test.ts` workaround. */
+type IArweaveSeed = CodexStoreState["arweaveSeeds"][number];
 
 // --------------------------------------------------------------------
 // Fixtures + shared wrapper (createStore seam injected)
@@ -107,6 +116,14 @@ const pureFx = (id = "p1"): IPureKeypair => ({
   publicKey: "f".repeat(64),
   encryptedPrivateKey: "enc-pk",
   createdAt: "2026-05-25T10:01:00.000Z",
+});
+
+const arweaveSeedFx = (id = "ar-seed-1"): IArweaveSeed => ({
+  id,
+  name: "Prime Arweave Seed",
+  secret: "encrypted-arweave-seed",
+  createdAt: "2026-05-25T10:00:30.000Z",
+  isPrime: true,
 });
 
 const addrFx = (id = "a1"): AddressBookEntry => ({
@@ -574,6 +591,92 @@ describe("useCodexBackup", () => {
       await result.current.backup.importFromCloud(payload);
     });
     expect(result.current.codex.pureKeypairs).toEqual([]);
+  });
+
+  it("arweaveSeeds round-trip: exportForCloud → importFromCloud into a FRESH store restores the Prime Arweave Seed byte-for-byte, isPrime included (funds-critical: fixes the reported save+reload seed-vanishes incident)", async () => {
+    const sourceAdapter = new MemoryCodexAdapter("dev");
+    const source = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        store: useCodexStore(),
+      }),
+      { wrapper: mkWrapper(sourceAdapter) }
+    );
+    await waitFor(() => expect(source.result.current.backup.isDirty).toBe(false));
+
+    const primeSeed = arweaveSeedFx("ar-seed-1");
+    await act(async () => {
+      await source.result.current.store.getState().actions.addArweaveSeed(primeSeed);
+    });
+
+    let json = "";
+    await act(async () => {
+      json = await source.result.current.backup.exportForCloud();
+    });
+    // The exported envelope actually carries arweaveSeeds as a bare array —
+    // before the fix, buildCodexExport had no awareness of the field and
+    // never emitted it (the export-side half of the reported loss).
+    const exported = JSON.parse(json);
+    expect(exported.arweaveSeeds).toEqual([primeSeed]);
+
+    // Import into a FRESH, independent store/adapter (simulates the reload).
+    const targetAdapter = new MemoryCodexAdapter("dev");
+    const target = renderHook(() => useCodexBackup(), {
+      wrapper: mkWrapper(targetAdapter),
+    });
+    await act(async () => {
+      await target.result.current.importFromCloud(json);
+    });
+
+    const restored = await targetAdapter.loadAll();
+    expect(restored.arweaveSeeds).toEqual([primeSeed]);
+    expect(restored.arweaveSeeds?.[0].isPrime).toBe(true);
+  });
+
+  it("importFromCloud PRESERVES existing arweaveSeeds when the backup omits the field (a pre-Arweave-seed backup must not wipe a live Prime Arweave Seed)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    // Pre-seed the live store with a Prime Arweave Seed before the import runs.
+    const primeSeed = arweaveSeedFx("ar-seed-live");
+    const { result } = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        store: useCodexStore(),
+        codex: useCodex(),
+      }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+    await act(async () => {
+      await result.current.store.getState().actions.addArweaveSeed(primeSeed);
+    });
+
+    // A "1.2" backup — written before Arweave seeds existed — carries no
+    // arweaveSeeds field at all.
+    const payload = JSON.stringify({
+      version: "1.2",
+      exportedAt: "2024-11-02T09:14:33.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    });
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // The restore must PRESERVE the live Prime Arweave Seed, not wipe it to []
+    // just because the backup file omitted the field entirely — this is
+    // exactly the reported incident's wipe mechanism.
+    const restored = await adapter.loadAll();
+    expect(restored.arweaveSeeds).toEqual([primeSeed]);
   });
 
   it("importFromCloud throws CodexImportError on malformed JSON", async () => {

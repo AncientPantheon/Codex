@@ -58,6 +58,11 @@ interface ParsedBackup {
   pureKeypairs?: CodexSnapshot["pureKeypairs"];
   /** `{ schemaVersion, keys }` BLOCK on the wire (absent on "1.2" backups). */
   foreignKeys?: ForeignKeysWireBlock;
+  /** Bare array on the wire (absent on any backup written before Arweave
+   *  seeds existed). FUNDS-CRITICAL: see `importFromCloud`'s
+   *  `current.arweaveSeeds` fallback — an absent field must NOT wipe a live
+   *  Prime Arweave Seed on restore. */
+  arweaveSeeds?: CodexSnapshot["arweaveSeeds"];
 }
 
 export interface CodexBackupView {
@@ -73,9 +78,12 @@ export interface CodexBackupView {
  * Build the `"1.3"` codec envelope from a snapshot. Threads BOTH keyrings onto
  * the PlaintextCodex-shaped source `buildCodexExport` reads: `foreignKeys` as a
  * bare array (the codec wraps it into a `{ schemaVersion, keys }` block on emit)
- * and `pureKeypairs` as a bare array (the codec carries it through unchanged).
- * Omitting either wire here would silently drop the corresponding keyring from
- * the backup — a funds-loss bug for `foreignKeys`.
+ * `pureKeypairs` as a bare array (the codec carries it through unchanged), and
+ * `arweaveSeeds` as a bare array (same pass-through discipline as
+ * `pureKeypairs`). Omitting any of these wires here would silently drop the
+ * corresponding keyring from the backup — a funds-loss bug for `foreignKeys`
+ * and `arweaveSeeds` (the reported Prime-Arweave-Seed-vanishes incident this
+ * fixes).
  */
 function buildBackupPayload(snapshot: CodexSnapshot): unknown {
   return buildCodexExport({
@@ -88,6 +96,7 @@ function buildBackupPayload(snapshot: CodexSnapshot): unknown {
     lastUpdatedAt: snapshot.lastUpdatedAt,
     lastUpdatedDevice: snapshot.lastUpdatedDevice,
     foreignKeys: snapshot.foreignKeys,
+    arweaveSeeds: snapshot.arweaveSeeds,
   });
 }
 
@@ -127,6 +136,11 @@ export function useCodexBackup(): CodexBackupView {
       // Carry the seedless foreign-key keyring so the Arweave key rides the
       // backup export (funds-critical — omitting it silently drops the key).
       foreignKeys: s.foreignKeys,
+      // Carry the Arweave-seed keyring so a Prime Arweave Seed rides the
+      // backup export (funds-critical — this is the reported incident: an
+      // omitted `arweaveSeeds` here means the seed silently vanishes from
+      // every fresh export regardless of the store's live state).
+      arweaveSeeds: s.arweaveSeeds,
       consumerSettings: s.consumerSettings,
       codexIdentity: s.codexIdentity,
       schemaVersion: s.schemaVersion,
@@ -197,6 +211,17 @@ export function useCodexBackup(): CodexBackupView {
         // field would make the slice/adapter `.map`/`.find` on a non-array →
         // the Arweave key is silently lost on restore = funds loss.
         foreignKeys: parsed.foreignKeys?.keys ?? [],
+        // FUNDS-CRITICAL (the reported incident this fixes): a backup written
+        // before Arweave seeds existed (or any backup that simply omits the
+        // field) must NOT WIPE the seed(s) already resident in this codex.
+        // Unlike `pureKeypairs` above (`?? []` — a keypair-free codex has
+        // nothing to lose when an older backup never had the concept),
+        // `arweaveSeeds` falls back to `current.arweaveSeeds` first: a Prime
+        // Arweave Seed is a high-value, user-created secret, and the reported
+        // incident is EXACTLY this field going missing on restore and wiping
+        // the live seed. Only an explicit (possibly empty) `arweaveSeeds`
+        // array present in the backup itself should replace it.
+        arweaveSeeds: parsed.arweaveSeeds ?? current.arweaveSeeds ?? [],
         // PRESERVE the double-Apollo identity + per-consumer settings the
         // sharding adapter shards: the wire format omits them, and a full
         // `saveAll` overwrite would otherwise WIPE them from disk (N-09).
