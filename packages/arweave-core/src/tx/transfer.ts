@@ -40,12 +40,12 @@ import { importKeyfile } from "../keys/keyfile.js";
 import { signTransaction } from "../signing/sign.js";
 import { assertOriginOnlyEndpoints } from "../endpoints.js";
 import { isCanonicalAddress } from "../canonical.js";
+import { estimateFee } from "../reads/fee.js";
 import type { GatewayPool } from "../gateway/types.js";
 import { createEndpointClientFactory } from "./endpointClient.js";
 import {
   InvalidTransferError,
   TransferPostFailedError,
-  InvalidGatewayPriceError,
   RewardExceedsCapError,
 } from "./errors.js";
 import type {
@@ -54,10 +54,6 @@ import type {
   TransferParams,
   TransferResult,
 } from "./types.js";
-
-/** Strict Winston amount gate: a plain decimal digit string (no lenient
- *  `BigInt` coercion of `""`, `" 123"`, `"1e3"`, `"0x10"`). */
-const WINSTON_DECIMAL = /^\d+$/;
 
 /** A data-less transfer prices at byteSize 0. */
 const TRANSFER_BYTE_SIZE = 0;
@@ -194,20 +190,15 @@ export async function sendTransfer(
   const lastTx = await pool.execute((endpoint, { signal }) =>
     withAbort(apiFactory(endpoint).getAnchor(), signal),
   );
-  const rewardString = await pool.execute(async (endpoint, { signal }) => {
-    const quote = await withAbort(
-      apiFactory(endpoint).getPrice(TRANSFER_BYTE_SIZE, params.target),
-      signal,
-    );
-    // The quote is embedded in a SIGNED tx — gate it strictly. A gate-failing
-    // quote throws inside the op so the pool rotates to an honest gateway.
-    if (!WINSTON_DECIMAL.test(quote)) {
-      throw new InvalidGatewayPriceError(endpoint);
-    }
-    return quote;
+  // The strict-validate-and-convert logic lives ONLY in `estimateFee`
+  // (reads/fee.ts) now; this threads our own (possibly test-injected)
+  // `apiFactory`'s `getPrice` through its `getPrice` seam so the price step
+  // still races each attempt against the pool's abort signal exactly as
+  // before, without a second copy of that logic here.
+  const reward = await estimateFee(pool, TRANSFER_BYTE_SIZE, params.target, {
+    getPrice: (endpoint, byteSize, target) =>
+      apiFactory(endpoint).getPrice(byteSize, target),
   });
-
-  const reward = BigInt(rewardString);
 
   // (2b) Fee cap — refuse to sign/pay a quote above the caller's ceiling.
   if (reward > params.maxRewardWinston) {
@@ -220,7 +211,7 @@ export async function sendTransfer(
       target: params.target,
       quantity: params.quantity.toString(),
       last_tx: lastTx,
-      reward: rewardString,
+      reward: reward.toString(),
     },
     jwk,
   );

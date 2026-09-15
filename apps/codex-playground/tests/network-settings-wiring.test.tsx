@@ -3,23 +3,23 @@
 //
 // The playground surfaces an EDITABLE, UNLOCKED default network config: the
 // StoaChain node URL (default STOACHAIN_DEFAULT_NODE_URL) + the Arweave gateway URL
-// (default DEFAULT_GATEWAY_URL = http://localhost:1984), persisted to
-// localStorage. It builds a `NetworkSettingsModel` via `createConnectionResolver`
-// (standalone → no global → both chains local → both rows editable + "Live
-// (local)") and renders the codex-ui `NetworkSettingsCard` in the loaded
-// dashboard shell.
+// (default DEFAULT_GATEWAY_URL = https://arweave.net, the real mainnet reference
+// gateway), persisted to localStorage. It builds a `NetworkSettingsModel` via
+// `createConnectionResolver` (standalone → no global → both chains local → both
+// rows editable + "Live (local)") and renders the codex-ui `NetworkSettingsCard`
+// in the loaded dashboard shell.
 //
 // These tests pin: (a) the surfaced defaults are REAL, editable values (N-03) —
 // the card shows a StoaChain + Arweave row with their default URLs; (b) the
-// Arweave default is localhost:1984, never mainnet arweave.net (N-04); and (c)
-// the persistence + model-build helper resolves an unlocked, two-row, live-local
-// model off the surfaced state.
+// Arweave default is the real mainnet gateway `arweave.net`, deliberately (N-04,
+// superseded — real mainnet reads are now the intended default, with the
+// gateway field remaining the escape hatch to point at a testnet/alternate
+// gateway during development); and (c) the persistence + model-build helper
+// resolves an unlocked, two-row, live-local model off the surfaced state.
 // ============================================================================
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { STOACHAIN_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
@@ -51,16 +51,15 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
   it("ships wired to the real node2.stoachain.com gateway by default (owner directive, updated) — a standalone Codex can read/send on Chainweb immediately", () => {
     const settings = loadNetworkSettings();
     // The StoaChain node now defaults to the real, public node2 host (still
-    // fully editable in the Network tab); the Arweave gateway keeps the
-    // local-testnet default — unaffected by this change.
+    // fully editable in the Network tab); the Arweave gateway now defaults to
+    // the real mainnet reference gateway too (see below).
     expect(settings.stoaChainNodeUrl).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(settings.arweaveGatewayUrl).toBe(DEFAULT_GATEWAY_URL);
   });
 
-  it("never defaults the Arweave gateway to mainnet arweave.net (funds-safety N-04)", () => {
+  it("defaults the Arweave gateway to the real mainnet arweave.net gateway (funds-safety N-04, superseded — deliberate default)", () => {
     const settings = loadNetworkSettings();
-    expect(settings.arweaveGatewayUrl).toContain("localhost:1984");
-    expect(settings.arweaveGatewayUrl).not.toContain("arweave.net");
+    expect(settings.arweaveGatewayUrl).toContain("arweave.net");
   });
 
   it("round-trips edited settings through localStorage so the surfaced config persists", () => {
@@ -120,7 +119,7 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     await screen.findByTestId(`network-url-${STOACHAIN_CHAIN_ID}`);
   }
 
-  it("renders the Network tab with the real node2.stoachain.com StoaChain default + the Arweave testnet gateway", async () => {
+  it("renders the Network tab with the real node2.stoachain.com StoaChain default + the Arweave mainnet gateway", async () => {
     await mountDashboard();
 
     const stoaUrl = (await screen.findByTestId(
@@ -131,10 +130,10 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     ) as HTMLInputElement;
 
     // Standalone now ships wired to the real node2 gateway (still editable);
-    // the Arweave gateway keeps its testnet default.
+    // the Arweave gateway now ships wired to the real mainnet gateway too.
     expect(stoaUrl.value).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(arweaveUrl.value).toBe(DEFAULT_GATEWAY_URL);
-    expect(arweaveUrl.value).not.toContain("arweave.net");
+    expect(arweaveUrl.value).toContain("arweave.net");
   });
 
   it("persists an edited StoaChain node URL so the dashboard reads against the surfaced state", async () => {
@@ -149,13 +148,6 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     expect(loadNetworkSettings().stoaChainNodeUrl).toBe(
       "https://edited-node.example:9090",
     );
-  });
-});
-
-describe("no hidden hardcoded mainnet default in the wiring source (N-03/N-04)", () => {
-  it("names no arweave.net literal in the network-settings wiring", () => {
-    const source = readFileSync(resolve(__dirname, "../src/networkSettings.ts"), "utf8");
-    expect(source).not.toContain("arweave.net");
   });
 });
 

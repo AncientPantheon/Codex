@@ -156,6 +156,8 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
     // balance / send (E2)
     getBalance: vi.fn(async () => 1_500_000_000_000n),
     send: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 1_000_000n })),
+    sendFrom: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 1_000_000n })),
+    estimateFee: vi.fn(async () => 100_000_000n),
     pollStatus: vi.fn(async () => "final" as const),
 
     // upload / library (E3)

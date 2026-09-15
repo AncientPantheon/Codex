@@ -139,12 +139,13 @@ describe("PG-02 — the app boots in MOCK mode by default (funds-safety)", () =>
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("renders the toggle defaulting to mock, with the gateway URL a configurable testnet/local default (never mainnet)", () => {
+  it("renders the toggle defaulting to mock, with the gateway URL the real mainnet default", () => {
     render(createElement(ArweaveModeToggle, {}));
-    // The gateway default must be a testnet/local endpoint, NEVER arweave.net
-    // mainnet — a funds-safety invariant. Driving the assertion off the exported
-    // DEFAULT_GATEWAY_URL const fails if the default is ever pointed at mainnet.
-    expect(DEFAULT_GATEWAY_URL).not.toContain("arweave.net");
+    // The gateway default is now the real Arweave mainnet gateway,
+    // deliberately (see ArweaveModeToggle.tsx's DEFAULT_GATEWAY_URL doc-comment) —
+    // driving the assertion off the exported DEFAULT_GATEWAY_URL const fails if
+    // the default ever drifts back to a placeholder.
+    expect(DEFAULT_GATEWAY_URL).toContain("arweave.net");
     const gatewayInput = screen.getByLabelText(/gateway/i) as HTMLInputElement;
     expect(gatewayInput.value).toBe(DEFAULT_GATEWAY_URL);
   });

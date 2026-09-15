@@ -287,7 +287,7 @@ describe("PG-01 — id-blind gate: the generic tab source carries no 'arweave' l
 //      seed `resolveSeedBitString` refuses).
 // ============================================================================
 
-import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { ForeignChainAdapter, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 
 import { toArweaveSeedAccounts } from "../src/ForeignChainsWiring";
@@ -1093,5 +1093,210 @@ describe("PG-04 — a persisted Arweave key round-trips through the real crypto"
       // The stub's tell: a non-empty member that came back empty.
       expect((back as unknown as Record<string, string>)[member]).not.toBe("");
     }
+  });
+});
+
+/**
+ * T6 — the real `sendFrom`/`estimateFee`/`decryptArweaveKey` wiring in
+ * `buildRealPanelDeps`.
+ *
+ * `decryptArweaveKey` used to be HARDCODED to throw, unconditionally, even
+ * when a working `persistence?.decryptArweaveKey` was available (every sibling
+ * keyring method already fell back to `persistence?.X`) — this is the actual
+ * bug that blocked any real send end to end. `sendFrom` and `estimateFee` are
+ * new members entirely: composition over the adapter's already-tested
+ * `buildSend`/`post` and arweave-core's `estimateFee`, no new crypto.
+ */
+describe("T6 — real sendFrom/estimateFee wiring in buildRealPanelDeps", () => {
+  const SEND_PASSWORD = "correct horse battery staple";
+  // A canonical 43-char base64url target (the fixture-independent shape gate).
+  const SEND_TARGET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO_-".slice(0, 43);
+
+  /** A fake `ForeignChainAdapter` — every method a `vi.fn()` so a test can
+   *  override/spy on exactly the ones it drives (`buildSend`/`post`), with no
+   *  real network and no real signing. */
+  function fakeAdapter(overrides: Partial<ForeignChainAdapter> = {}): ForeignChainAdapter {
+    return {
+      id: ARWEAVE_CHAIN_ID,
+      generateKey: vi.fn(),
+      importKey: vi.fn(),
+      addressOf: vi.fn(),
+      getBalance: vi.fn(),
+      buildSend: vi.fn(async (params: unknown) => params),
+      sign: vi.fn(),
+      post: vi.fn(async () => ({ id: "fake-tx-id", reward: 0n })),
+      ...overrides,
+    } as unknown as ForeignChainAdapter;
+  }
+
+  it("decryptArweaveKey returns the real JWK instead of throwing, once persistence is armed", async () => {
+    // WHY: this is the exact regression the bug report describes — a real send
+    // was unreachable end to end because this member threw unconditionally,
+    // independent of whether a working persistence seam was wired.
+    const persistence = createArweaveKeyPersistence({
+      getPassword: () => SEND_PASSWORD,
+      addForeignKey: async () => {},
+    });
+    const entry = await persistence.generateArweaveKey({ jwk: throwawayArweaveKeyfile });
+
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      getPassword: () => SEND_PASSWORD,
+    });
+
+    const jwk = await deps.decryptArweaveKey(entry);
+    expect(jwk.n).toBe(throwawayArweaveKeyfile.n);
+    expect(jwk.d).toBe(throwawayArweaveKeyfile.d);
+  }, 30_000);
+
+  it("decryptArweaveKey still throws when persistence itself is unarmed (no codex password seam wired)", async () => {
+    // WHY: the fallback must not silently paper over an unarmed build — the
+    // throw stays for the case the design calls out explicitly.
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      // no `getPassword` -> `persistence` is null.
+    });
+
+    await expect(
+      deps.decryptArweaveKey({
+        id: "some-id",
+        chainId: ARWEAVE_CHAIN_ID,
+        encryptedKeyfile: "throwaway-ciphertext-blob",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("sendFrom decrypts, then buildSends, then posts, in that order, with the request's exact params", async () => {
+    const persistence = createArweaveKeyPersistence({
+      getPassword: () => SEND_PASSWORD,
+      addForeignKey: async () => {},
+    });
+    const entry = await persistence.generateArweaveKey({ jwk: throwawayArweaveKeyfile });
+
+    const order: string[] = [];
+    const built = { target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n };
+    const adapter = fakeAdapter({
+      buildSend: vi.fn(async (params: unknown) => {
+        order.push("buildSend");
+        expect(params).toEqual({ target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n });
+        return built;
+      }),
+      post: vi.fn(async (b: unknown, jwk: unknown) => {
+        order.push("post");
+        expect(b).toBe(built);
+        expect((jwk as { n: string }).n).toBe(throwawayArweaveKeyfile.n);
+        return { id: "fake-tx-id", reward: 7n };
+      }),
+    });
+
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      adapter,
+      // `decryptArweaveKey` calls `getPassword()` synchronously before the
+      // async decrypt — recording its call here marks WHEN decrypt ran
+      // relative to buildSend/post, without spying into the persistence
+      // object's own internals (not exposed by `buildRealPanelDeps`).
+      getPassword: () => {
+        order.push("decrypt");
+        return SEND_PASSWORD;
+      },
+    });
+
+    const result = await deps.sendFrom(entry, {
+      target: SEND_TARGET,
+      quantity: 5n,
+      maxRewardWinston: 10n,
+    });
+
+    expect(order).toEqual(["decrypt", "buildSend", "post"]);
+    expect(result).toEqual({ id: "fake-tx-id", reward: 7n });
+  }, 30_000);
+
+  it("propagates decryptArweaveKey's own failure, not a generic one", async () => {
+    const entry: ForeignKeyEntry = {
+      id: "playground-arweave-key-under-test",
+      chainId: ARWEAVE_CHAIN_ID,
+      encryptedKeyfile: "throwaway-ciphertext-blob",
+    };
+    const adapter = fakeAdapter();
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      adapter,
+      getPassword: () => {
+        throw new Error("boom-decrypt");
+      },
+    });
+
+    await expect(
+      deps.sendFrom(entry, { target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n }),
+    ).rejects.toThrow("boom-decrypt");
+    expect(adapter.buildSend).not.toHaveBeenCalled();
+    expect(adapter.post).not.toHaveBeenCalled();
+  });
+
+  it("propagates buildSend's own failure, not a generic one", async () => {
+    const persistence = createArweaveKeyPersistence({
+      getPassword: () => SEND_PASSWORD,
+      addForeignKey: async () => {},
+    });
+    const entry = await persistence.generateArweaveKey({ jwk: throwawayArweaveKeyfile });
+
+    const adapter = fakeAdapter({
+      buildSend: vi.fn(async () => {
+        throw new Error("boom-buildSend");
+      }),
+    });
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      adapter,
+      getPassword: () => SEND_PASSWORD,
+    });
+
+    await expect(
+      deps.sendFrom(entry, { target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n }),
+    ).rejects.toThrow("boom-buildSend");
+    expect(adapter.post).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("propagates post's own failure, not a generic one", async () => {
+    const persistence = createArweaveKeyPersistence({
+      getPassword: () => SEND_PASSWORD,
+      addForeignKey: async () => {},
+    });
+    const entry = await persistence.generateArweaveKey({ jwk: throwawayArweaveKeyfile });
+
+    const adapter = fakeAdapter({
+      post: vi.fn(async () => {
+        throw new Error("boom-post");
+      }),
+    });
+    const deps = buildRealPanelDeps({
+      gatewayUrl: DEFAULT_GATEWAY_URL,
+      pool: offlinePool,
+      adapter,
+      getPassword: () => SEND_PASSWORD,
+    });
+
+    await expect(
+      deps.sendFrom(entry, { target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n }),
+    ).rejects.toThrow("boom-post");
+  }, 30_000);
+
+  it("estimateFee delegates to arweave-core's estimateFee against the resolved pool and returns its bigint quote", async () => {
+    const pool = {
+      execute: vi.fn(async () => "424242"),
+      getHealthSnapshot: () => [],
+      getActiveEndpoint: () => DEFAULT_GATEWAY_URL,
+    } as unknown as GatewayPool;
+
+    const deps = buildRealPanelDeps({ gatewayUrl: DEFAULT_GATEWAY_URL, pool });
+
+    await expect(deps.estimateFee(0, SEND_TARGET)).resolves.toBe(424242n);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
   });
 });

@@ -317,19 +317,116 @@ describe("ArweaveAccountsArea", () => {
     expect(screen.getByTestId("arweave-accounts-count-seed-2")).toHaveTextContent("1");
   });
 
-  /* ── T2: value cell, copy, explorer, confirm-then-delete ── */
+  /* ── T2: copy, explorer, confirm-then-delete ── */
 
-  it("shows a static 'Empty' value cell on every row (balances are out of scope)", () => {
-    // Regression: this cell must never read a store or the network — the whole
-    // project defers balances (design.md's "Out of scope"). A value that
-    // changes with the entry (rather than always reading "Empty") would mean
-    // someone wired a real read where a static placeholder belongs.
+  /* ── T4: live balance value cell + "Live balances" refresh control ── */
+
+  it("shows a fallback value cell (no crash) when getBalance is omitted entirely", () => {
+    // Regression: earlier this cell was a static "Empty" placeholder. Now that
+    // it drives a live read, a caller that omits `getBalance` (still a valid,
+    // optional prop) must render an inert, non-crashing fallback rather than
+    // throwing on a missing function call.
     const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    expect(() =>
+      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />),
+    ).not.toThrow();
 
     const value = screen.getByTestId(`arweave-account-value-${entry.id}`);
-    expect(value).toHaveTextContent("Empty");
-    expect(value.textContent).toBe("Empty");
+    expect(value.textContent).toBe("—");
+  });
+
+  it("fires one getBalance(address) call per row on mount and renders the resolved AR value", async () => {
+    // Regression: this is the whole point of T4 — a hardcoded "Empty" cell
+    // told the user nothing about what an address actually holds. A value
+    // cell that doesn't call getBalance, or doesn't render its resolved
+    // value, leaves the row exactly as useless as before.
+    const entryA = makeEntry({ id: "a", seedId: "seed-1", index: 0, address: "ADDR-A" });
+    const entryB = makeEntry({ id: "b", seedId: "seed-1", index: 1, address: "ADDR-B" });
+    const getBalance = vi.fn(async (address: string) =>
+      address === "ADDR-A" ? 2_500_000_000_000n : 0n,
+    );
+
+    render(
+      <ArweaveAccountsArea
+        entries={[entryA, entryB]}
+        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        getBalance={getBalance}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`arweave-account-value-a`)).toHaveTextContent(winstonToAr(2_500_000_000_000n));
+    });
+    expect(getBalance).toHaveBeenCalledWith("ADDR-A");
+    expect(getBalance).toHaveBeenCalledWith("ADDR-B");
+  });
+
+  it("shows a loading indicator while the balance read is pending", () => {
+    let resolveBalance: (value: bigint) => void = () => {};
+    const getBalance = vi.fn(() => new Promise<bigint>((resolve) => { resolveBalance = resolve; }));
+    const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
+
+    render(
+      <ArweaveAccountsArea
+        entries={[entry]}
+        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        getBalance={getBalance}
+      />,
+    );
+
+    const value = screen.getByTestId(`arweave-account-value-${entry.id}`);
+    expect(value.textContent).toBe("…");
+    expect(getBalance).toHaveBeenCalledWith("ADDR-ZERO");
+
+    // Cleans up the still-pending promise so it can't resolve after the test ends.
+    resolveBalance(0n);
+  });
+
+  it("renders a distinct, non-crashing fallback (not a thrown error) when getBalance rejects", async () => {
+    const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
+    const getBalance = vi.fn(async (): Promise<bigint> => {
+      throw new Error("gateway unreachable");
+    });
+
+    expect(() =>
+      render(
+        <ArweaveAccountsArea
+          entries={[entry]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          getBalance={getBalance}
+        />,
+      ),
+    ).not.toThrow();
+
+    const errorCell = await screen.findByTestId(`arweave-account-value-${entry.id}-error`);
+    expect(errorCell.textContent).toBe("—");
+    // The non-error testid must no longer resolve — the row is unambiguously
+    // in the error state, not silently still "loading" or "ready".
+    expect(screen.queryByTestId(`arweave-account-value-${entry.id}`)).toBeNull();
+  });
+
+  it("shows a 'Live balances' label and a refresh control that re-invokes getBalance for every visible row", async () => {
+    const entryA = makeEntry({ id: "a", seedId: "seed-1", index: 0, address: "ADDR-A" });
+    const entryB = makeEntry({ id: "b", seedId: "seed-1", index: 1, address: "ADDR-B" });
+    const getBalance = vi.fn(async () => 1_000_000_000_000n);
+
+    render(
+      <ArweaveAccountsArea
+        entries={[entryA, entryB]}
+        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        getBalance={getBalance}
+      />,
+    );
+
+    await waitFor(() => expect(getBalance).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Live balances")).toBeInTheDocument();
+
+    const refreshButton = screen.getByTestId("arweave-accounts-refresh");
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(getBalance).toHaveBeenCalledTimes(4));
+    expect(getBalance).toHaveBeenNthCalledWith(3, "ADDR-A");
+    expect(getBalance).toHaveBeenNthCalledWith(4, "ADDR-B");
   });
 
   it("copies the row's address (address ?? id) to the clipboard on copy-button click", () => {

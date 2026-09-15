@@ -1169,6 +1169,8 @@ function makePanelDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelD
     deleteForeignKey: vi.fn(async () => {}),
     getBalance: vi.fn(async () => 0n),
     send: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 0n })),
+    sendFrom: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 0n })),
+    estimateFee: vi.fn(async () => 100_000_000n),
     pollStatus: vi.fn(async () => "final" as const),
     uploadAndTrack: vi.fn(async () => ({
       id: "id",

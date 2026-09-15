@@ -80,6 +80,8 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
 
     getBalance: vi.fn(async () => 1_500_000_000_000n),
     send: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 1_000_000n })),
+    sendFrom: vi.fn(async () => ({ id: ARWEAVE_ADDRESS, reward: 1_000_000n })),
+    estimateFee: vi.fn(async () => 100_000_000n),
     pollStatus: vi.fn(async () => "final" as const),
 
     uploadAndTrack: vi.fn(async () => ({
@@ -156,6 +158,18 @@ describe("ArweavePanel — the five-category menu", () => {
       expect(body.textContent).toMatch(/not wired yet/i);
     },
   );
+
+  it("threads deps all the way to Accounts so its Send button is actually reachable (not just present on the component)", () => {
+    // Regression guard: ArweaveAccountsArea's `deps` prop can exist and be
+    // fully tested in isolation while ArweavePanel simply never passes it
+    // down — the Send button then silently never renders in the real app.
+    // This mounts the real ArweavePanel (not ArweaveAccountsArea directly)
+    // with real deps and checks the button is actually there.
+    renderPanel();
+    expect(
+      screen.getByTestId(`arweave-account-send-${ARWEAVE_ADDRESS}`),
+    ).toBeInTheDocument();
+  });
 
   it("shows exactly one category body at a time (switching away unmounts the last)", () => {
     renderPanel();

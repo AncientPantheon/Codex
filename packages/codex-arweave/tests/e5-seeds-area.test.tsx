@@ -562,6 +562,8 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
       deleteForeignKey,
       getBalance: vi.fn(async () => 0n),
       send: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      sendFrom: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      estimateFee: vi.fn(async () => 100_000_000n),
       pollStatus: vi.fn(async () => "final" as const),
       uploadAndTrack: vi.fn(async () => ({
         id: "item",
@@ -687,6 +689,8 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
       deleteForeignKey: vi.fn(async () => {}),
       getBalance: vi.fn(async () => 0n),
       send: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      sendFrom: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      estimateFee: vi.fn(async () => 100_000_000n),
       pollStatus: vi.fn(async () => "final" as const),
       uploadAndTrack: vi.fn(async () => ({
         id: "item",
@@ -809,6 +813,8 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
       deleteForeignKey,
       getBalance: vi.fn(async () => 0n),
       send: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      sendFrom: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      estimateFee: vi.fn(async () => 100_000_000n),
       pollStatus: vi.fn(async () => "final" as const),
       uploadAndTrack: vi.fn(async () => ({
         id: "item",
@@ -3362,6 +3368,8 @@ describe("ArweavePanel — warn before leaving an in-flight generation (T2)", ()
       deleteForeignKey: vi.fn(async () => {}),
       getBalance: vi.fn(async () => 0n),
       send: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      sendFrom: vi.fn(async () => ({ id: "tx", reward: 0n })),
+      estimateFee: vi.fn(async () => 100_000_000n),
       pollStatus: vi.fn(async () => "final" as const),
       uploadAndTrack: vi.fn(async () => ({
         id: "item",

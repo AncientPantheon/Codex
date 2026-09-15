@@ -31,6 +31,7 @@
 import {
   addressOf,
   createGatewayPool,
+  estimateFee,
   importKeyfile,
   type ArweaveJwk,
   type GatewayPool,
@@ -296,6 +297,14 @@ export function buildRealPanelDeps({
           addForeignKey: addForeignKey ?? (async () => {}),
           deleteForeignKey,
         });
+  // Pulled into a local const (rather than read off the returned object
+  // literal) so `sendFrom` below can call the SAME resolved fallback — the
+  // fallback throw is kept only for the case `persistence` itself is unarmed.
+  const decryptArweaveKey =
+    persistence?.decryptArweaveKey ??
+    (async () => {
+      throw new Error("decryptArweaveKey requires the unlock-gated keyring.");
+    });
 
   return {
     address: ownerAddress,
@@ -317,9 +326,7 @@ export function buildRealPanelDeps({
           "Arweave import cannot be persisted: no codex password seam was wired.",
         );
       }),
-    decryptArweaveKey: async () => {
-      throw new Error("decryptArweaveKey requires the unlock-gated keyring.");
-    },
+    decryptArweaveKey,
     addForeignKey: persistence?.addForeignKey ?? (async () => {}),
     renameForeignKey: async () => {},
     deleteForeignKey: persistence?.deleteForeignKey ?? (async () => {}),
@@ -335,6 +342,26 @@ export function buildRealPanelDeps({
         "Real send requires an unlocked keyfile JWK; import one first.",
       );
     },
+    sendFrom: async (
+      entry: ForeignKeyEntry,
+      req: ArweaveSendRequest,
+    ): Promise<ArweaveSendResult> => {
+      // Resolve the JWK ONLY at call time (never cached) — a re-locked codex
+      // must fail the decrypt loudly rather than sign with a stale key. Any
+      // failure at any of these three steps propagates unwrapped: a decrypt
+      // failure, a `buildSend` validation error (bad target/amount/missing
+      // cap), or a `post` failure (anchor/price/fee-cap/network) all surface
+      // as their own error, never swallowed into a generic one.
+      const jwk = await decryptArweaveKey(entry);
+      const built = await resolvedAdapter.buildSend({
+        target: req.target,
+        quantity: req.quantity,
+        maxRewardWinston: req.maxRewardWinston,
+      });
+      return (await resolvedAdapter.post(built, jwk)) as ArweaveSendResult;
+    },
+    estimateFee: (byteSize: number, target: string): Promise<bigint> =>
+      estimateFee(resolvedPool, byteSize, target),
     pollStatus: async (id: string): Promise<"pending" | "final"> => {
       // E3's pollStatus is void — it flips the store entry to `final` on deep
       // confirmation. Read the entry back to surface the current status the

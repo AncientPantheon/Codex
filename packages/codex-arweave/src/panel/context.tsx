@@ -121,6 +121,13 @@ export interface ArweavePanelDeps {
   getBalance: (address: string) => Promise<bigint>;
   /** E2 send: resolves `{id,reward}` or throws the fee-cap/non-cap error matrix. */
   send: (req: ArweaveSendRequest) => Promise<ArweaveSendResult>;
+  /** E2 send-from: resolves the JWK for the given entry at call time (never
+   *  cached) and sends from it, resolving `{id,reward}` or throwing the same
+   *  fee-cap/non-cap error matrix as `send`. */
+  sendFrom: (entry: ForeignKeyEntry, req: ArweaveSendRequest) => Promise<ArweaveSendResult>;
+  /** E2 fee estimate: a live Winston quote for a `byteSize`/`target` pair, used
+   *  to show "Network fee: ~X AR" and to derive the buffered `maxRewardWinston` cap. */
+  estimateFee: (byteSize: number, target: string) => Promise<bigint>;
   /** E2 status poll: resolves the current confirmation state for a tx id. */
   pollStatus: (id: string) => Promise<"pending" | "final">;
 

@@ -35,13 +35,24 @@
  * at the repo root where `react` resolves to the stale hoisted React 18, so
  * importing it renders elements from a second React ("A React Element from an
  * older version of React was rendered"). Same rule as `ArweavePanel.tsx`.
+ *
+ * T7: each row also gets a "Send AR" button opening `SendArweaveModal.tsx` for
+ * that row's entry — the one place this file stops being purely
+ * presentational-only-of-ciphertext and threads the full `ArweavePanelDeps`
+ * bundle down to a row, OPTIONALLY (`deps` prop, gated the same way
+ * `onDeleteKey` already is): a caller that omits it gets no Send button at
+ * all, rather than one that would throw or no-op on click. A successful send
+ * re-fires T4's `fetchBalances([address])` for exactly that row.
  */
 
 import * as React from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { winstonToAr } from "@ancientpantheon/arweave-core";
+
+import type { ArweavePanelDeps } from "./context.js";
+import { SendArweaveModal } from "./SendArweaveModal.js";
 
 /** The id of the TRUE-ORPHAN catch-all group: a `seedId` naming no known seed
  *  (unknown/legacy provenance). NOT a real seed id — no seed may use it. */
@@ -98,6 +109,14 @@ const ExternalLinkGlyph = ({ style }: { style?: React.CSSProperties }): React.Re
     <path d="M10 14 21 3" />
   </svg>
 );
+/** T7's per-row "Send AR" button glyph — a paper-plane send icon, same
+ *  inline-SVG rule (module JSDoc). */
+const SendGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <path d="m22 2-7 20-4-9-9-4Z" />
+    <path d="M22 2 11 13" />
+  </svg>
+);
 /** Same glyph as `ArweaveSeedsArea.tsx`'s `TrashGlyph` — this module stays
  *  self-contained (module JSDoc), so it is duplicated rather than imported. */
 const TrashGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
@@ -105,6 +124,14 @@ const TrashGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElem
     <path d="M3 6h18" />
     <path d="M8 6V4h8v2" />
     <path d="M19 6l-1 14H6L5 6" />
+  </svg>
+);
+/** The "Live balances" header's refresh-all control — same inline-SVG rule
+ *  (module JSDoc), mirroring `StoaAccountsTab.tsx`'s `RefreshCw` glyph. */
+const RefreshGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
   </svg>
 );
 
@@ -135,10 +162,19 @@ export interface ArweaveAccountsAreaProps {
    *  delete button would either throw on click or silently do nothing. */
   onDeleteKey?: (entry: ForeignKeyEntry) => Promise<void> | void;
   /** E2 balance read (winston bigint). OPTIONAL and additive — a caller that
-   *  omits it gets today's plain confirm-then-delete panel, unchanged
-   *  (design.md §3). When wired, a funded row's delete guard branches on its
-   *  group's `protected` tier (see {@link Group}). */
+   *  omits it gets a plain "—" value cell and today's plain confirm-then-
+   *  delete panel, unchanged (design.md §3). When wired, it feeds TWO
+   *  independent consumers: (1) every row's value cell, fired once per row
+   *  on mount and on "Refresh" (T4, parallel via `Promise.allSettled`), and
+   *  (2) the delete guard's own on-click read below, which branches on its
+   *  group's `protected` tier (see {@link Group}) — unaffected by (1). */
   getBalance?: (address: string) => Promise<bigint>;
+  /** T7: the full injected seam bundle, needed only to open the per-row Send
+   *  modal (`deps.sendFrom`/`deps.estimateFee`). OPTIONAL and additive,
+   *  mirroring `onDeleteKey`'s own omission convention — a caller that omits
+   *  it (this file's own pre-T7 tests) gets no Send button on any row rather
+   *  than a button that would throw or no-op on click. */
+  deps?: ArweavePanelDeps;
 }
 
 interface Group {
@@ -153,6 +189,12 @@ interface Group {
    *  whose `hasWords` is explicitly `false`. */
   protected: boolean;
 }
+
+/** The live value-cell read state for ONE row's address (T4). Distinct from
+ *  {@link DeleteGuardState} below — that state machine drives its OWN,
+ *  separately-fired `getBalance` call on delete-click; this one drives the
+ *  value cell's automatic on-mount/on-refresh read. */
+type BalanceState = { status: "loading" } | { status: "ready"; balance: bigint } | { status: "error" };
 
 /** Ascending by `index`; an entry without one (legacy) sorts last. */
 function byIndexAscending(a: ForeignKeyEntry, b: ForeignKeyEntry): number {
@@ -204,6 +246,9 @@ function AccountRow({
   onDeleteKey,
   getBalance,
   protectedTier,
+  balances,
+  deps,
+  onSendSuccess,
 }: {
   entry: ForeignKeyEntry;
   onDeleteKey?: (entry: ForeignKeyEntry) => Promise<void> | void;
@@ -211,11 +256,21 @@ function AccountRow({
   /** This row's group's balance-delete-guard tier (design.md §3). Only
    *  consulted once a funded balance is actually read. */
   protectedTier: boolean;
+  /** The live value-cell read state, keyed by address (T4) — owned and
+   *  fetched by {@link ArweaveAccountsArea}, not this row. */
+  balances: Record<string, BalanceState>;
+  /** T7: the injected seam bundle the Send modal needs. Absent → no Send
+   *  button renders at all (same gating as `onDeleteKey`). */
+  deps?: ArweavePanelDeps;
+  /** T7: fired with this row's address on a successful send, so the parent
+   *  can re-fire T4's `fetchBalances([address])` for exactly this row. */
+  onSendSuccess?: (address: string) => void;
 }): React.ReactElement {
   // `address` is plaintext public material; `id` is the fallback. The
   // `encryptedKeyfile` is never read here — see module JSDoc.
   const address = entry.address ?? entry.id;
   const position = typeof entry.index === "number" ? `#${entry.index}` : (entry.label ?? "—");
+  const [sendOpen, setSendOpen] = useState(false);
 
   /** Confirm-then-delete: matches Arweave's OWN seed-delete pattern
    *  (`ArweaveSeedsArea.tsx`'s `SeedRow`), not Chainweb's immediate `onRemove`
@@ -255,18 +310,58 @@ function AccountRow({
         >
           {address}
         </span>
-        {/* Balances are out of scope for this whole project (design.md) — this
-            is a static placeholder, never a store or network read. */}
-        <span
-          data-testid={`arweave-account-value-${entry.id}`}
-          style={{ fontFamily: MONO, fontSize: 12, fontWeight: 600, color: "#555", flexShrink: 0 }}
-        >
-          Empty
-        </span>
+        {/* T4: the live value cell — fetched by the parent via `getBalance`,
+            one call per row on mount and on "Refresh" (Promise.allSettled).
+            `balances[address]` is absent entirely when `getBalance` was never
+            wired at all (an inert "—", never attempted a read). */}
+        {(() => {
+          const balanceState = balances[address];
+          const isError = balanceState?.status === "error";
+          const testId = isError
+            ? `arweave-account-value-${entry.id}-error`
+            : `arweave-account-value-${entry.id}`;
+          const content =
+            balanceState?.status === "ready"
+              ? `${winstonToAr(balanceState.balance)} AR`
+              : balanceState?.status === "loading"
+                ? "…"
+                : "—";
+          const color =
+            balanceState?.status === "ready"
+              ? balanceState.balance > 0n
+                ? ACCENT
+                : "#555"
+              : isError
+                ? "#f87171"
+                : "#555";
+          return (
+            <span
+              data-testid={testId}
+              style={{ fontFamily: MONO, fontSize: 12, fontWeight: 600, color, flexShrink: 0 }}
+            >
+              {content}
+            </span>
+          );
+        })()}
         <span
           onClick={(e) => e.stopPropagation()}
           style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}
         >
+          {deps && (
+            <button
+              type="button"
+              data-testid={`arweave-account-send-${entry.id}`}
+              title="Send AR"
+              aria-label="Send AR"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSendOpen(true);
+              }}
+              style={iconButtonStyle}
+            >
+              <SendGlyph style={{ width: 13, height: 13 }} />
+            </button>
+          )}
           <button
             type="button"
             data-testid={`arweave-account-copy-${entry.id}`}
@@ -423,6 +518,16 @@ function AccountRow({
           </button>
         </div>
       )}
+
+      {deps && (
+        <SendArweaveModal
+          entry={entry}
+          isOpen={sendOpen}
+          onClose={() => setSendOpen(false)}
+          deps={deps}
+          onSuccess={() => onSendSuccess?.(address)}
+        />
+      )}
     </div>
   );
 }
@@ -431,10 +536,16 @@ function GroupSection({
   group,
   onDeleteKey,
   getBalance,
+  balances,
+  deps,
+  onSendSuccess,
 }: {
   group: Group;
   onDeleteKey?: (entry: ForeignKeyEntry) => Promise<void> | void;
   getBalance?: (address: string) => Promise<bigint>;
+  balances: Record<string, BalanceState>;
+  deps?: ArweavePanelDeps;
+  onSendSuccess?: (address: string) => void;
 }): React.ReactElement {
   const [open, setOpen] = useState(true);
   return (
@@ -489,6 +600,9 @@ function GroupSection({
                 onDeleteKey={onDeleteKey}
                 getBalance={getBalance}
                 protectedTier={group.protected}
+                balances={balances}
+                deps={deps}
+                onSendSuccess={onSendSuccess}
               />
             ))
           )}
@@ -503,8 +617,60 @@ export function ArweaveAccountsArea({
   seeds,
   onDeleteKey,
   getBalance,
+  deps,
 }: ArweaveAccountsAreaProps): React.ReactElement {
   const [subTab, setSubTab] = useState<"codex" | "watch">("codex");
+
+  // T4: live per-row balances. Every entry's resolvable address — same
+  // fallback the row itself uses (`entry.address ?? entry.id`).
+  const addresses = useMemo(() => entries.map((entry) => entry.address ?? entry.id), [entries]);
+  const [balances, setBalances] = useState<Record<string, BalanceState>>({});
+
+  /** Reads `getBalance(address)` for the given addresses, ALL in parallel via
+   *  `Promise.allSettled` (no bulk-read capability exists in arweave-core —
+   *  design.md), marking each address "loading" first so the value cell never
+   *  silently keeps its stale content while a new read is in flight.
+   *
+   *  Also THE per-row refresh hook point a later task (T7's Send modal, after
+   *  a successful send) can reuse — `fetchBalances([address])` refreshes
+   *  exactly that one row without re-fetching every other row. */
+  const fetchBalances = useCallback(
+    (targets: readonly string[]) => {
+      if (!getBalance) return;
+      setBalances((prev) => {
+        const next = { ...prev };
+        for (const addr of targets) next[addr] = { status: "loading" };
+        return next;
+      });
+      void Promise.allSettled(targets.map((addr) => getBalance(addr))).then((results) => {
+        setBalances((prev) => {
+          const next = { ...prev };
+          results.forEach((result, i) => {
+            const addr = targets[i];
+            next[addr] =
+              result.status === "fulfilled"
+                ? { status: "ready", balance: result.value }
+                : { status: "error" };
+          });
+          return next;
+        });
+      });
+    },
+    [getBalance],
+  );
+
+  const refreshAllBalances = useCallback(() => {
+    fetchBalances(addresses);
+  }, [fetchBalances, addresses]);
+
+  // Fires once per row on mount, and again whenever the entry list itself
+  // changes (a key generated/imported/deleted) — re-reading the FULL set,
+  // matching `refreshAllBalances`'s own scope.
+  useEffect(() => {
+    refreshAllBalances();
+  }, [refreshAllBalances]);
+
+  const anyBalanceLoading = addresses.some((addr) => balances[addr]?.status === "loading");
 
   const groups = useMemo<Group[]>(() => {
     const known = new Map<string, ForeignKeyEntry[]>(seeds.map((seed) => [seed.id, []]));
@@ -604,6 +770,41 @@ export function ArweaveAccountsArea({
             {entries.length + WATCHED_COUNT}
           </div>
         </div>
+        <div style={{ flex: 1 }} />
+        {/* T4: "Live balances / Refresh" — mirrors `StoaAccountsTab.tsx`'s own
+            live-chain-status + refresh convention, adapted to this file's
+            established inline-SVG styling. */}
+        {anyBalanceLoading ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#888" }}>
+            <RefreshGlyph style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+            Reading balances…
+          </span>
+        ) : (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#4ade80" }}>
+            Live balances
+          </span>
+        )}
+        <button
+          type="button"
+          data-testid="arweave-accounts-refresh"
+          title="Refresh balances"
+          onClick={refreshAllBalances}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 8px",
+            borderRadius: 6,
+            border: "1px solid #262626",
+            background: "transparent",
+            color: "#888",
+            cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          <RefreshGlyph style={{ width: 11, height: 11 }} />
+          Refresh
+        </button>
       </div>
 
       {/* Codex / Watched toggle */}
@@ -670,7 +871,15 @@ export function ArweaveAccountsArea({
             </div>
           ) : (
             groups.map((group) => (
-              <GroupSection key={group.id} group={group} onDeleteKey={onDeleteKey} getBalance={getBalance} />
+              <GroupSection
+                key={group.id}
+                group={group}
+                onDeleteKey={onDeleteKey}
+                getBalance={getBalance}
+                balances={balances}
+                deps={deps}
+                onSendSuccess={(address) => fetchBalances([address])}
+              />
             ))
           )}
         </div>

@@ -99,21 +99,21 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
     ).toBeInTheDocument();
   });
 
-  it("boots Arweave in mock+offline with the gateway on the testnet/local default (funds-safety)", async () => {
+  it("boots Arweave in mock+offline with the gateway on the real mainnet default", async () => {
     await mountDashboard();
 
-    // Funds-safety, asserted at the level that still carries it.
-    //
     // Two things changed under this test: the on-screen mock/real toggle was
     // removed from the shell (unstyled dev chrome), and every Arweave category
     // is now an empty placeholder pending real wiring. So the DOM no longer
     // renders ANY adapter output — it cannot prove "mock mode is live" any more,
     // and asserting on panel text here would be asserting on a placeholder.
     //
-    // What survives, and is what actually protects funds: the shell reaches
-    // Arweave without contacting a gateway, and the gateway default is pinned
-    // away from mainnet. Adapter-mode selection itself is covered where the
-    // wiring is built (e5-foreign-chains-mock).
+    // What survives: the shell reaches Arweave without contacting a gateway,
+    // and the app still boots mock+offline by default even though the
+    // gateway default itself now points at real mainnet (`arweave.net`) —
+    // mock mode never dials out regardless of the configured gateway.
+    // Adapter-mode selection itself is covered where the wiring is built
+    // (e5-foreign-chains-mock).
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: /blockchain accounts/i }));
     const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
@@ -123,8 +123,8 @@ describe("PG-03 standalone — the dashboard composes the codex + Foreign Chains
 
     // The category strip mounts (chain reachable) with no network in play.
     expect(await screen.findByTestId("arweave-subtab-seeds")).toBeInTheDocument();
-    // Never mainnet by default.
-    expect(DEFAULT_GATEWAY_URL).not.toContain("arweave.net");
+    // Real mainnet reads are now the deliberate default (see ArweaveModeToggle.tsx).
+    expect(DEFAULT_GATEWAY_URL).toContain("arweave.net");
   });
 });
 

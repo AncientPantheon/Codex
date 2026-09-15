@@ -205,6 +205,8 @@ export function buildMockPanelDeps(
     // balance / send seams (fakes)
     getBalance: async () => (await adapter.getBalance()) as bigint,
     send: async () => ({ id: "mock-send-tx", reward: 0n }),
+    sendFrom: async () => ({ id: "mock-send-tx", reward: 0n }),
+    estimateFee: async () => 100_000_000n,
     pollStatus: async () => "final",
 
     // upload / library seams (fakes)

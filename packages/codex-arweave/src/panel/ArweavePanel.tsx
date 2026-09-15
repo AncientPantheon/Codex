@@ -513,15 +513,16 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
             // key via the Pure Keys category. `onDeleteKey` is optional on
             // this component precisely so omitting it renders no delete
             // control on any row at all (see this component's own module doc).
-            // getBalance intentionally NOT threaded here yet: `deps.getBalance`
-            // has no real chain observation behind it in this build (mock mode's
-            // fake always resolves the SAME fixed balance for every address,
-            // including a key created seconds ago with nothing on it). Wiring
-            // it would make the funded-key delete guard fire on genuinely empty
-            // keys — a false positive, not a safety net. `getBalance` is
-            // optional on this component precisely so the guard is a no-op
-            // (today's plain confirm) until a real balance read exists to feed
-            // it. Re-add this prop once that's wired.
+            // getBalance IS now threaded (was deliberately withheld until this
+            // was wired): every row shows a live AR balance, fetched in
+            // parallel per row with a "Live balances / Refresh" control
+            // mirroring StoaAccountsTab. The same read also still feeds the
+            // funded-key delete guard, unchanged from before this task.
+            getBalance={deps?.getBalance}
+            // deps (full ArweavePanelDeps) threaded so the row-level Send
+            // button/modal can reach sendFrom/estimateFee — deps is `null`
+            // here (no-context state) but the prop wants `undefined`.
+            deps={deps ?? undefined}
           />
         ) : active === "pure-keys" ? (
           deps === null ? (
@@ -538,12 +539,19 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
               addForeignKey={handleAddPureKey}
               renameForeignKey={handleRenamePureKey}
               deleteForeignKey={handleDeletePureKey}
-              // getBalance intentionally NOT threaded here yet — see the same
-              // note on <ArweaveAccountsArea> above. A Pure Key is *always*
-              // seedless (this is exactly the case the funded-guard exists to
-              // protect), so a false-positive "funded, can't delete" warning
-              // here is the single most visible place this would bite a user
-              // testing a freshly-generated, genuinely-empty key.
+              // getBalance intentionally NOT threaded here yet: mock mode's
+              // fake `getBalance` always resolves the SAME fixed balance for
+              // every address, including a key created seconds ago with
+              // nothing on it. A Pure Key is *always* seedless (exactly the
+              // case the funded-guard exists to protect), so wiring it here
+              // would make a false-positive "funded, can't delete" warning
+              // the single most visible place this would bite a user testing
+              // a freshly-generated, genuinely-empty key. `getBalance` is
+              // optional on this component precisely so the guard stays a
+              // no-op (today's plain confirm) until a real balance read
+              // exists to feed it — unlike Accounts (T4), this one is NOT yet
+              // wired to a live value display either, so there is no display
+              // reason to force the read here today.
             />
           )
         ) : active !== "seeds" ? (

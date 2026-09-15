@@ -107,6 +107,15 @@ export {
   InvalidGatewayResponseError,
 } from "./reads/errors.js";
 
+// ── Reads: Winston fee/price-quote estimate (Phase 4) ───────────────────────
+// Extracted from `tx/transfer.ts`'s own inline price-fetch so there is exactly
+// one implementation of "fetch and validate a Winston price quote through the
+// pool" — `sendTransfer` calls this too. `EstimateFeeOptions.getPrice` is an
+// internal seam `sendTransfer` reuses for its own test-injectable
+// `apiFactory`; a plain consumer never needs it.
+export { estimateFee } from "./reads/fee.js";
+export type { EstimateFeeOptions, EstimateFeeGetPriceFn } from "./reads/fee.js";
+
 // ── Transfer: native AR transfer orchestration (Phase 3) ───────────────────
 // The per-endpoint arweave-js client factory (endpointClient.ts) is
 // DELIBERATELY PRIVATE — an internal seam of the tx path; consumers configure
