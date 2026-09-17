@@ -50,9 +50,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { winstonToAr } from "@ancientpantheon/arweave-core";
+import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
+import { validateAddress } from "@ancientpantheon/codex-ouronet/hooks";
+import { onTxConfirmed } from "@ancientpantheon/codex-ouronet/zbom";
 
 import type { ArweavePanelDeps } from "./context.js";
 import { SendArweaveModal } from "./SendArweaveModal.js";
+import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
+
+/** A single STABLE empty array, reused as `watchedEntries`'s default when the
+ *  prop is omitted. A `[]` written directly in the destructuring default is a
+ *  NEW array literal on every render, which changes `addresses`'s (T4) memoized
+ *  identity every render, which re-fires the balance-fetch effect every render
+ *  — an infinite render loop the very first time this component mounts without
+ *  `watchedEntries` wired (i.e. every pre-T2 caller). */
+const EMPTY_WATCHED_ENTRIES: WatchListEntry[] = [];
 
 /** The id of the TRUE-ORPHAN catch-all group: a `seedId` naming no known seed
  *  (unknown/legacy provenance). NOT a real seed id — no seed may use it. */
@@ -100,6 +112,13 @@ const CopyGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactEleme
   <svg {...svgBase} style={style}>
     <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
     <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+  </svg>
+);
+/** `data-glyph="check"` lets tests distinguish this from the resting
+ *  `CopyGlyph` without depending on SVG path internals. */
+const CheckGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style} data-glyph="check">
+    <polyline points="20 6 9 17 4 12" />
   </svg>
 );
 const ExternalLinkGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
@@ -175,6 +194,21 @@ export interface ArweaveAccountsAreaProps {
    *  it (this file's own pre-T7 tests) gets no Send button on any row rather
    *  than a button that would throw or no-op on click. */
   deps?: ArweavePanelDeps;
+  /** T2: third-party addresses the codex holds no private key for — the
+   *  Watched Accounts sub-tab's list. OPTIONAL and additive: a caller that
+   *  omits it (every pre-T2 test in this file) sees the Watched sub-tab's
+   *  existing empty state and no watched rows, exactly as before this task. */
+  watchedEntries?: WatchListEntry[];
+  /** Adds a new watched address, or (called again with the same address)
+   *  re-labels an existing one — the upsert-by-id semantics of the host's
+   *  `addWatchListEntry` make this the same seam for both. OPTIONAL: absent
+   *  disables the add form (its submit button renders but stays `disabled`)
+   *  and the inline label editor on every watched row. */
+  onAddWatched?: (address: string, label?: string) => Promise<void>;
+  /** Removes one watched address by its watch-list entry id. OPTIONAL: absent
+   *  disables the remove control on every watched row (mirrors `onDeleteKey`'s
+   *  own gating). */
+  onRemoveWatched?: (id: string) => Promise<void>;
 }
 
 interface Group {
@@ -195,6 +229,18 @@ interface Group {
  *  separately-fired `getBalance` call on delete-click; this one drives the
  *  value cell's automatic on-mount/on-refresh read. */
 type BalanceState = { status: "loading" } | { status: "ready"; balance: bigint } | { status: "error" };
+
+/** "Live balances" alone doesn't say whether it's stale — there is no
+ *  periodic polling at all (only on-mount, manual Refresh, post-send, and
+ *  post-confirmation reads), so a plain "updated Xs ago" is how a user
+ *  actually tells freshness from staleness at a glance. */
+function formatUpdatedAgo(lastFetchedAt: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - lastFetchedAt) / 1000));
+  if (seconds < 5) return "Updated just now";
+  if (seconds < 60) return `Updated ${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  return `Updated ${minutes}m ago`;
+}
 
 /** Ascending by `index`; an entry without one (legacy) sorts last. */
 function byIndexAscending(a: ForeignKeyEntry, b: ForeignKeyEntry): number {
@@ -240,6 +286,89 @@ const dangerIconButtonStyle: React.CSSProperties = {
  *  Protected-tier row with sharper copy), `"blocked"` (funded + Unprotected —
  *  no delete action at all, only dismiss). */
 type DeleteGuardState = "idle" | "checking" | "confirm" | "blocked";
+
+/** The live value-cell read (T4), factored out of `AccountRow` so `WatchedRow`
+ *  (T2) renders the identical loading/ready/error states off the SAME
+ *  `balances` map the parent fetches into — a watched row's balance goes
+ *  through the exact same `getBalance` pipeline as a Codex-owned row, per
+ *  design.md. `testIdBase` is the caller's own per-row id prefix (e.g.
+ *  `arweave-account-value-${entry.id}` / `arweave-watched-value-${w.id}`); the
+ *  error state appends `-error`, unchanged from `AccountRow`'s original
+ *  contract. */
+function BalanceCell({
+  testIdBase,
+  address,
+  balances,
+}: {
+  testIdBase: string;
+  address: string;
+  balances: Record<string, BalanceState>;
+}): React.ReactElement {
+  const balanceState = balances[address];
+  const isError = balanceState?.status === "error";
+  const testId = isError ? `${testIdBase}-error` : testIdBase;
+  const content =
+    balanceState?.status === "ready"
+      ? `${winstonToAr(balanceState.balance)} AR`
+      : balanceState?.status === "loading"
+        ? "…"
+        : "—";
+  const color =
+    balanceState?.status === "ready"
+      ? balanceState.balance > 0n
+        ? ACCENT
+        : "#555"
+      : isError
+        ? "#f87171"
+        : "#555";
+  return (
+    <span
+      data-testid={testId}
+      style={{ fontFamily: MONO, fontSize: 12, fontWeight: 600, color, flexShrink: 0 }}
+    >
+      {content}
+    </span>
+  );
+}
+
+/** The copy-address icon button, shared by `AccountRow` and `WatchedRow` —
+ *  same green-check-then-revert feedback as Chainweb's `IconCopyBtn`
+ *  (`StoaAccountsTab.tsx`), which this previously had no equivalent of: a
+ *  click here used to give no visible confirmation at all. Mirrors
+ *  `IconCopyBtn`'s exact timing (1200ms) and color swap (green background +
+ *  border + icon while `copied`). */
+function CopyButton({ testId, address }: { testId: string; address: string }): React.ReactElement {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title="Copy address"
+      aria-label="Copy address"
+      onClick={(e) => {
+        e.stopPropagation();
+        // Same idiom as `ArweaveSeedsArea.tsx`'s copy handler: `void` a
+        // possibly-undefined result rather than chaining `.catch` onto it,
+        // since a bare `vi.fn()` test double returns `undefined`.
+        void navigator.clipboard?.writeText(address);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+      style={{
+        ...iconButtonStyle,
+        backgroundColor: copied ? "#0a2a14" : iconButtonStyle.backgroundColor,
+        color: copied ? "#4ade80" : iconButtonStyle.color,
+        border: copied ? "1px solid rgba(74,222,128,0.4)" : iconButtonStyle.border,
+      }}
+    >
+      {copied ? (
+        <CheckGlyph style={{ width: 13, height: 13 }} />
+      ) : (
+        <CopyGlyph style={{ width: 13, height: 13 }} />
+      )}
+    </button>
+  );
+}
 
 function AccountRow({
   entry,
@@ -314,35 +443,7 @@ function AccountRow({
             one call per row on mount and on "Refresh" (Promise.allSettled).
             `balances[address]` is absent entirely when `getBalance` was never
             wired at all (an inert "—", never attempted a read). */}
-        {(() => {
-          const balanceState = balances[address];
-          const isError = balanceState?.status === "error";
-          const testId = isError
-            ? `arweave-account-value-${entry.id}-error`
-            : `arweave-account-value-${entry.id}`;
-          const content =
-            balanceState?.status === "ready"
-              ? `${winstonToAr(balanceState.balance)} AR`
-              : balanceState?.status === "loading"
-                ? "…"
-                : "—";
-          const color =
-            balanceState?.status === "ready"
-              ? balanceState.balance > 0n
-                ? ACCENT
-                : "#555"
-              : isError
-                ? "#f87171"
-                : "#555";
-          return (
-            <span
-              data-testid={testId}
-              style={{ fontFamily: MONO, fontSize: 12, fontWeight: 600, color, flexShrink: 0 }}
-            >
-              {content}
-            </span>
-          );
-        })()}
+        <BalanceCell testIdBase={`arweave-account-value-${entry.id}`} address={address} balances={balances} />
         <span
           onClick={(e) => e.stopPropagation()}
           style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}
@@ -362,22 +463,7 @@ function AccountRow({
               <SendGlyph style={{ width: 13, height: 13 }} />
             </button>
           )}
-          <button
-            type="button"
-            data-testid={`arweave-account-copy-${entry.id}`}
-            title="Copy address"
-            aria-label="Copy address"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Same idiom as `ArweaveSeedsArea.tsx`'s copy handler: `void` a
-              // possibly-undefined result rather than chaining `.catch` onto
-              // it, since a bare `vi.fn()` test double returns `undefined`.
-              void navigator.clipboard?.writeText(address);
-            }}
-            style={iconButtonStyle}
-          >
-            <CopyGlyph style={{ width: 13, height: 13 }} />
-          </button>
+          <CopyButton testId={`arweave-account-copy-${entry.id}`} address={address} />
           <a
             data-testid={`arweave-account-explorer-${entry.id}`}
             href={explorerUrl(address)}
@@ -526,7 +612,191 @@ function AccountRow({
           onClose={() => setSendOpen(false)}
           deps={deps}
           onSuccess={() => onSendSuccess?.(address)}
+          // Reuses the SAME balances map the value cell above already reads
+          // (T4) — no extra fetch. Undefined (loading/error/unfetched)
+          // simply leaves the modal's amount-fits-balance check inert; it
+          // never blocks submit on an unknown balance (see the modal's own
+          // prop doc).
+          senderBalanceWinston={balances[address]?.status === "ready" ? balances[address].balance : undefined}
         />
+      )}
+    </div>
+  );
+}
+
+/** T2: one row of the Watched Accounts sub-tab — a third-party address the
+ *  codex holds no private key for. `WatchListEntry` cannot be handed to
+ *  `AccountRow` unmodified (it takes a `ForeignKeyEntry`, which carries a
+ *  mandatory `encryptedKeyfile`), so this is a SEPARATE component, not an
+ *  overload.
+ *
+ *  Mirrors `AccountRow`'s layout (address text, the SAME `BalanceCell` off the
+ *  SAME `balances` map, copy, ViewBlock explorer link) plus an inline label
+ *  editor and a remove button, mirroring `StoaAccountsTab.tsx`'s own watched
+ *  row (`onRelabel`/`onRemove`, upsert-by-id semantics).
+ *
+ *  Deliberately carries NO `deps` prop and renders NO Send control anywhere:
+ *  there is no private key behind a watched address to sign a send with. */
+function WatchedRow({
+  entry,
+  balances,
+  onRelabel,
+  onRemove,
+}: {
+  entry: WatchListEntry;
+  /** The live value-cell read state, keyed by address (T4) — the SAME map
+   *  {@link ArweaveAccountsArea} fetches for the Codex rows; a watched
+   *  address's own address is included in that same fetch. */
+  balances: Record<string, BalanceState>;
+  /** Relabels this watched entry. Absent → no label editor renders (mirrors
+   *  `onDeleteKey`'s own gating on `AccountRow`). */
+  onRelabel?: (label: string) => void;
+  /** Removes this watched entry. Absent → no remove control renders. */
+  onRemove?: () => void;
+}): React.ReactElement {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(entry.label);
+
+  const saveLabel = (): void => {
+    onRelabel?.(draft.trim());
+    setEditing(false);
+  };
+
+  return (
+    <div
+      data-testid="arweave-watched-row"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: "8px 12px",
+        borderRadius: 10,
+        border: "1px solid #1a1a1a",
+        backgroundColor: "#0a0a0a",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontFamily: MONO,
+            fontSize: 12,
+            color: "#d2d3d4",
+            overflowWrap: "anywhere",
+          }}
+        >
+          {entry.address}
+        </span>
+        <BalanceCell
+          testIdBase={`arweave-watched-value-${entry.id}`}
+          address={entry.address}
+          balances={balances}
+        />
+        <span
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}
+        >
+          {/* Deliberately NO Send button here — a watched address has no
+              private key behind it to sign a send with (module JSDoc). */}
+          <CopyButton testId={`arweave-watched-copy-${entry.id}`} address={entry.address} />
+          <a
+            data-testid={`arweave-watched-explorer-${entry.id}`}
+            href={explorerUrl(entry.address)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open in Explorer"
+            aria-label="Open in Explorer"
+            onClick={(e) => e.stopPropagation()}
+            style={iconButtonStyle}
+          >
+            <ExternalLinkGlyph style={{ width: 13, height: 13 }} />
+          </a>
+          {onRemove && (
+            <button
+              type="button"
+              data-testid={`arweave-watched-remove-${entry.id}`}
+              title="Stop watching this address"
+              aria-label="Stop watching this address"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              style={dangerIconButtonStyle}
+            >
+              <TrashGlyph style={{ width: 13, height: 13 }} />
+            </button>
+          )}
+        </span>
+      </div>
+
+      {onRelabel && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "#555" }}>Label</span>
+          {editing ? (
+            <>
+              <input
+                autoFocus
+                data-testid={`arweave-watched-label-input-${entry.id}`}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveLabel();
+                  if (e.key === "Escape") setEditing(false);
+                }}
+                style={{
+                  flex: 1,
+                  height: 26,
+                  fontSize: 12,
+                  padding: "0 8px",
+                  borderRadius: 6,
+                  backgroundColor: "#0a0a0a",
+                  border: "1px solid #4ade8060",
+                  color: "#d2d3d4",
+                }}
+              />
+              <button
+                type="button"
+                data-testid={`arweave-watched-label-save-${entry.id}`}
+                onClick={saveLabel}
+                style={{ ...iconButtonStyle, width: "auto", padding: "0 10px", fontSize: 12 }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                data-testid={`arweave-watched-label-cancel-${entry.id}`}
+                onClick={() => setEditing(false)}
+                style={{ ...iconButtonStyle, width: "auto", padding: "0 10px", fontSize: 12 }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              data-testid={`arweave-watched-label-edit-${entry.id}`}
+              onClick={() => {
+                setDraft(entry.label);
+                setEditing(true);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                padding: "2px 8px",
+                borderRadius: 6,
+                background: "transparent",
+                border: "1px solid #262626",
+                color: "#888",
+                cursor: "pointer",
+              }}
+            >
+              {entry.label || "(set label)"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -618,13 +888,33 @@ export function ArweaveAccountsArea({
   onDeleteKey,
   getBalance,
   deps,
+  watchedEntries = EMPTY_WATCHED_ENTRIES,
+  onAddWatched,
+  onRemoveWatched,
 }: ArweaveAccountsAreaProps): React.ReactElement {
   const [subTab, setSubTab] = useState<"codex" | "watch">("codex");
 
   // T4: live per-row balances. Every entry's resolvable address — same
-  // fallback the row itself uses (`entry.address ?? entry.id`).
-  const addresses = useMemo(() => entries.map((entry) => entry.address ?? entry.id), [entries]);
+  // fallback the row itself uses (`entry.address ?? entry.id`) — PLUS (T2)
+  // every watched address, so a watched row reads its balance through the
+  // exact same fetch/refresh pipeline as a Codex-owned row.
+  const addresses = useMemo(
+    () => [
+      ...entries.map((entry) => entry.address ?? entry.id),
+      ...watchedEntries.map((w) => w.address),
+    ],
+    [entries, watchedEntries],
+  );
   const [balances, setBalances] = useState<Record<string, BalanceState>>({});
+  // When the FULL set (`refreshAllBalances`) last actually completed a read —
+  // NOT when a per-row `fetchBalances([address])` fires alone, so "updated
+  // Xs ago" always describes what the visible "Live balances" label claims.
+  // `null` until the first read resolves (nothing rendered yet to be stale).
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
+  // Ticks once a second purely to force a re-render — `formatUpdatedAgo`
+  // itself reads `Date.now()` fresh each render; this is what makes "Updated
+  // 3s ago" advance on screen without any new network read.
+  const [, setClockTick] = useState(0);
 
   /** Reads `getBalance(address)` for the given addresses, ALL in parallel via
    *  `Promise.allSettled` (no bulk-read capability exists in arweave-core —
@@ -661,6 +951,7 @@ export function ArweaveAccountsArea({
 
   const refreshAllBalances = useCallback(() => {
     fetchBalances(addresses);
+    setLastFetchedAt(Date.now());
   }, [fetchBalances, addresses]);
 
   // Fires once per row on mount, and again whenever the entry list itself
@@ -669,6 +960,23 @@ export function ArweaveAccountsArea({
   useEffect(() => {
     refreshAllBalances();
   }, [refreshAllBalances]);
+
+  // Real on-chain confirmation for an Arweave send arrives up to ~10 minutes
+  // AFTER `sendFrom` resolves (toastManager.ts's arweave poll) — long after
+  // this row's own post-send `fetchBalances([address])` already fired at
+  // BROADCAST time, before the debit was final. Without this, the balance
+  // shown here just silently stays the pre-send figure until the user
+  // remembers to click Refresh themselves. `onTxConfirmed` is a blunt "ANY
+  // tx confirmed, somewhere" signal (no payload) — refreshing every visible
+  // balance on it is cheap for this panel's realistic address counts and is
+  // always correct, unlike guessing which single row to target.
+  useEffect(() => onTxConfirmed(refreshAllBalances), [refreshAllBalances]);
+
+  // Ticks the "updated Xs ago" label forward once a second while mounted.
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const anyBalanceLoading = addresses.some((addr) => balances[addr]?.status === "loading");
 
@@ -726,9 +1034,33 @@ export function ArweaveAccountsArea({
     return out;
   }, [entries, seeds]);
 
-  // Arweave has no watch-list yet; the tab exists (and reads 0) so this page and
-  // Chainweb's stay structurally identical.
-  const WATCHED_COUNT = 0;
+  // T2: the add-watched-address form's own local state — mirrors
+  // `StoaAccountsTab.tsx`'s `handleAddWatch` shape exactly (module JSDoc).
+  const [watchInput, setWatchInput] = useState("");
+  const [watchError, setWatchError] = useState<string | null>(null);
+
+  const handleAddWatch = useCallback(async (): Promise<void> => {
+    setWatchError(null);
+    const addr = watchInput.trim();
+    if (!validateAddress(ARWEAVE_CHAIN_ID, addr)) {
+      setWatchError("Not a valid Arweave address.");
+      return;
+    }
+    if (entries.some((e) => e.address === addr)) {
+      setWatchError("That address is already a Codex account.");
+      return;
+    }
+    if (watchedEntries.some((w) => w.address === addr)) {
+      setWatchError("Already watched.");
+      return;
+    }
+    try {
+      await onAddWatched?.(addr);
+      setWatchInput("");
+    } catch (e) {
+      setWatchError(e instanceof Error ? e.message : "Could not add.");
+    }
+  }, [watchInput, entries, watchedEntries, onAddWatched]);
 
   return (
     <div
@@ -767,7 +1099,7 @@ export function ArweaveAccountsArea({
         <div>
           <div style={{ fontSize: 12, color: "#888" }}>Total Addresses</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#d2d3d4" }}>
-            {entries.length + WATCHED_COUNT}
+            {entries.length + watchedEntries.length}
           </div>
         </div>
         <div style={{ flex: 1 }} />
@@ -782,6 +1114,14 @@ export function ArweaveAccountsArea({
         ) : (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#4ade80" }}>
             Live balances
+            {/* "Live" alone doesn't say WHEN — there is no periodic polling,
+                only on-mount/manual-refresh/post-send/post-confirmation
+                reads, so this is how staleness is actually told at a glance. */}
+            {lastFetchedAt !== null && (
+              <span style={{ color: "#555" }} data-testid="arweave-accounts-updated-ago">
+                · {formatUpdatedAgo(lastFetchedAt, Date.now())}
+              </span>
+            )}
           </span>
         )}
         <button
@@ -812,7 +1152,7 @@ export function ArweaveAccountsArea({
         {(
           [
             ["codex", "Codex Accounts", entries.length],
-            ["watch", "Watched Accounts", WATCHED_COUNT],
+            ["watch", "Watched Accounts", watchedEntries.length],
           ] as const
         ).map(([key, label, count]) => {
           const active = subTab === key;
@@ -884,19 +1224,93 @@ export function ArweaveAccountsArea({
           )}
         </div>
       ) : (
-        <div
-          data-testid="arweave-accounts-watched-empty"
-          style={{
-            textAlign: "center",
-            padding: "32px 0",
-            borderRadius: 12,
-            border: "1px dashed #262626",
-            color: "#555",
-            fontSize: 13,
-          }}
-        >
-          <EyeGlyph style={{ width: 24, height: 24, opacity: 0.4 }} />
-          <p style={{ fontSize: 14, margin: "8px 0 0" }}>No watched addresses.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* T2: add-address form — ALWAYS rendered in the watch tab, even
+              while the list is empty (mirrors Chainweb's own tab, module
+              JSDoc). The submit button stays enabled-looking but `disabled`
+              while `onAddWatched` is unwired, so an unwired seam never
+              silently no-ops on click. */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "0 10px", color: "#888" }}>
+              <EyeGlyph style={{ width: 16, height: 16 }} />
+            </span>
+            <input
+              data-testid="arweave-watch-input"
+              value={watchInput}
+              onChange={(e) => setWatchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleAddWatch();
+              }}
+              placeholder="Watch an Arweave address…"
+              spellCheck={false}
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                borderRadius: 8,
+                outline: "none",
+                backgroundColor: "#0a0a0a",
+                border: "1px solid #262626",
+                color: "#d2d3d4",
+                fontSize: 13,
+                fontFamily: MONO,
+              }}
+            />
+            <button
+              type="button"
+              data-testid="arweave-watch-submit"
+              disabled={onAddWatched === undefined}
+              onClick={() => void handleAddWatch()}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 14px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                border: "none",
+                backgroundColor: onAddWatched === undefined ? "#262626" : ACCENT,
+                color: onAddWatched === undefined ? "#666" : "#0a0a0a",
+                cursor: onAddWatched === undefined ? "not-allowed" : "pointer",
+              }}
+            >
+              Watch
+            </button>
+          </div>
+          {watchError && (
+            <p role="alert" style={{ fontSize: 12, color: "#f87171", margin: 0 }}>
+              {watchError}
+            </p>
+          )}
+
+          {watchedEntries.length === 0 ? (
+            <div
+              data-testid="arweave-accounts-watched-empty"
+              style={{
+                textAlign: "center",
+                padding: "32px 0",
+                borderRadius: 12,
+                border: "1px dashed #262626",
+                color: "#555",
+                fontSize: 13,
+              }}
+            >
+              <EyeGlyph style={{ width: 24, height: 24, opacity: 0.4 }} />
+              <p style={{ fontSize: 14, margin: "8px 0 0" }}>No watched addresses.</p>
+            </div>
+          ) : (
+            watchedEntries.map((w) => (
+              <WatchedRow
+                key={w.id}
+                entry={w}
+                balances={balances}
+                onRelabel={
+                  onAddWatched ? (label: string) => void onAddWatched(w.address, label) : undefined
+                }
+                onRemove={onRemoveWatched ? () => void onRemoveWatched(w.id) : undefined}
+              />
+            ))
+          )}
         </div>
       )}
     </div>

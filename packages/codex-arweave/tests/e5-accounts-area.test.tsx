@@ -28,14 +28,17 @@
  *       less trustworthy) product than Chainweb.
  */
 
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, within, waitFor, act } from "@testing-library/react";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { winstonToAr } from "@ancientpantheon/arweave-core";
+import { registerChainAddressValidator } from "@ancientpantheon/codex-ouronet/hooks";
+import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 
 import { ArweaveAccountsArea } from "../src/panel/ArweaveAccountsArea";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
+import { arweaveValidator } from "../src/address-book/arweaveValidator";
 
 const CIPHERTEXT = "ENCRYPTED-KEYFILE-CIPHERTEXT-MUST-NEVER-RENDER";
 
@@ -44,6 +47,17 @@ function makeEntry(overrides: Partial<ForeignKeyEntry> = {}): ForeignKeyEntry {
     id: `entry-${Math.random().toString(36).slice(2)}`,
     chainId: ARWEAVE_CHAIN_ID,
     encryptedKeyfile: CIPHERTEXT,
+    ...overrides,
+  };
+}
+
+function makeWatchEntry(overrides: Partial<WatchListEntry> = {}): WatchListEntry {
+  return {
+    id: `watch-${Math.random().toString(36).slice(2)}`,
+    label: "",
+    address: "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4",
+    type: "arweave",
+    createdAt: "2025-01-01T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -429,6 +443,84 @@ describe("ArweaveAccountsArea", () => {
     expect(getBalance).toHaveBeenNthCalledWith(4, "ADDR-B");
   });
 
+  it("shows when the balances were last actually read — 'Live balances' alone doesn't say whether it's stale", async () => {
+    // WHY: there is no periodic polling at all — balances refresh only on
+    // mount, on a manual Refresh click, or once after a send. The plain
+    // "Live balances" label overstates freshness with nothing to back it up;
+    // a visible "updated Xs ago" is how a user actually tells staleness.
+    vi.useFakeTimers();
+    try {
+      const getBalance = vi.fn(async () => 1_000_000_000_000n);
+      const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
+      render(
+        <ArweaveAccountsArea
+          entries={[entry]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          getBalance={getBalance}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve(); // let the mount-time getBalance promise settle
+      });
+      expect(screen.getByText(/updated just now/i)).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(45_000);
+      });
+      expect(screen.getByText(/updated 45s ago/i)).toBeInTheDocument();
+
+      // A manual refresh resets the clock back to "just now".
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("arweave-accounts-refresh"));
+        await Promise.resolve();
+      });
+      expect(screen.getByText(/updated just now/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes every visible balance when ANY tx confirms — a send's own balance refresh fires at BROADCAST time (before the debit is final), so without this the user keeps seeing the pre-send balance until they click Refresh themselves", async () => {
+    // Drives the REAL toastManager (not mocked in this file) end-to-end: an
+    // arweave-chain `txPending(...).submitted(id)` with a `pollFn` that
+    // resolves 'confirmed' fires the SAME `onTxConfirmed` pub/sub the
+    // component subscribes to — proving the wiring, not just the import.
+    const { txPending } = await import("@ancientpantheon/codex-ouronet/zbom");
+    vi.useFakeTimers();
+    try {
+      const entryA = makeEntry({ id: "a", seedId: "seed-1", index: 0, address: "ADDR-A" });
+      const entryB = makeEntry({ id: "b", seedId: "seed-1", index: 1, address: "ADDR-B" });
+      const getBalance = vi.fn(async () => 1_000_000_000_000n);
+
+      render(
+        <ArweaveAccountsArea
+          entries={[entryA, entryB]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          getBalance={getBalance}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(getBalance).toHaveBeenCalledTimes(2);
+
+      const ctrl = txPending("Send Arweave", { chain: "arweave", pollFn: async () => "confirmed" });
+      ctrl.submitted("some-other-tx-id"); // unrelated to entryA/entryB — refresh is a blunt "any confirm" signal
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+        // Extra microtask flushes: the poll's own promise chain AND the
+        // resulting fetchBalances(getBalance) promises both need to settle.
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(getBalance).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("copies the row's address (address ?? id) to the clipboard on copy-button click", () => {
     // Regression: a copy button that copies the wrong field (e.g. the id, or a
     // truncated display string) silently hands the user the wrong address to
@@ -458,6 +550,36 @@ describe("ArweaveAccountsArea", () => {
 
     fireEvent.click(screen.getByTestId(`arweave-account-copy-${entry.id}`));
     expect(writeText).toHaveBeenCalledWith(entry.id);
+  });
+
+  it("shows a green check on the copy button after clicking, then reverts — matching StoaAccountsTab's IconCopyBtn feedback", () => {
+    // Regression: Chainweb's copy button (IconCopyBtn) confirms the copy with
+    // a temporary green check; the Arweave copy button silently did nothing
+    // visible at all, leaving the user unsure whether the click registered.
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn() },
+      configurable: true,
+    });
+    vi.useFakeTimers();
+    try {
+      const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
+      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+
+      const copyBtn = screen.getByTestId(`arweave-account-copy-${entry.id}`);
+      expect(copyBtn.querySelector('[data-glyph="check"]')).toBeNull();
+
+      fireEvent.click(copyBtn);
+      expect(copyBtn.querySelector('[data-glyph="check"]')).toBeInTheDocument();
+
+      act(() => {
+        act(() => {
+          vi.advanceTimersByTime(1200);
+        });
+      });
+      expect(copyBtn.querySelector('[data-glyph="check"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("links the explorer control to viewblock.io for the row's address, opening a new tab", () => {
@@ -719,6 +841,208 @@ describe("ArweaveAccountsArea", () => {
       fireEvent.click(screen.getByTestId(`arweave-account-delete-${seedless.id}`));
       await screen.findByTestId(`arweave-account-delete-blocked-${seedless.id}`);
       expect(screen.queryByTestId(`arweave-account-delete-confirm-${seedless.id}`)).not.toBeInTheDocument();
+    });
+  });
+
+  /* ── T2: Watched Accounts — add form, validation, watched-row rendering ── */
+
+  describe("Watched Accounts", () => {
+    const ARWEAVE_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
+
+    // Register the REAL Arweave address validator so the add-form's validation
+    // path exercises the actual `validateAddress(ARWEAVE_CHAIN_ID, ...)` D5
+    // seam, not a stand-in regex.
+    beforeEach(() => {
+      registerChainAddressValidator(ARWEAVE_CHAIN_ID, arweaveValidator);
+    });
+
+    function openWatchTab(): void {
+      fireEvent.click(screen.getByTestId("arweave-accounts-subtab-watch"));
+    }
+
+    it("with no watchedEntries/onAddWatched props, shows the existing empty state and a disabled add button", () => {
+      // Regression: an omitted seam must degrade to the pre-T2 read-only stub —
+      // never a button that throws or silently no-ops on click.
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        />,
+      );
+      openWatchTab();
+
+      expect(screen.getByTestId("arweave-accounts-watched-empty")).toBeInTheDocument();
+      expect(screen.getByTestId("arweave-watch-submit")).toBeDisabled();
+    });
+
+    it("rejects a syntactically invalid address with a validation error, without calling onAddWatched", () => {
+      const onAddWatched = vi.fn();
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          onAddWatched={onAddWatched}
+        />,
+      );
+      openWatchTab();
+
+      fireEvent.change(screen.getByTestId("arweave-watch-input"), { target: { value: "not-a-valid-address" } });
+      fireEvent.click(screen.getByTestId("arweave-watch-submit"));
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Not a valid Arweave address.");
+      expect(onAddWatched).not.toHaveBeenCalled();
+    });
+
+    it("calls onAddWatched with a syntactically valid Arweave address on submit", () => {
+      const onAddWatched = vi.fn(async () => {});
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          onAddWatched={onAddWatched}
+        />,
+      );
+      openWatchTab();
+
+      fireEvent.change(screen.getByTestId("arweave-watch-input"), { target: { value: ARWEAVE_ADDRESS } });
+      fireEvent.click(screen.getByTestId("arweave-watch-submit"));
+
+      expect(onAddWatched).toHaveBeenCalledWith(ARWEAVE_ADDRESS);
+    });
+
+    it("rejects an address already held as a Codex account, without calling onAddWatched", () => {
+      // Regression: adding a Codex-owned address to the watch list would show
+      // the same address twice, under two different (and differently capable)
+      // rows.
+      const onAddWatched = vi.fn();
+      render(
+        <ArweaveAccountsArea
+          entries={[makeEntry({ seedId: "seed-1", index: 0, address: ARWEAVE_ADDRESS })]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          onAddWatched={onAddWatched}
+        />,
+      );
+      openWatchTab();
+
+      fireEvent.change(screen.getByTestId("arweave-watch-input"), { target: { value: ARWEAVE_ADDRESS } });
+      fireEvent.click(screen.getByTestId("arweave-watch-submit"));
+
+      expect(screen.getByRole("alert")).toHaveTextContent("That address is already a Codex account.");
+      expect(onAddWatched).not.toHaveBeenCalled();
+    });
+
+    it("rejects an address already on the watch list, without calling onAddWatched", () => {
+      const onAddWatched = vi.fn();
+      const watched = makeWatchEntry({ address: ARWEAVE_ADDRESS });
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          watchedEntries={[watched]}
+          onAddWatched={onAddWatched}
+        />,
+      );
+      openWatchTab();
+
+      fireEvent.change(screen.getByTestId("arweave-watch-input"), { target: { value: ARWEAVE_ADDRESS } });
+      fireEvent.click(screen.getByTestId("arweave-watch-submit"));
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Already watched.");
+      expect(onAddWatched).not.toHaveBeenCalled();
+    });
+
+    it("renders a watched row's live balance via getBalance, formatted with winstonToAr", async () => {
+      // Mirrors the codex-row "renders a live balance" test — a watched
+      // address is worthless to observe if its balance never actually reads.
+      const watched = makeWatchEntry({ id: "w-1", address: ARWEAVE_ADDRESS });
+      const getBalance = vi.fn(async () => 2_500_000_000_000n);
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          watchedEntries={[watched]}
+          getBalance={getBalance}
+        />,
+      );
+      openWatchTab();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("arweave-watched-value-w-1")).toHaveTextContent(
+          winstonToAr(2_500_000_000_000n),
+        );
+      });
+      expect(getBalance).toHaveBeenCalledWith(ARWEAVE_ADDRESS);
+    });
+
+    it("calls onRemoveWatched with the watched entry's id on remove-button click", () => {
+      const onRemoveWatched = vi.fn();
+      const watched = makeWatchEntry({ id: "w-2", address: ARWEAVE_ADDRESS });
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          watchedEntries={[watched]}
+          onRemoveWatched={onRemoveWatched}
+        />,
+      );
+      openWatchTab();
+
+      fireEvent.click(screen.getByTestId("arweave-watched-remove-w-2"));
+
+      expect(onRemoveWatched).toHaveBeenCalledWith("w-2");
+    });
+
+    it("shows a green check on the copy button after clicking, then reverts — same feedback as a Codex-owned row", () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn() },
+        configurable: true,
+      });
+      vi.useFakeTimers();
+      try {
+        const watched = makeWatchEntry({ id: "w-4", address: ARWEAVE_ADDRESS });
+        render(
+          <ArweaveAccountsArea
+            entries={[]}
+            seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+            watchedEntries={[watched]}
+          />,
+        );
+        openWatchTab();
+
+        const copyBtn = screen.getByTestId("arweave-watched-copy-w-4");
+        expect(copyBtn.querySelector('[data-glyph="check"]')).toBeNull();
+
+        fireEvent.click(copyBtn);
+        expect(copyBtn.querySelector('[data-glyph="check"]')).toBeInTheDocument();
+
+        act(() => {
+        act(() => {
+          vi.advanceTimersByTime(1200);
+        });
+      });
+        expect(copyBtn.querySelector('[data-glyph="check"]')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never renders a Send button/test-id on a watched row, even when a full deps prop is supplied", () => {
+      // The whole point of "watch" is observe-only — there is no private key
+      // to sign with, so a Send affordance here would be a funds-critical bug.
+      const watched = makeWatchEntry({ id: "w-3", address: ARWEAVE_ADDRESS });
+      const fakeDeps = {} as never;
+      render(
+        <ArweaveAccountsArea
+          entries={[]}
+          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          watchedEntries={[watched]}
+          deps={fakeDeps}
+        />,
+      );
+      openWatchTab();
+
+      expect(screen.queryByTestId("arweave-watched-send-w-3")).toBeNull();
+      expect(screen.queryByText(/^Send/)).toBeNull();
     });
   });
 });

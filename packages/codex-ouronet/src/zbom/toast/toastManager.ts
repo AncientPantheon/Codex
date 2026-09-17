@@ -13,6 +13,14 @@
 
 export type StepStatus = 'pending' | 'active' | 'done' | 'error';
 
+/**
+ * Which chain a toast belongs to — drives BOTH its confirmation strategy
+ * (`.submitted()`) and its display theme (explorer link + accent color,
+ * `MultiStepToastContainer.tsx`). Defaults to `'stoachain'` everywhere it's
+ * optional, so the 6 existing Kadena/Stoa modals are byte-for-byte unchanged.
+ */
+export type ToastChain = 'stoachain' | 'arweave';
+
 export interface StepData {
   label: string;
   status: StepStatus;
@@ -26,6 +34,13 @@ export interface ToastEntry {
   steps: StepData[];
   createdAt: number;
   settledAt?: number; // set once when all steps done or any error
+  /** Defaults to `'stoachain'` — see `ToastChain`. */
+  chain?: ToastChain;
+  /** How long a SETTLED (done/error) toast lingers before auto-dismissing —
+   *  the depletion-bar duration. Computed from `chain` at creation time (see
+   *  `DISMISS_MS`/`ARWEAVE_DISMISS_MS`) so the safety-net timeout
+   *  (`updateStep`, below) and the container's CSS animation always agree. */
+  dismissMs?: number;
 }
 
 // ── Global state ────────────────────────────────────────────────────────────
@@ -77,6 +92,21 @@ export const toastStore = {
 // ── Controller factory ──────────────────────────────────────────────────────
 
 export const DISMISS_MS = 60000;
+/**
+ * 10x `DISMISS_MS` — per explicit request: Arweave blocks land every ~2
+ * minutes (targeted; 2-3 min typical in practice), so a settled Arweave
+ * toast needs to stay on screen far longer than a near-instant Pact
+ * confirmation for its (now-live) explorer link to still be there when the
+ * user looks back at it. Also doubles as the arweave poll budget (see
+ * `_pollArweaveConfirmation`) — the toast stays visibly "Confirming…" for
+ * exactly as long as this session keeps trying to confirm it, then both
+ * agree on how long the settled state lingers afterward.
+ */
+export const ARWEAVE_DISMISS_MS = DISMISS_MS * 10;
+
+function dismissMsFor(chain: ToastChain): number {
+  return chain === 'arweave' ? ARWEAVE_DISMISS_MS : DISMISS_MS;
+}
 
 export interface ToastController {
   updateStep(step: number, status: StepStatus, data?: { label?: string; requestKey?: string; result?: string }): void;
@@ -88,6 +118,8 @@ interface CreateOpts {
   id?: string;
   title?: string;
   steps?: Array<{ label: string; requestKey?: string }>;
+  /** Defaults to `'stoachain'` — see `ToastChain`. */
+  chain?: ToastChain;
 }
 
 export function createMultiStepToast(opts: CreateOpts = {}): ToastController {
@@ -99,7 +131,8 @@ export function createMultiStepToast(opts: CreateOpts = {}): ToastController {
   // First step starts active
   if (steps.length) steps[0].status = 'active';
 
-  toastStore.add({ id, title, steps, createdAt: Date.now() });
+  const chain = opts.chain ?? 'stoachain';
+  toastStore.add({ id, title, steps, createdAt: Date.now(), chain, dismissMs: dismissMsFor(chain) });
 
   return {
     id,
@@ -130,9 +163,11 @@ export function createMultiStepToast(opts: CreateOpts = {}): ToastController {
 
       toastStore.update(id, { steps: newSteps, settledAt });
 
-      // Safety net: auto-remove after DISMISS_MS + buffer (in case CSS animation doesn't fire)
+      // Safety net: auto-remove after this toast's own dismissMs + buffer (in
+      // case CSS animation doesn't fire) — chain-specific, not the flat
+      // DISMISS_MS, so an arweave toast's 10x-longer window is honored here too.
       if (allDone && !entry.settledAt) {
-        setTimeout(() => toastStore.remove(id), DISMISS_MS + 2000);
+        setTimeout(() => toastStore.remove(id), (entry.dismissMs ?? DISMISS_MS) + 2000);
       }
     },
     dismiss() {
@@ -143,23 +178,64 @@ export function createMultiStepToast(opts: CreateOpts = {}): ToastController {
 
 // ── Convenience helpers ─────────────────────────────────────────────────────
 
-/** Create toast with spinner → call .submitted() after submit → polls for confirmation automatically */
-export function txPending(title: string) {
+/** What an injected {@link ArweavePollFn} reports back per poll attempt. */
+export type ArweavePollResult = 'pending' | 'confirmed' | 'give-up';
+
+/** Injected per-send: checks whether `requestKey` (an Arweave tx id) has been
+ *  mined yet. Returning `'give-up'` stops polling immediately rather than
+ *  spending the full budget (e.g. a structurally-invalid id, such as mock
+ *  mode's fixed placeholder, can never become valid no matter how many times
+ *  it's retried) — any OTHER thrown error is treated as transient and simply
+ *  retried next interval, matching the StoaChain poll's own behavior. */
+export type ArweavePollFn = (requestKey: string) => Promise<ArweavePollResult>;
+
+/** Create toast with spinner → call .submitted() after submit → polls for confirmation automatically.
+ *  `opts.chain` (defaults to `'stoachain'`) drives both the display theme
+ *  (`MultiStepToastContainer.tsx`) and `.submitted()`'s confirmation
+ *  strategy — see `ToastChain`. `opts.pollFn` (arweave only) supplies the
+ *  actual chain-status check — see `submitted()`'s doc below. */
+export function txPending(title: string, opts: { chain?: ToastChain; pollFn?: ArweavePollFn } = {}) {
+  const chain = opts.chain ?? 'stoachain';
   let ctrl: ToastController | null = null;
   const ensureStarted = () => {
-    if (!ctrl) ctrl = createMultiStepToast({ title, steps: [{ label: 'Processing' }] });
+    if (!ctrl) ctrl = createMultiStepToast({ title, steps: [{ label: 'Processing' }], chain });
     return ctrl;
   };
   return {
     /** Show the toast (call after password entry / key resolution) */
     start() { ensureStarted(); },
     /**
-     * TX submitted on-chain. Shows requestKey, starts polling for confirmation.
+     * TX submitted on-chain. Shows requestKey.
+     *
+     * `'stoachain'` (default): starts polling for confirmation — unchanged.
      * When confirmed: settledAt set → depletion bar starts (60s).
+     *
+     * `'arweave'`: Arweave has no Pact-style request-key/`/api/v1/poll`
+     * confirmation model — StoaChain's own poll would hit the wrong chain
+     * entirely for an Arweave id. When the caller supplies `opts.pollFn`
+     * (`SendArweaveModal` wires arweave-core's `getTransactionStatus`
+     * against the live gateway pool — the SAME primitive the Library's own
+     * upload-confirmation flow already uses), this polls it every 15s for up
+     * to `ARWEAVE_DISMISS_MS` (~10 min — Arweave blocks land every ~2 min, so
+     * this is real headroom, not a guess) and flips to "Confirmed" the
+     * moment the gateway actually reports it mined — mirroring the "pop a
+     * real confirmation" contract Pact's poll gives StoaChain toasts for
+     * free. Exhausting the budget (or no `pollFn` supplied at all) falls
+     * back to "Submitted" — the gateway's 2xx post accept, already true by
+     * the time this fires, still means the send itself succeeded; only the
+     * on-chain confirmation display is what's uncertain.
      */
     submitted(requestKey: string, chainId?: string) {
       const c = ensureStarted();
       c.updateStep(0, 'active', { label: 'Confirming…', requestKey });
+      if (chain === 'arweave') {
+        if (opts.pollFn) {
+          _pollArweaveConfirmation(c, requestKey, opts.pollFn);
+        } else {
+          c.updateStep(0, 'done', { label: 'Submitted', requestKey });
+        }
+        return;
+      }
       // Start polling — dynamic import to avoid circular deps
       import('@stoachain/stoa-core/constants').then(({ KADENA_CHAIN_ID: STOACHAIN_CHAIN_ID }) => {
         _pollConfirmation(c, requestKey, chainId ?? STOACHAIN_CHAIN_ID);
@@ -228,6 +304,43 @@ async function _pollConfirmation(ctrl: ToastController, requestKey: string, chai
     }
   }
   // Timeout — mark as done so user can check explorer
+  ctrl.updateStep(0, 'done', { label: 'Submitted', requestKey });
+}
+
+/** 15s between polls — appropriate for Arweave's ~2-minute block time (vs.
+ *  StoaChain's 5s/near-instant-finality cadence above); attempts sized so the
+ *  total budget matches `ARWEAVE_DISMISS_MS` (~10 min) — the toast stays
+ *  visibly "Confirming…" for exactly as long as this keeps trying. */
+const ARWEAVE_POLL_INTERVAL_MS = 15000;
+const ARWEAVE_POLL_ATTEMPTS = Math.ceil(ARWEAVE_DISMISS_MS / ARWEAVE_POLL_INTERVAL_MS);
+
+/** Poll an injected {@link ArweavePollFn} for real on-chain confirmation. */
+async function _pollArweaveConfirmation(ctrl: ToastController, requestKey: string, pollFn: ArweavePollFn) {
+  for (let i = 0; i < ARWEAVE_POLL_ATTEMPTS; i++) {
+    await new Promise(r => setTimeout(r, ARWEAVE_POLL_INTERVAL_MS));
+    let result: ArweavePollResult;
+    try {
+      result = await pollFn(requestKey);
+    } catch {
+      // A caller's pollFn is documented to swallow its own transient errors
+      // into 'pending' — this is defense-in-depth if one doesn't.
+      result = 'pending';
+    }
+    if (result === 'confirmed') {
+      ctrl.updateStep(0, 'done', { label: 'Confirmed', requestKey });
+      // Post-TX propagation: the SAME generic "something confirmed, refresh"
+      // signal the StoaChain poll fires above — lets a consumer (e.g.
+      // codex-arweave's `ArweaveAccountsArea`, whose balance refresh
+      // otherwise only fires once at BROADCAST time, before the debit is
+      // actually final) react to the REAL confirmation even though the send
+      // modal that started this poll closed minutes ago.
+      _txConfirmListeners.forEach(fn => { try { fn(); } catch { /* best effort */ } });
+      return;
+    }
+    if (result === 'give-up') break;
+  }
+  // Timeout (or gave up) — mark as done so user can check the explorer
+  // themselves; the SEND already succeeded (this only tracks confirmation).
   ctrl.updateStep(0, 'done', { label: 'Submitted', requestKey });
 }
 

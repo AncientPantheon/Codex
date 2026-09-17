@@ -27,6 +27,8 @@ import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import type { LibraryEntry, LibraryStore } from "../src/library/types";
 
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
+import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 
@@ -1191,10 +1193,15 @@ function makePanelDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelD
 describe("PureKeysArea — mounted for real inside ArweavePanel's pure-keys category", () => {
   it("replaces the generic placeholder with the real PureKeysArea", () => {
     const deps = makePanelDeps();
+    // `SendArweaveModal` (Accounts category) calls `useEnsureCodexUnlocked`
+    // (`codex-ouronet/zbom`), which requires a `<CodexProvider>` ancestor —
+    // the SAME one `apps/codex-playground` always wraps `ArweavePanel` in.
     render(
-      <ArweavePanelProvider deps={deps}>
-        <ArweavePanel id={ARWEAVE_CHAIN_ID} />
-      </ArweavePanelProvider>,
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>
+      </CodexProvider>,
     );
     fireEvent.click(screen.getByTestId("arweave-subtab-pure-keys"));
     expect(screen.queryByTestId("arweave-category-empty-pure-keys")).toBeNull();

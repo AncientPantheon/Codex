@@ -47,6 +47,22 @@ import { ArweavePanelProvider, type ArweavePanelDeps } from "../src/panel/contex
 import { SEED_BIT_LENGTH } from "../src/seeds/index";
 import type { KeygenWorkerMsg } from "../src/keygen/KeygenRunner";
 import type { LibraryStore } from "../src/library/types";
+import type { ReactNode } from "react";
+import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+
+/**
+ * `SendArweaveModal` (mounted inside `ArweavePanel`'s Accounts category) now
+ * calls `useEnsureCodexUnlocked` (`codex-ouronet/zbom`), which requires a
+ * `<CodexProvider>` ancestor — the SAME one `apps/codex-playground` always
+ * wraps `ArweavePanel` in (`ForeignChainsWiring.tsx`: "Must be mounted INSIDE
+ * <CodexProvider>"). Only the two tests below that actually navigate to the
+ * Accounts category need this; the rest of the file never leaves Seeds, so
+ * `SendArweaveModal` never mounts and the real hook never runs.
+ */
+function withCodexProvider(node: ReactNode) {
+  return <CodexProvider adapter={new MemoryCodexAdapter("dev")}>{node}</CodexProvider>;
+}
 
 import {
   ArweaveSeedsArea,
@@ -584,9 +600,11 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
     };
 
     render(
-      <ArweavePanelProvider deps={deps}>
-        <ArweavePanel id={ARWEAVE_CHAIN_ID} />
-      </ArweavePanelProvider>,
+      withCodexProvider(
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>,
+      ),
     );
 
     // Define the Prime seed via Free Seed Input.
@@ -836,9 +854,11 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
     };
 
     render(
-      <ArweavePanelProvider deps={deps}>
-        <ArweavePanel id={ARWEAVE_CHAIN_ID} />
-      </ArweavePanelProvider>,
+      withCodexProvider(
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>,
+      ),
     );
 
     // Define the Prime seed, generate one key — it lands in `sessionKeys` via

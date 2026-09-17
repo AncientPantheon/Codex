@@ -14,9 +14,37 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Check, AlertTriangle, Loader2, Copy, X, ExternalLink } from "lucide-react";
-import { toastStore, DISMISS_MS, type ToastEntry, type StepStatus, type StepData } from "./toastManager.js";
+import { toastStore, DISMISS_MS, type ToastEntry, type StepStatus, type StepData, type ToastChain } from "./toastManager.js";
 
-const EXPLORER_TX = "https://explorer.stoachain.com/transactions/";
+/**
+ * Per-chain display theme: the explorer a "View on Explorer"/copy-link
+ * button points at, and the accent color used while a toast of that chain
+ * is active (pending/in-flight step border, spinner, status dot). Keyed by
+ * `ToastEntry.chain` (defaults to `'stoachain'`) so a toast never has to
+ * guess which explorer format its `requestKey` is in.
+ *
+ * Bug this fixes: a single hardcoded `EXPLORER_TX` pointed EVERY toast —
+ * including Arweave sends — at `explorer.stoachain.com/transactions/<id>`,
+ * a dead link for an Arweave tx id. Arweave gets its own entry, matching the
+ * ViewBlock convention `ArweaveAccountsArea.tsx` already uses for address
+ * pages (`viewblock.io/arweave/address/<addr>`), plus a distinct accent
+ * (violet, not StoaChain gold) so a stack of toasts reads "different chain"
+ * at a glance.
+ */
+const CHAIN_THEME: Record<ToastChain, { accent: string; explorerTx: (id: string) => string }> = {
+  stoachain: {
+    accent: "#ceac5f",
+    explorerTx: (id) => `https://explorer.stoachain.com/transactions/${id}`,
+  },
+  arweave: {
+    accent: "#a78bfa",
+    explorerTx: (id) => `https://viewblock.io/arweave/tx/${id}`,
+  },
+};
+
+function themeFor(chain: ToastChain | undefined): { accent: string; explorerTx: (id: string) => string } {
+  return CHAIN_THEME[chain ?? "stoachain"];
+}
 
 // ── Hook: subscribe to store ────────────────────────────────────────────────
 
@@ -36,12 +64,18 @@ function useToasts(): ToastEntry[] {
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
-const COLOR: Record<StepStatus, string> = {
-  pending: "#555",
-  active: "#ceac5f",
-  done: "#4ade80",
-  error: "#c0392b",
-};
+// `done`/`error`/`pending` are universal status semantics (green/red/gray),
+// unrelated to which chain the toast belongs to. Only `active` — "this toast
+// is doing something right now" — reflects the chain's theme accent, which is
+// where the "different chain" visual cue actually needs to land.
+function stepColor(status: StepStatus, accent: string): string {
+  switch (status) {
+    case "pending": return "#555";
+    case "active": return accent;
+    case "done": return "#4ade80";
+    case "error": return "#c0392b";
+  }
+}
 
 // ── Inline styles (no external CSS needed except keyframes) ─────────────────
 
@@ -128,7 +162,8 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
   const allDone = toast.steps.every(s => s.status === "done");
   const hasError = toast.steps.some(s => s.status === "error");
   const single = toast.steps.length === 1;
-  const dotColor = hasError ? "#c0392b" : allDone ? "#4ade80" : "#ceac5f";
+  const theme = themeFor(toast.chain);
+  const dotColor = hasError ? "#c0392b" : allDone ? "#4ade80" : theme.accent;
 
   // Depletion: use CSS animation. Key = settledAt so animation restarts if settledAt changes.
   const showDepletion = allDone && !hasError && toast.settledAt != null;
@@ -145,7 +180,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
           </span>
           {/* Single-step: show label inline */}
           {single && (
-            <span style={{ fontSize: 10, color: COLOR[toast.steps[0].status], fontWeight: 500, whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 10, color: stepColor(toast.steps[0].status, theme.accent), fontWeight: 500, whiteSpace: "nowrap" }}>
               — {toast.steps[0].label}
             </span>
           )}
@@ -160,7 +195,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
       {/* Single-step spinner */}
       {single && toast.steps[0].status === "active" && (
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-          <Loader2 className="toast-spin" style={{ width: 16, height: 16, color: "#ceac5f" }} />
+          <Loader2 className="toast-spin" style={{ width: 16, height: 16, color: theme.accent }} />
           <span style={{ fontSize: 10, color: "#888" }}>Processing...</span>
         </div>
       )}
@@ -174,7 +209,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
                 <div style={{
                   width: 24, height: 24, borderRadius: "50%",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  border: `2px solid ${COLOR[step.status]}`, color: COLOR[step.status], backgroundColor: "#0a0a0f",
+                  border: `2px solid ${stepColor(step.status, theme.accent)}`, color: stepColor(step.status, theme.accent), backgroundColor: "#0a0a0f",
                 }}>
                   {step.status === "active" && <Loader2 className="toast-spin" style={{ width: 12, height: 12 }} />}
                   {step.status === "done" && <Check style={{ width: 12, height: 12, color: "#4ade80" }} />}
@@ -212,7 +247,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
               </span>
               {/* Copy explorer link */}
               <button
-                onClick={() => navigator.clipboard.writeText(`${EXPLORER_TX}${step.requestKey}`).catch(() => {})}
+                onClick={() => navigator.clipboard.writeText(theme.explorerTx(step.requestKey!)).catch(() => {})}
                 title="Copy Explorer link"
                 style={{ background: "none", border: "none", cursor: "pointer", padding: 2, flexShrink: 0, display: "flex" }}
               >
@@ -220,8 +255,8 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
               </button>
               {/* Explorer link — active only when confirmed */}
               {step.status === "done" ? (
-                <a href={`${EXPLORER_TX}${step.requestKey}`} target="_blank" rel="noopener noreferrer" title="View on Explorer" style={{ flexShrink: 0, display: "flex", padding: 2 }}>
-                  <ExternalLink style={{ width: 10, height: 10, color: "#ceac5f" }} />
+                <a href={theme.explorerTx(step.requestKey!)} target="_blank" rel="noopener noreferrer" title="View on Explorer" style={{ flexShrink: 0, display: "flex", padding: 2 }}>
+                  <ExternalLink style={{ width: 10, height: 10, color: theme.accent }} />
                 </a>
               ) : (
                 <span style={{ flexShrink: 0, display: "flex", padding: 2, opacity: 0.25 }} title="Available after confirmation">
@@ -233,16 +268,37 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
         </div>
       )}
 
+      {/* Arweave-only caption: WE confirm against the canonical gateway
+          (`/tx/{id}/status`), but a third-party explorer like ViewBlock runs
+          its OWN separate indexer, which can lag behind that confirmation by
+          several minutes — clicking "View on Explorer" the instant this
+          toast settles can still 404 for a bit. This sets that expectation
+          honestly instead of implying the link is guaranteed live the moment
+          it becomes clickable. Distinct copy for the two settled labels:
+          "Confirmed" means WE verified it mined; "Submitted" means only the
+          broadcast succeeded — our own poll budget ran out (or gave up)
+          before verifying mining, so the explorer wait may be longer still. */}
+      {toast.chain === "arweave" && allDone && !hasError && (
+        <div style={{ padding: "0 14px 10px", fontSize: 9, color: "#555" }}>
+          {toast.steps[0]?.label === "Confirmed"
+            ? "Confirmed on-chain — third-party explorers can take a few minutes to index it."
+            : "Broadcast succeeded — mining + explorer indexing can take several minutes on Arweave."}
+        </div>
+      )}
+
       {/* Results */}
       <ResultSection steps={toast.steps} />
 
-      {/* Depletion bar — CSS animation, starts when settledAt is set */}
+      {/* Depletion bar — CSS animation, starts when settledAt is set. Duration
+          is per-toast (`toast.dismissMs`, e.g. arweave's 10x-longer window),
+          NOT the shared `.toast-deplete` class's own duration — the inline
+          `animationDuration` here overrides just that one sub-property. */}
       {showDepletion && (
         <div style={{ height: 3, backgroundColor: "#1a1a1a", overflow: "hidden" }}>
           <div
             key={toast.settledAt}
             className="toast-deplete"
-            style={{ height: "100%", backgroundColor: "#4ade80", width: "100%" }}
+            style={{ height: "100%", backgroundColor: "#4ade80", width: "100%", animationDuration: `${toast.dismissMs ?? DISMISS_MS}ms` }}
           />
         </div>
       )}

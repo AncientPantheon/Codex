@@ -26,6 +26,8 @@ import { ArweavePanel } from "../src/panel/ArweavePanel";
 import { ArweavePanelProvider, type ArweavePanelDeps } from "../src/panel/context";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import type { LibraryEntry, LibraryStore } from "../src/library/types";
+import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 
 import throwawayKeyfile from "./fixtures/throwaway-arweave-keyfile.json" assert { type: "json" };
 
@@ -106,10 +108,16 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
 
 function renderPanel(overrides: Partial<ArweavePanelDeps> = {}) {
   const deps = makeDeps(overrides);
+  // `SendArweaveModal` (Accounts category) calls `useEnsureCodexUnlocked`
+  // (`codex-ouronet/zbom`), which requires a `<CodexProvider>` ancestor —
+  // the SAME one `apps/codex-playground` always wraps `ArweavePanel` in
+  // (`ForeignChainsWiring.tsx`: "Must be mounted INSIDE <CodexProvider>").
   const utils = render(
-    <ArweavePanelProvider deps={deps}>
-      <ArweavePanel id={ARWEAVE_CHAIN_ID} />
-    </ArweavePanelProvider>,
+    <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+      <ArweavePanelProvider deps={deps}>
+        <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+      </ArweavePanelProvider>
+    </CodexProvider>,
   );
   return { deps, ...utils };
 }

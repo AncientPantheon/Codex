@@ -99,7 +99,17 @@ export default defineConfig({
     // natively — sqliteStore already lazy-loads + availability-gates it at runtime.
     server: {
       deps: {
-        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/, /lucide-react/],
+        // `zustand` MUST be inlined too (not just the workspace packages above):
+        // `SendArweaveModal` now calls codex-ouronet's real `useEnsureCodexUnlocked`
+        // (the "pop the real password prompt, don't just error out" fix), which
+        // reaches codex-ouronet's zustand-backed `useCodexStore`. An externalized
+        // (default) `zustand` at the repo root resolves ITS `react` import against
+        // the ROOT React copy — a different instance than the one the aliases below
+        // pin every aliased package to — so `useSyncExternalStore` reads a null
+        // dispatcher and every test that reaches the Accounts category throws
+        // "Cannot read properties of null (reading 'useSyncExternalStore')".
+        // Identical fix already proven in apps/codex-playground/vitest.config.ts.
+        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/, /lucide-react/, "zustand"],
         external: [/^node:sqlite$/],
       },
     },
