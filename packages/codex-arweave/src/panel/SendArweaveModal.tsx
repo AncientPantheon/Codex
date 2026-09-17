@@ -28,6 +28,22 @@
  * fills the WHOLE balance (the mode's own math already carves out the fee);
  * "Fee On Top" fills balance-minus-buffered-fee (unchanged from before).
  *
+ * SUPER MAX: a second, riskier sibling to Max, for a user who explicitly
+ * wants to empty the wallet as close to zero as possible. Regular Max always
+ * reserves the SAME 1.2x-buffered fee `handleSubmit` caps `maxRewardWinston`
+ * at, deliberately leaving a small residual balance as headroom against fee
+ * drift between the live quote and the actual submit. Super Max instead uses
+ * the EXACT live-quoted fee, with NO buffer, as both the amount subtracted
+ * (`effectiveFee`) and the submit-time cap — forces "Fee Included" mode
+ * (sweeping only makes sense in "typed amount is the total" framing) and
+ * fills the whole balance. This is a real, explained trade-off, not a bug:
+ * if the actual on-chain reward drifts even slightly above the exact quote
+ * before this confirms, `sendFrom` throws `RewardExceedsCapError` (zero
+ * headroom) and the send must be retried — the two buttons' `title` tooltips
+ * say so. `superMax` (state) is a one-shot flag: it resets on the NEXT
+ * manual amount edit, feeMode switch, or regular Max click — never a sticky
+ * mode a user could forget is still armed.
+ *
  * Unlike `SendStoaModal` (which dispatches through `useSignTransaction()` /
  * `CodexSigningStrategy` and the Ouronet Gas Station), Arweave has no
  * signing-strategy or gas-station equivalent: the JWK is resolved directly by
@@ -173,6 +189,11 @@ export function SendArweaveModal({
    *  buffered `maxRewardWinston` cap at submit time. Never rendered as an
    *  editable field (module JSDoc). */
   const [feeQuote, setFeeQuote] = useState<bigint | null>(null);
+  /** Armed by the Super Max button ONLY — see module JSDoc. A one-shot flag:
+   *  any manual amount edit, feeMode switch, or regular Max click disarms it
+   *  again, so a user can never be surprised by a lingering zero-buffer fee
+   *  cap they forgot was still active. */
+  const [superMax, setSuperMax] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -182,6 +203,7 @@ export function SendArweaveModal({
       setLastError(null);
       setFeeQuote(null);
       setFeeMode("included");
+      setSuperMax(false);
     }
   }, [isOpen]);
 
@@ -213,6 +235,11 @@ export function SendArweaveModal({
   // will be enforced, not the bare unbuffered quote (which would let a
   // borderline amount through this check only to fail on the real submit).
   const bufferedFee = feeQuote !== null ? (feeQuote * 12n) / 10n : null;
+  // Super Max swaps the buffer out for the exact live quote — see module
+  // JSDoc. Every downstream computation (quantity, the two blocking
+  // messages, and handleSubmit's own cap) reads THIS, not `bufferedFee`
+  // directly, so the display and the actual submit never disagree.
+  const effectiveFee = superMax ? feeQuote : bufferedFee;
 
   const typedWinston =
     validationMessage === null && amount.trim() !== "" ? arToWinston(amount.trim()) : null;
@@ -221,21 +248,21 @@ export function SendArweaveModal({
   // the render, the balance check, and handleSubmit all agree on the exact
   // same number instead of three independent re-derivations drifting apart.
   //   "included": the typed amount is the TOTAL debited; quantity is what's
-  //     left after the buffered fee comes out of it (never negative — an
+  //     left after the effective fee comes out of it (never negative — an
   //     amount too small to cover the fee is its own blocking error below).
   //   "onTop": the typed amount goes to the recipient unchanged.
   const quantityWinston =
-    typedWinston !== null && bufferedFee !== null
+    typedWinston !== null && effectiveFee !== null
       ? feeMode === "included"
-        ? typedWinston > bufferedFee
-          ? typedWinston - bufferedFee
+        ? typedWinston > effectiveFee
+          ? typedWinston - effectiveFee
           : null
         : typedWinston
       : null;
 
   const tooSmallForFeeMessage =
-    feeMode === "included" && typedWinston !== null && bufferedFee !== null && typedWinston <= bufferedFee
-      ? `Amount is too small to cover the network fee (~${winstonToAr(bufferedFee)} AR).`
+    feeMode === "included" && typedWinston !== null && effectiveFee !== null && typedWinston <= effectiveFee
+      ? `Amount is too small to cover the network fee (~${winstonToAr(effectiveFee)} AR).`
       : null;
 
   // Arweave has no gas station — fee comes out of the SAME balance as the
@@ -244,11 +271,11 @@ export function SendArweaveModal({
   // mode's check is simpler — the typed amount IS the total, no separate fee
   // headroom to add — while "onTop" needs amount + fee to both fit.
   const insufficientBalanceMessage =
-    senderBalanceWinston !== undefined && bufferedFee !== null && typedWinston !== null
-      ? (feeMode === "included" ? typedWinston : typedWinston + bufferedFee) > senderBalanceWinston
+    senderBalanceWinston !== undefined && effectiveFee !== null && typedWinston !== null
+      ? (feeMode === "included" ? typedWinston : typedWinston + effectiveFee) > senderBalanceWinston
         ? feeMode === "included"
           ? `Amount exceeds your balance (${winstonToAr(senderBalanceWinston)} AR).`
-          : `Amount + fee (~${winstonToAr(bufferedFee)} AR) exceeds your balance (${winstonToAr(senderBalanceWinston)} AR).`
+          : `Amount + fee (~${winstonToAr(effectiveFee)} AR) exceeds your balance (${winstonToAr(senderBalanceWinston)} AR).`
         : null
       : null;
 
@@ -265,6 +292,9 @@ export function SendArweaveModal({
   // "included": the mode's own math already carves the fee out of the typed
   // total, so Max is simply the whole balance. "onTop": unchanged — the
   // recipient gets exactly what's typed, so Max reserves the fee separately.
+  // ALWAYS uses the buffered fee — regular Max means "safe" regardless of
+  // whatever `superMax` currently is (clicking it also disarms superMax, see
+  // the button's own onClick below).
   const maxAmount =
     senderBalanceWinston === undefined || bufferedFee === null
       ? null
@@ -273,6 +303,17 @@ export function SendArweaveModal({
         : senderBalanceWinston > bufferedFee
           ? winstonToAr(senderBalanceWinston - bufferedFee)
           : null;
+
+  // Super Max's own fill value — the "Fee Included" framing ALWAYS (forces
+  // the mode on click), full balance, gated only on there being enough to
+  // cover the bare exact fee (no buffer headroom needed to compute the fill
+  // value itself — handleSubmit's own submit still uses the exact fee as the
+  // cap, so a borderline balance can still fail on the real send; that's the
+  // documented trade-off, not a bug).
+  const superMaxAmount =
+    senderBalanceWinston === undefined || feeQuote === null || senderBalanceWinston <= feeQuote
+      ? null
+      : winstonToAr(senderBalanceWinston);
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || feeQuote === null || quantityWinston === null) return;
@@ -317,11 +358,13 @@ export function SendArweaveModal({
       },
     });
     try {
-      // 1.2x buffer over the last live quote — never shown to the user as an
-      // editable field (module JSDoc / design.md). A rare drift beyond this
-      // buffer between estimate and submit surfaces as `sendFrom`'s own
+      // 1.2x buffer over the last live quote by default — never shown to the
+      // user as an editable field (module JSDoc / design.md). Super Max
+      // (module JSDoc) deliberately drops the buffer and caps at the EXACT
+      // quote instead, to sweep as close to zero as possible; a rare drift
+      // beyond that between estimate and submit surfaces as `sendFrom`'s own
       // fee-cap-exceeded error below, never swallowed.
-      const maxRewardWinston = (feeQuote * 12n) / 10n;
+      const maxRewardWinston = superMax ? feeQuote : (feeQuote * 12n) / 10n;
       const result = await deps.sendFrom(entry, {
         target: recipient.trim(),
         // The mode-aware quantity computed above — "included" already has the
@@ -343,7 +386,7 @@ export function SendArweaveModal({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, feeQuote, quantityWinston, ensureCodexUnlocked, deps, entry, recipient, onSuccess, onClose]);
+  }, [canSubmit, feeQuote, quantityWinston, superMax, ensureCodexUnlocked, deps, entry, recipient, onSuccess, onClose]);
 
   if (!isOpen) return null;
 
@@ -377,7 +420,7 @@ export function SendArweaveModal({
           type="button"
           data-testid="arweave-send-mode-included"
           aria-pressed={feeMode === "included"}
-          onClick={() => setFeeMode("included")}
+          onClick={() => { setFeeMode("included"); setSuperMax(false); }}
           style={{
             flex: 1,
             padding: "6px 10px",
@@ -396,7 +439,7 @@ export function SendArweaveModal({
           type="button"
           data-testid="arweave-send-mode-onTop"
           aria-pressed={feeMode === "onTop"}
-          onClick={() => setFeeMode("onTop")}
+          onClick={() => { setFeeMode("onTop"); setSuperMax(false); }}
           style={{
             flex: 1,
             padding: "6px 10px",
@@ -422,25 +465,52 @@ export function SendArweaveModal({
         <label style={{ ...fieldLabelStyle, marginTop: 0 }} htmlFor="send-arweave-amount">
           Amount (AR)
         </label>
-        <button
-          type="button"
-          data-testid="arweave-send-max"
-          onClick={() => {
-            if (maxAmount !== null) setAmount(maxAmount);
-          }}
-          disabled={maxAmount === null}
-          style={{
-            fontSize: 11,
-            padding: "2px 8px",
-            borderRadius: 6,
-            background: "transparent",
-            border: "1px solid #262626",
-            color: maxAmount === null ? "#555" : "#ceac5f",
-            cursor: maxAmount === null ? "not-allowed" : "pointer",
-          }}
-        >
-          Max
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            data-testid="arweave-send-max"
+            title="Fills the whole balance and reserves a 1.2x buffer over the live fee quote as the cap — the safe default. A small amount may remain if the network fee moves before this confirms."
+            onClick={() => {
+              if (maxAmount !== null) setAmount(maxAmount);
+              setSuperMax(false);
+            }}
+            disabled={maxAmount === null}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 6,
+              background: "transparent",
+              border: "1px solid #262626",
+              color: maxAmount === null ? "#555" : "#ceac5f",
+              cursor: maxAmount === null ? "not-allowed" : "pointer",
+            }}
+          >
+            Max
+          </button>
+          <button
+            type="button"
+            data-testid="arweave-send-super-max"
+            title="Attempts to fully sweep the wallet: uses the exact live-quoted fee as the cap, with no safety buffer. If the fee moves even slightly before this confirms, the send fails and can be retried."
+            onClick={() => {
+              if (superMaxAmount === null) return;
+              setFeeMode("included");
+              setAmount(superMaxAmount);
+              setSuperMax(true);
+            }}
+            disabled={superMaxAmount === null}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 6,
+              background: "transparent",
+              border: "1px solid #262626",
+              color: superMaxAmount === null ? "#555" : "#f59e0b",
+              cursor: superMaxAmount === null ? "not-allowed" : "pointer",
+            }}
+          >
+            Super Max
+          </button>
+        </div>
       </div>
       <input
         id="send-arweave-amount"
@@ -448,7 +518,7 @@ export function SendArweaveModal({
         type="text"
         inputMode="decimal"
         value={amount}
-        onChange={(e) => setAmount(e.target.value)}
+        onChange={(e) => { setAmount(e.target.value); setSuperMax(false); }}
         placeholder="0.000000000000"
         autoComplete="off"
         aria-invalid={validationMessage ? "true" : undefined}
@@ -481,6 +551,14 @@ export function SendArweaveModal({
       {feeMode === "included" && quantityWinston !== null && (
         <p data-testid="arweave-send-receive-estimate" style={feeTextStyle}>
           Recipient receives: ~{winstonToAr(quantityWinston)} AR
+        </p>
+      )}
+      {superMax && (
+        // The amount field alone looks IDENTICAL to a regular Max fill (both
+        // show the whole balance) — this is the only visible cue the exact,
+        // unbuffered fee cap is armed for this submit.
+        <p data-testid="arweave-send-supermax-note" style={{ ...feeTextStyle, color: "#f59e0b" }}>
+          Super Max: attempting a full sweep with the exact fee, no buffer.
         </p>
       )}
 

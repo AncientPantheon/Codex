@@ -580,6 +580,137 @@ describe("<SendArweaveModal>", () => {
       });
     });
 
+    describe("Super Max — attempts a full wallet sweep with the EXACT (unbuffered) fee as the cap", () => {
+      it("forces 'Fee Included' mode, fills the WHOLE balance, and submits with the exact fee (not the 1.2x buffer) as both the subtracted amount and maxRewardWinston", async () => {
+        const sendFrom = vi.fn(async () => ({ id: "tx-1", reward: FEE }));
+        render(
+          <SendArweaveModal
+            entry={makeEntry()}
+            isOpen
+            onClose={() => {}}
+            deps={makeDeps({ estimateFee: vi.fn(async () => FEE), sendFrom })}
+            senderBalanceWinston={BALANCE}
+          />,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId("arweave-send-fee")).toHaveTextContent(winstonToAr(FEE)),
+        );
+        // Start in "Fee On Top" — Super Max must force it back to "Fee Included".
+        fireEvent.click(screen.getByTestId("arweave-send-mode-onTop"));
+        fireEvent.change(screen.getByTestId("arweave-send-recipient"), { target: { value: RECIPIENT } });
+
+        fireEvent.click(screen.getByTestId("arweave-send-super-max"));
+
+        expect(screen.getByTestId("arweave-send-mode-included")).toHaveAttribute("aria-pressed", "true");
+        expect((screen.getByTestId("arweave-send-amount") as HTMLInputElement).value).toBe(
+          winstonToAr(BALANCE),
+        );
+        // Sweeps CLOSER to zero than regular Max: subtracts the exact fee, not
+        // the 1.2x-buffered one.
+        await waitFor(() =>
+          expect(screen.getByTestId("arweave-send-receive-estimate")).toHaveTextContent(
+            `Recipient receives: ~${winstonToAr(BALANCE - FEE)} AR`,
+          ),
+        );
+
+        fireEvent.click(screen.getByTestId("arweave-send-submit"));
+        await waitFor(() => expect(sendFrom).toHaveBeenCalledTimes(1));
+        expect(sendFrom).toHaveBeenCalledWith(makeEntry(), {
+          target: RECIPIENT,
+          quantity: BALANCE - FEE,
+          maxRewardWinston: FEE,
+        });
+      });
+
+      it("editing the amount after Super Max drops back to the safe buffered fee — no lingering zero-buffer risk from a stale click", async () => {
+        const sendFrom = vi.fn(async () => ({ id: "tx-1", reward: FEE }));
+        render(
+          <SendArweaveModal
+            entry={makeEntry()}
+            isOpen
+            onClose={() => {}}
+            deps={makeDeps({ estimateFee: vi.fn(async () => FEE), sendFrom })}
+            senderBalanceWinston={BALANCE}
+          />,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId("arweave-send-fee")).toHaveTextContent(winstonToAr(FEE)),
+        );
+        fireEvent.change(screen.getByTestId("arweave-send-recipient"), { target: { value: RECIPIENT } });
+        fireEvent.click(screen.getByTestId("arweave-send-super-max"));
+
+        // Changes their mind and types a smaller amount — a genuine manual
+        // edit, must drop Super Max back to the safe buffered fee.
+        fireEvent.change(screen.getByTestId("arweave-send-amount"), {
+          target: { value: "0.5" },
+        });
+        fireEvent.click(screen.getByTestId("arweave-send-submit"));
+
+        await waitFor(() => expect(sendFrom).toHaveBeenCalledTimes(1));
+        expect(sendFrom).toHaveBeenCalledWith(makeEntry(), {
+          target: RECIPIENT,
+          quantity: arToWinston("0.5") - BUFFERED_FEE,
+          maxRewardWinston: BUFFERED_FEE,
+        });
+      });
+
+      it("clicking the regular Max button after Super Max also drops back to the buffered fee", async () => {
+        const sendFrom = vi.fn(async () => ({ id: "tx-1", reward: FEE }));
+        render(
+          <SendArweaveModal
+            entry={makeEntry()}
+            isOpen
+            onClose={() => {}}
+            deps={makeDeps({ estimateFee: vi.fn(async () => FEE), sendFrom })}
+            senderBalanceWinston={BALANCE}
+          />,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId("arweave-send-fee")).toHaveTextContent(winstonToAr(FEE)),
+        );
+        fireEvent.change(screen.getByTestId("arweave-send-recipient"), { target: { value: RECIPIENT } });
+        fireEvent.click(screen.getByTestId("arweave-send-super-max"));
+        fireEvent.click(screen.getByTestId("arweave-send-max"));
+        fireEvent.click(screen.getByTestId("arweave-send-submit"));
+
+        await waitFor(() => expect(sendFrom).toHaveBeenCalledTimes(1));
+        expect(sendFrom).toHaveBeenCalledWith(makeEntry(), {
+          target: RECIPIENT,
+          quantity: BALANCE - BUFFERED_FEE,
+          maxRewardWinston: BUFFERED_FEE,
+        });
+      });
+
+      it("disables Super Max while the balance or fee quote is unknown, or the balance can't even cover the exact fee", async () => {
+        const { rerender } = render(
+          <SendArweaveModal entry={makeEntry()} isOpen onClose={() => {}} deps={makeDeps()} />,
+        );
+        expect((screen.getByTestId("arweave-send-super-max") as HTMLButtonElement).disabled).toBe(true);
+
+        rerender(
+          <SendArweaveModal
+            entry={makeEntry()}
+            isOpen
+            onClose={() => {}}
+            deps={makeDeps({ estimateFee: vi.fn(async () => FEE) })}
+            senderBalanceWinston={FEE} // exactly the fee — nothing left to sweep
+          />,
+        );
+        await waitFor(() =>
+          expect(screen.getByTestId("arweave-send-fee")).toHaveTextContent(winstonToAr(FEE)),
+        );
+        expect((screen.getByTestId("arweave-send-super-max") as HTMLButtonElement).disabled).toBe(true);
+      });
+
+      it("both Max and Super Max carry an explanatory tooltip describing the 1.2x buffer vs. the exact-fee sweep", () => {
+        render(<SendArweaveModal entry={makeEntry()} isOpen onClose={() => {}} deps={makeDeps()} />);
+        expect(screen.getByTestId("arweave-send-max").getAttribute("title")).toMatch(/1\.2x/i);
+        const superMaxTitle = screen.getByTestId("arweave-send-super-max").getAttribute("title");
+        expect(superMaxTitle).toMatch(/exact/i);
+        expect(superMaxTitle).toMatch(/sweep/i);
+      });
+    });
+
     describe("'Fee On Top' mode — typed amount is EXACTLY what the recipient receives", () => {
       it("blocks submit and shows a clear message when amount + buffered fee exceeds the known balance — never attempts sendFrom", async () => {
         const sendFrom = vi.fn();
