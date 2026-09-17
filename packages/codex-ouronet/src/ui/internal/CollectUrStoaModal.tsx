@@ -17,6 +17,7 @@ import { executeCollectUrStoa, checkCoinAccountExists } from "@ouronet/ouronet-c
 import { useGetKeypair } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
 import { txPending } from "../../zbom/toast/toastManager.js";
+import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { CodexModalShell, ModalExecuteRow, ModalFeedback } from "./CodexModalShell.js";
 
 export interface CollectUrStoaModalProps {
@@ -39,6 +40,7 @@ export function CollectUrStoaModal({
   onSuccess,
 }: CollectUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
+  const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   const [submitting, setSubmitting] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -56,6 +58,14 @@ export function CollectUrStoaModal({
     if (!canSubmit) return;
     setSubmitting(true);
     setLastError(null);
+    // Pop the REAL password prompt here, BEFORE touching the keypair at all,
+    // if the codex is locked — a cancelled prompt just stops quietly (no
+    // toast, no error): declining to unlock isn't a failure.
+    const unlocked = await ensureCodexUnlocked();
+    if (!unlocked) {
+      setSubmitting(false);
+      return;
+    }
     const _tx = txPending("Collect UrStoa Earnings");
     try {
       // Resolved HERE, at confirm-time — never eagerly, never cached.
@@ -84,7 +94,7 @@ export function CollectUrStoaModal({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, publicKey, address, getKeypair, onSuccess, onClose]);
+  }, [canSubmit, publicKey, address, getKeypair, ensureCodexUnlocked, onSuccess, onClose]);
 
   if (!isOpen) return null;
 

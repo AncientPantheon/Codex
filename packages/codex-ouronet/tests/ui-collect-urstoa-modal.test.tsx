@@ -19,6 +19,15 @@ vi.mock("@ancientpantheon/codex-ouronet/hooks", async (importOriginal) => {
   return { ...actual, useGetKeypair: () => getKeypairMock };
 });
 
+// Pops the REAL password prompt when the codex is locked, per the reported
+// bug: a locked-codex send/stake/etc must prompt-and-resume, never just
+// dead-end on a text error. Defaults to "already unlocked" for every
+// pre-existing test; the two new tests below override this per-case.
+const ensureCodexUnlockedMock = vi.fn(async () => true);
+vi.mock("../src/zbom/hooks/useEnsureCodexUnlocked", () => ({
+  useEnsureCodexUnlocked: () => ensureCodexUnlockedMock,
+}));
+
 const executeCollectUrStoaMock = vi.fn();
 const checkCoinAccountExistsMock = vi.fn();
 vi.mock("@ouronet/ouronet-core/interactions/urStoaFunctions", async (importOriginal) => {
@@ -61,6 +70,8 @@ describe("<CollectUrStoaModal>", () => {
     txPendingMock.mockClear();
     txSubmittedMock.mockClear();
     txFailMock.mockClear();
+    ensureCodexUnlockedMock.mockClear();
+    ensureCodexUnlockedMock.mockResolvedValue(true);
   });
 
   it("renders nothing when isOpen=false", () => {
@@ -153,5 +164,40 @@ describe("<CollectUrStoaModal>", () => {
     );
     // The tx toast must ALSO surface the real failure — never silently swallowed.
     expect(txFailMock).toHaveBeenCalledWith(expect.stringMatching(/no earnings to collect/i));
+  });
+
+  it("calls the codex-unlock gate BEFORE resolving the keypair on every submit — pops the REAL password prompt if locked, instead of erroring out", async () => {
+    checkCoinAccountExistsMock.mockResolvedValue(true);
+    const callOrder: string[] = [];
+    ensureCodexUnlockedMock.mockImplementation(async () => {
+      callOrder.push("ensureUnlocked");
+      return true;
+    });
+    getKeypairMock.mockImplementation(async () => {
+      callOrder.push("getKeypair");
+      return FAKE_KEYPAIR;
+    });
+    executeCollectUrStoaMock.mockResolvedValue({ requestKey: "req-key-gate" });
+    render(<CollectUrStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /collect/i }));
+
+    await waitFor(() => expect(executeCollectUrStoaMock).toHaveBeenCalledTimes(1));
+    expect(callOrder).toEqual(["ensureUnlocked", "getKeypair"]);
+  });
+
+  it("when the user cancels the password prompt, stops quietly — no keypair resolution, no error toast, no alert", async () => {
+    ensureCodexUnlockedMock.mockResolvedValueOnce(false);
+    render(<CollectUrStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
+
+    const submit = screen.getByRole("button", { name: /collect/i });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(ensureCodexUnlockedMock).toHaveBeenCalledTimes(1));
+    expect(getKeypairMock).not.toHaveBeenCalled();
+    expect(executeCollectUrStoaMock).not.toHaveBeenCalled();
+    expect(txFailMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import { formatDecimalForPact } from "@stoachain/stoa-core/pact";
 import { useGetKeypair } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
 import { txPending } from "../../zbom/toast/toastManager.js";
+import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { CodexModalShell, ModalExecuteRow, ModalFeedback, modalLabel, modalInput } from "./CodexModalShell.js";
 
 /** UrStoa amounts are validated to 3 decimal places, matching OuronetUI's
@@ -50,6 +51,7 @@ export function UnstakeUrStoaModal({
   onSuccess,
 }: UnstakeUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
+  const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +72,14 @@ export function UnstakeUrStoaModal({
     if (!canSubmit) return;
     setSubmitting(true);
     setLastError(null);
+    // Pop the REAL password prompt here, BEFORE touching the keypair at all,
+    // if the codex is locked — a cancelled prompt just stops quietly (no
+    // toast, no error): declining to unlock isn't a failure.
+    const unlocked = await ensureCodexUnlocked();
+    if (!unlocked) {
+      setSubmitting(false);
+      return;
+    }
     const _tx = txPending("Unstake UrStoa");
     try {
       const validatedAmount = formatDecimalForPact(amount.trim(), URSTOA_PRECISION);
@@ -96,7 +106,7 @@ export function UnstakeUrStoaModal({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, amount, publicKey, address, getKeypair, onSuccess, onClose]);
+  }, [canSubmit, amount, publicKey, address, getKeypair, ensureCodexUnlocked, onSuccess, onClose]);
 
   if (!isOpen) return null;
 

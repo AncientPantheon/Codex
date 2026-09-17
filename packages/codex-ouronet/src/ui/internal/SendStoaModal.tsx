@@ -50,6 +50,7 @@ import type { IKeyset } from "@stoachain/stoa-core/guard";
 import { useSignTransaction } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
 import { txPending } from "../../zbom/toast/toastManager.js";
+import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { CodexModalShell, ModalExecuteRow, ModalFeedback, modalLabel, modalInput } from "./CodexModalShell.js";
 
 const AMOUNT_RX = /^\d+(\.\d+)?$/;
@@ -95,6 +96,7 @@ export function SendStoaModal({
   onSuccess,
 }: SendStoaModalProps): React.JSX.Element | null {
   const { execute } = useSignTransaction();
+  const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
@@ -121,6 +123,14 @@ export function SendStoaModal({
     if (!canSubmit) return;
     setSubmitting(true);
     setLastError(null);
+    // Pop the REAL password prompt here, BEFORE touching sendFrom/execute at
+    // all, if the codex is locked — a cancelled prompt just stops quietly (no
+    // toast, no error): declining to unlock isn't a failure.
+    const unlocked = await ensureCodexUnlocked();
+    if (!unlocked) {
+      setSubmitting(false);
+      return;
+    }
     const _tx = txPending("Send Stoa");
     try {
       const receiverAddr = receiver.trim();
@@ -205,7 +215,7 @@ export function SendStoaModal({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, receiver, amount, address, publicKey, execute, onSuccess, onClose]);
+  }, [canSubmit, receiver, amount, address, publicKey, execute, ensureCodexUnlocked, onSuccess, onClose]);
 
   if (!isOpen) return null;
 

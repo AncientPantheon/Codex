@@ -26,6 +26,15 @@ vi.mock("@ancientpantheon/codex-ouronet/hooks", async (importOriginal) => {
   };
 });
 
+// Pops the REAL password prompt when the codex is locked, per the reported
+// bug: a locked-codex send/stake/etc must prompt-and-resume, never just
+// dead-end on a text error. Defaults to "already unlocked" for every
+// pre-existing test; the two new tests below override this per-case.
+const ensureCodexUnlockedMock = vi.fn(async () => true);
+vi.mock("../src/zbom/hooks/useEnsureCodexUnlocked", () => ({
+  useEnsureCodexUnlocked: () => ensureCodexUnlockedMock,
+}));
+
 const checkCoinAccountExistsMock = vi.fn();
 vi.mock("@ouronet/ouronet-core/interactions/ouroPriceFunctions", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -83,6 +92,8 @@ describe("<SendStoaModal>", () => {
     txPendingMock.mockClear();
     txSubmittedMock.mockClear();
     txFailMock.mockClear();
+    ensureCodexUnlockedMock.mockClear();
+    ensureCodexUnlockedMock.mockResolvedValue(true);
   });
 
   it("renders nothing when isOpen=false", () => {
@@ -286,6 +297,44 @@ describe("<SendStoaModal>", () => {
     );
     // The tx toast must ALSO surface the real failure — never silently swallowed.
     expect(txFailMock).toHaveBeenCalledWith(expect.stringMatching(/insufficient STOA balance/i));
+  });
+
+  it("calls the codex-unlock gate BEFORE execute on every submit — pops the REAL password prompt if locked, instead of erroring out", async () => {
+    checkCoinAccountExistsMock.mockResolvedValue(true);
+    const callOrder: string[] = [];
+    ensureCodexUnlockedMock.mockImplementation(async () => {
+      callOrder.push("ensureUnlocked");
+      return true;
+    });
+    executeMock.mockImplementation(async () => {
+      callOrder.push("execute");
+      return { requestKey: "req-key-gate" };
+    });
+    render(<SendStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
+
+    fireEvent.change(screen.getByLabelText(/receiver/i), { target: { value: RECEIVER_EXISTING } });
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /send stoa/i }));
+
+    await waitFor(() => expect(executeMock).toHaveBeenCalledTimes(1));
+    expect(callOrder).toEqual(["ensureUnlocked", "execute"]);
+  });
+
+  it("when the user cancels the password prompt, stops quietly — no execute call, no error toast, no alert", async () => {
+    ensureCodexUnlockedMock.mockResolvedValueOnce(false);
+    render(<SendStoaModal isOpen onClose={() => {}} publicKey={PUBLIC_KEY} address={ADDRESS} />);
+
+    fireEvent.change(screen.getByLabelText(/receiver/i), { target: { value: RECEIVER_EXISTING } });
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: "2" } });
+    const submit = screen.getByRole("button", { name: /send stoa/i });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(ensureCodexUnlockedMock).toHaveBeenCalledTimes(1));
+    expect(checkCoinAccountExistsMock).not.toHaveBeenCalled();
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(txFailMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("resets receiver/amount/error state each time the modal re-opens", () => {

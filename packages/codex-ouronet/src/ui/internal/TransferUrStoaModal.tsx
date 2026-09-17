@@ -28,6 +28,7 @@ import { formatDecimalForPact } from "@stoachain/stoa-core/pact";
 import { useGetKeypair } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
 import { txPending } from "../../zbom/toast/toastManager.js";
+import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { CodexModalShell, ModalExecuteRow, ModalFeedback, modalLabel, modalInput } from "./CodexModalShell.js";
 
 const URSTOA_PRECISION = 3;
@@ -68,6 +69,7 @@ export function TransferUrStoaModal({
   onSuccess,
 }: TransferUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
+  const ensureCodexUnlocked = useEnsureCodexUnlocked();
 
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
@@ -97,6 +99,14 @@ export function TransferUrStoaModal({
     if (!canSubmit) return;
     setSubmitting(true);
     setLastError(null);
+    // Pop the REAL password prompt here, BEFORE touching the keypair at all,
+    // if the codex is locked — a cancelled prompt just stops quietly (no
+    // toast, no error): declining to unlock isn't a failure.
+    const unlocked = await ensureCodexUnlocked();
+    if (!unlocked) {
+      setSubmitting(false);
+      return;
+    }
     const _tx = txPending("Transfer UrStoa");
     try {
       const receiverAddress = receiver.trim();
@@ -149,7 +159,7 @@ export function TransferUrStoaModal({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, receiver, amount, publicKey, address, getKeypair, onSuccess, onClose]);
+  }, [canSubmit, receiver, amount, publicKey, address, getKeypair, ensureCodexUnlocked, onSuccess, onClose]);
 
   if (!isOpen) return null;
 
