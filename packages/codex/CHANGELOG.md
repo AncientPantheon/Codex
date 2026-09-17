@@ -2,6 +2,70 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.11.0 — 2026-09-17
+
+**MINOR — two new chain capabilities: native Arweave (balance, send, keyring,
+seeds) and direct native Stoa/UrStoa movement (vault actions + send). No
+breaking changes. `codex`-only release** (`arweave-core` unchanged).
+
+### Added — Arweave: keyring, seeds, live balance + native send
+
+- **Pure Keys** category wired end-to-end: random RSA-4096 generation via a
+  Generate/Save two-step flow (free reroll before commit), PEM keyfile
+  import (private+public `.pem`, cross-validated via WebCrypto, discarded
+  after save) alongside JSON-keyfile import, per-row RSA parameter details,
+  a balance-aware delete guard (blocks deleting a funded seedless key, warns
+  on a seed-protected one), and Chainweb-style collapsible rows.
+- **Seeds**: Direct Deterministic RSA Generation (BitString/Bitmap/Base-10/
+  Base-49, 1024/1600-bit) alongside Seed Words Deterministic RSA Generation;
+  a unified 3-tile "enter your own seed" picker (Stoa Dalos / Dictionary
+  12-word / Dictionary 24-word); unified seed reveal UI with DALOS-charset
+  info and a worst-case entropy preview.
+- **Live balances + native AR send**: every account row shows a real
+  on-chain balance (with a manual refresh control) instead of a hardcoded
+  placeholder. The Send AR modal offers a "Fee Included" (typed amount is
+  the total debited) / "Fee On Top" (typed amount is exactly what the
+  recipient gets) toggle with an estimated-arrival line, live balance-aware
+  validation, and the codex-unlock gate now pops the real password prompt
+  on a locked codex instead of dead-ending on a static error.
+- **Real on-chain transaction confirmation.** The send toast now polls
+  Arweave's own gateway (`getTransactionStatus`, the same primitive the
+  Library's upload-confirmation flow already uses) every 15s for up to
+  ~10 minutes instead of guessing "done" the instant the broadcast
+  succeeds, and links "View on Explorer" at ViewBlock's Arweave tx page
+  with a distinct violet accent (not StoaChain's explorer/gold — the old
+  link pointed an Arweave tx id at StoaChain's explorer, a dead link). The
+  settled toast stays visible 10x longer, and carries an honest caption
+  about third-party explorer indexing lag.
+- **Balance freshness.** The Accounts view now refreshes every visible
+  balance on real transaction confirmation (not just at broadcast time,
+  before a debit is final) and shows a live "Updated Xs ago" label next to
+  "Live balances" so staleness is never a guess.
+- **Watch-list persistence.** Watched addresses (and the Prime Arweave
+  Seed) now round-trip through the codex JSON backup export/import — both
+  were previously dropped silently on reload. "Real" gateway mode is now
+  the default (mock mode moved to Codex UI Settings, no longer shown on the
+  main Accounts view), with a one-time migration off a stale local gateway
+  default and a fixed "Watch" button that previously threw on first use.
+
+### Added — direct native Stoa / UrStoa movement
+
+- **UrStoa vault actions** on the Chainweb Accounts tab: a Stoa/UrStoa
+  toggle shows liquid + staked + claimable balances (bulk chain-0 read) and
+  exposes **Transfer / Stake / Unstake / Collect** as icon buttons with
+  live-data tooltips; Stoa mode keeps a single Send button. Every action
+  shows the standard submit/confirming/confirmed toast, and the row
+  highlight now accounts for staked/claimable balances, not just liquid.
+- **Native Stoa send** (`coin.C_Transfer`/`coin.C_TransferAnew`) now shows
+  which of the 10 braided chains the transfer actually executes on and the
+  sender's balance ON that specific chain — a balance on chain 3 doesn't
+  fund a send that runs on chain 0.
+- **Locked-codex fix**, applied uniformly to all six modals above plus Send
+  AR: a signed action attempted on a locked codex now pops the real
+  password prompt and resumes automatically, instead of showing a static
+  "Codex is locked" error and dead-ending. A cancelled prompt stops
+  quietly — declining to unlock isn't a failure.
+
 ## 0.10.0 — 2026-08-10
 
 **MINOR — fixes a real transaction bug on every signed transaction; raises two
