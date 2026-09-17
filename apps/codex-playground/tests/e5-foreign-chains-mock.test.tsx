@@ -1180,7 +1180,17 @@ describe("T6 — real sendFrom/estimateFee wiring in buildRealPanelDeps", () => 
     const adapter = fakeAdapter({
       buildSend: vi.fn(async (params: unknown) => {
         order.push("buildSend");
-        expect(params).toEqual({ target: SEND_TARGET, quantity: 5n, maxRewardWinston: 10n });
+        // Regression (real bug, not a hypothetical): `sendFrom` used to send
+        // this as `quantity`, but `BuildSendParams` (codex-arweave) only
+        // recognizes `quantityWinston`/`amountAr`. Because `ForeignChainAdapter`
+        // (codex-core) declares `buildSend(...args: unknown[])` deliberately
+        // loosely, that wrong key compiled clean and only broke at runtime —
+        // every real send failed with "Invalid transfer: quantity must be a
+        // positive Winston bigint" regardless of the amount typed. This
+        // test previously asserted the WRONG (buggy) key itself, which is
+        // exactly how the bug shipped unnoticed — asserting the correct key
+        // here is the regression guard.
+        expect(params).toEqual({ target: SEND_TARGET, quantityWinston: 5n, maxRewardWinston: 10n });
         return built;
       }),
       post: vi.fn(async (b: unknown, jwk: unknown) => {
@@ -1298,5 +1308,80 @@ describe("T6 — real sendFrom/estimateFee wiring in buildRealPanelDeps", () => 
 
     await expect(deps.estimateFee(0, SEND_TARGET)).resolves.toBe(424242n);
     expect(pool.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================================
+// T1 (arweave-watch-list) — the codex store's shared watch list, filtered to
+// `type === "arweave"`, wired through `buildArweaveWiring`'s `panelDeps`.
+//
+// `buildArweaveWiring` itself does NO filtering — it is a straight pass-through
+// seam, exactly like `arweaveSeeds`/`onSeedDefined` — so what is under test here
+// is only that the option reaches `panelDeps` unchanged, and that omitting it
+// leaves the wiring funds-safe (an empty list, no crash) rather than required.
+// The `ForeignChainsWiring` component's OWN `type === "arweave"` filter is a
+// render-level concern, covered by the smoke test below.
+// ============================================================================
+
+import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
+
+/** A single watched Arweave address — a throwaway address, never funded. */
+const fixtureArweaveWatchEntry: WatchListEntry = {
+  id: "watch-arweave-fixture-0001",
+  label: "Watched Arweave Fixture",
+  address: THROWAWAY_ARWEAVE_ADDRESS,
+  type: "arweave",
+  createdAt: MODE2_LAST_UPDATED_AT,
+};
+
+describe("T1 — buildArweaveWiring passes the watch-list seam straight through", () => {
+  it("carries the supplied watchedAddresses into panelDeps unchanged", () => {
+    // WHY: `buildArweaveWiring` does no filtering of its own — a regression that
+    // drops, re-maps, or re-filters the option here would silently desync the
+    // panel's watch list from what the app actually wired.
+    const { panelDeps } = buildArweaveWiring({
+      mode: ARWEAVE_WIRING_MODE_MOCK,
+      watchedAddresses: [fixtureArweaveWatchEntry],
+    });
+
+    expect(panelDeps.watchedAddresses).toEqual([fixtureArweaveWatchEntry]);
+  });
+
+  it("defaults to an empty watch list and leaves add/remove undefined when the caller omits them", () => {
+    // WHY: `watchedAddresses`/`addWatchedAddress`/`removeWatchedAddress` must
+    // stay OPTIONAL on `BuildArweaveWiringOptions` — a caller that does not wire
+    // them (e.g. an earlier test in this very file) must not crash building the
+    // wiring, and the panel must see an inert (never `undefined`) empty list.
+    const { panelDeps } = buildArweaveWiring({ mode: ARWEAVE_WIRING_MODE_MOCK });
+
+    expect(panelDeps.watchedAddresses).toEqual([]);
+    expect(panelDeps.addWatchedAddress).toBeUndefined();
+    expect(panelDeps.removeWatchedAddress).toBeUndefined();
+  });
+});
+
+describe("T1 — ForeignChainsWiring renders against a mixed-type watch list", () => {
+  it("renders without throwing when the store's watch list carries both a stoa and an arweave entry", async () => {
+    // WHY: this is the render-level proof that widening `WatchListEntry.type` to
+    // include "arweave" and threading `useWatchList()` through the wiring does
+    // not blow up a mount that mixes Chainweb's own watched entries with a new
+    // Arweave one — the DOM-visible proof that only the Arweave entry surfaces
+    // arrives with T2 (`ArweaveAccountsArea` does not consume `watchedAddresses`
+    // yet), so this test is deliberately a smoke guard, not a content assertion.
+    const stoaWatchEntry: WatchListEntry = {
+      id: "watch-stoa-fixture-0001",
+      label: "Watched Stoa Fixture",
+      address: "k:0000000000000000000000000000000000000000000000000000watched",
+      type: "stoa",
+      createdAt: MODE2_LAST_UPDATED_AT,
+    };
+    const snapshot: CodexSnapshot = {
+      ...emptySnapshot,
+      watchList: [stoaWatchEntry, fixtureArweaveWatchEntry],
+    };
+
+    await renderWiredForeignChainsTab(snapshot);
+
+    expect(await screen.findByTestId("arweave-panel")).toBeInTheDocument();
   });
 });

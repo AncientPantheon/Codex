@@ -353,9 +353,20 @@ export function buildRealPanelDeps({
       // cap), or a `post` failure (anchor/price/fee-cap/network) all surface
       // as their own error, never swallowed into a generic one.
       const jwk = await decryptArweaveKey(entry);
+      // `BuildSendParams` (codex-arweave/src/adapter/arweaveAdapter.ts) has no
+      // `quantity` field — only `amountAr`/`quantityWinston`. `resolvedAdapter`
+      // is typed as the generic `ForeignChainAdapter`, whose `buildSend`
+      // deliberately accepts `unknown[]` (it spans multiple chains with
+      // different call shapes), so a wrong key name here compiles clean and
+      // only breaks at runtime: the real `buildSend` reads
+      // `params.quantityWinston`, sees `undefined`, and throws
+      // `InvalidTransferError("non-positive-quantity")` — surfaced to the user
+      // as "Invalid transfer: quantity must be a positive Winston bigint"
+      // regardless of what amount they actually typed. Key MUST be
+      // `quantityWinston`.
       const built = await resolvedAdapter.buildSend({
         target: req.target,
-        quantity: req.quantity,
+        quantityWinston: req.quantity,
         maxRewardWinston: req.maxRewardWinston,
       });
       return (await resolvedAdapter.post(built, jwk)) as ArweaveSendResult;
