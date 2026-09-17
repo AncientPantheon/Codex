@@ -126,6 +126,14 @@ const arweaveSeedFx = (id = "ar-seed-1"): IArweaveSeed => ({
   isPrime: true,
 });
 
+const watchEntryFx = (id = "watch-1"): WatchListEntry => ({
+  id,
+  label: "BigMoney",
+  address: "kvxXYE6q7v6LrmQJLBEQZ2abWDdVyjQDERqM1YeMvf0",
+  type: "arweave",
+  createdAt: "2026-05-25T10:00:45.000Z",
+});
+
 const addrFx = (id = "a1"): AddressBookEntry => ({
   id,
   name: "Alice",
@@ -677,6 +685,89 @@ describe("useCodexBackup", () => {
     // exactly the reported incident's wipe mechanism.
     const restored = await adapter.loadAll();
     expect(restored.arweaveSeeds).toEqual([primeSeed]);
+  });
+
+  it("watchList round-trip: exportForCloud → importFromCloud into a FRESH store restores a watched address (fixes the reported codex-save vanishes incident)", async () => {
+    const sourceAdapter = new MemoryCodexAdapter("dev");
+    const source = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        store: useCodexStore(),
+      }),
+      { wrapper: mkWrapper(sourceAdapter) }
+    );
+    await waitFor(() => expect(source.result.current.backup.isDirty).toBe(false));
+
+    const watched = watchEntryFx("watch-1");
+    await act(async () => {
+      await source.result.current.store.getState().actions.addWatchListEntry(watched);
+    });
+
+    let json = "";
+    await act(async () => {
+      json = await source.result.current.backup.exportForCloud();
+    });
+    // The exported envelope actually carries watchList as a bare array —
+    // before the fix, buildBackupPayload never threaded it into
+    // buildCodexExport at all (the export-side half of the reported loss).
+    const exported = JSON.parse(json);
+    expect(exported.watchList).toEqual([watched]);
+
+    // Import into a FRESH, independent store/adapter (simulates the reload).
+    const targetAdapter = new MemoryCodexAdapter("dev");
+    const target = renderHook(() => useCodexBackup(), {
+      wrapper: mkWrapper(targetAdapter),
+    });
+    await act(async () => {
+      await target.result.current.importFromCloud(json);
+    });
+
+    const restored = await targetAdapter.loadAll();
+    expect(restored.watchList).toEqual([watched]);
+  });
+
+  it("importFromCloud PRESERVES existing watchList when the backup omits the field (a pre-watchlist backup must not wipe a live watched address)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const watched = watchEntryFx("watch-live");
+    const { result } = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        store: useCodexStore(),
+        codex: useCodex(),
+      }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+    await act(async () => {
+      await result.current.store.getState().actions.addWatchListEntry(watched);
+    });
+
+    // A "1.2" backup — written before watchList existed in the codec — carries
+    // no watchList field at all.
+    const payload = JSON.stringify({
+      version: "1.2",
+      exportedAt: "2024-11-02T09:14:33.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    });
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // The restore must PRESERVE the live watched address, not wipe it to []
+    // just because the backup file omitted the field entirely.
+    const restored = await adapter.loadAll();
+    expect(restored.watchList).toEqual([watched]);
   });
 
   it("importFromCloud throws CodexImportError on malformed JSON", async () => {

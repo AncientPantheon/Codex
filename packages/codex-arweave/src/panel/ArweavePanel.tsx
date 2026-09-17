@@ -39,6 +39,7 @@ import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import type { PanelProps } from "@ancientpantheon/codex-ui";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 import { ArweavePanelContext } from "./context.js";
@@ -69,6 +70,22 @@ interface ArweaveSeedStoreSeams {
   arweaveSeeds?: readonly ArweaveSeedRecord[];
   /** Persists a newly defined seed into the codex. Absent → session-only. */
   onSeedDefined?: (seed: ArweaveSeedRecord) => Promise<void> | void;
+}
+
+/**
+ * The store-backed watch-list seams the HOST wires alongside `ArweavePanelDeps`
+ * (T1) — same structural-narrowing pattern as {@link ArweaveSeedStoreSeams}.
+ *
+ * Reused from Chainweb's own `watchList` store slice (design.md), filtered to
+ * this chain's WatchListEntry.type value by the host wiring — this panel
+ * never reads a store itself. `ForeignChainsWiring.tsx`'s `WiredArweavePanelDeps` types the values
+ * `| undefined` rather than declaring the keys optional (`?:`), so they are
+ * read the same way here: present, but possibly unwired.
+ */
+interface ArweaveWatchListSeams {
+  watchedAddresses: WatchListEntry[];
+  addWatchedAddress: (address: string, label?: string) => Promise<void>;
+  removeWatchedAddress: (id: string) => Promise<void>;
 }
 
 
@@ -292,6 +309,9 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
 
   /** The host's store-backed seed seams (see {@link ArweaveSeedStoreSeams}). */
   const seedSeams = deps as (typeof deps & ArweaveSeedStoreSeams) | null;
+
+  /** The host's store-backed watch-list seams (see {@link ArweaveWatchListSeams}). */
+  const watchSeams = deps as (typeof deps & ArweaveWatchListSeams) | null;
 
   /** Seeds defined in THIS session, kept as an overlay over the host list: the
    *  record carries the plaintext bitstring the generate flow needs, which the
@@ -523,6 +543,13 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
             // button/modal can reach sendFrom/estimateFee — deps is `null`
             // here (no-context state) but the prop wants `undefined`.
             deps={deps ?? undefined}
+            // T2: the watch-list seams (see {@link ArweaveWatchListSeams}) —
+            // an unwired host (watchSeams === null, or one that never wires
+            // these three fields) degrades to an empty list and a disabled
+            // add form, never a throw.
+            watchedEntries={watchSeams?.watchedAddresses ?? []}
+            onAddWatched={watchSeams?.addWatchedAddress}
+            onRemoveWatched={watchSeams?.removeWatchedAddress}
           />
         ) : active === "pure-keys" ? (
           deps === null ? (

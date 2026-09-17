@@ -46,6 +46,30 @@ export type ArweaveSeedEntry = {
 };
 
 /**
+ * The wire shape of one watch-list entry inside a "1.3" export envelope —
+ * mirrors codex-ouronet's own `WatchListEntry` structurally (declared here
+ * rather than imported, same reasoning as `ArweaveSeedEntry`: codex-core has
+ * no dependency on codex-ouronet, and the consumer's richer type is
+ * structurally compatible and passes through verbatim).
+ *
+ * A watch-list entry never carries a secret — it names an address the codex
+ * observes but holds no key for — so unlike `ArweaveSeedEntry`/`ForeignKeyEntry`
+ * there is no ciphertext field here to protect.
+ */
+export type WatchListEntry = {
+  /** Stable identifier for this watch entry (addresses it on restore/upsert). */
+  id: string;
+  /** Human label; empty string is valid (unlabeled). */
+  label: string;
+  /** The observed address — public material, never a secret. */
+  address: string;
+  /** Which chain family this address belongs to. */
+  type: "ouronet" | "stoa" | "arweave";
+  /** ISO timestamp the entry was created. */
+  createdAt: string;
+};
+
+/**
  * PlaintextCodex — the portable shape of an Ouronet user's in-memory
  * codex state. Consumers decide the concrete element types for each list
  * via generics (OuronetUI plugs in its IStoaChainSeed / IOuroAccount / etc;
@@ -70,6 +94,7 @@ export interface PlaintextCodex<
   AddressBookEntry = unknown,
   UiSettings       = unknown,
   ArweaveSeed      = unknown,
+  WatchList        = unknown,
 > {
   /** HD seeds (koala / chainweaver / eckowallet variants) known to this codex. */
   readonly kadenaWallets: StoaChainSeed[];
@@ -123,6 +148,20 @@ export interface PlaintextCodex<
    * or the seed silently drops out of the backup on the next round-trip.
    */
   readonly arweaveSeeds?: ArweaveSeed[];
+
+  /**
+   * OPTIONAL watch-list source — a BARE `WatchList[]`, mirroring `arweaveSeeds`'
+   * wire shape. OPTIONAL so existing consumers built before this field existed
+   * compile unchanged.
+   *
+   * Reported incident this fixes: a watched Arweave address (no key, purely
+   * observed) silently vanished across a codex export+reimport because the
+   * codec had no awareness of the watch list at all. Every consumer that
+   * builds a `PlaintextCodex` source for export MUST thread its live
+   * `watchList` state through here, or it silently drops out of the backup on
+   * the next round-trip.
+   */
+  readonly watchList?: WatchList[];
 }
 
 /**
@@ -189,6 +228,7 @@ export interface CodexExportV1_3<
   UiSettings       = unknown,
   PureKeypair      = PureKeypairEntry,
   ArweaveSeed      = ArweaveSeedEntry,
+  WatchList        = WatchListEntry,
 > {
   readonly version: "1.3";
   readonly exportedAt: string;
@@ -199,4 +239,5 @@ export interface CodexExportV1_3<
   readonly foreignKeys?: ForeignKeysBlock;
   readonly pureKeypairs?: PureKeypair[];
   readonly arweaveSeeds?: ArweaveSeed[];
+  readonly watchList?: WatchList[];
 }

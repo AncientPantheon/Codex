@@ -64,7 +64,7 @@ import { UnlockScreen } from "./UnlockScreen";
 import { ForeignChainsWiring } from "./ForeignChainsWiring";
 import { ArweaveModeToggle } from "./ArweaveModeToggle";
 import {
-  ARWEAVE_WIRING_MODE_MOCK,
+  ARWEAVE_WIRING_MODE_REAL,
   type ArweaveWiringMode,
 } from "./ForeignChainsWiring";
 import {
@@ -121,8 +121,21 @@ export function Dashboard({
   // the address's real on-chain balance. Restored as real state + a
   // (minimally) styled mount below, not re-removed, since "real mode
   // unreachable" is strictly worse than "unstyled control."
-  const [arweaveMode, setArweaveMode] = useState<ArweaveWiringMode>(
-    ARWEAVE_WIRING_MODE_MOCK,
+  //
+  // SOURCED FROM `network.arweaveMode` (persisted, not a bare `useState`): a
+  // plain useState here defaults to mock on EVERY mount — a page reload or a
+  // dev-server restart would silently reset a user's "real" choice back to
+  // mock with no indication anything changed, and every balance read after
+  // that point would silently read the mock adapter's fixed fake balance
+  // instead of the real chain. Reusing `network`'s existing persistence
+  // (the `useEffect` below already saves the whole object on every change)
+  // means flipping to real survives exactly the same way editing the gateway
+  // URL already does — one source of truth, not a second forgetful one.
+  const arweaveMode = network.arweaveMode ?? ARWEAVE_WIRING_MODE_REAL;
+  const setArweaveMode = useCallback(
+    (mode: ArweaveWiringMode) =>
+      setNetwork((prev) => ({ ...prev, arweaveMode: mode })),
+    [],
   );
   const gatewayUrl = network.arweaveGatewayUrl;
 
@@ -255,14 +268,41 @@ export function Dashboard({
         <div className="cxpg-separator" aria-hidden="true" />
         <CodexUiRoot>
           {activeView === "ui" ? (
+            /* THE single Codex tab shell. `ForeignChainsWiring` renders
+               `CodexTabs` itself, fed the Arweave+Chainweb rail — so the
+               Blockchain Accounts Class tab IS the wired rail rather than an
+               empty Class 2 with a duplicate rail section beside it. Real
+               mode is now the default (owner directive) — no toggle box
+               sits on this view any more; it lives in Settings → Network
+               instead, alongside the gateway URL field it edits. */
+            <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
+          ) : (
             <>
-              {/* The Arweave mock <-> real toggle. Scoped, minimal inline
-                  styling (not the component's own bare markup) so it reads
-                  as a small settings control rather than dev chrome. The
-                  gateway URL field it also renders is bound to the SAME
-                  `network.arweaveGatewayUrl` state as the Settings tab's
-                  Network card, via `setChainUrl` — one source of truth, not
-                  two independent gateway fields. */}
+              <CodexSettingsSection
+                consumerName="Codex Playground"
+                network={
+                  networkModel
+                    ? {
+                        model: networkModel,
+                        urls: {
+                          [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
+                          [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
+                        },
+                        onSetChainUrl: setChainUrl,
+                        pythiaUrl: network.pythiaUrl,
+                        onSetPythiaUrl: setPythiaUrl,
+                      }
+                    : undefined
+                }
+              />
+              {/* The Arweave mock <-> real toggle — relocated here (owner
+                  directive: it must not sit on the main Accounts view).
+                  Scoped, minimal inline styling (not the component's own bare
+                  markup) so it reads as a settings control, not dev chrome.
+                  The gateway URL field it also renders is bound to the SAME
+                  `network.arweaveGatewayUrl` state the Network card above
+                  edits, via `setChainUrl` — one source of truth, not two
+                  independent gateway fields. */}
               <div style={ARWEAVE_MODE_TOGGLE_STYLE}>
                 <ArweaveModeToggle
                   initialMode={arweaveMode}
@@ -271,30 +311,7 @@ export function Dashboard({
                   onGatewayUrlChange={(url) => setChainUrl(ARWEAVE_CHAIN_ID, url)}
                 />
               </div>
-              {/* THE single Codex tab shell. `ForeignChainsWiring` renders
-                  `CodexTabs` itself, fed the Arweave+Chainweb rail — so the
-                  Blockchain Accounts Class tab IS the wired rail rather than an
-                  empty Class 2 with a duplicate rail section beside it. */}
-              <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
             </>
-          ) : (
-            <CodexSettingsSection
-              consumerName="Codex Playground"
-              network={
-                networkModel
-                  ? {
-                      model: networkModel,
-                      urls: {
-                        [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
-                        [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
-                      },
-                      onSetChainUrl: setChainUrl,
-                      pythiaUrl: network.pythiaUrl,
-                      onSetPythiaUrl: setPythiaUrl,
-                    }
-                  : undefined
-              }
-            />
           )}
         </CodexUiRoot>
       </div>

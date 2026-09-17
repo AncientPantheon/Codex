@@ -29,10 +29,13 @@
 // surface; there is no second, parallel foreign-chains section.
 // ============================================================================
 
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { createForeignChainRegistry } from "@ancientpantheon/codex-core";
-import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
+import {
+  ARWEAVE_CHAIN_ID,
+  registerArweaveAddressValidator,
+} from "@ancientpantheon/codex-arweave/address-book";
 import {
   ArweavePanel,
   ArweavePanelProvider,
@@ -45,10 +48,12 @@ import {
   type CodexTabKey,
 } from "@ancientpantheon/codex-ouronet/ui";
 import {
+  getRegisteredChains,
   useAddressBook,
   useCodexAuth,
   useOuroAccounts,
   useStoaChainSeeds,
+  useWatchList,
 } from "@ancientpantheon/codex-ouronet/hooks";
 import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { curveOf } from "@ancientpantheon/codex-ouronet/codex-identity";
@@ -57,6 +62,7 @@ import type {
   IOuroAccount,
   IStoaChainSeed,
 } from "@ancientpantheon/codex-ouronet/types";
+import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 import type { ForeignChainPanels } from "@ancientpantheon/codex-ui/ui/foreign-chains";
 import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
 
@@ -73,6 +79,19 @@ import {
   createRealArweaveAdapter,
 } from "./realArweaveAdapter";
 import { DEFAULT_GATEWAY_URL } from "./ArweaveModeToggle";
+
+// Register the Arweave address-book validator on the module-level default
+// registry, mirroring how packages/codex/src/ui/CodexTabsWired.tsx does it for
+// ITS OWN composition — this app does not depend on or import that package, so
+// without this call `validateAddress(ARWEAVE_CHAIN_ID, ...)` throws
+// UnknownChainError the moment anything in THIS app's real tree calls it (found
+// via ArweaveAccountsArea's "Watch" button, the first real reachable call site
+// in this app; SendArweaveModal, the actually-mounted send modal, never calls
+// validateAddress at all, so that feature is unaffected). Guarded so a
+// re-import (HMR / repeated module eval) doesn't re-register.
+if (!getRegisteredChains().includes(ARWEAVE_CHAIN_ID)) {
+  registerArweaveAddressValidator();
+}
 
 /**
  * The Class 2 rail id for Chainweb. It is the CHAIN-RAIL vocabulary shared with
@@ -475,6 +494,21 @@ export type WiredArweavePanelDeps = ArweavePanelDeps & {
   arweaveSeeds: PanelArweaveSeed[];
   /** Persists a newly defined seed into the codex (ciphertext at rest). */
   onSeedDefined?: (seed: PanelArweaveSeed) => Promise<void>;
+  /** The codex's shared watch list, filtered to `type === "arweave"` — a
+   *  third-party address the codex does not hold a private key for. Reused
+   *  from Chainweb's own `watchList` store slice (D-13); not declared on
+   *  `ArweavePanelDeps` for the same reason as the seed seams above. */
+  watchedAddresses: WatchListEntry[];
+  /** Adds a new watched Arweave address (defaults `type: "arweave"`, generates
+   *  the `id`/`createdAt`), or re-labels an existing one by address. A REQUIRED
+   *  key (unlike `onSeedDefined?`) whose VALUE may still be `undefined` — left
+   *  undefined-able exactly like `revealAccountSecret`, so an unwired caller of
+   *  `buildArweaveWiring` never fails to build, and the field is never silently
+   *  absent from `panelDeps` either. */
+  addWatchedAddress: ((address: string, label?: string) => Promise<void>) | undefined;
+  /** Removes a watched Arweave address by its watch-list entry id. Same
+   *  required-key/undefined-value contract as {@link addWatchedAddress}. */
+  removeWatchedAddress: ((id: string) => Promise<void>) | undefined;
   /** Option 2's candidates: ACTIVATED, `dalos`-curve Ouronet accounts. */
   ouronetAccounts: ArweaveSeedAccountSource[];
   /** Option 3's candidates: the codex's Chainweb seeds (no words — lazy). */
@@ -516,6 +550,15 @@ export interface BuildArweaveWiringOptions {
   arweaveSeeds?: PanelArweaveSeed[];
   /** The define-seed persist seam ({@link createArweaveSeedPersistence}). */
   onSeedDefined?: (seed: PanelArweaveSeed) => Promise<void>;
+  /** The codex's watch list, already filtered to `type === "arweave"`. Empty
+   *  (the default) means the Codex has no watched Arweave address yet. */
+  watchedAddresses?: WatchListEntry[];
+  /** Adds/relabels a watched Arweave address ({@link WiredArweavePanelDeps}'s
+   *  own field — see its JSDoc). Left `undefined` disables the add affordance. */
+  addWatchedAddress?: (address: string, label?: string) => Promise<void>;
+  /** Removes a watched Arweave address by id. Left `undefined` disables the
+   *  remove affordance. */
+  removeWatchedAddress?: (id: string) => Promise<void>;
   /** Option 2's candidates, already filtered by {@link toArweaveSeedAccounts}. */
   ouronetAccounts?: ArweaveSeedAccountSource[];
   /** Option 2's unlock-gated reveal seam ({@link createRevealAccountSecret}). */
@@ -556,6 +599,9 @@ export function buildArweaveWiring({
   foreignKeys = [],
   arweaveSeeds = [],
   onSeedDefined,
+  watchedAddresses = [],
+  addWatchedAddress,
+  removeWatchedAddress,
   ouronetAccounts = [],
   revealAccountSecret,
   chainwebSeeds = [],
@@ -633,6 +679,9 @@ export function buildArweaveWiring({
     ...baseDeps,
     arweaveSeeds,
     onSeedDefined,
+    watchedAddresses,
+    addWatchedAddress,
+    removeWatchedAddress,
     ouronetAccounts,
     revealAccountSecret,
     chainwebSeeds,
@@ -745,6 +794,44 @@ export function ForeignChainsWiring({
     [storedChainwebSeeds, getCurrentPassword],
   );
 
+  // The codex's shared watch list (Chainweb's `watchList` store slice, reused
+  // rather than duplicated — see design.md), filtered to the Arweave-typed
+  // entries. `addWatchedAddress` defaults `type: "arweave"` and generates the
+  // `id`/`createdAt` the same way Chainweb's own `handleAddWatch` does — for a
+  // genuinely NEW address. `ArweaveAccountsArea`'s `WatchedRow` reuses this
+  // SAME function for relabeling an EXISTING watched address (its own
+  // `onRelabel` prop is just `onAddWatched(entry.address, newLabel)`, per its
+  // module doc's stated "upsert-by-id semantics" intent) — so this must
+  // actually upsert by address, reusing an existing entry's `id`/`createdAt`
+  // when one already exists, exactly like Chainweb's own `onRelabel={(label)
+  // => addEntry({...w, label})}` does by spreading the whole existing entry.
+  // Always minting a fresh id here (the prior bug) meant `addWatchListEntry`'s
+  // upsert-by-id store action could never find a match, so every relabel
+  // silently appended a SECOND entry for the same address instead of updating
+  // the first.
+  const { entries: watchListEntries, addEntry: addWatchListEntry, deleteEntry: deleteWatchListEntry } = useWatchList();
+  const watchedAddresses = useMemo(
+    () => watchListEntries.filter((w) => w.type === "arweave"),
+    [watchListEntries],
+  );
+  const addWatchedAddress = useCallback(
+    (address: string, label?: string) => {
+      const existing = watchedAddresses.find((w) => w.address === address);
+      return addWatchListEntry({
+        id: existing?.id ?? globalThis.crypto.randomUUID(),
+        label: label ?? "",
+        address,
+        type: "arweave",
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+      });
+    },
+    [addWatchListEntry, watchedAddresses],
+  );
+  const removeWatchedAddress = useCallback(
+    (id: string) => deleteWatchListEntry(id),
+    [deleteWatchListEntry],
+  );
+
   // The REAL Arweave-seed slice. Read from the store (not panel state) so a
   // defined seed survives the Class-2 chain switch that unmounts the panel —
   // the reported bug. Stored seeds are ciphertext, so the bitstrings the Seeds
@@ -803,6 +890,9 @@ export function ForeignChainsWiring({
     foreignKeys,
     arweaveSeeds,
     onSeedDefined,
+    watchedAddresses,
+    addWatchedAddress,
+    removeWatchedAddress,
     ouronetAccounts,
     revealAccountSecret,
     chainwebSeeds,

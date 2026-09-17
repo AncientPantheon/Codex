@@ -35,6 +35,11 @@ import { createArweaveConnection } from "@ancientpantheon/codex-arweave/connecti
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 
 import { DEFAULT_GATEWAY_URL } from "./ArweaveModeToggle";
+import {
+  ARWEAVE_WIRING_MODE_MOCK,
+  ARWEAVE_WIRING_MODE_REAL,
+  type ArweaveWiringMode,
+} from "./ForeignChainsWiring";
 
 /** The StoaChain connection chain id (matches createStoaChainConnection). */
 export const STOACHAIN_CHAIN_ID = "stoachain" as const;
@@ -51,6 +56,16 @@ export interface NetworkSettings {
   stoaChainNodeUrl: string;
   /** The Arweave gateway URL the Arweave panel reads/broadcasts against (LOCAL). */
   arweaveGatewayUrl: string;
+  /** The Arweave mock<->real wiring mode. OPTIONAL (unlike the other fields)
+   *  since `resolveNetworkModel` and its own callers never needed it before
+   *  this field existed. Defaults to REAL (owner directive, updated): a
+   *  standalone Codex should show real balances out of the box, not require
+   *  an extra manual toggle click before anything useful shows — mock stays
+   *  available (still user-selectable, in the Network settings tab) as an
+   *  offline/dev escape hatch, it is just no longer the default. PERSISTED so
+   *  a page reload / dev-server restart cannot silently reset a user's
+   *  chosen mode back to the default with no indication anything changed. */
+  arweaveMode?: ArweaveWiringMode;
 }
 
 /** The localStorage key the surfaced config persists under. */
@@ -73,6 +88,7 @@ export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   pythiaUrl: "",
   stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+  arweaveMode: ARWEAVE_WIRING_MODE_REAL,
 };
 
 /**
@@ -93,9 +109,24 @@ export function loadNetworkSettings(): NetworkSettings {
           ? parsed.stoaChainNodeUrl
           : DEFAULT_NETWORK_SETTINGS.stoaChainNodeUrl,
       arweaveGatewayUrl:
-        typeof parsed.arweaveGatewayUrl === "string" && parsed.arweaveGatewayUrl.length > 0
+        typeof parsed.arweaveGatewayUrl === "string" &&
+        parsed.arweaveGatewayUrl.length > 0 &&
+        // ONE-TIME migration: "http://localhost:1984" was this constant's own
+        // hardcoded value before this default flipped to real mainnet — any
+        // browser that loaded the app before that change has it WRITTEN to
+        // localStorage not because anyone chose it, but because it was simply
+        // the code's default at the time. Correcting exactly this one legacy
+        // literal (never any OTHER value, including a different localhost URL
+        // someone actually typed) is what lets "real" mode work out of the box
+        // for a returning browser instead of silently pointing at nothing.
+        parsed.arweaveGatewayUrl !== "http://localhost:1984"
           ? parsed.arweaveGatewayUrl
           : DEFAULT_NETWORK_SETTINGS.arweaveGatewayUrl,
+      arweaveMode:
+        parsed.arweaveMode === ARWEAVE_WIRING_MODE_REAL ||
+        parsed.arweaveMode === ARWEAVE_WIRING_MODE_MOCK
+          ? parsed.arweaveMode
+          : DEFAULT_NETWORK_SETTINGS.arweaveMode,
     };
   } catch {
     return { ...DEFAULT_NETWORK_SETTINGS };

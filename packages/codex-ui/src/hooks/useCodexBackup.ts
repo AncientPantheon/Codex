@@ -63,6 +63,11 @@ interface ParsedBackup {
    *  `current.arweaveSeeds` fallback — an absent field must NOT wipe a live
    *  Prime Arweave Seed on restore. */
   arweaveSeeds?: CodexSnapshot["arweaveSeeds"];
+  /** Bare array on the wire (absent on any backup written before the watch
+   *  list existed in the codec). See `importFromCloud`'s `current.watchList`
+   *  fallback — an absent field must NOT wipe a live watched address on
+   *  restore (the reported codex-save-vanishes incident). */
+  watchList?: CodexSnapshot["watchList"];
 }
 
 export interface CodexBackupView {
@@ -97,6 +102,7 @@ function buildBackupPayload(snapshot: CodexSnapshot): unknown {
     lastUpdatedDevice: snapshot.lastUpdatedDevice,
     foreignKeys: snapshot.foreignKeys,
     arweaveSeeds: snapshot.arweaveSeeds,
+    watchList: snapshot.watchList,
   });
 }
 
@@ -202,8 +208,15 @@ export function useCodexBackup(): CodexBackupView {
         ouroAccounts: parsed.ouronetWallets,
         pureKeypairs: parsed.pureKeypairs ?? [],
         addressBook: parsed.addressBook,
-        // watchList stays current (not in the wire format).
-        watchList: current.watchList,
+        // Same funds-safe fallback discipline as `arweaveSeeds` below: a
+        // backup written before the watch list rode the codec (or any backup
+        // that simply omits the field) must NOT wipe a live watched address —
+        // only an explicit (possibly empty) `watchList` array present in the
+        // backup itself should replace it. This is the reported incident: a
+        // watched Arweave address vanished across an export+reimport because
+        // this fell back unconditionally to `current.watchList`, masking the
+        // fact that `buildBackupPayload` never emitted the field at all.
+        watchList: parsed.watchList ?? current.watchList ?? [],
         uiSettings: parsed.uiSettings,
         // BLOCK → BARE-ARRAY UNWRAP (funds-critical): the wire `foreignKeys` is a
         // `{ schemaVersion, keys }` block; the store/adapter expect a bare

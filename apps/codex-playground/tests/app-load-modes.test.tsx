@@ -47,6 +47,7 @@ const railName = (id: string) => new RegExp(`^${id}$`, "i");
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 /**
@@ -249,15 +250,17 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
   });
 });
 
-describe("Dashboard — the Arweave mock/real mode toggle is actually reachable", () => {
-  // WHY: `arweaveMode` was hardcoded to mock (commit 12c135d0), and the
-  // on-screen <ArweaveModeToggle> was left unmounted with a "re-mount here if
-  // real-mode switching is needed" comment — so there was NO way, from the
-  // real running app, to ever reach real mode. Every Arweave balance/send
-  // read silently fell back to the mock adapter's FIXED fake balance
-  // (1.5 AR for every address, regardless of its real on-chain balance),
-  // which is exactly the bug this guards against regressing to.
-  it("renders the toggle, defaults to mock, and flipping it to real updates the on-screen mode + shows the funds-safety warning", async () => {
+describe("Dashboard — the Arweave mode defaults to real, with the mock/real toggle reachable from Settings", () => {
+  // WHY (history): `arweaveMode` was first hardcoded to mock entirely
+  // (commit 12c135d0, no toggle mounted anywhere) — real mode was
+  // UNREACHABLE. That was fixed by restoring the toggle, defaulted to mock.
+  // Per explicit owner directive afterward: a standalone Codex should show
+  // real balances out of the box with no manual step, and the toggle box
+  // must not sit on the main Accounts view — it now lives in the "Codex UI
+  // Settings" view (a sibling below the Network card), and the DEFAULT mode
+  // is real, not mock. Mock stays fully reachable as an offline/dev choice,
+  // just no longer the first thing a user sees or has to click past.
+  it("defaults to real with no manual step, and the toggle is reachable from Settings (not the main Accounts view)", async () => {
     const user = userEvent.setup();
     const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
     render(
@@ -266,16 +269,91 @@ describe("Dashboard — the Arweave mock/real mode toggle is actually reachable"
       </CodexProvider>,
     );
 
-    const modeSection = screen.getByRole("region", { name: /arweave mode/i });
-    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
-    expect(within(modeSection).queryByRole("alert")).toBeNull();
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
+    // Not present on the landing (Accounts) view.
+    expect(screen.queryByRole("region", { name: /arweave mode/i })).toBeNull();
 
-    await user.click(
-      within(modeSection).getByRole("button", { name: /switch to real arweave/i }),
-    );
-
+    await user.click(screen.getByRole("tab", { name: /codex ui settings/i }));
+    const modeSection = await screen.findByRole("region", { name: /arweave mode/i });
     expect(within(modeSection).getByText("real")).toBeInTheDocument();
     expect(within(modeSection).getByRole("alert")).toBeInTheDocument();
+
+    await user.click(
+      within(modeSection).getByRole("button", { name: /switch to mock \(offline\)/i }),
+    );
+    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
+  });
+
+  it("boots directly into mock mode when arweaveMode:'mock' was already persisted from a prior session (mode choice still survives a remount, real is only the DEFAULT)", async () => {
+    window.localStorage.setItem(
+      "codex-playground:network-settings",
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: "",
+        arweaveGatewayUrl: "https://arweave.net",
+        arweaveMode: "mock",
+      }),
+    );
+
+    const user = userEvent.setup();
+    const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
+    );
+
+    await screen.findByRole("tab", { name: /blockchain accounts/i });
+    await user.click(screen.getByRole("tab", { name: /codex ui settings/i }));
+    const modeSection = await screen.findByRole("region", { name: /arweave mode/i });
+    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
+  });
+});
+
+describe("Dashboard — relabeling a watched Arweave address updates it in place", () => {
+  it("does not duplicate the row: watch an address, then set its label, and exactly one row remains for that address", async () => {
+    // WHY: ForeignChainsWiring's addWatchedAddress ALWAYS minted a fresh
+    // crypto.randomUUID() id, for both the genuine "add new address" call
+    // (ArweaveAccountsArea's Watch button) AND the "relabel" call (WatchedRow's
+    // inline label editor reuses the same onAddWatched prop, per its own
+    // upsert-by-id-semantics intent). Since the store's addWatchListEntry
+    // upserts BY ID, and relabel never reused the original entry's id, every
+    // relabel silently created a SECOND watch-list entry for the same address
+    // instead of updating the first — the address then appears twice, one
+    // unlabeled, one with the new label.
+    const user = userEvent.setup();
+    const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: /blockchain accounts/i }));
+    const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
+    await user.click(within(rail).getByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }));
+    await user.click(await screen.findByTestId("arweave-accounts-subtab-watch"));
+
+    const address = "kvxXYE6q7v6LrmQJLBEQZ2abWDdVyjQDERqM1YeMvf0";
+    await user.type(screen.getByTestId("arweave-watch-input"), address);
+    await user.click(screen.getByTestId("arweave-watch-submit"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(address)).toHaveLength(1);
+    });
+
+    // Set a label on the now-single row.
+    await user.click(screen.getByText("(set label)"));
+    await user.type(screen.getByTestId(/^arweave-watched-label-input-/), "BigMoney");
+    await user.click(screen.getByTestId(/^arweave-watched-label-save-/));
+
+    await waitFor(() => {
+      expect(screen.getByText("BigMoney")).toBeInTheDocument();
+    });
+
+    // The address must still appear exactly once — relabeling updated the
+    // SAME row, it did not create a second one.
+    expect(screen.getAllByText(address)).toHaveLength(1);
   });
 });
 
@@ -313,5 +391,47 @@ describe("Dashboard — Class 2 is wired into the REAL shell (not a second, para
     ).toBeInTheDocument();
     // The empty state of an unwired Class 2 must be gone, not merely shadowed.
     expect(screen.queryByText(/no foreign chains\./i)).toBeNull();
+  });
+
+  it("can actually add a watched Arweave address end to end from the real mounted app", async () => {
+    // WHY: ArweaveAccountsArea's "Watch" button calls validateAddress(ARWEAVE_CHAIN_ID, ...),
+    // which throws UnknownChainError unless registerArweaveAddressValidator() has run
+    // somewhere in this app's real boot path first. The ONLY place that call existed was
+    // packages/codex/src/ui/CodexTabsWired.tsx — a composition this playground app does
+    // NOT depend on or import (it has its own composition, ForeignChainsWiring.tsx).
+    // So the button was unconditionally broken end to end despite passing every isolated
+    // component/unit test (which either mock validateAddress or never exercise the real
+    // registry). This test mounts the REAL app tree and drives the REAL click, the only
+    // way this class of gap reliably surfaces.
+    const user = userEvent.setup();
+    const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <Dashboard />
+      </CodexProvider>,
+    );
+
+    await user.click(
+      await screen.findByRole("tab", { name: /blockchain accounts/i }),
+    );
+    const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
+    await user.click(
+      within(rail).getByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }),
+    );
+
+    await user.click(await screen.findByTestId("arweave-accounts-subtab-watch"));
+
+    const submit = await screen.findByTestId("arweave-watch-submit");
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+
+    const input = screen.getByTestId("arweave-watch-input");
+    await user.type(input, "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4");
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("arweave-accounts-watched-empty"),
+      ).toBeNull();
+    });
   });
 });

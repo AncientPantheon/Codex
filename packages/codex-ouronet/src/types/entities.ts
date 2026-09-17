@@ -357,7 +357,7 @@ export interface WatchListEntry {
   id: string;
   label: string;
   address: string;
-  type: "ouronet" | "stoa";
+  type: "ouronet" | "stoa" | "arweave";
   createdAt: string;
 }
 

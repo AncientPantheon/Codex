@@ -75,6 +75,86 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
     // The edited node survives a reload — the persisted value wins over the default.
     expect(reloaded.stoaChainNodeUrl).toBe("https://my-node.example:8080");
   });
+
+  it("migrates a persisted arweaveGatewayUrl that is EXACTLY the old testnet-only default (localhost:1984) to the current real mainnet default", () => {
+    // WHY: DEFAULT_GATEWAY_URL was localhost:1984 before this session flipped
+    // it to https://arweave.net. Any browser that had ALREADY loaded this app
+    // before that change got "http://localhost:1984" WRITTEN to localStorage
+    // as its persisted value — not because anyone deliberately typed it, but
+    // because it was simply the code's own default at the time. Since nothing
+    // is ever listening on localhost:1984 in a real deployment, that stale
+    // value permanently breaks "real" mode for that browser (it shows a
+    // misleading green "Live (local)" status for an endpoint that never
+    // answers) until manually edited — this migration corrects EXACTLY that
+    // one legacy literal, once, without touching any OTHER value a user
+    // might have deliberately typed (including a DIFFERENT custom localhost
+    // URL, which is left completely alone).
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+        arweaveGatewayUrl: "http://localhost:1984",
+      }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.arweaveGatewayUrl).toBe(DEFAULT_GATEWAY_URL);
+  });
+
+  it("does NOT migrate a deliberately-chosen custom gateway URL, even if it also happens to be a localhost address", () => {
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+        arweaveGatewayUrl: "http://localhost:1985",
+      }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.arweaveGatewayUrl).toBe("http://localhost:1985");
+  });
+
+  it("defaults arweaveMode to real when nothing is persisted yet (owner directive: real balances out of the box, no manual step)", () => {
+    const settings = loadNetworkSettings();
+    expect(settings.arweaveMode).toBe("real");
+  });
+
+  it("round-trips an edited arweaveMode through localStorage — flipping to real survives a reload", () => {
+    // WHY: arweaveMode used to live in a plain (non-persisted) useState in
+    // App.tsx, defaulting to mock on every mount. A page reload or a dev-server
+    // restart silently reset a user's "real" choice back to mock with zero
+    // indication — every subsequent balance read then quietly used the mock
+    // adapter's fixed fake balance instead of the real chain, which is exactly
+    // the reported symptom (a real, funded address reading as a fixed 1.5 AR).
+    saveNetworkSettings({
+      pythiaUrl: "",
+      stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+      arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+      arweaveMode: "real",
+    });
+    const reloaded = loadNetworkSettings();
+    expect(reloaded.arweaveMode).toBe("real");
+  });
+
+  it("falls back to the default (real) for a corrupt/unknown persisted arweaveMode value", () => {
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({ arweaveMode: "not-a-real-mode" }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.arweaveMode).toBe("real");
+  });
+
+  it("still honors a deliberately-persisted 'mock' choice (real is only the default, not forced)", () => {
+    saveNetworkSettings({
+      pythiaUrl: "",
+      stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+      arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+      arweaveMode: "mock",
+    });
+    const reloaded = loadNetworkSettings();
+    expect(reloaded.arweaveMode).toBe("mock");
+  });
 });
 
 describe("networkSettings — resolveNetworkModel (standalone unlocked two-tier)", () => {

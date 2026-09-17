@@ -24,6 +24,7 @@ import type {
   CodexExportV1_2,
   CodexExportV1_3,
   PlaintextCodex,
+  WatchListEntry,
 } from "./types.js";
 import { isForeignKeyEntry, type ForeignKeysBlock } from "./foreignKeys.js";
 import { isPureKeypairEntry } from "./pureKeypairs.js";
@@ -78,11 +79,11 @@ const FOREIGN_KEYS_BLOCK_SCHEMA_VERSION = 2;
  * export regardless of the source.
  */
 export function buildCodexExport<
-  KS, OA, PK, AB, UI, AS,
+  KS, OA, PK, AB, UI, AS, WL,
 >(
-  codex: PlaintextCodex<KS, OA, PK, AB, UI, AS>,
-): CodexExportV1_2<KS, OA, AB, UI> | CodexExportV1_3<KS, OA, AB, UI, PK, AS> {
-  const base: CodexExportV1_3<KS, OA, AB, UI, PK, AS> = {
+  codex: PlaintextCodex<KS, OA, PK, AB, UI, AS, WL>,
+): CodexExportV1_2<KS, OA, AB, UI> | CodexExportV1_3<KS, OA, AB, UI, PK, AS, WL> {
+  const base: CodexExportV1_3<KS, OA, AB, UI, PK, AS, WL> = {
     version: "1.3",
     exportedAt: new Date().toISOString(),
     kadenaWallets: codex.kadenaWallets,
@@ -90,7 +91,7 @@ export function buildCodexExport<
     addressBook: codex.addressBook,
     uiSettings: codex.uiSettings,
   };
-  const withKeyrings: CodexExportV1_3<KS, OA, AB, UI, PK, AS> = {
+  const withKeyrings: CodexExportV1_3<KS, OA, AB, UI, PK, AS, WL> = {
     ...base,
     ...(codex.foreignKeys !== undefined
       ? {
@@ -104,6 +105,9 @@ export function buildCodexExport<
     ...(codex.arweaveSeeds !== undefined && codex.arweaveSeeds.length > 0
       ? { arweaveSeeds: codex.arweaveSeeds }
       : {}),
+    ...(codex.watchList !== undefined && codex.watchList.length > 0
+      ? { watchList: codex.watchList }
+      : {}),
   };
   return withKeyrings;
 }
@@ -114,9 +118,9 @@ export function buildCodexExport<
  * opens it to sanity-check account addresses.
  */
 export function serializeCodex<
-  KS, OA, PK, AB, UI, AS,
+  KS, OA, PK, AB, UI, AS, WL,
 >(
-  codex: PlaintextCodex<KS, OA, PK, AB, UI, AS>,
+  codex: PlaintextCodex<KS, OA, PK, AB, UI, AS, WL>,
 ): string {
   return JSON.stringify(buildCodexExport(codex), null, 2);
 }
@@ -142,6 +146,11 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   // place. Allow-listed alongside `pureKeypairs`/`foreignKeys` ONLY, never
   // wide-open.
   "arweaveSeeds",
+  // A watched address (no key, purely observed) silently vanished across a
+  // codex export+reimport because this reader had no `watchList` allow-list
+  // entry at all. Allow-listed alongside the other keyrings ONLY, never
+  // wide-open.
+  "watchList",
 ]);
 
 // Strict-equality membership only. No trim/normalize/prefix matching: a version
@@ -245,6 +254,45 @@ function validateArweaveSeeds(value: unknown): void {
 }
 
 /**
+ * Structural guard for a single watch-list wire entry — SHAPE only. Unlike
+ * `ArweaveSeedEntry`/`ForeignKeyEntry` there is no ciphertext field to protect
+ * here (a watch entry never carries a secret), but the shape is still
+ * validated so a malformed entry fails closed rather than corrupting the
+ * store on restore.
+ */
+function isWatchListEntry(x: unknown): x is WatchListEntry {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
+  const entry = x as Record<string, unknown>;
+  if (typeof entry.id !== "string") return false;
+  if (typeof entry.label !== "string") return false;
+  if (typeof entry.address !== "string") return false;
+  if (typeof entry.createdAt !== "string") return false;
+  if (entry.type !== "ouronet" && entry.type !== "stoa" && entry.type !== "arweave") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Structurally validate a present `watchList` array — SHAPE only. Like
+ * `pureKeypairs`/`arweaveSeeds`, this is a BARE ARRAY on the wire, so the
+ * validator asserts array-ness at the top level and entry shape per element.
+ * Throws a `CodexError` naming the offending PATH (`watchList[0]`).
+ */
+function validateWatchList(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new CodexError("deserializeCodex: watchList must be an array");
+  }
+  value.forEach((entry, i) => {
+    if (!isWatchListEntry(entry)) {
+      throw new CodexError(
+        `deserializeCodex: watchList[${i}] is not a valid watch-list entry`,
+      );
+    }
+  });
+}
+
+/**
  * Parse a codex-export JSON string. Does NOT decrypt any enclosed blobs — the
  * returned object's `kadenaWallets[i].secret` and `foreignKeys.keys[i].encryptedKeyfile`
  * are still ciphertext. Caller decrypts them with the codex password once the
@@ -311,6 +359,9 @@ export function deserializeCodex<
   }
   if (parsed.arweaveSeeds !== undefined) {
     validateArweaveSeeds(parsed.arweaveSeeds);
+  }
+  if (parsed.watchList !== undefined) {
+    validateWatchList(parsed.watchList);
   }
   return parsed as
     | CodexExportV1_2<KS, OA, AB, UI>
