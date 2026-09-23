@@ -80,3 +80,17 @@
   0%, 100% { text-shadow: 0 0 4px currentColor, 0 0 8px currentColor; opacity: 0.92; }
   50%      { text-shadow: 0 0 12px currentColor, 0 0 22px currentColor; opacity: 1; }
 }
+
+/*
+ * Round 24 — "if it doesnt fit one per line, we dont shorten it, but
+ * ratel carusell it moving it slowly liek a train, from right to left".
+ * A DALOS custom seed word can run up to 256 glyphs — too wide for any
+ * column count, even one-per-line. Rather than truncate it (losing the
+ * ability to actually read/verify the real value), it scrolls
+ * continuously instead, full text intact. See `DalosSecretReveal.tsx`'s
+ * word grid.
+ */
+@keyframes codex-word-marquee {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(-100%); }
+}

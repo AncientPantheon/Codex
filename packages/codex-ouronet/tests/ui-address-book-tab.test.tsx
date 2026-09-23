@@ -1,10 +1,12 @@
 /**
- * AddressBookTab specs (Phase 14, T14.1).
+ * AddressBookTab specs (Phase 14, T14.1; Tier 1/Tier 2 rehaul —
+ * docs/work/codex-ui-mobile/design.md §9).
  *
  * Token-styled, Redux-free port of OuronetUI's AddressBookPage. State flows
  * strictly through `useAddressBook` over a mounted <CodexProvider>. These
- * specs pin the CRUD the tab exists for: add an entry, edit its name, delete
- * it, and tab-filter ouronet vs stoa entries.
+ * specs pin the CRUD the tab exists for (add an entry, edit its name, delete
+ * it, filter by kind) AND the Tier 1 (Ouronet / Foreign Blockchains) → Tier 2
+ * (Accounts+StoicTags / Chainweb+Arweave) navigation on top of it.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -53,7 +55,7 @@ describe("<AddressBookTab>", () => {
   it("adds an entry through the form and shows it in the list (add → list round-trip)", async () => {
     await renderTab();
     // Open the add form.
-    fireEvent.click(screen.getByRole("button", { name: /add ouronet/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add accounts/i }));
 
     fireEvent.change(screen.getByLabelText(/^name/i), {
       target: { value: "Alice" },
@@ -74,7 +76,7 @@ describe("<AddressBookTab>", () => {
 
   it("edits an entry's name in place so updateEntry is wired to the rename control", async () => {
     await renderTab();
-    fireEvent.click(screen.getByRole("button", { name: /add ouronet/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add accounts/i }));
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "Bob" } });
     fireEvent.change(screen.getByLabelText(/^address/i), {
       target: { value: "Ѻ.bob-account" },
@@ -94,7 +96,7 @@ describe("<AddressBookTab>", () => {
 
   it("deletes an entry so deleteEntry drops it from the list", async () => {
     await renderTab();
-    fireEvent.click(screen.getByRole("button", { name: /add ouronet/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add accounts/i }));
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "Carol" } });
     fireEvent.change(screen.getByLabelText(/^address/i), {
       target: { value: "Ѻ.carol-account" },
@@ -107,10 +109,10 @@ describe("<AddressBookTab>", () => {
     await waitFor(() => expect(screen.queryByText("Carol")).toBeNull());
   });
 
-  it("filters entries by type when switching to the StoaChain tab", async () => {
+  it("filters entries by type when switching to the Chainweb tab (under Foreign Blockchains)", async () => {
     await renderTab();
     // Add an ouronet entry on the default tab.
-    fireEvent.click(screen.getByRole("button", { name: /add ouronet/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add accounts/i }));
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "OuroOne" } });
     fireEvent.change(screen.getByLabelText(/^address/i), {
       target: { value: "Ѻ.ouro-one" },
@@ -118,17 +120,48 @@ describe("<AddressBookTab>", () => {
     fireEvent.click(screen.getByRole("button", { name: /^save/i }));
     await screen.findByText("OuroOne");
 
-    // Switch to the stoa tab — the ouronet entry must not appear there.
-    fireEvent.click(screen.getByRole("button", { name: /stoachain/i }));
+    // Switch to the Foreign Blockchains tier 1, then its Chainweb tier 2 —
+    // the ouronet entry must not appear there.
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^chainweb$/i }));
     await waitFor(() => expect(screen.queryByText("OuroOne")).toBeNull());
-    // And the stoa empty state shows.
-    expect(screen.getByText(/No StoaChain.* Addresses/i)).toBeTruthy();
+    // And the Chainweb empty state shows.
+    expect(screen.getByText(/No Chainweb Addresses/i)).toBeTruthy();
+  });
+
+  it("switching Tier 1 lands on that group's first Tier 2 kind by default", async () => {
+    await renderTab();
+    // Default is Ouronet / Accounts (the "ouronet" kind).
+    expect(screen.getByText(/No Ouronet Accounts/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    // Foreign Blockchains' first tier 2 kind is Chainweb.
+    expect(screen.getByText(/No Chainweb Addresses/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /^ouronet$/i }));
+    // Back to Ouronet lands on Accounts again (its first tier 2 kind).
+    expect(screen.getByText(/No Ouronet Accounts/i)).toBeTruthy();
+  });
+
+  it("only shows the active Tier 1's two Tier 2 kinds at once — never all four flat", async () => {
+    await renderTab();
+    // Default Tier 1 (Ouronet): exactly Accounts + StoicTags as tier-2 tabs,
+    // plus the two Tier 1 tabs themselves — 4 tabs total, not the old flat 4
+    // AddressKinds directly (Chainweb/Arweave aren't reachable without first
+    // switching Tier 1).
+    let tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Ouronet", "Foreign Blockchains", "Accounts", "StoicTags"]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Ouronet", "Foreign Blockchains", "Chainweb", "Arweave"]);
   });
 
   it("adds a StoicTag entry, storing the bare name but displaying the § sigil", async () => {
     await renderTab();
-    // Switch to the StoicTags subsection.
-    fireEvent.click(screen.getByRole("button", { name: /stoictags/i }));
+    // StoicTags is the Ouronet tier 1's second tier 2 kind — already the
+    // active tier 1 by default, no tier-1 switch needed.
+    fireEvent.click(screen.getByRole("tab", { name: /stoictags/i }));
     expect(screen.getByText(/No StoicTags/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /add stoictags/i }));
@@ -140,8 +173,10 @@ describe("<AddressBookTab>", () => {
     expect(await screen.findByText("My Tag")).toBeTruthy();
     // Displayed WITH the sigil…
     expect(screen.getByText("§mytag")).toBeTruthy();
-    // …but the empty-state for the OTHER tabs is unaffected (bare name stored under stoic-tag).
-    fireEvent.click(screen.getByRole("button", { name: /^ouronet$/i }));
+    // …but the empty-state for the OTHER tabs is unaffected (bare name stored
+    // under stoic-tag). Still under the Ouronet tier 1 — switch to its OTHER
+    // tier 2 kind, "Accounts" (the "ouronet" kind's tab label, per design.md §9).
+    fireEvent.click(screen.getByRole("tab", { name: /^accounts$/i }));
     expect(screen.queryByText("§mytag")).toBeNull();
   });
 });
@@ -154,16 +189,18 @@ describe("<AddressBookTab>", () => {
  * transfer target.
  */
 describe("<AddressBookTab> — Arweave sub-tab", () => {
-  it("offers Arweave as a fourth sub-tab with its own empty state", async () => {
+  it("offers Arweave as a Foreign Blockchains tier 2 kind, with its own empty state", async () => {
     await renderTab();
-    // Four sub-tabs: Ouronet, StoaChain™, StoicTags, Arweave.
-    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    // Foreign Blockchains tier 1 → Arweave tier 2 (design.md §9).
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^arweave$/i }));
     expect(screen.getByText(/No Arweave Addresses/i)).toBeTruthy();
   });
 
   it("saves a canonical 43-character Arweave address and lists it", async () => {
     await renderTab();
-    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^arweave$/i }));
     fireEvent.click(screen.getByRole("button", { name: /add arweave/i }));
 
     const address = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 43 chars
@@ -180,7 +217,8 @@ describe("<AddressBookTab> — Arweave sub-tab", () => {
 
   it("rejects a malformed Arweave address instead of saving it", async () => {
     await renderTab();
-    fireEvent.click(screen.getByRole("button", { name: /^arweave$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /foreign blockchains/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^arweave$/i }));
     fireEvent.click(screen.getByRole("button", { name: /add arweave/i }));
 
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "Typo" } });

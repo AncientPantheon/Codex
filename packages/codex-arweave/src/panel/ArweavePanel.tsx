@@ -32,14 +32,32 @@
  *
  * The panel is also the only place that can hand the SAME seed list to both
  * wired categories, so Accounts can group keys under the seed that produced them.
+ *
+ * MOBILE (docs/work/codex-ui-mobile/design.md §8, the "Blockchain Accounts"
+ * cleanup round): the desktop wrapping text-pill strip is superseded by a
+ * single-line, CENTERED icon-only row (`MobileCategoryIconBtn`, imported from
+ * `@ancientpantheon/codex-ui/ui` — a VALUE import, unlike the glyphs below,
+ * which stay hand-rolled SVGs specifically to avoid `lucide-react`'s own
+ * dual-React-instance resolution bug; `MobileCategoryIconBtn`/`useIsMobile`
+ * import neither `lucide-react` nor any icon package themselves, so that
+ * bug does not apply here) — "we go the same route we did on Ouronet
+ * Accounts... Arweave has 5... aligned center on the top of Zone 3." The
+ * generation-guard interception (`requestCategory`, the leave-generation
+ * dialog) is unchanged and shared by both the desktop and mobile strips —
+ * the mobile icon buttons call the SAME `requestCategory` callback, not a
+ * bare `setActive`. Desktop's own pill strip is a separate branch,
+ * byte-identical to before.
  */
 
 import * as React from "react";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { PanelProps } from "@ancientpantheon/codex-ui";
+import { useIsMobile, MobileCategoryIconBtn } from "@ancientpantheon/codex-ui/ui";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
+import { useEnsureCodexUnlockedOptional } from "@ancientpantheon/codex-ouronet/zbom";
 
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 import { ArweavePanelContext } from "./context.js";
@@ -88,6 +106,26 @@ interface ArweaveWatchListSeams {
   removeWatchedAddress: (id: string) => Promise<void>;
 }
 
+/** A STABLE empty fallback for `watchedEntries` when `watchSeams` isn't
+ *  wired — root-caused via a live diagnostic (round 10): `watchSeams
+ *  ?.watchedAddresses ?? []` constructs a BRAND NEW array literal on every
+ *  single render when the seam is unwired. `ArweaveAccountsArea`'s own
+ *  `addresses` is a `useMemo` keyed on `[entries, watchedEntries]` — a
+ *  "new" (but content-identical) `watchedEntries` reference on every
+ *  render makes `addresses` recompute every render too, which makes
+ *  `refreshAllBalances` (keyed on `addresses`) a new function every
+ *  render, which makes its own "fetch on mount" effect (keyed on
+ *  `[refreshAllBalances]`) treat EVERY render as a fresh mount and refire
+ *  `fetchBalances` synchronously — which reports `loading: true` back up
+ *  via `onRefreshHandleChange`, updating THIS component's own state,
+ *  triggering another render, recreating another "new" `[]`... a true
+ *  synchronous infinite render loop (confirmed via a live counter: tens of
+ *  thousands of renders per second, `loading` permanently stuck `true`
+ *  since the render loop never yields long enough for the real
+ *  `getBalance()` promise to resolve). A single shared, referentially
+ *  stable empty array breaks the cycle at its root. */
+const EMPTY_WATCHED_ENTRIES: WatchListEntry[] = [];
+
 
 /** The Arweave chain's declared categories, in display order. */
 const CATEGORIES = ["seeds", "pure-keys", "accounts", "upload", "library"] as const;
@@ -135,6 +173,28 @@ const UploadGlyph: Glyph = ({ style }) => (
 const LibraryGlyph: Glyph = ({ style }) => (
   <svg {...svgBase} style={style}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></svg>
 );
+/** The Accounts category's relocated refresh button — same glyph
+ *  `ArweaveAccountsArea.tsx`'s own `RefreshGlyph` uses (module JSDoc: this
+ *  module stays self-contained, so it is duplicated rather than imported). */
+const RefreshGlyph: Glyph = ({ style }) => (
+  <svg {...svgBase} style={style}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+);
+/** The pagination medallion's square Prev/Next arrows (round 9 owner
+ *  correction: "prev and next buttons, which should be simple square and
+ *  with arrows, instead of the name") — hand-rolled per this module's own
+ *  inline-SVG rule. */
+const ChevronLeftGlyph: Glyph = ({ style }) => (
+  <svg {...svgBase} style={style}><path d="m15 18-6-6 6-6" /></svg>
+);
+const ChevronRightGlyph: Glyph = ({ style }) => (
+  <svg {...svgBase} style={style}><path d="m9 18 6-6-6-6" /></svg>
+);
+/** The Seeds category's relocated "add seed" button (mirrors
+ *  `ChainwebPanel.tsx`'s own `PlusCircle` in the same tablist right-slot) —
+ *  hand-rolled per this module's own inline-SVG rule. */
+const PlusGlyph: Glyph = ({ style }) => (
+  <svg {...svgBase} style={style}><circle cx="12" cy="12" r="10" /><path d="M12 8v8" /><path d="M8 12h8" /></svg>
+);
 
 /** Icon + accent per category. Seeds / Pure Keys / Accounts deliberately reuse
  *  ChainwebPanel's colours so a shared category name reads the same on every
@@ -152,6 +212,261 @@ const CATEGORY_META: Record<CategoryId, { Icon: Glyph; color: string }> = {
  *  local rather than imported: a layout number is not worth widening codex-ui's
  *  locked public surface. */
 const CATEGORY_ROW_HEIGHT = 40;
+
+/**
+ * SplitSeamMedallion — "the same structure and design and placement of
+ * buttons as what we did for chainweb": ported from
+ * `packages/codex-ouronet/src/ui/chains/ChainwebPanel.tsx` rather than
+ * imported — both that file and this one already follow a deliberate
+ * "self-contained module, nothing shared across chain-panel packages"
+ * convention (see this file's own module doc on `lucide-react` /
+ * hand-rolled glyphs), and `codex-arweave` cannot import from
+ * `codex-ouronet` (unrelated packages) regardless. See `ChainwebPanel.tsx`'s
+ * own doc comments on this function for the full history of bugs this
+ * exact geometry/click/clipping design fixes — `zone3AnchorTarget`'s OWN
+ * border box, `pointer-events: auto` on the portaled badge, `edge`'s
+ * `top: 0`/`bottom: 0` being the ACTUAL visible border lines.
+ *
+ * `SplitSeamMedallion` is the ONLY variant Arweave needs for its Codex/
+ * Watched toggle — Arweave has only ONE balance kind (native AR), so there
+ * is no Stoa/UrStoa-equivalent second toggle the way Chainweb needs one.
+ * Round 11 removed the single-button `SeamMedallion` variant entirely: its
+ * only caller was the Collapse-All medallion, and round 11 removed
+ * Collapse-All from mobile altogether (the Accounts list is now a flat,
+ * fixed-height, seed-badged list — see `ArweaveAccountsArea`'s own
+ * `codexFlatEntries` doc comment — so there's nothing left to collapse).
+ */
+function SplitSeamMedallion({
+  edge, align, accent, edgeRailTarget, offset = 14,
+  leftLabel, rightLabel, active, onSelectLeft, onSelectRight,
+}: {
+  edge: "top" | "bottom";
+  align: "left" | "right" | "center";
+  accent: string;
+  edgeRailTarget?: Element | null;
+  offset?: number;
+  leftLabel: React.ReactNode;
+  rightLabel: React.ReactNode;
+  active: "left" | "right";
+  onSelectLeft: () => void;
+  onSelectRight: () => void;
+}) {
+  const edgeStyle: React.CSSProperties = edge === "top" ? { top: 0 } : { bottom: 0 };
+  const alignStyle: React.CSSProperties =
+    align === "center"
+      ? { left: "50%", transform: `translate(-50%, ${edge === "top" ? "-50%" : "50%"})` }
+      : align === "left"
+        ? { left: offset, transform: `translateY(${edge === "top" ? "-50%" : "50%"})` }
+        : { right: offset, transform: `translateY(${edge === "top" ? "-50%" : "50%"})` };
+  const segmentStyle = (isActive: boolean): React.CSSProperties => ({
+    height: 24, padding: "0 10px", border: "none", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+    backgroundColor: isActive ? accent : "transparent",
+    color: isActive ? "#0a0a0a" : accent,
+  });
+  const pill = (
+    <div
+      style={{
+        position: "absolute",
+        ...edgeStyle,
+        ...alignStyle,
+        display: "flex", borderRadius: 9999, overflow: "hidden",
+        border: `1.5px solid ${accent}`, backgroundColor: "#0a0a0a",
+        zIndex: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+        pointerEvents: "auto",
+      }}
+    >
+      <button type="button" onClick={onSelectLeft} title={typeof leftLabel === "string" ? leftLabel : undefined} style={segmentStyle(active === "left")}>
+        {leftLabel}
+      </button>
+      <div style={{ width: 1.5, alignSelf: "stretch", backgroundColor: accent }} />
+      <button type="button" onClick={onSelectRight} title={typeof rightLabel === "string" ? rightLabel : undefined} style={segmentStyle(active === "right")}>
+        {rightLabel}
+      </button>
+    </div>
+  );
+  return edgeRailTarget ? createPortal(pill, edgeRailTarget) : pill;
+}
+
+/** A codex with hundreds of seeds/thousands of accounts can genuinely
+ *  paginate into double digits — owner correction (round 9): "when more
+ *  than 10 pages exist clicking in the middle on the pages number opens
+ *  the ability to input page number to jump directly to wanted page."
+ *  Below 10 pages, the plain "N / M" text is unclickable. Duplicated from
+ *  `ArweaveAccountsArea`/`ArweaveSeedsArea`'s identical component per this
+ *  package's own "self-contained module" convention. */
+function PageJumpIndicator({ page, totalPages, onJump }: { page: number; totalPages: number; onJump: (page: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (totalPages <= 10) {
+    return <span style={{ fontSize: 11, fontWeight: 700, color: "#d2d3d4" }}>{page + 1} / {totalPages}</span>;
+  }
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(String(page + 1)); setEditing(true); }}
+        title="Jump to a page"
+        style={{ fontSize: 11, fontWeight: 700, color: "#888", background: "transparent", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline dotted" }}
+      >
+        {page + 1} / {totalPages}
+      </button>
+    );
+  }
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n)) onJump(Math.max(0, Math.min(totalPages - 1, n - 1)));
+    setEditing(false);
+  };
+  return (
+    <input
+      autoFocus
+      type="number"
+      min={1}
+      max={totalPages}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+      onBlur={commit}
+      aria-label={`Jump to page (1-${totalPages})`}
+      style={{ width: 36, fontSize: 11, padding: "1px 3px", borderRadius: 4, border: "1px solid #888", backgroundColor: "#0a0a0a", color: "#d2d3d4", textAlign: "center" }}
+    />
+  );
+}
+
+/**
+ * PaginationMedallion — round 9's "standard pagination controls zone":
+ * "we also need to agree on a standard pagination controls zone. If no
+ * expand collapse medallion exists at the middle of the bottom page, where
+ * it sits now, that's where the pagination controls should be in their own
+ * medallion with prev and next buttons, which should be simple square and
+ * with arrows, instead of the name." Same seam-straddling geometry as
+ * `SeamMedallion`'s own `edge="bottom" align="center"` (its own doc
+ * comment covers the `edgeRailTarget`/clipping/pointer-events reasoning —
+ * identical here) — this is that SAME shared slot, just showing pagination
+ * instead of the Collapse-All toggle whenever the caller determined that
+ * toggle isn't occupying it (see `ArweavePanel`'s own render logic).
+ * Ported from `ChainwebPanel.tsx` rather than imported, per this module's
+ * own "self-contained" convention.
+ */
+/** How many page-position dots `SwipeBullets` shows at once — beyond this,
+ *  it slides a window around the current page and truncates the rest with
+ *  an ellipsis (see the component's own doc comment). */
+const SWIPE_BULLET_WINDOW = 7;
+
+/**
+ * SwipeBullets — round 15 owner correction (ported from `ChainwebPanel.tsx`'s
+ * identical change): "i noticed the pages are swapable, but there are no
+ * swap bullets displayed, did you miss them? also remember that the swap
+ * bullets should be shortned by placing ... and ... before the bullets and
+ * after the bullets, to signal the fact, that there are so many bullets,
+ * that we couldnt fit them on the available width." Round 11 added the
+ * swipe GESTURE (`onTouchStart`/`onTouchEnd` on the paginated container,
+ * in `ArweaveAccountsArea.tsx`) but never added its visual position
+ * indicator — this is that indicator. Past `SWIPE_BULLET_WINDOW` pages
+ * this slides a window centered on the CURRENT page and renders a leading
+ * and/or trailing "…" wherever the window doesn't reach the very
+ * first/last page.
+ */
+function SwipeBullets({ page, totalPages, onJump }: { page: number; totalPages: number; onJump: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  let start = 0;
+  let end = totalPages - 1;
+  if (totalPages > SWIPE_BULLET_WINDOW) {
+    const half = Math.floor(SWIPE_BULLET_WINDOW / 2);
+    start = Math.max(0, page - half);
+    end = start + SWIPE_BULLET_WINDOW - 1;
+    if (end > totalPages - 1) {
+      end = totalPages - 1;
+      start = end - SWIPE_BULLET_WINDOW + 1;
+    }
+  }
+  const showLeadingEllipsis = start > 0;
+  const showTrailingEllipsis = end < totalPages - 1;
+  const indices = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  return (
+    <div
+      role="tablist"
+      aria-label="Page position"
+      style={{
+        position: "absolute", bottom: 0, left: "50%", transform: "translate(-50%, calc(50% + 18px))",
+        display: "flex", alignItems: "center", gap: 4,
+        height: 14, padding: "0 8px", borderRadius: 9999,
+        backgroundColor: "#0a0a0a", border: "1px solid #333",
+        zIndex: 6, pointerEvents: "auto",
+      }}
+    >
+      {showLeadingEllipsis && <span aria-hidden="true" style={{ fontSize: 9, color: "#666", lineHeight: 1 }}>…</span>}
+      {indices.map((i) => (
+        <button
+          key={i}
+          type="button"
+          role="tab"
+          aria-label={`Go to page ${i + 1}`}
+          aria-selected={i === page}
+          onClick={() => onJump(i)}
+          style={{
+            flexShrink: 0, padding: 0, border: "none", cursor: "pointer", borderRadius: "50%",
+            width: i === page ? 8 : 6, height: i === page ? 8 : 6,
+            backgroundColor: i === page ? "#ceac5f" : "#444",
+          }}
+        />
+      ))}
+      {showTrailingEllipsis && <span aria-hidden="true" style={{ fontSize: 9, color: "#666", lineHeight: 1 }}>…</span>}
+    </div>
+  );
+}
+
+function PaginationMedallion({
+  edgeRailTarget, page, totalPages, onPrev, onNext, onJump,
+}: {
+  edgeRailTarget?: Element | null;
+  page: number;
+  totalPages: number;
+  onPrev: () => void;
+  onNext: () => void;
+  onJump: (page: number) => void;
+}) {
+  const squareBtn = (disabled: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 20, height: 20, borderRadius: 4, border: "none", background: "transparent",
+    color: disabled ? "#444" : "#d2d3d4", cursor: disabled ? "default" : "pointer", padding: 0,
+  });
+  const pill = (
+    <div
+      style={{
+        position: "absolute", bottom: 0, left: "50%", transform: "translate(-50%, 50%)",
+        display: "flex", alignItems: "center", gap: 6,
+        height: 24, padding: "0 8px", borderRadius: 9999,
+        backgroundColor: "#0a0a0a", border: "1.5px solid #888",
+        zIndex: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+        // See `SeamMedallion`'s bug fix #3 — same `pointer-events: none`
+        // portal-target inheritance issue applies here.
+        pointerEvents: "auto",
+      }}
+    >
+      <button type="button" aria-label="Previous page" onClick={onPrev} disabled={page === 0} style={squareBtn(page === 0)}>
+        <ChevronLeftGlyph style={{ width: 14, height: 14 }} />
+      </button>
+      <PageJumpIndicator page={page} totalPages={totalPages} onJump={onJump} />
+      <button type="button" aria-label="Next page" onClick={onNext} disabled={page >= totalPages - 1} style={squareBtn(page >= totalPages - 1)}>
+        <ChevronRightGlyph style={{ width: 14, height: 14 }} />
+      </button>
+    </div>
+  );
+  // `SwipeBullets` is a SIBLING of the arrows/jump pill above (not nested
+  // inside it) so the pill's own existing geometry/styling stays byte-
+  // identical — it renders its own independent straddling position,
+  // offset further below the same border.
+  const content = (
+    <>
+      {pill}
+      <SwipeBullets page={page} totalPages={totalPages} onJump={onJump} />
+    </>
+  );
+  return edgeRailTarget ? createPortal(content, edgeRailTarget) : content;
+}
 
 /** Styling for the seed-persistence failure notice — the one surface that
  *  reports a seed the Codex refused to store. */
@@ -229,8 +544,53 @@ const LEAVE_DIALOG_CONTINUE_BUTTON_STYLE: React.CSSProperties = {
 /** The category the panel lands on — the one a user reaches for first. */
 const DEFAULT_CATEGORY: CategoryId = "accounts";
 
-export function ArweavePanel(_props: PanelProps): React.ReactElement {
+export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: PanelProps): React.ReactElement {
   const [active, setActive] = useState<CategoryId>(DEFAULT_CATEGORY);
+  const isMobile = useIsMobile();
+  // Round 22 owner correction: "then i think we have a problem here when
+  // attempting to show RSA details" — see
+  // `ArweaveSeedsAreaProps.ensureCodexUnlocked`'s own doc comment for why
+  // this is threaded down as an injected prop rather than
+  // `ArweaveSeedsArea`/`useRsaParamsSection` calling it directly. The
+  // OPTIONAL variant, not the throwing one `SendArweaveModal` uses —
+  // `ArweavePanel` ITSELF is deliberately mountable with zero providers at
+  // all (its own "degrades to a visible 'not available' state rather than
+  // crashing when no provider is wired" test) — `null` here just means
+  // "no real gate available," which `ArweaveSeedsArea`'s own
+  // `ensureCodexUnlocked` prop already treats as "proceed straight to
+  // decrypt," unchanged from before this round.
+  const ensureCodexUnlocked = useEnsureCodexUnlockedOptional();
+  // Accounts' own relocated controls — same "report upward, don't
+  // duplicate the underlying logic" shape `ChainwebPanel.tsx` uses for
+  // `StoaAccountsTab` ("same structure and design and placement of
+  // buttons as what we did for chainweb"). `ArweaveAccountsArea` stays the
+  // source of truth; this component just renders the medallions/buttons.
+  const [accountsTotal, setAccountsTotal] = useState(0);
+  const [refreshHandle, setRefreshHandle] = useState<{ refresh: () => void; loading: boolean; error: boolean } | null>(null);
+  const [accountsSubTab, setAccountsSubTab] = useState<"codex" | "watch">("codex");
+  const [accountsCounts, setAccountsCounts] = useState({ codex: 0, watch: 0 });
+  const [accountsBreakdown, setAccountsBreakdown] = useState({ seedAccounts: 0, seedCount: 0, directAccounts: 0 });
+  // Round 9/11 "standard pagination controls zone" — the shared bottom-seam
+  // medallion shows whichever category's pagination handle is currently
+  // reported. Round 11 removed Collapse-All from mobile entirely (see
+  // `ArweaveAccountsArea`'s own `codexFlatEntries` doc comment), so this
+  // slot is now UNCONDITIONALLY pagination's for the Accounts category too
+  // — mirrors `ChainwebPanel.tsx`'s own identical state exactly.
+  type PaginationHandle = { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null;
+  const [accountsPaginationHandle, setAccountsPaginationHandle] = useState<PaginationHandle>(null);
+  const [seedsPaginationHandle, setSeedsPaginationHandle] = useState<PaginationHandle>(null);
+  // Seeds' own relocated "+" add-seed button (mirrors `ChainwebPanel.tsx`'s
+  // `setCreateSeedOpen` lift for `SeedWordsTab`) — "same structure and
+  // design and placement of buttons as what we did for chainweb", round 20
+  // owner correction. Unlike Chainweb's separate, remountable
+  // `CreateStoaChainSeedModal`, `ArweaveSeedsArea`'s define form is inline,
+  // per-field state that only `openDefine` knows how to reset correctly —
+  // so rather than lifting a raw open/close boolean (which would skip that
+  // reset), `ArweaveSeedsArea` reports its OWN `openDefine` function up here,
+  // same "report a handle upward" shape `onPaginationHandleChange` already
+  // uses throughout this file.
+  const [openSeedFormHandle, setOpenSeedFormHandle] = useState<(() => void) | null>(null);
+  const [pureKeysPaginationHandle, setPureKeysPaginationHandle] = useState<PaginationHandle>(null);
 
   /** The Seeds area's live run, reported up via `ArweaveSeedsArea`'s
    *  `onRunActivityChange` (T1) — non-null exactly while a generate run has
@@ -441,48 +801,215 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
     [seeds],
   );
 
-  return (
-    <div data-testid="arweave-panel" data-chain-id={ARWEAVE_CHAIN_ID}>
-      <div
-        role="tablist"
-        aria-label="Arweave panel"
-        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}
-      >
+  const desktopStrip = (
+    <div
+      role="tablist"
+      aria-label="Arweave panel"
+      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16 }}
+    >
+      {CATEGORIES.map((id) => {
+        const { Icon, color } = CATEGORY_META[id];
+        const selected = id === active;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            data-testid={`arweave-subtab-${id}`}
+            onClick={() => requestCategory(id)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              height: CATEGORY_ROW_HEIGHT,
+              padding: "0 16px",
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              border: `1px solid ${selected ? color : "#262626"}`,
+              backgroundColor: selected ? color + "1a" : "transparent",
+              color: selected ? color : "#888",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Icon style={{ width: 14, height: 14 }} />
+            {CATEGORY_LABELS[id]}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // Same categories, same `requestCategory` interception (the generation
+  // guard) — just icon-only, single-line, centered (design.md §8, the
+  // "Blockchain Accounts" cleanup round). "Same structure and design and
+  // placement of buttons as what we did for chainweb": LEFT/RIGHT reserved
+  // slots (count, and a category-specific action) mirror
+  // `ChainwebPanel.tsx`'s own icon row exactly — Seeds shows its count on
+  // the left and (round 20) a "+" add-seed button on the right, reported up
+  // via `ArweaveSeedsArea`'s own `onOpenSeedFormHandleChange`, the same
+  // "lift the '+' next to Chainweb's" ask `SeedWordsTab`'s `createSeedOpen`
+  // already satisfies there; Accounts shows its `m/n+x` composition on the
+  // left and the refresh button on the right; Pure Keys/Upload/Library show
+  // neither, exactly like Chainweb's own Pure Keys.
+  const mobileStrip = (
+    <div
+      role="tablist"
+      aria-label="Arweave panel"
+      // Round 16 owner correction (ported from `ChainwebPanel.tsx`'s
+      // identical change): "space clearly could be optimised better...
+      // everything could be pushed a bit higher." Ordinary breathing room
+      // (no medallion-clearance invariant tied to it, unlike the outer
+      // wrapper's own `paddingTop` below) — trimmed to give the entries
+      // list more real room.
+      style={{ position: "relative", flex: "none", display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}
+    >
+      <span style={{ minWidth: 30, display: "flex", justifyContent: "center", flexShrink: 0 }}>
+        {active === "seeds" && (
+          <span
+            aria-label={`${seeds.length} seed${seeds.length !== 1 ? "s" : ""}`}
+            title={`${seeds.length} seed${seeds.length !== 1 ? "s" : ""}`}
+            style={{ fontSize: 13, fontWeight: 700, color: CATEGORY_META.seeds.color }}
+          >
+            {seeds.length}
+          </span>
+        )}
+        {active === "accounts" && (
+          <span
+            aria-label={`${accountsTotal} address${accountsTotal !== 1 ? "es" : ""} — ${accountsBreakdown.seedAccounts} from ${accountsBreakdown.seedCount} seed group${accountsBreakdown.seedCount !== 1 ? "s" : ""}, ${accountsBreakdown.directAccounts} direct`}
+            title={`${accountsTotal} address${accountsTotal !== 1 ? "es" : ""} — ${accountsBreakdown.seedAccounts} from ${accountsBreakdown.seedCount} seed group${accountsBreakdown.seedCount !== 1 ? "s" : ""}, ${accountsBreakdown.directAccounts} direct`}
+            style={{ fontSize: 12, fontWeight: 700, color: CATEGORY_META.accounts.color, whiteSpace: "nowrap" }}
+          >
+            {accountsBreakdown.seedAccounts}/{accountsBreakdown.seedCount}+{accountsBreakdown.directAccounts}
+          </span>
+        )}
+      </span>
+      <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: 4 }}>
         {CATEGORIES.map((id) => {
           const { Icon, color } = CATEGORY_META[id];
           const selected = id === active;
           return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              data-testid={`arweave-subtab-${id}`}
-              onClick={() => requestCategory(id)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                height: CATEGORY_ROW_HEIGHT,
-                padding: "0 16px",
-                borderRadius: 999,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                border: `1px solid ${selected ? color : "#262626"}`,
-                backgroundColor: selected ? color + "1a" : "transparent",
-                color: selected ? color : "#888",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <Icon style={{ width: 14, height: 14 }} />
-              {CATEGORY_LABELS[id]}
-            </button>
+            <MobileCategoryIconBtn key={id} active={selected} color={color} label={CATEGORY_LABELS[id]} onClick={() => requestCategory(id)}>
+              <Icon style={{ width: 16, height: 16 }} />
+            </MobileCategoryIconBtn>
           );
         })}
       </div>
+      <span style={{ width: 30, display: "flex", justifyContent: "center", flexShrink: 0 }}>
+        {active === "accounts" && refreshHandle && (
+          <button
+            type="button"
+            onClick={refreshHandle.refresh}
+            aria-label="Refresh balances"
+            title={refreshHandle.error ? "Balance read failed — tap to retry" : "Refresh balances"}
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 30, height: 30, borderRadius: 8, cursor: "pointer",
+              border: `1px solid ${refreshHandle.error ? "#8b1a1a" : `${CATEGORY_META.accounts.color}55`}`,
+              backgroundColor: refreshHandle.error ? "#8b1a1a1a" : `${CATEGORY_META.accounts.color}1a`,
+              color: refreshHandle.error ? "#c0392b" : CATEGORY_META.accounts.color,
+            }}
+          >
+            <RefreshGlyph style={{ width: 16, height: 16, animation: refreshHandle.loading ? "spin 1s linear infinite" : undefined }} />
+          </button>
+        )}
+        {active === "seeds" && openSeedFormHandle && (
+          <button
+            type="button"
+            data-testid="arweave-mobile-add-seed"
+            onClick={openSeedFormHandle}
+            aria-label="Add Arweave Seed"
+            title="Add Arweave Seed"
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 30, height: 30, borderRadius: 8, cursor: "pointer",
+              border: `1px solid ${CATEGORY_META.seeds.color}55`,
+              backgroundColor: `${CATEGORY_META.seeds.color}1a`,
+              color: CATEGORY_META.seeds.color,
+            }}
+          >
+            <PlusGlyph style={{ width: 16, height: 16 }} />
+          </button>
+        )}
+      </span>
+      {active === "accounts" && (
+        <>
+          {/* Zone 3's OWN top border, half above/half below — the SAME
+              seam-straddling geometry `ChainwebPanel.tsx` uses for its own
+              Codex/Watched medallion. Only ONE toggle here (Arweave has no
+              Stoa/UrStoa-equivalent second balance kind), so it's the only
+              medallion on the top border, left-aligned. */}
+          <SplitSeamMedallion
+            edge="top"
+            align="left"
+            offset={20}
+            accent={CATEGORY_META.accounts.color}
+            edgeRailTarget={zone3AnchorTarget}
+            active={accountsSubTab === "codex" ? "left" : "right"}
+            leftLabel={`Codex ${accountsCounts.codex}`}
+            rightLabel={`Watched ${accountsCounts.watch}`}
+            onSelectLeft={() => setAccountsSubTab("codex")}
+            onSelectRight={() => setAccountsSubTab("watch")}
+          />
+          {/* Zone 3's OWN bottom border, half above/half below — same
+              geometry as `ChainwebPanel.tsx`'s own pagination medallion.
+              Round 11 — Collapse-All is GONE from mobile entirely (the
+              Codex list is now a flat, fixed-height, seed-badged list —
+              see `ArweaveAccountsArea`'s own `codexFlatEntries` doc
+              comment — so there's nothing left to collapse). This slot is
+              therefore UNCONDITIONALLY the pagination medallion's. */}
+          {accountsPaginationHandle && (
+            <PaginationMedallion
+              edgeRailTarget={zone3AnchorTarget}
+              page={accountsPaginationHandle.page}
+              totalPages={accountsPaginationHandle.totalPages}
+              onPrev={accountsPaginationHandle.onPrev}
+              onNext={accountsPaginationHandle.onNext}
+              onJump={accountsPaginationHandle.onJump}
+            />
+          )}
+        </>
+      )}
+      {/* Seeds NEVER has a Collapse-All medallion of its own — the shared
+          slot is always free for its own pagination whenever it has more
+          than one page. */}
+      {active === "seeds" && seedsPaginationHandle && (
+        <PaginationMedallion
+          edgeRailTarget={zone3AnchorTarget}
+          page={seedsPaginationHandle.page}
+          totalPages={seedsPaginationHandle.totalPages}
+          onPrev={seedsPaginationHandle.onPrev}
+          onNext={seedsPaginationHandle.onNext}
+          onJump={seedsPaginationHandle.onJump}
+        />
+      )}
+      {/* Pure Keys is ALSO a flat list with no Collapse-All medallion —
+          round 9/10 owner correction: "we need pagination on the pure
+          keys as well, which should kick in once enough entries exist." */}
+      {active === "pure-keys" && pureKeysPaginationHandle && (
+        <PaginationMedallion
+          edgeRailTarget={zone3AnchorTarget}
+          page={pureKeysPaginationHandle.page}
+          totalPages={pureKeysPaginationHandle.totalPages}
+          onPrev={pureKeysPaginationHandle.onPrev}
+          onNext={pureKeysPaginationHandle.onNext}
+          onJump={pureKeysPaginationHandle.onJump}
+        />
+      )}
+    </div>
+  );
 
-      <div role="tabpanel">
+  const tabContent = (
+      <div
+        role="tabpanel"
+        // MOBILE ONLY (desktop stays byte-identical) — a definite height
+        // for `ArweaveAccountsArea`'s own slot-based pagination engine to
+        // measure against, mirroring `ChainwebPanel.tsx`'s identical fix
+        // for `StoaAccountsTab`.
+        style={isMobile ? { height: "100%" } : undefined}
+      >
         {/* Seeds, Pure Keys and Accounts are WIRED (E5). The remaining two keep
             their explicit empty placeholder: the demo/mock surfaces they used
             to mount (BalanceArea / SendArea / UploadArea / LibraryArea) are
@@ -501,7 +1028,16 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
             alive. Mounting it unconditionally and only toggling visibility
             keeps `run`/`abortRef`/`storedRef`/the form fields intact across the
             switch, with no change needed inside `ArweaveSeedsArea` itself. */}
-        <div style={{ display: active === "seeds" ? undefined : "none" }}>
+        <div
+          style={{
+            display: active === "seeds" ? undefined : "none",
+            // MOBILE ONLY — a definite height for `ArweaveSeedsArea`'s own
+            // measured seed-list pagination to size against (mirrors the
+            // `role="tabpanel"` fix just above). Irrelevant while hidden
+            // (`display: none`).
+            height: isMobile ? "100%" : undefined,
+          }}
+        >
           {seedPersistError !== null && (
             <div data-testid="arweave-seed-persist-error" role="alert" style={SEED_ERROR_STYLE}>
               {seedPersistError}
@@ -520,6 +1056,19 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
             onDeleteSeed={handleDeleteSeed}
             decryptArweaveKey={deps?.decryptArweaveKey}
             onRunActivityChange={setActiveGeneration}
+            fullScreenPortalTarget={fullScreenPortalTarget}
+            onPaginationHandleChange={setSeedsPaginationHandle}
+            // NOT `setOpenSeedFormHandle` directly: `openDefine` is itself a
+            // function, and `useState`'s setter treats a function ARGUMENT
+            // as a `(prevState) => nextState` updater rather than as the
+            // literal next value — passing it straight through would
+            // immediately INVOKE `openDefine` (as `updater(prevState)`) and
+            // store its `undefined` return as state, both opening the
+            // define form as an unwanted side effect and leaving the "+"
+            // button permanently unrendered. Wrapping it forces React to
+            // treat `fn` as the value, not as an updater.
+            onOpenSeedFormHandleChange={(fn) => setOpenSeedFormHandle(() => fn)}
+            ensureCodexUnlocked={ensureCodexUnlocked ?? undefined}
           />
         </div>
         {active === "accounts" ? (
@@ -547,9 +1096,24 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
             // an unwired host (watchSeams === null, or one that never wires
             // these three fields) degrades to an empty list and a disabled
             // add form, never a throw.
-            watchedEntries={watchSeams?.watchedAddresses ?? []}
+            watchedEntries={watchSeams?.watchedAddresses ?? EMPTY_WATCHED_ENTRIES}
             onAddWatched={watchSeams?.addWatchedAddress}
             onRemoveWatched={watchSeams?.removeWatchedAddress}
+            onTotalChange={setAccountsTotal}
+            onRefreshHandleChange={setRefreshHandle}
+            subTab={accountsSubTab}
+            onSubTabChange={setAccountsSubTab}
+            onSubTabCountsChange={setAccountsCounts}
+            onAccountsBreakdownChange={setAccountsBreakdown}
+            onPaginationHandleChange={setAccountsPaginationHandle}
+            // Round 17 — "arweave account one line, balance one line, and
+            // buttons below on the lower bar, with entry selection": the
+            // shared bottom action bar docks to the SAME Zone-3 seam every
+            // other mobile medallion here already does, and its Send modal
+            // needs the same full-screen portal every other mobile modal
+            // in this panel already gets.
+            fullScreenPortalTarget={fullScreenPortalTarget}
+            zone3AnchorTarget={zone3AnchorTarget}
           />
         ) : active === "pure-keys" ? (
           deps === null ? (
@@ -566,6 +1130,8 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
               addForeignKey={handleAddPureKey}
               renameForeignKey={handleRenamePureKey}
               deleteForeignKey={handleDeletePureKey}
+              onPaginationHandleChange={setPureKeysPaginationHandle}
+              fullScreenPortalTarget={fullScreenPortalTarget}
               // getBalance intentionally NOT threaded here yet: mock mode's
               // fake `getBalance` always resolves the SAME fixed balance for
               // every address, including a key created seconds ago with
@@ -587,44 +1153,76 @@ export function ArweavePanel(_props: PanelProps): React.ReactElement {
           </div>
         ) : null}
       </div>
+  );
 
-      {pendingCategory !== null && activeGeneration !== null && (
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-label="Leave the seed still generating?"
-          data-testid="arweave-leave-generation-dialog"
-          style={LEAVE_DIALOG_BACKDROP_STYLE}
-        >
-          <div style={LEAVE_DIALOG_STYLE}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
-              {`"${activeGeneration.seedLabel}" is still generating keys.`}
-            </div>
-            <div style={{ fontSize: 13, color: "#888" }}>
-              Leaving this tab does not stop it, but you will lose the progress bar
-              and the ability to cancel until you come back.
-            </div>
-            <div style={LEAVE_DIALOG_BUTTON_ROW_STYLE}>
-              <button
-                type="button"
-                data-testid="arweave-leave-generation-stop"
-                onClick={handleStopGeneration}
-                style={LEAVE_DIALOG_STOP_BUTTON_STYLE}
-              >
-                Stop generation now
-              </button>
-              <button
-                type="button"
-                data-testid="arweave-leave-generation-continue"
-                onClick={handleContinueInBackground}
-                style={LEAVE_DIALOG_CONTINUE_BUTTON_STYLE}
-              >
-                Continue in background
-              </button>
-            </div>
-          </div>
+  const leaveDialog = pendingCategory !== null && activeGeneration !== null && (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Leave the seed still generating?"
+      data-testid="arweave-leave-generation-dialog"
+      style={LEAVE_DIALOG_BACKDROP_STYLE}
+    >
+      <div style={LEAVE_DIALOG_STYLE}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+          {`"${activeGeneration.seedLabel}" is still generating keys.`}
         </div>
-      )}
+        <div style={{ fontSize: 13, color: "#888" }}>
+          Leaving this tab does not stop it, but you will lose the progress bar
+          and the ability to cancel until you come back.
+        </div>
+        <div style={LEAVE_DIALOG_BUTTON_ROW_STYLE}>
+          <button
+            type="button"
+            data-testid="arweave-leave-generation-stop"
+            onClick={handleStopGeneration}
+            style={LEAVE_DIALOG_STOP_BUTTON_STYLE}
+          >
+            Stop generation now
+          </button>
+          <button
+            type="button"
+            data-testid="arweave-leave-generation-continue"
+            onClick={handleContinueInBackground}
+            style={LEAVE_DIALOG_CONTINUE_BUTTON_STYLE}
+          >
+            Continue in background
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div
+        data-testid="arweave-panel"
+        data-chain-id={ARWEAVE_CHAIN_ID}
+        style={{
+          display: "flex", flexDirection: "column", height: "100%",
+          // Owner correction (round 8 follow-up — "on chainweb there is
+          // enough room between the medallion and the buttons, and on
+          // arweave there isn't... we need to have the same implementation
+          // here as on chainweb"): the Codex/Watched medallion straddles
+          // Zone 3's OWN top border, half poking DOWN into this exact
+          // space — the category icon row needs the SAME clearance
+          // `ChainwebPanel.tsx` already gives it, or the poking-down half
+          // sits on top of the icon row's own buttons.
+          paddingTop: 16,
+        }}
+      >
+        {mobileStrip}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{tabContent}</div>
+        {leaveDialog}
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="arweave-panel" data-chain-id={ARWEAVE_CHAIN_ID}>
+      {desktopStrip}
+      {tabContent}
+      {leaveDialog}
     </div>
   );
 }

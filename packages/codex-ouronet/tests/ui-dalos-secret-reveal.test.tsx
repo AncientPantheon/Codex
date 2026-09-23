@@ -150,38 +150,114 @@ describe("DalosSecretReveal — Seed tab word layout", () => {
     expect(grid.style.gridTemplateColumns).toBe("repeat(8, 1fr)");
   });
 
-  it("switches to ONE WORD PER LINE, single line, middle-truncated with its own copy button, when any word exceeds the long-word threshold", () => {
-    // 60 DALOS-legal glyphs (plain Latin letters ARE in the 256-glyph set) —
-    // well past the point an 8-column grid cell can hold on one line.
-    const longWord = "a".repeat(30) + "b".repeat(30);
-    const words = ["short", longWord];
-    render(
-      <DalosSecretReveal
-        plaintext={words.join(" ")}
-        originMode="seedWords"
-        originCurve="dalos"
-        hideAddress
-      />,
-    );
+  // Round 24 owner correction: "we always fit max 8 horisontaly, (if they
+  // fit) if not 6 then 4 then 2 then 1. but the word should be one per
+  // line. if it doesnt fit one per line, we dont shorten it, but ratel
+  // carusell it." Replaces the old fixed-8-column / middle-truncated-list
+  // split with ONE responsive grid — these specs mock `ResizeObserver` to
+  // control the measured width `fitWordColumns` reacts to (jsdom itself
+  // never resolves real layout, so unmocked specs — like the one above —
+  // exercise the wide 800px fallback, which is why an ordinary-length word
+  // there always lands at 8 columns, unaffected).
+  describe("responsive column count + marquee for words too wide to fit (round 24)", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+      observe(target: Element) {
+        this.callback([{ contentRect: { width: FakeResizeObserver.nextWidth } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+      static nextWidth = 800;
+    }
 
-    // The FULL word is never rendered verbatim (that's the whole point of
-    // truncating it) — only its head+tail with a single "…" in between.
-    expect(screen.queryByText(longWord)).toBeNull();
-    const truncated = `${longWord.slice(0, 48)}…${longWord.slice(-8)}`;
-    expect(screen.getByText(truncated)).toBeTruthy();
+    afterEach(() => vi.unstubAllGlobals());
 
-    // Short words switch to the SAME one-per-line layout too — never mixed
-    // with the grid in one seed.
-    expect(screen.getByText("short")).toBeTruthy();
+    it("at the wide default (no mock — jsdom's own unmeasured fallback), even a 60-character word fits at 1 column and is never truncated", () => {
+      // 60 DALOS-legal glyphs (plain Latin letters ARE in the 256-glyph
+      // set) — too wide for 8 columns, but well within a single full-width
+      // (1-column) cell at the 800px fallback.
+      const longWord = "a".repeat(30) + "b".repeat(30);
+      const words = ["short", longWord];
+      render(
+        <DalosSecretReveal
+          plaintext={words.join(" ")}
+          originMode="seedWords"
+          originCurve="dalos"
+          hideAddress
+        />,
+      );
 
-    // Every row gets its OWN copy button in addition to the whole-plaintext
-    // one: 2 words + 1 whole-plaintext button = 3 "Copy Value" buttons total
-    // (`hideAddress` above removes the address block's own 4th one, keeping
-    // this count about the words, not incidental to the address).
-    expect(screen.getAllByText("Copy Value")).toHaveLength(3);
+      // The FULL word renders verbatim — no more shortening.
+      expect(screen.getByText(longWord)).toBeTruthy();
+      expect(screen.getByText("short")).toBeTruthy();
+      expect(document.body.textContent ?? "").not.toContain("…");
+    });
+
+    it("narrows the grid from 8 columns as the measured width shrinks", () => {
+      const words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"];
+
+      FakeResizeObserver.nextWidth = 800;
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+      const { unmount } = render(
+        <DalosSecretReveal plaintext={words.join(" ")} originMode="seedWords" originCurve="dalos" />,
+      );
+      let grid = screen.getByText("alpha").closest('[style*="grid-template-columns"]') as HTMLElement;
+      expect(grid.style.gridTemplateColumns).toBe("repeat(8, 1fr)");
+      unmount();
+
+      // Narrow enough that an 8-cell row can't hold "foxtrot"/"charlie"
+      // single-line any more — falls back to fewer, wider columns.
+      FakeResizeObserver.nextWidth = 160;
+      render(
+        <DalosSecretReveal plaintext={words.join(" ")} originMode="seedWords" originCurve="dalos" />,
+      );
+      grid = screen.getByText("alpha").closest('[style*="grid-template-columns"]') as HTMLElement;
+      expect(grid.style.gridTemplateColumns).not.toBe("repeat(8, 1fr)");
+      expect(["repeat(6, 1fr)", "repeat(4, 1fr)", "repeat(2, 1fr)", "repeat(1, 1fr)"]).toContain(
+        grid.style.gridTemplateColumns,
+      );
+    });
+
+    it("a word too wide even at 1 column (full measured width) gets the marquee treatment — full text intact, never shortened, with its own copy button", () => {
+      // Extreme case: a 256-glyph DALOS custom word (the format's own max)
+      // against a genuinely narrow measured width.
+      const hugeWord = "x".repeat(256);
+      FakeResizeObserver.nextWidth = 180;
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+      render(
+        <DalosSecretReveal plaintext={`short ${hugeWord}`} originMode="seedWords" originCurve="dalos" hideAddress />,
+      );
+
+      // The grid falls back to its narrowest column count...
+      const grid = screen.getByText("short").closest('[style*="grid-template-columns"]') as HTMLElement;
+      expect(grid.style.gridTemplateColumns).toBe("repeat(1, 1fr)");
+      // ...and the huge word is STILL rendered verbatim, in full — not
+      // truncated — inside an animated (marqueeing) span.
+      const wordEl = screen.getByText(hugeWord);
+      expect(wordEl.textContent).toBe(hugeWord);
+      expect(wordEl.style.animation).toContain("codex-word-marquee");
+      // A copy button sits alongside the marqueeing word (only marqueeing
+      // cells get their own — a static-fitting word like "short" doesn't,
+      // same as the original grid never had per-word copy buttons): 1 for
+      // the huge word + 1 whole-plaintext = 2 (`hideAddress` removes the
+      // address block's own).
+      expect(screen.getAllByText("Copy Value")).toHaveLength(2);
+    });
+
+    it("a short word never gets the marquee treatment, even in a narrow grid", () => {
+      FakeResizeObserver.nextWidth = 180;
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+      render(
+        <DalosSecretReveal plaintext="alpha bravo" originMode="seedWords" originCurve="dalos" />,
+      );
+      const wordEl = screen.getByText("alpha");
+      expect(wordEl.style.animation).toBe("");
+    });
   });
 
-  it("a seed with NO word past the threshold never renders the truncation ellipsis", () => {
+  it("a seed with every word comfortably short never renders the truncation ellipsis", () => {
     const words = ["alpha", "bravo", "charlie"];
     render(
       <DalosSecretReveal plaintext={words.join(" ")} originMode="seedWords" originCurve="dalos" />,

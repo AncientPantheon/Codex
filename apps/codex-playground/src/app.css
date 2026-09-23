@@ -384,6 +384,106 @@ body {
   gap: 4px 12px;
 }
 
+/* Mobile thin header (design.md §8) — brand only, no tagline/view-tabs/
+   export-load (all moved to OuronetShellMock's Codex-tap tier-2 menu). */
+.cxpg-titlerow--mobile {
+  flex: none;
+  padding: 10px 14px 4px;
+}
+
+/* ── The mobile fixed-frame flex column (design.md §8, corrected):
+   Zone 1 + its separator + Zone 2 are RESERVED — `flex: none`, never scroll
+   away — and Zone 3 is the ONLY scrolling region, matching how OuronetUI's
+   own header (account/timers rail) stays put while its <main> scrolls
+   beneath it. This class is MOBILE-ONLY (applied alongside `.cxpg-container`,
+   never replacing it) — desktop keeps `.cxpg-container`'s own plain
+   block-flow page layout entirely unchanged. ── */
+.cxpg-container--mobile {
+  /* The `.cxpg-modal-portal-root` overlay (App.tsx) anchors its `position:
+     absolute; inset: 0` against THIS box. */
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Zone 1 (design.md §8) — the debouncer's own rectangle, the same
+   structural slot OuronetUI reserves for its account-card ⇄ timers swipe
+   rail. Standalone shows just this one pane; a real embedded host would add
+   its own panes alongside it in the SAME rectangle (see the cross-repo
+   request filed against OuronetUI's MobileHeader). `flex: none` — reserved,
+   never scrolls away. */
+.cxpg-zone1 {
+  flex: none;
+  padding: 8px 14px 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* The "fixed bar separator from everything else" the owner called for
+   between Zone 1 and the rest of the shell — more prominent than the thin
+   golden hairline `.cxpg-separator` used between Zone 2 and Zone 3 on
+   desktop, since this one marks a whole reserved-zone boundary. */
+.cxpg-zone1-separator {
+  flex: none;
+  height: 4px;
+  margin: 10px 0 0;
+  background: linear-gradient(90deg, transparent, var(--cxpg-border), var(--cxpg-border), transparent);
+}
+
+/* Zone 2 (design.md §8) — the CodexID display, RESERVED like Zone 1: it
+   never scrolls away as Zone 3 (the core zone) scrolls beneath it.
+   COLLAPSIBLE, collapsed by default (the "Zone 2 collapse" round — owner
+   directive: "the define codex identity is occupying too much screen
+   estate permanently for nothing... make Zone 2 collapsible, collapsed by
+   default to a single line... this brings us more screen estate to Zone
+   3"). Height is now OWNED by `ObservationalCodexIdDisplay` itself — its own
+   `max-height` (44px collapsed / 190px expanded, animated) — NOT forced
+   here anymore; this wrapper just supplies the outer spacing (`margin`, not
+   `padding` — the component's own `wrapStyle` already carries its own
+   internal padding) and lets the component's box dictate its own size. */
+.cxpg-zone2 {
+  flex: none;
+  margin: 10px 14px 0;
+}
+
+/* Zone 3 / core zone (design.md §8) — the ONLY scrolling region, and its OWN
+   ENCIRCLED area (owner directive: "Zone 3 is its own zone, with its own
+   designated area for displaying... it needs to be encircled" — matching
+   OuronetUI's own bordered "Account Overview" card). `CodexTabs` itself
+   (mounted inside) owns the EdgeRails-vs-inner-scroller split so its rails
+   stay pinned to THIS box's edges rather than scrolling away; the
+   `overflow-y: auto` here is Settings' safety net (it has no internal
+   scroller of its own) and never actually engages for the Accounts view,
+   since CodexTabs is bounded to exactly this box's height. */
+.cxpg-zone3 {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Bottom margin cleared for BOTH riser bands PLUS the same 10px gap Zone 3
+     already keeps from Zone 2 above it (owner directive: "there must be a
+     separation area... same separation that we have from the element above
+     it" — sitting flush against the stripe row was wrong):
+       - the Controls/Pagination/Address Book row, ~18px, flush to the tab bar
+       - a SEPARATE swipe-bullets + EdgeRails band above THAT (owner
+         correction, the follow-up round: "the bullet... is something
+         beneath Zone 3... a different entity" — see
+         `.cxpg-osm-swipe-indicator-riser-slot`), ~22+16=38px above the tab
+         bar's own top edge.
+     Total: 10 (gap) + 38 (swipe-indicator band's own top) + a few px
+     breathing room ≈ 46px. This is also the level the EdgeRail semicircles
+     now dock at (see CodexTabs.tsx's `edgeRailPortalTarget`) — "at this
+     level we can add the side buttons", per the owner. */
+  margin: 10px 14px 46px;
+  padding: 0;
+  border: 1px solid var(--cxpg-border);
+  border-radius: 16px;
+  background: #0a0a0a;
+}
+
 .cxpg-badge {
   font-size: 10px;
   font-weight: 600;

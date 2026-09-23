@@ -13,6 +13,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { executeCollectUrStoa, checkCoinAccountExists } from "@ouronet/ouronet-core/interactions/urStoaFunctions";
 import { useGetKeypair } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
@@ -30,6 +31,22 @@ export interface CollectUrStoaModalProps {
    *  `paymentKeyAddress`, the on-chain identity collecting earnings. */
   address: string;
   onSuccess?: (requestKey: string) => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — round 10 owner correction: "the buttons, stake unstake
+   * collect transfer, must expand on the full screen, and once executed,
+   * they get out of the full screen." Mirrors `TransferUrStoaModal.tsx`'s
+   * identical fix. Omitted (the default) falls back to the bounded-to-
+   * this-component behavior every `CodexModalShell` caller has without it.
+   */
+  fullScreenPortalTarget?: Element | null;
+}
+
+/** Portals `children` into `target` when supplied, renders inline
+ *  otherwise — duplicated per this package's own "self-contained module"
+ *  convention (see `SeedWordsTab.tsx`). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
 }
 
 export function CollectUrStoaModal({
@@ -38,6 +55,7 @@ export function CollectUrStoaModal({
   publicKey,
   address,
   onSuccess,
+  fullScreenPortalTarget,
 }: CollectUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -99,13 +117,19 @@ export function CollectUrStoaModal({
   if (!isOpen) return null;
 
   return (
-    <CodexModalShell title="Collect UrStoa Earnings" subtitle="coin.C_URV|Collect" onClose={onClose}>
-      <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>
-        Collects accrued STOA earnings from the UrStoa Vault to <code>{address}</code>.
-      </p>
-      <ModalFeedback error={lastError} requestKey={null} />
-      <ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Collect Earnings" />
-    </CodexModalShell>
+    <MobilePortal target={fullScreenPortalTarget}>
+      <CodexModalShell
+        title="Collect UrStoa Earnings"
+        subtitle="coin.C_URV|Collect"
+        onClose={onClose}
+        footer={<ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Collect Earnings" />}
+      >
+        <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px", overflowWrap: "anywhere" }}>
+          Collects accrued STOA earnings from the UrStoa Vault to <code style={{ wordBreak: "break-all" }}>{address}</code>.
+        </p>
+        <ModalFeedback error={lastError} requestKey={null} />
+      </CodexModalShell>
+    </MobilePortal>
   );
 }
 

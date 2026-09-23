@@ -83,7 +83,7 @@ export function ViewSeedModal({ isOpen, onClose, account, name }: ViewSeedModalP
   const originCurve = account.originCurve ?? detectOriginCurve(account);
 
   return (
-    <CodexModalShell title={`${name ?? "Ouronet Account"} — Secret Reveal`} maxWidth={880} onClose={onClose}>
+    <CodexModalShell title={`${name ?? "Ouronet Account"} — Secret Reveal`} maxWidth={880} onClose={onClose} fillBody>
       {needsPassword ? (
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>

@@ -23,6 +23,7 @@
  */
 
 import { type CSSProperties, useCallback } from "react";
+import { Wrench, Globe, Timer, Eye, ShieldCheck, Fingerprint, Settings2 } from "lucide-react";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
 import {
@@ -135,6 +136,7 @@ export function CodexSettingsSection({
       key: "operations",
       label: "Operations",
       color: "#ceac5f",
+      Icon: Wrench,
       cards: (
         <div style={cardGrid(300)}>
           <ZbomSettingsCard />
@@ -146,18 +148,21 @@ export function CodexSettingsSection({
       key: "debouncer",
       label: "Debouncer",
       color: "#ec4899",
+      Icon: Timer,
       cards: <DebouncerSettingsCard />,
     },
     {
       key: "read-functions",
       label: "Read Functions",
       color: "#06b6d4",
+      Icon: Eye,
       cards: <ReadFunctionsCard />,
     },
     {
       key: "security",
       label: "Security",
       color: "#22c55e",
+      Icon: ShieldCheck,
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={cardGrid(220)}>
@@ -181,6 +186,7 @@ export function CodexSettingsSection({
       key: "identity",
       label: "Identity & Backup",
       color: "#8b5cf6",
+      Icon: Fingerprint,
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={cardGrid(240)}>
@@ -204,6 +210,7 @@ export function CodexSettingsSection({
       key: "advanced",
       label: "Advanced",
       color: "#f59e0b",
+      Icon: Settings2,
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <ConsumerSettingsCard consumerName={consumerName} />
@@ -263,6 +270,7 @@ export function CodexSettingsSection({
       key: "network",
       label: "Network",
       color: "#3b82f6",
+      Icon: Globe,
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <PythiaConnectorCard

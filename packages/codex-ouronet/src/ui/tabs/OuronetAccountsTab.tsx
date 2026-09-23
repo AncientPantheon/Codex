@@ -28,6 +28,7 @@ import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   ChevronsUpDown,
   Eye,
   Lock,
@@ -41,6 +42,11 @@ import {
   Atom,
   Check,
   X,
+  User,
+  Sparkles,
+  KeyRound,
+  Link2,
+  Star,
 } from "lucide-react";
 
 import { useOuroAccounts } from "../../hooks/index.js";
@@ -50,7 +56,7 @@ import { getApiKeySelectorData, isApiKeyRegistered, isApiKeyLinked, type ApiKeyR
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
-import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
+import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile, SwipeDeck, type SwipeDeckHandle } from "@ancientpantheon/codex-ui/ui";
 import RotatePaymentKeyModal from "../../zbom/modals/RotatePaymentKeyModal.js";
 import RotateGuardModal from "../../zbom/modals/RotateGuardModal.js";
 import ReleaseStoicTagModal from "../../zbom/modals/ReleaseStoicTagModal.js";
@@ -62,6 +68,7 @@ import ActivateSmartAccountModal from "../../zbom/modals/ActivateSmartAccountMod
 import ActivateApolloPythiaKeyModal from "../../zbom/modals/ActivateApolloPythiaKeyModal.js";
 import { flattenStoaChainAccounts } from "../../zbom/cfm/seam.js";
 import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconRenameBtnRect } from "../internal/IconButtons.js";
+import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { OuronetAddressHighlight } from "../internal/OuronetAddressHighlight.js";
 import { GuardTree } from "../internal/GuardTree.js";
 import { detectOriginCurve } from "../internal/originCurve.js";
@@ -108,7 +115,140 @@ function hydrate(account: IOuroAccount, d?: AccountSelectorData): IOuroAccount {
 /* APOLLO observational-curve accents — Standard ₱. orange, Smart Π. cherry. */
 const APOLLO_COLOR = "#f97316";
 const APOLLO_SMART_COLOR = "#a01b3f";
-const ACCOUNTS_PER_PAGE = 10;
+/** DESKTOP's own fixed page size — unchanged/independent of mobile now
+ *  (docs/work/codex-ui-mobile/design.md §8, the "variable mobile
+ *  pagination" round: "we keep a fixed 10 entry per page on desktop").
+ *  Mobile no longer shares this constant at all — see `useMobilePageSize`. */
+const DESKTOP_ACCOUNTS_PER_PAGE = 10;
+
+/** Fallback px height of one COMPACT (icon-badge) mobile account row, used
+ *  ONLY before the first real row has mounted/measured (jsdom / no layout
+ *  yet) — see `useMobilePageSize`'s `rowRef`. This USED to be the only
+ *  source of truth (a rough guess), which is exactly why the last row of a
+ *  page could render cut off (owner correction, design.md §8, round 8:
+ *  "entries musnt be displayed not whole... entries must be displayed only
+ *  in their entirety, everywhere") — a real `AccountRow` header (32px icon
+ *  + `12px 16px` padding + border) actually renders taller than this
+ *  guess, so packing `usable / 44` rows per page put one MORE row on the
+ *  page than the measured Zone 3 box could actually show in full, leaving
+ *  it sliced at the bottom. `rowRef`, wired to the FIRST real row rendered
+ *  each mount, now measures the TRUE height live and corrects `pageSize`
+ *  the instant it lands. */
+const MOBILE_ROW_HEIGHT_FALLBACK = 44;
+const MOBILE_ROW_GAP = 8;
+
+/**
+ * Measures Zone 3's actual available content height (via the SAME
+ * ResizeObserver-driven technique `CompactHalf`/`MiddleEllipsis` use
+ * elsewhere in this codebase) and computes EXACTLY how many rows fit —
+ * docs/work/codex-ui-mobile/design.md §8, the "variable mobile pagination"
+ * round: "we need to rethink the pagination and make it variable, depending
+ * on how much we can fit on the screen... there is a lot of wasted space
+ * here... simply recount the number of pages needed." This SUPERSEDES the
+ * previous quantized-divisor scheme (a fixed candidate pool of
+ * `[12, 6, 4, 3]`, snapping DOWN to the nearest one even when more rows
+ * would genuinely fit — the exact "wasted space" the owner flagged) — the
+ * page size IS the measured count, with no snapping, and there is no more
+ * separate outer/inner (page-of-12 vs swipe-chunk) split: one "page" now
+ * simply means "however many rows currently fit," and swiping between
+ * pages IS the pagination (see the main component's `chunksPerPage = 1`
+ * usage below). Starts at a conservative default (`4`) before the first
+ * real measurement lands, matching this codebase's established "safe
+ * default, corrected once real measurement resolves" convention. `rowRef`
+ * must be attached to the wrapper of the FIRST real `AccountRow` rendered
+ * (every row is a single, non-wrapping line in compact mode, so one
+ * measurement is representative of all of them) — round 8's fix for the
+ * cut-off-last-row bug (see `MOBILE_ROW_HEIGHT_FALLBACK` above).
+ *
+ * Round 8 follow-up bug fix — owner correction: "first page has 8, second
+ * page has 7, leaving one position open, third page again 7... if 8
+ * positions fit on a page, they must all be occupied": this hook used to
+ * bake a PRIME-ROW deduction into the returned `pageSize` itself, so every
+ * chunk (not just chunk 0, the only one that actually carries the pinned
+ * CodexPrime/APOLLO-prime rows) was sliced one-or-more slots SMALLER than
+ * it needed to be, leaving a real empty slot at the bottom of every OTHER
+ * page. This hook now returns the FULL page capacity (no prime deduction
+ * at all — it doesn't know about pinned rows anymore); the caller (which
+ * DOES know how many prime rows chunk 0 alone carries) subtracts that
+ * count from `pageSize` ONLY when sizing chunk 0's own slice, leaving
+ * every other page's slice at full capacity.
+ */
+
+/**
+ * One swipe pane's own scrollable body. Carries `scroll-snap-type:
+ * mandatory` with its rows opting in via `scrollSnapAlign` (design.md §8,
+ * round 8: "no more incomplete viewing of entries on the list... this must
+ * be done everywhere").
+ *
+ * A JS-enforced backstop (`useSnapScrollCorrection`) was tried on top of
+ * this CSS mechanism and REMOVED again — see `ChainwebPanel`'s own doc
+ * comment at its (former) call site for the full account: it actively
+ * fought the user's own scroll gesture across three separate live-reported
+ * regressions in a row, most recently "once i colapse a seed... i scroll
+ * and it moves me... the hook behave eratically." Plain CSS scroll-snap,
+ * no JS correction, stays the mechanism here.
+ */
+function SwipeChunkPane({ i, children }: { i: number; children: React.ReactNode }) {
+  return (
+    <div
+      data-mobile-swipe-chunk={i}
+      style={{ height: "100%", overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, scrollSnapType: "y mandatory" }}
+    >
+      {children}
+    </div>
+  );
+}
+function useMobilePageSize(): {
+  ref: React.RefObject<HTMLDivElement | null>;
+  rowRef: (node: HTMLDivElement | null) => void;
+  pageSize: number;
+} {
+  const ref = useRef<HTMLDivElement>(null);
+  // A CALLBACK ref (not a plain `useRef`) — a plain ref's `.current` change
+  // doesn't itself trigger a re-render/effect run, so the measuring effect
+  // below would only ever see whatever was mounted on the FIRST render
+  // (`null`, before any row exists). Routing the DOM node through state
+  // instead means attaching it (once the first real row mounts) reliably
+  // fires the measuring effect.
+  const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(MOBILE_ROW_HEIGHT_FALLBACK);
+  const [pageSize, setPageSize] = useState(4);
+
+  useEffect(() => {
+    if (!rowEl) return;
+    const measure = () => {
+      const h = rowEl.getBoundingClientRect().height;
+      if (h > 0) setRowHeight(h);
+    };
+    measure();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(rowEl);
+    }
+    return () => ro?.disconnect();
+  }, [rowEl]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const compute = () => {
+      const height = el.clientHeight;
+      if (height <= 0) return;
+      const maxRows = Math.floor((height + MOBILE_ROW_GAP) / (rowHeight + MOBILE_ROW_GAP));
+      setPageSize(Math.max(1, maxRows));
+    };
+    compute();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(compute);
+      ro.observe(el);
+    }
+    return () => ro?.disconnect();
+  }, [rowHeight]);
+
+  return { ref, rowRef: setRowEl, pageSize };
+}
 
 /** Pact returns decimals as `{ decimal: "…" }` objects. Rendering one directly
  *  as a React child throws "Objects are not valid as a React child" (#31) and
@@ -125,6 +265,46 @@ const decimalToDisplay = (v: unknown): string | null => {
 
 export interface OuronetAccountsTabProps {
   className?: string;
+  /**
+   * Where the mobile pagination stripe's Prev/Next cluster should mount, via
+   * `createPortal` — a DOM node flush against a host's OWN bottom tab bar,
+   * centered between the Controls and Address Book risers (docs/work/
+   * codex-ui-mobile/design.md §8, the "Zone 3" round: "the Prev/Next page
+   * controllers would appear... as a middle stripe... similar to Controls
+   * and Address Book"). Mirrors `CodexTabs`' own `addressBookRiserTarget`
+   * contract exactly — omitted (the default) falls back to positioning the
+   * cluster relative to this component's own frame.
+   */
+  paginationRiserTarget?: Element | null;
+  /**
+   * Where the SEPARATE swipe-bullets strip should mount, via `createPortal`
+   * — a DOM node spanning the host's full width, positioned in the gap
+   * directly BELOW Zone 3's own bordered box (NOT the same stripe as the
+   * Prev/Next pagination riser above). Owner correction (the follow-up
+   * feedback round): "the bullet I was talking about is something beneath
+   * Zone 3, and is specific to Zone 3... they work in concert but they are
+   * different entities... I want the bullets where they are on the Ouronet
+   * UI, outside of the Zone 3 box" — i.e. NOT merged into the Prev/Next
+   * stripe (that reverted back to its original "N / M" text form; see
+   * `paginationRiserTarget`). Mirrors the other riser-target contracts —
+   * omitted (the default) falls back to positioning the strip relative to
+   * this component's own frame.
+   */
+  swipeIndicatorRiserTarget?: Element | null;
+  /**
+   * A DOM node spanning the host's WHOLE mobile body, via `createPortal` —
+   * design.md §8, the "Zone 3" feedback round: "when clicking the spawning
+   * of new accounts, doing so shows the spawning interface, on the whole
+   * screen, not only on zone 3." When supplied, the mobile Spawn Standard/
+   * Smart `SpawnAccountModal` portals there instead of into this
+   * component's own (Zone-3-bounded) frame — mirrors `CodexTabs`' own
+   * `fullScreenPortalTarget` contract exactly. Omitted (the default) falls
+   * back to the ORIGINAL inline mount — safe for any consumer that hasn't
+   * wired a target. Desktop is unaffected either way (its own
+   * `CodexModalShell` already renders `position: fixed` against the
+   * viewport, never bounded by this component's frame).
+   */
+  fullScreenPortalTarget?: Element | null;
 }
 
 /* Green pillar marker — at-a-glance "account has an active StoicTag" + the
@@ -190,6 +370,25 @@ function StoicTagPillar({ tag }: { tag: string }) {
   );
 }
 
+/** A small icon-only badge (docs/work/codex-ui-mobile/design.md §8, the
+ *  "Zone 3" feedback round) — `AccountRow`'s `compact` mode's replacement
+ *  for a text pill: the full text still carries via `title`/`aria-label`. */
+function IconBadge({ icon, bg, color, label }: { icon: React.ReactNode; bg: string; color: string; label: string }) {
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 20, height: 20, borderRadius: 9999, flexShrink: 0,
+        backgroundColor: bg, color,
+      }}
+    >
+      {icon}
+    </span>
+  );
+}
+
 /* ─── Account Row ─── */
 /** A labeled divider between prime CodexID entities and the normal accounts. */
 function PrimeSeparator({ label }: { label: string }) {
@@ -215,9 +414,18 @@ function formatPactTime(t: unknown): string {
   return isNaN(d.getTime()) ? String(raw) : d.toLocaleString();
 }
 
+/** Portals `children` into `target` when supplied, otherwise renders them
+ *  inline — the same "no-op fallback" shape `SeedWordsTab.tsx`'s own
+ *  `MobilePortal` and `PureKeysArea.tsx`'s own `MobilePortal` already use, so
+ *  a caller that hasn't wired a `fullScreenPortalTarget` still gets a working
+ *  (if Zone-3-bounded) `CodexModalShell` instead of nothing. */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
+}
+
 function AccountRow({
   account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, paymentKeyFunded, primeName,
-  apiKeyRow, apiKeyLoaded,
+  apiKeyRow, apiKeyLoaded, expandable = true, compact = false, fullScreenPortalTarget,
 }: {
   account: IOuroAccount;
   index: number;
@@ -238,8 +446,44 @@ function AccountRow({
    *  (DPL-UR.URC_0031). `null` = observational; undefined until loaded. */
   apiKeyRow?: ApiKeyRow | null;
   apiKeyLoaded?: boolean;
+  /**
+   * Whether tapping the row header toggles its expand at all (docs/work/
+   * codex-ui-mobile/design.md §8, the "Zone 3" round). Default true. On
+   * mobile this now drives the FULL-SCREEN popup below (see
+   * `fullScreenPortalTarget`), not an inline block — the owner's follow-up
+   * correction ("we remove the expansion but we forgot to readd it...
+   * normally the content... should be a display fullscreen of its expansion
+   * box") restored it after an earlier round had disabled it outright
+   * (`expandable={false}`) to avoid shipping the OLD Zone-3-breaking inline
+   * expand while the real full-screen version wasn't built yet. Desktop is
+   * unaffected either way (still the original inline block).
+   */
+  expandable?: boolean;
+  /**
+   * Icon-only badges instead of text pills for Prime/Standard-Smart/
+   * Selected/Active (docs/work/codex-ui-mobile/design.md §8, the "Zone 3"
+   * feedback round): "instead of the active green text, we should show an
+   * icon, and use icons instead of text, for Prime Standard Selected and
+   * active — you already used icon for standard and smart in the upper bar
+   * button, use that." Standard/Smart reuse the EXACT SAME `User`/
+   * `Sparkles` icons the mobile filter row uses. Default false (desktop,
+   * unchanged) — StoicTag/APOLLO badges are UNCHANGED either way (not named
+   * in the directive).
+   */
+  compact?: boolean;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal`; threaded straight through from `OuronetAccountsTabProps`
+   * (see its own doc comment, which already documents this contract for the
+   * mobile Spawn modal) to this row's own full-screen expand popup. Omitted
+   * (the default) falls back to a `CodexModalShell` bounded to this
+   * component's own Zone-3 frame, same as every other `CodexModalShell`
+   * caller in this codebase without a portal target.
+   */
+  fullScreenPortalTarget?: Element | null;
 }) {
   const { updateAccount, deleteAccount } = useOuroAccounts();
+  const isMobile = useIsMobile();
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = forceExpanded || localExpanded;
   // A single ZBOM host serves all seven codex operations for this row; the open
@@ -305,16 +549,17 @@ function AccountRow({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setLocalExpanded(!localExpanded)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocalExpanded(!localExpanded); } }}
+        onClick={() => { if (expandable) setLocalExpanded(!localExpanded); }}
+        onKeyDown={(e) => { if (!expandable) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLocalExpanded(!localExpanded); } }}
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-          textAlign: "left", background: "transparent", border: "none", cursor: "pointer",
+          textAlign: "left", background: "transparent", border: "none",
+          cursor: expandable ? "pointer" : "default",
         }}
       >
-        {expanded
+        {expandable && (expanded
           ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} />
-          : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />)}
         {canSelect ? (
           <button
             type="button"
@@ -340,44 +585,105 @@ function AccountRow({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: nameColor }}>{displayName}</span>
-            {locked && (
+            {locked && (compact ? (
+              <IconBadge
+                icon={<Lock size={11} />}
+                bg={`${isCodexIdPrime ? apolloAccent : "#ceac5f"}20`}
+                color={isCodexIdPrime ? apolloAccent : "#ceac5f"}
+                label="Prime"
+              />
+            ) : (
               <span style={pillStyle(
                 `${isCodexIdPrime ? apolloAccent : "#ceac5f"}20`,
                 isCodexIdPrime ? apolloAccent : "#ceac5f",
               )}>🔒 Prime</span>
-            )}
+            ))}
             {stoicTag && <StoicTagPillar tag={stoicTag} />}
-            <span style={pillStyle(
-              isApollo ? apolloAccent + "20" : isStandard ? "#ceac5f20" : "#8b5cf620",
-              isApollo ? apolloAccent : isStandard ? "#ceac5f" : "#a78bfa",
-            )}>
-              {isStandard ? "Standard" : "Smart"}
-            </span>
-            {isApollo && (
+            {compact ? (
+              <IconBadge
+                icon={isStandard ? <User size={11} /> : <Sparkles size={11} />}
+                bg={isApollo ? apolloAccent + "20" : isStandard ? "#ceac5f20" : "#8b5cf620"}
+                color={isApollo ? apolloAccent : isStandard ? "#ceac5f" : "#a78bfa"}
+                label={isStandard ? "Standard" : "Smart"}
+              />
+            ) : (
+              <span style={pillStyle(
+                isApollo ? apolloAccent + "20" : isStandard ? "#ceac5f20" : "#8b5cf620",
+                isApollo ? apolloAccent : isStandard ? "#ceac5f" : "#a78bfa",
+              )}>
+                {isStandard ? "Standard" : "Smart"}
+              </span>
+            )}
+            {isApollo && (compact ? (
+              // Icon badge, not the full "APOLLO · observational/registered"
+              // text pill — the follow-up feedback round: this pill was the
+              // ONE badge the earlier icon-badge pass overlooked (only
+              // Prime/Standard-Smart/Selected/Active were converted), and
+              // its wide text was wide/wrapping enough on longer names to
+              // make THIS row taller than its neighbours, throwing off
+              // cross-chunk row alignment ("entries from different swipes
+              // are not on the same level"). `KeyRound` — the SAME icon the
+              // mobile filter row's "Single API" tab already uses (APOLLO
+              // accounts ARE the API-key halves that tab lists).
+              <IconBadge
+                icon={<KeyRound size={11} />}
+                bg={apolloAccent + "20"}
+                color={apolloAccent}
+                label={isRegistered ? "APOLLO — registered" : (apiKeyLoaded ? "APOLLO — observational" : "APOLLO")}
+              />
+            ) : (
               <span style={pillStyle(apolloAccent + "15", apolloAccent, apolloAccent + "40")} title={isRegistered ? "APOLLO (₱./Π.) — deployed on-chain as a Pythia API key." : "APOLLO (₱./Π.) — a Pythia API-key account. Observational until you deploy it as a Pythia key."}>
                 APOLLO · {isRegistered ? "registered" : (apiKeyLoaded ? "observational" : "…")}
               </span>
-            )}
+            ))}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {isSelected && (
+          {isSelected && (compact ? (
+            <IconBadge icon={<Star size={11} />} bg="#ceac5f20" color="#ceac5f" label="Selected — the active Ouronet account used as the owner for operations." />
+          ) : (
             <span style={pillStyle("#ceac5f20", "#ceac5f", "#ceac5f60")} title="This is the active Ouronet account used as the owner for operations.">
               ★ Selected
             </span>
+          ))}
+          {compact ? (
+            <IconBadge
+              icon={(isApollo ? isRegistered : isActivated) ? <Check size={11} /> : <X size={11} />}
+              bg={isApollo ? (isRegistered ? "#22c55e20" : apolloAccent + "20") : isActivated ? "#22c55e20" : "#8b1a1a20"}
+              color={isApollo ? (isRegistered ? "#4ade80" : apolloAccent) : isActivated ? "#4ade80" : "#c0392b"}
+              label={isApollo ? (isRegistered ? "Registered" : "Observational") : isActivated ? "Active" : "Inactive"}
+            />
+          ) : (
+            <span style={pillStyle(
+              isApollo ? (isRegistered ? "#22c55e20" : apolloAccent + "20") : isActivated ? "#22c55e20" : "#8b1a1a20",
+              isApollo ? (isRegistered ? "#4ade80" : apolloAccent) : isActivated ? "#4ade80" : "#c0392b",
+            )}>
+              {isApollo ? (isRegistered ? "Registered" : "Observational") : isActivated ? "Active" : "Inactive"}
+            </span>
           )}
-          <span style={pillStyle(
-            isApollo ? (isRegistered ? "#22c55e20" : apolloAccent + "20") : isActivated ? "#22c55e20" : "#8b1a1a20",
-            isApollo ? (isRegistered ? "#4ade80" : apolloAccent) : isActivated ? "#4ade80" : "#c0392b",
-          )}>
-            {isApollo ? (isRegistered ? "Registered" : "Observational") : isActivated ? "Active" : "Inactive"}
-          </span>
         </div>
       </div>
 
-      {/* Expanded content */}
-      {expanded && (
-        <div style={{ padding: "0 16px 12px", borderTop: "1px solid #262626" }}>
+      {/* Expanded content — owner correction: "ive added an ouronet smart
+          account, but it seems im missing the expand button for ouronet
+          accounts. we remove the expansion but we forgot to readd it.
+          Normally the content of the Ouronet Account, when clicked on the
+          entry, should be a display fullscreen of its expansion box." An
+          earlier round disabled mobile's inline expand outright
+          (`expandable={false}` at both mobile `AccountRow` call sites) to
+          avoid shipping the old Zone-3-bounded behavior before the real
+          full-screen version existed — that also silently dropped the
+          chevron affordance itself (gated on the same `expandable` prop),
+          which is the "missing expand button" being reported here. Fix
+          mirrors `SeedRow`'s (round 21) and `PureKeyRow`'s (round 27) own
+          "expandedContent extracted once, wrapper differs by platform"
+          pattern exactly: identical content either way, MOBILE portals it
+          into a full-screen `CodexModalShell` (via `fullScreenPortalTarget`)
+          instead of growing the row inline, desktop keeps the original
+          inline block byte-identical. */}
+      {expanded && (() => {
+        const expandedContent = (
+          <>
           {/* Ouronet Address */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, minWidth: 0, overflow: "hidden", backgroundColor: "#080808", border: "1px dashed #2a2a2a", borderRadius: 6, padding: "5px 6px 5px 8px" }}>
             <span style={{ ...sectionLabel, letterSpacing: "0.08em" }}>{isApollo ? "Apollo Account" : "Ouronet Account"}</span>
@@ -581,8 +887,25 @@ function AccountRow({
               ? <IconDeleteBtnDisabled size={28} title={isCodexIdPrime ? `${primeName} cannot be removed while it is part of the CodexID` : "CodexPrime cannot be removed"} />
               : <IconDeleteBtn onClick={() => { void deleteAccount(account.id); }} size={28} />}
           </div>
-        </div>
-      )}
+          </>
+        );
+        return isMobile ? (
+          <MobilePortal target={fullScreenPortalTarget}>
+            <CodexModalShell
+              title={isApollo ? "Apollo Account" : displayName}
+              onClose={() => setLocalExpanded(false)}
+              dialogTestId={`ouronet-account-expand-modal-${account.id}`}
+              closeTestId="ouronet-account-expand-close"
+            >
+              {expandedContent}
+            </CodexModalShell>
+          </MobilePortal>
+        ) : (
+          <div style={{ padding: "0 16px 12px", borderTop: "1px solid #262626" }}>
+            {expandedContent}
+          </div>
+        );
+      })()}
 
       {/* ZBOM hosts — the seven verbatim-cloned codex modals, each its own
           self-contained debouncer + patron + signing flow. Keyed off the open
@@ -625,8 +948,177 @@ const pageBtn = (disabled: boolean): React.CSSProperties => ({
   background: "transparent", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.3 : 1,
 });
 
+/** The mobile pagination riser's Prev/Next arrow style — same family as the
+ *  Controls/Address Book risers' own tiny buttons. */
+const iconRiserBtn = (disabled: boolean): React.CSSProperties => ({
+  display: "flex", alignItems: "center", justifyContent: "center",
+  background: "none", border: "none", padding: 0, color: "inherit",
+  cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.3 : 1,
+});
+
+/** One icon-only button in Zone 3's fixed mobile button row (design.md §8) —
+ *  a filter tab, a spawn action, or the Expand-All toggle, all condensed to
+ *  the same shape: an icon medallion + a tooltip-style `title`/`aria-label`
+ *  carrying the text a desktop button would show inline. */
+function MobileFilterIconBtn({
+  active, accent, label, onClick, children,
+}: {
+  active: boolean; accent: string; label: string; onClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        width: 30, height: 30, borderRadius: 8, cursor: "pointer",
+        border: `1px solid ${active ? accent : "#262626"}`,
+        backgroundColor: active ? accent + "1a" : "transparent",
+        color: active ? accent : "#888",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Dot geometry for `GroupedSwipeBullets` — same regular/active dot sizing
+ *  convention `SwipeDeck`'s own (now-hidden, for Zone 3) dot strip used. */
+const SWIPE_BULLET = { dot: 4, activeDot: 12, gap: 4, groupGap: 10, ellipsisSlot: 11 };
+
+/**
+ * The Zone 3 pagination riser's swipe-position indicator — the follow-up
+ * feedback round: "if an area is swipeable, it must have its swiping bullets
+ * show." Two-level, matching the owner's exact spec: one dot PER inner swipe
+ * chunk, GROUPED (extra gap, no hard divider glyph) by which outer
+ * (`ACCOUNTS_PER_PAGE`) page it belongs to — "two swipes per page, two
+ * pages... 4 bullets grouped into 2" — so the grouping itself communicates
+ * page boundaries even at the bullet level, not just the chunk count.
+ *
+ * Truncates at GROUP granularity when there isn't room for every page's
+ * group ("instead of showing 100 groups of 3 bullets each, we'd show as many
+ * groups as the width would fit, and the rest would show …"), windowed
+ * around the ACTIVE page and re-measured live via `ResizeObserver` (the same
+ * measured-fit convention `useSwipeDivisor`/`CompactHalf` already use
+ * elsewhere in this codebase). The leading/trailing "…" slots are FIXED
+ * width and always occupy their layout space — rendered empty (not
+ * unmounted) when that side isn't truncated — so the visible groups never
+ * shift horizontally as truncation toggles on/off while swiping near either
+ * end of a long list vs. its middle ("their location reserved, not showing
+ * when they are not needed").
+ *
+ * Every dot is also a direct jump target (`onSelectChunk`), same as
+ * `SwipeDeck`'s own dots were before Zone 3 hid them — this strip both
+ * SHOWS and DRIVES the swipe position.
+ */
+function GroupedSwipeBullets({
+  totalChunks,
+  chunksPerPage,
+  activeChunk,
+  onSelectChunk,
+}: {
+  totalChunks: number;
+  chunksPerPage: number;
+  activeChunk: number;
+  onSelectChunk: (chunkIndex: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const compute = () => setWidth(el.clientWidth);
+    compute();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(compute);
+      ro.observe(el);
+    }
+    return () => ro?.disconnect();
+  }, []);
+
+  const totalGroups = Math.max(1, Math.ceil(totalChunks / chunksPerPage));
+  const groupSize = (p: number) => Math.max(0, Math.min(chunksPerPage, totalChunks - p * chunksPerPage));
+  const groupWidth = (p: number) => {
+    const n = groupSize(p);
+    return n <= 0 ? 0 : n * SWIPE_BULLET.dot + (n - 1) * SWIPE_BULLET.gap;
+  };
+  const activePage = Math.min(totalGroups - 1, Math.max(0, Math.floor(activeChunk / chunksPerPage)));
+
+  // Fixed budget for the two ellipsis slots — ALWAYS reserved (see the doc
+  // comment above), regardless of whether either side actually truncates.
+  const available = Math.max(0, width - SWIPE_BULLET.ellipsisSlot * 2);
+
+  // Grow a window of WHOLE page-groups outward from the active page,
+  // alternating which side gets first refusal each step, until neither side
+  // has room (or width, or more pages) left to grow into. jsdom never
+  // resolves real layout (`clientWidth` stays 0) — `available` then starts
+  // at 0, so this degrades to "just the active group" until a real
+  // measurement lands, the same safe-default convention as `useSwipeDivisor`.
+  let lo = activePage;
+  let hi = activePage;
+  let used = groupWidth(activePage);
+  let preferRight = true;
+  for (;;) {
+    const order = preferRight ? ([true, false] as const) : ([false, true] as const);
+    let advanced = false;
+    for (const goRight of order) {
+      if (goRight && hi + 1 < totalGroups) {
+        const w = groupWidth(hi + 1) + SWIPE_BULLET.groupGap;
+        if (used + w <= available) { hi += 1; used += w; advanced = true; break; }
+      } else if (!goRight && lo - 1 >= 0) {
+        const w = groupWidth(lo - 1) + SWIPE_BULLET.groupGap;
+        if (used + w <= available) { lo -= 1; used += w; advanced = true; break; }
+      }
+    }
+    if (!advanced) break;
+    preferRight = !preferRight;
+  }
+
+  const ellipsisStyle: React.CSSProperties = {
+    width: SWIPE_BULLET.ellipsisSlot, flexShrink: 0, textAlign: "center",
+    color: "#555", fontSize: 9, lineHeight: "4px",
+  };
+
+  return (
+    <div ref={ref} style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0, justifyContent: "center" }}>
+      <span data-swipe-ellipsis="lead" style={ellipsisStyle}>{lo > 0 ? "…" : ""}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: SWIPE_BULLET.groupGap }}>
+        {Array.from({ length: hi - lo + 1 }, (_, gi) => lo + gi).map((p) => (
+          <div key={p} style={{ display: "flex", alignItems: "center", gap: SWIPE_BULLET.gap }}>
+            {Array.from({ length: groupSize(p) }, (_, k) => {
+              const chunkIndex = p * chunksPerPage + k;
+              const isActive = chunkIndex === activeChunk;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  aria-label={`Go to swipe ${k + 1} of page ${p + 1}`}
+                  aria-pressed={isActive}
+                  onClick={() => onSelectChunk(chunkIndex)}
+                  style={{
+                    width: isActive ? SWIPE_BULLET.activeDot : SWIPE_BULLET.dot,
+                    height: SWIPE_BULLET.dot, borderRadius: 9999, border: "none", padding: 0,
+                    cursor: "pointer", transition: "all 0.2s",
+                    backgroundColor: isActive ? "#ceac5f" : "#3a3a3a",
+                  }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <span data-swipe-ellipsis="trail" style={ellipsisStyle}>{hi < totalGroups - 1 ? "…" : ""}</span>
+    </div>
+  );
+}
+
 /* ─── Main tab ─── */
-export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
+export function OuronetAccountsTab({ className, paginationRiserTarget, swipeIndicatorRiserTarget, fullScreenPortalTarget }: OuronetAccountsTabProps) {
+  const isMobile = useIsMobile();
   const { accounts } = useOuroAccounts();
   const { seeds } = useStoaChainSeeds();
   const { keypairs } = usePureKeypairs();
@@ -642,6 +1134,17 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   const [page, setPage] = useState(0);
   const [allExpanded, setAllExpanded] = useState(false);
   const [spawnMode, setSpawnMode] = useState<"standard" | "smart" | null>(null);
+  /** Mobile's OWN continuous-swipe position — the index of the currently
+   *  active inner swipe pane across the ENTIRE (unpaginated) account list,
+   *  not just the current outer 12-account page (docs/work/codex-ui-mobile/
+   *  design.md §8, the follow-up Zone 3 round: "a direct swipe for all the
+   *  accounts... if I'm on the last swipe page of page 1 and I swipe
+   *  forward, I'd be sent on swipe 1 of the next page, and the page counter
+   *  would update accordingly"). Driven by the deck's own `onActiveChange`;
+   *  `swipeDeckRef` lets the pagination riser's Prev/Next drive it back the
+   *  OTHER direction (see `goToPage` in the `isMobile` block below). */
+  const [mobileSwipeIndex, setMobileSwipeIndex] = useState(0);
+  const swipeDeckRef = useRef<SwipeDeckHandle>(null);
 
   // Live on-chain state (URC_0027) — activation, sovereign, governor, payment
   // key + guard + balance, on-chain public key, StoicTag. The package reads the
@@ -747,10 +1250,24 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
   }
 
   const restList = currentList.filter((a) => !primeIds.has(a.id));
-  const totalPages = Math.ceil(restList.length / ACCOUNTS_PER_PAGE);
-  const pageAccounts = restList.slice(page * ACCOUNTS_PER_PAGE, (page + 1) * ACCOUNTS_PER_PAGE);
+  // DESKTOP-only from here — mobile computes its OWN page count from its
+  // OWN measured page size (`useMobilePageSize`, below), independent of
+  // this fixed constant (design.md §8, the "variable mobile pagination"
+  // round).
+  const totalPages = Math.ceil(restList.length / DESKTOP_ACCOUNTS_PER_PAGE);
+  const pageAccounts = restList.slice(page * DESKTOP_ACCOUNTS_PER_PAGE, (page + 1) * DESKTOP_ACCOUNTS_PER_PAGE);
 
-  useEffect(() => setPage(0), [activeTab]);
+  // `mobileSwipeIndex`/`swipeDeckRef` mirror `page`/`setPage` for mobile's
+  // OWN continuous swipe sequence (see the `isMobile` block below) — reset
+  // together on a tab switch, including an imperative snap back to the
+  // deck's own pane 0 (its `initialIndex` only applies on first mount, not
+  // on a later tab switch that keeps the SAME `SwipeDeck` instance mounted
+  // with new children).
+  useEffect(() => {
+    setPage(0);
+    setMobileSwipeIndex(0);
+    swipeDeckRef.current?.scrollToIndex(0);
+  }, [activeTab]);
 
   const prevStdCount = useRef(standardAccounts.length);
   const prevSmartCount = useRef(smartAccounts.length);
@@ -767,6 +1284,12 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
 
   const isAccountList = activeTab === "standard" || activeTab === "smart";
 
+  // Called UNCONDITIONALLY (Rules of Hooks) even though its result is only
+  // consumed in the `isMobile` branch below — `isMobile` itself can flip
+  // live (a container-relative ResizeObserver), so this can't be gated
+  // behind the `if (isMobile)` check the way the mobile JSX itself is.
+  const { ref: swipeRef, rowRef: mobileRowRef, pageSize: mobilePageSize } = useMobilePageSize();
+
   const Pagination = () => totalPages > 1 ? (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
       <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} style={pageBtn(page === 0)}>← Prev</button>
@@ -774,6 +1297,301 @@ export function OuronetAccountsTab({ className }: OuronetAccountsTabProps) {
       <button onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} style={pageBtn(page >= totalPages - 1)}>Next →</button>
     </div>
   ) : null;
+
+  // ── Mobile (docs/work/codex-ui-mobile/design.md §8, the "Zone 3" round,
+  // and the follow-up "variable mobile pagination" round) ──
+  // Zone 3 is its own ENCIRCLED area (the host gives this component a
+  // bordered, bounded box — `.cxpg-zone3` in the playground). Structure:
+  //   1. A FIXED single-line icon row (flex: none) — the filter tabs +
+  //      Spawn Standard/Smart + Expand All, all condensed to icon-only.
+  //   2. The pane below is ONE continuous `SwipeDeck` spanning the WHOLE
+  //      (unpaginated) account list, chunked at `mobilePageSize` — the
+  //      EXACT number of rows that measured to fit Zone 3's real height
+  //      (`useMobilePageSize`), no quantization. A "page" IS a chunk now —
+  //      there is no more separate outer (fixed-count) / inner (measured)
+  //      split the way `ACCOUNTS_PER_PAGE`/`swipeDivisor` used to have
+  //      (`chunksPerPage` below is always `1`), so "recount the number of
+  //      pages needed" happens for free: `chunks.length` IS `totalPages`,
+  //      live, off the SAME measurement. The continuous-sweep behavior
+  //      (swiping past the last row of one page lands on the first row of
+  //      the next) is unchanged — `page`/`pageAccounts` stay desktop-only
+  //      (fixed `DESKTOP_ACCOUNTS_PER_PAGE`); mobile derives its own page
+  //      number directly from the active swipe index.
+  //   3. The pagination stripe (Prev/Next, portaled flush against the host's
+  //      tab bar, same family as Controls/Address Book) now DRIVES the deck
+  //      via `swipeDeckRef` rather than owning an independent slice — and
+  //      the deck's own dot/arrow strip is suppressed (`hideIndicators`):
+  //      Zone 3 is a bordered/clipped box (unlike Zone 1's border-less
+  //      slot), so a dot strip anchored inside it can't spill into the gap
+  //      below the way Zone 1's does — the owner's directive was to move
+  //      "the lines showing there is swipeable content" OUTSIDE the box
+  //      entirely, and this pagination stripe already lives there.
+  //   4. Row expansion opens a FULL-SCREEN `CodexModalShell` (via
+  //      `AccountRow`'s own `isMobile` branch + `fullScreenPortalTarget`,
+  //      threaded straight through below) rather than an inline block — the
+  //      owner's directive is that it "must be shown on the whole screen...
+  //      instead of expanding it on Zone 3". An earlier round shipped
+  //      `expandable={false}` here as a stopgap before that full-screen
+  //      version existed; the owner's later follow-up ("we remove the
+  //      expansion but we forgot to readd it") flagged the row was left with
+  //      no expand affordance at all in the meantime — fixed by restoring
+  //      `expandable` to its default (true) at both call sites below.
+  if (isMobile) {
+    // Owner correction (design.md §8, round 8): "if 8 positions fit on a
+    // page, they must all be occupied" — chunk 0 ALONE shares its page with
+    // the pinned prime row(s), so ONLY its own slice is shrunk by that many
+    // slots; every other page gets the full measured `mobilePageSize` (see
+    // `useMobilePageSize`'s own doc comment for why the deduction moved
+    // here instead of living inside the hook).
+    const chunks: IOuroAccount[][] = [];
+    const firstChunkSize = Math.max(1, mobilePageSize - primeRows.length);
+    if (restList.length === 0) {
+      chunks.push([]);
+    } else {
+      chunks.push(restList.slice(0, firstChunkSize));
+      for (let i = firstChunkSize; i < restList.length; i += mobilePageSize) {
+        chunks.push(restList.slice(i, i + mobilePageSize));
+      }
+    }
+
+    // A "page" and a "chunk" are the SAME thing now (see the doc comment
+    // above) — `chunksPerPage` stays `1` purely so `GroupedSwipeBullets`
+    // (built for the old two-tier scheme) still works unmodified: with
+    // `chunksPerPage=1` its own "group" math degenerates to exactly one dot
+    // per page, i.e. a flat bullet row, which is exactly right here.
+    const chunksPerPage = 1;
+    const mobileTotalPages = chunks.length;
+    const mobilePage = Math.min(mobileTotalPages - 1, Math.max(0, mobileSwipeIndex));
+    // Set state directly (immediate feedback + jsdom-testable —
+    // `scrollToIndex`'s own `Element.scrollTo` guard is a real-browser-only
+    // no-op in the test env) IN ADDITION to driving the real scroll
+    // position, so a subsequent manual swipe continues from the correct
+    // visual spot rather than snapping back once the deck's own scroll
+    // listener resolves. Shared by the Prev/Next arrows (page-level jump)
+    // AND every individual bullet in `GroupedSwipeBullets` (chunk-level jump).
+    const goToChunk = (target: number) => {
+      const idx = Math.max(0, Math.min(chunks.length - 1, target));
+      setMobileSwipeIndex(idx);
+      swipeDeckRef.current?.scrollToIndex(idx);
+    };
+    const goToPage = (target: number) => {
+      const clamped = Math.max(0, Math.min(mobileTotalPages - 1, target));
+      goToChunk(clamped);
+    };
+
+    // The ORIGINAL Prev/Next pagination stripe — arrows + "N / M" text, back
+    // exactly as it was before the bullets round (owner correction: "you
+    // need to keep the pagination stripe with page 1/2 prev and next, that
+    // we have before"). Still gated on `mobileTotalPages > 1` — "N" here is
+    // now the LIVE, measured page count, not a fixed-count derivation.
+    const paginationCluster = isAccountList && mobileTotalPages > 1 ? (
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          height: 18, padding: "0 6px", border: "1px solid #262626", borderBottom: "none",
+          borderRadius: "6px 6px 0 0", backgroundColor: "#0a0a0af0",
+          color: "#ceac5f", fontSize: 9, fontWeight: 700, fontFamily: MONO,
+        }}
+      >
+        <button
+          type="button"
+          aria-label="Previous page"
+          onClick={() => goToPage(mobilePage - 1)}
+          disabled={mobilePage === 0}
+          style={iconRiserBtn(mobilePage === 0)}
+        >
+          <ChevronLeft size={11} />
+        </button>
+        <span>{mobilePage + 1}/{mobileTotalPages}</span>
+        <button
+          type="button"
+          aria-label="Next page"
+          onClick={() => goToPage(mobilePage + 1)}
+          disabled={mobilePage >= mobileTotalPages - 1}
+          style={iconRiserBtn(mobilePage >= mobileTotalPages - 1)}
+        >
+          <ChevronRight size={11} />
+        </button>
+      </div>
+    ) : null;
+
+    // A SEPARATE strip, specific to Zone 3, for the swipe-position bullets —
+    // owner correction: "the bullet I was talking about is something
+    // beneath Zone 3... they work in concert but they are different
+    // entities." Gated on `chunks.length > 1` — since a page and a chunk
+    // are now the SAME thing, this is equivalent to `mobileTotalPages > 1`,
+    // but written this way to stay correct even if that ever changes again.
+    const swipeIndicatorCluster = isAccountList && chunks.length > 1 ? (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
+        <GroupedSwipeBullets
+          totalChunks={chunks.length}
+          chunksPerPage={chunksPerPage}
+          activeChunk={mobileSwipeIndex}
+          onSelectChunk={goToChunk}
+        />
+      </div>
+    ) : null;
+
+    return (
+      <div
+        className={className}
+        style={{
+          position: "relative", height: "100%", display: "flex", flexDirection: "column",
+          fontFamily: "var(--codex-font, inherit)", color: "#d2d3d4",
+        }}
+      >
+        {/* Fixed icon-only button row — never scrolls away. 4 filters LEFT,
+            2 spawn actions RIGHT (owner directive) — Expand All is DROPPED
+            entirely on mobile (row expansion itself is disabled here, so a
+            toggle for it has nothing to do). `marginBottom` — owner
+            directive (the follow-up feedback round): "the buttons on the
+            top sit flush to the account entries, this is a no go, must
+            have some sort of spacing between them." */}
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
+          <MobileFilterIconBtn active={activeTab === "standard"} accent="#ceac5f" label={`Standard (${standardAccounts.length})`} onClick={() => setActiveTab("standard")}>
+            <User size={16} />
+          </MobileFilterIconBtn>
+          <MobileFilterIconBtn active={activeTab === "smart"} accent="#a78bfa" label={`Smart (${smartAccounts.length})`} onClick={() => setActiveTab("smart")}>
+            <Sparkles size={16} />
+          </MobileFilterIconBtn>
+          <MobileFilterIconBtn active={activeTab === "single-api"} accent="#4ade80" label={`Single API (${apolloHalfCount})`} onClick={() => setActiveTab("single-api")}>
+            <KeyRound size={16} />
+          </MobileFilterIconBtn>
+          <MobileFilterIconBtn active={activeTab === "dual-api"} accent="#38bdf8" label={`Dual API (${dualCount ?? "…"})`} onClick={() => setActiveTab("dual-api")}>
+            <Link2 size={16} />
+          </MobileFilterIconBtn>
+          <div style={{ flex: 1 }} />
+          <MobileFilterIconBtn active={false} accent="#ceac5f" label="Spawn Standard Account" onClick={() => setSpawnMode("standard")}>
+            <PlusCircle size={16} />
+          </MobileFilterIconBtn>
+          <MobileFilterIconBtn active={false} accent="#a78bfa" label="Spawn Smart Account" onClick={() => setSpawnMode("smart")}>
+            <PlusCircle size={16} />
+          </MobileFilterIconBtn>
+        </div>
+
+        {/* The pane below — swipeable per-page content. */}
+        <div ref={swipeRef} style={{ flex: 1, minHeight: 0 }}>
+          {activeTab === "single-api" ? (
+            <div style={{ height: "100%", overflowY: "auto" }}>
+              <SingleApiPanel standardApollo={standardApollo} smartApollo={smartApollo} apiKeyMap={apiKeyMap} accounts={hydratedAccounts} />
+            </div>
+          ) : activeTab === "dual-api" ? (
+            <div style={{ height: "100%", overflowY: "auto" }}>
+              <DualApiPanel standardApollo={standardApollo} smartApollo={smartApollo} apiKeyMap={apiKeyMap} accounts={hydratedAccounts} />
+            </div>
+          ) : (
+            <SwipeDeck
+              ref={swipeDeckRef}
+              fill
+              peek={false}
+              hideIndicators
+              onActiveChange={setMobileSwipeIndex}
+              style={{ height: "100%" }}
+            >
+              {chunks.map((chunk, i) => (
+                <SwipeChunkPane key={i} i={i}>
+                  {/* CodexPrime/APOLLO-prime row(s) — pinned first in pane 0,
+                      NO separator bar on mobile (owner directive, the
+                      follow-up feedback round: "the bar separating the
+                      prime account... needs to be removed, and the prime
+                      account must be designated as such via colour coding"
+                      — `AccountRow`'s own border/background/name-color
+                      already carries that designation; see
+                      `useMobilePageSize`'s doc comment above for why this
+                      also keeps every pane's row count uniform). */}
+                  {i === 0 && primeRows.length > 0 && primeRows.map(({ account, primeName }, pi) => (
+                    <div
+                      key={account.id || account.address}
+                      ref={i === 0 && pi === 0 ? mobileRowRef : undefined}
+                      style={{ scrollSnapAlign: "start" }}
+                    >
+                      <AccountRow
+                        account={account}
+                        index={hydratedAccounts.indexOf(account)}
+                        seeds={seeds}
+                        pureKeypairs={keypairs}
+                        accounts={hydratedAccounts}
+                        stoaChainAccounts={stoaChainAccounts}
+                        forceExpanded={false}
+                        compact
+                        fullScreenPortalTarget={fullScreenPortalTarget}
+                        paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
+                        paymentKeyFunded={byAddress[account.address]?.["payment-key-existance"] ?? null}
+                        primeName={primeName}
+                        apiKeyRow={apiKeyMap?.get(account.address) ?? null}
+                        apiKeyLoaded={apiKeyMap !== null}
+                      />
+                    </div>
+                  ))}
+                  {chunk.map((account, ai) => (
+                    <div
+                      key={account.id || account.address}
+                      ref={i === 0 && primeRows.length === 0 && ai === 0 ? mobileRowRef : undefined}
+                      style={{ scrollSnapAlign: "start" }}
+                    >
+                      <AccountRow
+                        account={account}
+                        index={hydratedAccounts.indexOf(account)}
+                        seeds={seeds}
+                        pureKeypairs={keypairs}
+                        accounts={hydratedAccounts}
+                        stoaChainAccounts={stoaChainAccounts}
+                        forceExpanded={false}
+                        compact
+                        fullScreenPortalTarget={fullScreenPortalTarget}
+                        paymentBalance={decimalToDisplay(byAddress[account.address]?.["payment-key-balance"])}
+                        paymentKeyFunded={byAddress[account.address]?.["payment-key-existance"] ?? null}
+                        apiKeyRow={apiKeyMap?.get(account.address) ?? null}
+                        apiKeyLoaded={apiKeyMap !== null}
+                      />
+                    </div>
+                  ))}
+                  {i === 0 && chunk.length === 0 && primeRows.length === 0 && (
+                    <div style={{ textAlign: "center", padding: "32px 0", borderRadius: 12, border: "1px dashed #262626", color: "#555" }}>
+                      <span style={{ fontSize: 14 }}>No {activeTab} accounts in Codex</span>
+                    </div>
+                  )}
+                </SwipeChunkPane>
+              ))}
+            </SwipeDeck>
+          )}
+        </div>
+
+        {paginationCluster && (paginationRiserTarget ? createPortal(paginationCluster, paginationRiserTarget) : (
+          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 0, zIndex: 5 }}>
+            {paginationCluster}
+          </div>
+        ))}
+
+        {/* The swipe-bullets strip — a DIFFERENT stripe from the Prev/Next
+            pagination riser above, "beneath Zone 3, specific to Zone 3."
+            Fallback (no target) sits directly ABOVE the pagination riser's
+            own fallback position, not sharing its row. */}
+        {swipeIndicatorCluster && (swipeIndicatorRiserTarget ? createPortal(swipeIndicatorCluster, swipeIndicatorRiserTarget) : (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 22, zIndex: 5 }}>
+            {swipeIndicatorCluster}
+          </div>
+        ))}
+
+        {/* Owner directive (the follow-up feedback round): "when clicking
+            the spawning of new accounts, doing so shows the spawning
+            interface, on the whole screen, not only on zone 3." Portaled to
+            `fullScreenPortalTarget` when supplied — its `CodexModalShell`
+            (mobile: `position: absolute; inset: 0`) then anchors against
+            the host's WHOLE mobile body instead of this component's own
+            Zone-3-bounded frame. Falls back to the original inline mount
+            when no target is supplied. */}
+        {spawnMode && (
+          fullScreenPortalTarget ? createPortal(
+            <SpawnAccountModal isSmart={spawnMode === "smart"} onClose={() => setSpawnMode(null)} />,
+            fullScreenPortalTarget,
+          ) : (
+            <SpawnAccountModal isSmart={spawnMode === "smart"} onClose={() => setSpawnMode(null)} />
+          )
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={className} style={{ fontFamily: "var(--codex-font, inherit)", color: "#d2d3d4", display: "flex", flexDirection: "column", gap: 16 }}>

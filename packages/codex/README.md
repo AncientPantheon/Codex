@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.11.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.12.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.12.0** — Full Pantheonic-mobile compliance across the whole packaged UI surface (`codex-ui` + `codex-ouronet`'s UI + `codex-arweave`'s panel), so the whole thing degrades correctly when embedded in a host that only hands it a portion of the screen (e.g. OuronetUI), not just when running full-viewport standalone. New shared mobile primitives in `codex-ui` (container-relative `useIsMobile`, `SwipeDeck`, the Controls riser/drawer pattern, `EdgeRail`, and `CodexModalShell`'s full-screen-on-mobile flip). Every packaged tab (Seed Words, Pure Keypairs, Ouronet Accounts, Address Book on the Chainweb side; Pure Keys, Seeds, Accounts on the Arweave side) got mobile-specific layouts, and — the headline pattern — tapping a row now opens its detail as a genuine full-screen page instead of an inline expand bounded to a small on-screen zone. ZBOM action modals (Rotate/Activate/etc.) now stack correctly on top of that full-screen view and go edge-to-edge full-screen on mobile too. Stoa Dalos and Arweave seeds can now persist a separately-encrypted `wordsSecret` so a seed created from typed/generated words shows those same words back on later reveal. The header debouncer gained the "What is this?" full-screen explainer present in the original OuronetUI implementation (a labeled pill, not an easy-to-miss icon), and its per-tier hover tooltip no longer clips when mounted inside a bounded host rectangle. Also adds Send AR's Super Max (a riskier full-wallet-sweep mode using the exact live fee, no buffer). No breaking changes. `codex`-only release (`arweave-core` unchanged).
 
 **v0.11.0** — Two new chain capabilities. **Arweave**: Pure Keys (RSA-4096 generate/import, PEM + JSON keyfiles) and Seeds (Direct Deterministic RSA + Seed Words, unified seed picker/reveal) categories wired end-to-end; live per-account balances with native AR send (Fee Included/Fee On Top modes, real on-chain confirmation polling via the gateway's own status endpoint, a ViewBlock explorer link with an honest indexing-lag caption, and a live "Updated Xs ago" balance-freshness indicator); the watch-list and Prime Arweave Seed now persist through codex backup export/import; real gateway mode is the default. **Direct native Stoa/UrStoa movement**: a Stoa/UrStoa toggle on the Chainweb Accounts tab exposing Transfer/Stake/Unstake/Collect (liquid + staked + claimable balances, live tooltips) alongside native Stoa send (now showing the sending chain + the sender's balance on that specific chain). **Cross-cutting fix**: every signed action above — plus Send AR — now pops the real password prompt on a locked codex and resumes automatically, instead of dead-ending on a static error. `codex`-only release (`arweave-core` unchanged).
 
@@ -64,8 +66,8 @@ Version `0.11.0` on public npmjs. The aggregate: the six subpath barrels wired t
 | Member package | Version |
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.3.0` |
-| `@ancientpantheon/codex-ui` | `0.5.0` |
-| `@ancientpantheon/codex-ouronet` | `0.11.0` |
-| `@ancientpantheon/codex-arweave` | `0.3.0` |
+| `@ancientpantheon/codex-ui` | `0.6.0` |
+| `@ancientpantheon/codex-ouronet` | `0.12.0` |
+| `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

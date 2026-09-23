@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.12.0 — 2026-09-24
+
+**MINOR — Pantheonic-mobile compliance for every packaged tab/modal, plus a
+`wordsSecret` persistence field. No breaking changes.**
+
+- **Mobile layouts for `SeedWordsTab`, `PureKeypairsTab`, `OuronetAccountsTab`,
+  `AddressBookTab`.** Icon-only sticky sub-tab bars (fixed while entries
+  scroll beneath them), slimmed/height-matched collapsed rows, responsive
+  seed-word grids (8→6→4→2→1 columns with per-word marquee for anything
+  still too wide to fit), and a genuine full-screen detail view: tapping a
+  row now portals its expanded content into a full-screen `CodexModalShell`
+  instead of expanding inline within a small on-screen zone. This applies to
+  `SeedRow`, `KeypairRow`, and `AccountRow` alike; `OuronetAccountsTab`
+  specifically had this re-added after an earlier round shipped
+  `expandable={false}` as a stopgap and never wired the real replacement.
+- **`ZbomModalFrame`** (the shared chrome for every Rotate/Activate/etc.
+  ZBOM action modal) now stacks above `CodexModalShell`'s mobile full-screen
+  popups (z-index raised past 9999) and goes edge-to-edge full-screen on
+  mobile itself, instead of rendering invisibly behind the account-detail
+  view it was opened from and staying a fixed-width desktop card regardless
+  of viewport.
+- **`CodexDebouncerPanel`**: per-tier hover tooltips now portal to
+  `document.body` with viewport-relative positioning instead of clipping
+  inside whatever bounded host rectangle the panel is mounted in. Added a
+  new `DebouncerInfoModal` (exported) — a full-screen "What is this?"
+  explainer, matching OuronetUI's own debouncer info page, wired to the
+  panel's existing `onInfo` trigger (now a labeled pill instead of a small
+  icon).
+- **`IStoaChainSeed.wordsSecret` / `IArweaveSeed.wordsSecret`** (new optional
+  field, mirrors the existing `secret`/`backup` dual-encrypted-field
+  pattern): when a seed is genuinely created from typed/generated words,
+  those words are now separately encrypted and persisted, so later reveal
+  can show the real words back instead of only ever reconstructing the raw
+  derived bitstring. `useEnsureCodexUnlockedOptional()` / provider
+  `useCodexStoreOptional()` added to support gating this in components that
+  must remain mountable without a `CodexProvider`.
+- **New**: `StoaAddressHighlight`, `ActionTooltip` (shared address-truncation
+  and tooltip primitives used across the new mobile rows).
+
 ## 0.10.0 — 2026-08-10
 
 **MINOR — fixes `meta.gasPrice` on every signed transaction; raises peer floors.**

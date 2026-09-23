@@ -310,6 +310,20 @@ export interface PanelArweaveSeed {
    *  which still LISTS the seed rather than making it vanish. */
   bits: string;
   isPrime?: boolean;
+  /**
+   * Round 25 owner correction ("does this mean i would need to remove it
+   * and recreated it, because now the seed is captured?" — yes, for any
+   * seed defined BEFORE this field existed; going forward, defining OR
+   * reloading a seed captures/restores this automatically). The seed's
+   * real word list, decrypted from the codex's separate `wordsSecret`
+   * envelope alongside `bits` — `undefined` for a Direct-mode (bitstring/
+   * bitmap/scalar-origin) seed, which never has words at all, or for a
+   * seed stored before this field existed. Mirrors
+   * `ArweaveSeedRecord.words`'s own exact shape (the type this structural
+   * interface stands in for) — `ArweaveSeedsArea.tsx`'s "View Seed"
+   * reveal already branches on it to show the real Seed (words) tab.
+   */
+  words?: readonly string[];
 }
 
 /** The codex's stored Arweave seed. Structural (the `/types` barrel does not
@@ -320,6 +334,10 @@ export interface StoredArweaveSeed {
   secret: string;
   createdAt: string;
   isPrime?: boolean;
+  /** See `PanelArweaveSeed.words`'s own doc comment — CIPHERTEXT, decrypted
+   *  by `revealArweaveSeedWords` the same way `secret`/`revealArweaveSeedBits`
+   *  already work. Mirrors `IStoaChainSeed.wordsSecret` exactly. */
+  wordsSecret?: string;
 }
 
 /** The label a stored seed shows. The Prime Arweave Seed keeps its name even if
@@ -345,6 +363,9 @@ function labelOfStoredSeed(seed: StoredArweaveSeed): string {
 export function toPanelArweaveSeeds(
   seeds: readonly StoredArweaveSeed[],
   bitsById: Readonly<Record<string, string>> = {},
+  // Round 25 — parallel to `bitsById`, same "seed still lists even before
+  // this resolves" contract. See `revealArweaveSeedWords`.
+  wordsById: Readonly<Record<string, readonly string[]>> = {},
 ): PanelArweaveSeed[] {
   return seeds.map((seed) => {
     const record: PanelArweaveSeed = {
@@ -353,6 +374,8 @@ export function toPanelArweaveSeeds(
       bits: bitsById[seed.id] ?? "",
     };
     if (seed.isPrime !== undefined) record.isPrime = seed.isPrime;
+    const words = wordsById[seed.id];
+    if (words !== undefined && words.length > 0) record.words = words;
     return record;
   });
 }
@@ -385,6 +408,39 @@ export async function revealArweaveSeedBits(
 }
 
 /**
+ * Round 25 owner correction: "this seed, still doesnt show the seed words
+ * when looking only the bitstring elements. Is this becuase it was created
+ * before that could be captured..." — yes, exactly that; this is the fix.
+ * Unseals `wordsSecret`, the SEPARATE envelope `createArweaveSeedPersistence`
+ * below now writes whenever real words were in hand at define time. Mirrors
+ * `revealArweaveSeedBits` exactly — same "never throws, a seed with no
+ * words (or not yet readable) just contributes no entry" contract, so a
+ * genuinely wordless (Direct-mode) seed and a locked codex are both
+ * indistinguishable from "no words to show" here, same as the one existing
+ * "no words" note in `ArweaveSeedsArea.tsx`'s own reveal already documents.
+ */
+export async function revealArweaveSeedWords(
+  seeds: readonly StoredArweaveSeed[],
+  getPassword: () => string,
+): Promise<Record<string, readonly string[]>> {
+  const entries = await Promise.all(
+    seeds.map(async (seed): Promise<[string, readonly string[]] | null> => {
+      if (seed.wordsSecret === undefined) return null;
+      try {
+        const plain = await smartDecrypt(seed.wordsSecret, getPassword());
+        const words = plain.trim().split(/\s+/).filter(Boolean);
+        return words.length > 0 ? [seed.id, words] : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return Object.fromEntries(
+    entries.filter((e): e is [string, readonly string[]] => e !== null),
+  );
+}
+
+/**
  * Build the define-seed PERSIST seam: seal a newly defined seed at the codex
  * password and hand it to the store.
  *
@@ -397,12 +453,6 @@ export async function revealArweaveSeedBits(
  * `encryptStringV2` ciphertext (the same V2 envelope account secrets and
  * foreign keys use, so ONE codex password unlocks everything). It is never
  * logged, never stored in the clear and never put in an error message.
- *
- * KNOWN GAP, not a silent one: `rekeyCodex`'s secret inventory
- * (`codex-ouronet/src/rekey/index.ts`) does not yet walk `arweaveSeeds`, so a
- * codex-password change re-encrypts every OTHER secret and leaves these sealed
- * under the old password. The snapshot keeps them (structuredClone), but they
- * stop decrypting until that inventory gains the slice.
  *
  * `isPrime` is deliberately NOT forwarded: the codex owns primality (the first
  * seed it ever stores becomes the Prime Arweave Seed), so the UI's positional
@@ -417,10 +467,20 @@ export function createArweaveSeedPersistence({
 }): (seed: PanelArweaveSeed) => Promise<void> {
   return async (seed: PanelArweaveSeed): Promise<void> => {
     const secret = await encryptStringV2(seed.bits, getPassword());
+    // Round 25 — see `PanelArweaveSeed.words`'s own doc comment: a SEPARATE
+    // encrypted field, only written when real words are actually in hand
+    // (never derivable back from `bits` alone — `seedWordsToBitString` is
+    // one-way). `words?.length` guards against persisting an empty-but-
+    // defined array as a falsely "real" `wordsSecret`.
+    const wordsSecret =
+      seed.words && seed.words.length > 0
+        ? await encryptStringV2(seed.words.join(" "), getPassword())
+        : undefined;
     await addArweaveSeed({
       id: seed.id,
       name: seed.label,
       secret,
+      wordsSecret,
       createdAt: new Date().toISOString(),
     });
   };
@@ -701,10 +761,14 @@ export function buildArweaveWiring({
     [CHAINWEB_RAIL_ID]: ChainwebPanel,
   };
 
-  // Registry ids lead the rail (so the landing panel is the one this wiring's
-  // adapter backs); Chainweb, which contributes no adapter, follows.
+  // Chainweb leads the rail (owner directive, the "Blockchain Accounts"
+  // cleanup round: "Chainweb is here the default selection when landing on
+  // the page") — `ForeignChainsTab`'s own default-selection rule is simply
+  // "whichever id is first" (id-blind, no chain-specific branch there), so
+  // list order is the ONLY lever this wiring has to control it. Previously
+  // registry ids (Arweave) led instead, landing on Arweave by default.
   return {
-    foreignChains: [...registry.list(), CHAINWEB_RAIL_ID],
+    foreignChains: [CHAINWEB_RAIL_ID, ...registry.list()],
     foreignChainPanels,
     panelDeps,
   };
@@ -721,6 +785,18 @@ export interface ForeignChainsWiringProps {
   className?: string;
   /** Forwarded to `CodexTabs`; defaults to its own landing Class tab. */
   defaultTab?: CodexTabKey;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  addressBookRiserTarget?: Element | null;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  paginationRiserTarget?: Element | null;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  swipeIndicatorRiserTarget?: Element | null;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  edgeRailAnchorTarget?: Element | null;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  zone3AnchorTarget?: Element | null;
+  /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
+  fullScreenPortalTarget?: Element | null;
 }
 
 /**
@@ -747,6 +823,12 @@ export function ForeignChainsWiring({
   pool,
   className,
   defaultTab,
+  addressBookRiserTarget,
+  paginationRiserTarget,
+  swipeIndicatorRiserTarget,
+  edgeRailAnchorTarget,
+  zone3AnchorTarget,
+  fullScreenPortalTarget,
 }: ForeignChainsWiringProps = {}): ReactElement {
   // The REAL codex address book (never a fake): mapped into the panel seam so a
   // saved Arweave address is selectable as a Send recipient.
@@ -838,6 +920,9 @@ export function ForeignChainsWiring({
   // area needs are unsealed in an effect under the codex password.
   const storedArweaveSeeds = store((s) => s.arweaveSeeds);
   const [seedBits, setSeedBits] = useState<Record<string, string>>({});
+  // Round 25 — the words counterpart of `seedBits`, same unseal-in-an-effect
+  // shape. See `revealArweaveSeedWords`'s own doc comment.
+  const [seedWords, setSeedWords] = useState<Record<string, readonly string[]>>({});
   useEffect(() => {
     let cancelled = false;
     void revealArweaveSeedBits(storedArweaveSeeds, getCurrentPassword).then(
@@ -845,8 +930,13 @@ export function ForeignChainsWiring({
         if (!cancelled) setSeedBits(bits);
       },
     );
-    // Dropping the decrypted bitstrings on unmount keeps them in memory no
-    // longer than the surface that needs them.
+    void revealArweaveSeedWords(storedArweaveSeeds, getCurrentPassword).then(
+      (words) => {
+        if (!cancelled) setSeedWords(words);
+      },
+    );
+    // Dropping the decrypted bitstrings (and words) on unmount keeps them in
+    // memory no longer than the surface that needs them.
     return () => {
       cancelled = true;
     };
@@ -857,8 +947,8 @@ export function ForeignChainsWiring({
   }, [storedArweaveSeeds, getCurrentPassword, isLocked]);
   // The LIST is synchronous (rows appear immediately); only the material waits.
   const arweaveSeeds = useMemo(
-    () => toPanelArweaveSeeds(storedArweaveSeeds, seedBits),
-    [storedArweaveSeeds, seedBits],
+    () => toPanelArweaveSeeds(storedArweaveSeeds, seedBits, seedWords),
+    [storedArweaveSeeds, seedBits, seedWords],
   );
 
   const onSeedDefined = useMemo(
@@ -913,6 +1003,12 @@ export function ForeignChainsWiring({
         defaultTab={defaultTab}
         foreignChains={foreignChains}
         foreignChainPanels={foreignChainPanels}
+        addressBookRiserTarget={addressBookRiserTarget}
+        paginationRiserTarget={paginationRiserTarget}
+        swipeIndicatorRiserTarget={swipeIndicatorRiserTarget}
+        edgeRailAnchorTarget={edgeRailAnchorTarget}
+        zone3AnchorTarget={zone3AnchorTarget}
+        fullScreenPortalTarget={fullScreenPortalTarget}
       />
     </ArweavePanelProvider>
   );

@@ -83,6 +83,11 @@ export type { CodexDebouncerPanelProps } from "../zbom/debouncer/CodexDebouncerP
 export { codexClock } from "../zbom/debouncer/codexClock.js";
 export { CODEX_READ_REGISTRY } from "../zbom/debouncer/readRegistry.js";
 export type { CodexReadFn } from "../zbom/debouncer/readRegistry.js";
+// `CodexDebouncerPanel`'s own "What is this?" trigger (`onInfo`) is an
+// injected callback (this package has no router) — this is the full-screen
+// explainer a host wires it to. See its own doc comment.
+export { DebouncerInfoModal } from "../zbom/debouncer/DebouncerInfoModal.js";
+export type { DebouncerInfoModalProps } from "../zbom/debouncer/DebouncerInfoModal.js";
 
 // ── STAY-set: the @stoachain-edged settings cards (C4 — CodexInfoCard +
 //    EncryptionCard transitively edge @stoachain via encryptionState) ──
@@ -113,6 +118,15 @@ export type { DalosSecretRevealProps } from "./internal/DalosSecretReveal.js";
 
 export { CodexModalShell } from "./internal/CodexModalShell.js";
 export type { CodexModalShellProps } from "./internal/CodexModalShell.js";
+
+// The real Ouronet-account seed-reveal modal — a consumer wires this in as
+// `ObservationalCodexIdDisplay`'s `renderViewSeedModal` injection slot
+// (docs/work/codex-ui-mobile/design.md §8) so the CodexID Zone 2's Reveal
+// Seed buttons open the SAME secret-reveal UI a real Ouronet account uses,
+// full-screen on mobile (via `CodexModalShell`'s existing flip — no separate
+// mobile variant needed).
+export { ViewSeedModal } from "./internal/ViewSeedModal.js";
+export type { ViewSeedModalProps } from "./internal/ViewSeedModal.js";
 
 export { BitmapKeyInput } from "./internal/BitmapKeyInput.js";
 export type { BitmapKeyInputProps } from "./internal/BitmapKeyInput.js";

@@ -170,12 +170,15 @@ describe("PG-01 — the Class 2 rail carries BOTH blockchains (Chainweb + Arweav
     expect(within(panel).getByTestId("chainweb-subtab-accounts")).toBeInTheDocument();
   });
 
-  it("lands on the Arweave panel (the chain this wiring's adapter backs) before any rail click", async () => {
-    // The rail's FIRST id is the selected one; Arweave leads because it is the
-    // registry-registered adapter. A regression that reorders the rail would
-    // silently change the landing panel.
+  it("lands on the Chainweb panel before any rail click (owner directive, the 'Blockchain Accounts' cleanup round: 'Chainweb is here the default selection when landing on the page')", async () => {
+    // The rail's FIRST id is the selected one — `ForeignChainsTab`'s own
+    // default-selection rule is simply "whichever id is first" (id-blind).
+    // This wiring deliberately leads with CHAINWEB_RAIL_ID (not the registry
+    // ids Arweave backs) specifically so Chainweb is the landing panel. A
+    // regression that reorders the rail back to registry-ids-first would
+    // silently change the landing panel back to Arweave.
     await renderWiring();
-    expect(await screen.findByTestId("arweave-panel")).toBeInTheDocument();
+    expect(await screen.findByTestId("chainweb-panel")).toBeInTheDocument();
   });
 });
 

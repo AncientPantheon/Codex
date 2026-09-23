@@ -70,12 +70,16 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { type ArweaveJwk, addressOf, winstonToAr } from "@ancientpantheon/arweave-core";
+import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
+import { CodexModalShell } from "@ancientpantheon/codex-ouronet/ui";
 
 import type { KeygenRunner } from "./context.js";
 import { RsaParamsPanel, RsaParamsSection, RsaParamsToggle, useRsaParamsSection } from "./ArweaveSeedsArea.js";
+import { ArweaveAddressHighlight } from "./ArweaveAccountsArea.js";
 
 /** Same MONO/ACCENT this panel's Accounts category uses — one visual language
  *  across both categories. Duplicated (not imported) for the same reason
@@ -83,6 +87,126 @@ import { RsaParamsPanel, RsaParamsSection, RsaParamsToggle, useRsaParamsSection 
  *  area module stays self-contained. */
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const ACCENT = "#ceac5f";
+
+/** One `PureKeyRow`'s measured height + the gap between rows — a flat,
+ *  uniform-height list (no groups/headers). Mirrors Chainweb
+ *  `PureKeypairsTab.tsx`'s own `useMobileKeypairPageSize` exactly.
+ *  Duplicated per this package's own "self-contained module" convention. */
+/** Round 26: trimmed alongside `PureKeyRow`'s own mobile padding/avatar cut
+ *  (58px → ~34px real row height) — same treatment `PureKeypairsTab.tsx`'s
+ *  own `KEYPAIR_ROW_HEIGHT_FALLBACK` got in the same round. Only the
+ *  FALLBACK moves; the real row is always live-measured once mounted. */
+const KEYPAIR_ROW_HEIGHT_FALLBACK = 34;
+const KEYPAIR_ROW_GAP = 6;
+
+function useMobileKeypairPageSize(): {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  rowRef: (node: HTMLDivElement | null) => void;
+  pageSize: number;
+} {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(KEYPAIR_ROW_HEIGHT_FALLBACK);
+  const [pageSize, setPageSize] = useState(4);
+
+  useEffect(() => {
+    if (!rowEl) return;
+    const measure = () => {
+      const h = rowEl.getBoundingClientRect().height;
+      if (h > 0) setRowHeight(h);
+    };
+    measure();
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(measure);
+    const fontsReady = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;
+    fontsReady?.then(measure).catch(() => {});
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(rowEl);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [rowEl]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const compute = () => {
+      const height = el.clientHeight - 2 * KEYPAIR_ROW_GAP;
+      if (height <= 0) return;
+      const maxRows = Math.floor((height + KEYPAIR_ROW_GAP) / (rowHeight + KEYPAIR_ROW_GAP));
+      setPageSize(Math.max(1, maxRows));
+    };
+    compute();
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(compute);
+    if (typeof window !== "undefined") window.addEventListener("resize", compute);
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(compute);
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      if (typeof window !== "undefined") window.removeEventListener("resize", compute);
+    };
+  }, [rowHeight]);
+
+  return { containerRef, rowRef: setRowEl, pageSize };
+}
+
+/** Mirrors `ArweaveAccountsArea.tsx`'s identical `PageJumpIndicator`. */
+function PageJumpIndicator({ page, totalPages, onJump }: { page: number; totalPages: number; onJump: (page: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (totalPages <= 10) {
+    return <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>{page + 1} / {totalPages}</span>;
+  }
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(String(page + 1)); setEditing(true); }}
+        title="Jump to a page"
+        style={{ fontSize: 12, fontFamily: MONO, color: ACCENT, background: "transparent", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline dotted" }}
+      >
+        {page + 1} / {totalPages}
+      </button>
+    );
+  }
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n)) onJump(Math.max(0, Math.min(totalPages - 1, n - 1)));
+    setEditing(false);
+  };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        autoFocus
+        type="number"
+        min={1}
+        max={totalPages}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        onBlur={commit}
+        aria-label={`Jump to page (1-${totalPages})`}
+        style={{ width: 44, fontSize: 12, fontFamily: MONO, padding: "2px 4px", borderRadius: 6, border: `1px solid ${ACCENT}`, backgroundColor: "#0a0a0a", color: "#d2d3d4", textAlign: "center" }}
+      />
+      <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>/ {totalPages}</span>
+    </span>
+  );
+}
+
+/** Mirrors `ArweaveAccountsArea.tsx`'s identical Prev/Next button style. */
+const pageBtn = (disabled: boolean): React.CSSProperties => ({
+  fontSize: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid #262626", color: "#d2d3d4",
+  background: "transparent", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.3 : 1,
+});
 
 const svgBase = {
   viewBox: "0 0 24 24",
@@ -127,6 +251,14 @@ const KeyGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElemen
     <path d="m10.85 12.15 7.4-7.4" />
     <path d="m18 5 3 3" />
     <path d="m15 8 2 2" />
+  </svg>
+);
+/** Round 26 — the Generate sub-tab's icon (mobile icon-only row), matching
+ *  Chainweb's own `Sparkles` (lucide-react — this file never imports it,
+ *  same self-containment reason as every other glyph here). */
+const SparkleGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
   </svg>
 );
 /** The row-collapse chevrons, matching `ArweaveSeedsArea.tsx`'s own
@@ -311,6 +443,35 @@ export interface PureKeysAreaProps {
    *  "Unprotected" tier (design.md §3): no seed can ever regenerate it, so a
    *  balance `> 0n` blocks deletion outright rather than merely warning. */
   getBalance?: (address: string) => Promise<bigint>;
+  /**
+   * Reports the list's OWN pagination state so `ArweavePanel` can render it
+   * in the shared "middle of the bottom seam" medallion slot — round 9/10
+   * owner correction: "we need pagination on the pure keys as well, which
+   * should kick in once enough entries exist" + "standard pagination
+   * controls zone." Mirrors Chainweb `PureKeypairsTab.tsx`'s own identical
+   * prop — Pure Keys never has a Collapse-All medallion of its own (flat
+   * list, no groups), so the shared slot is always free for its own
+   * pagination. Omitted (every standalone mount), this component keeps
+   * rendering its own inline Prev/Next.
+   */
+  onPaginationHandleChange?: (
+    handle: { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null,
+  ) => void;
+  /**
+   * MOBILE ONLY — round 27 owner correction: "clickign fathippo, opens it
+   * in place. i want it to be opened in new page, same as seed, this is
+   * only for arweave as it has more detail." Mirrors
+   * `ArweaveSeedsAreaProps.fullScreenPortalTarget` exactly: a DOM node
+   * spanning the host's whole mobile body, via `createPortal`, so a
+   * row's expanded detail (address, RSA parameters, rename/export/delete)
+   * covers the WHOLE screen on mobile instead of expanding inline within
+   * this tab's own Zone 3 rectangle. Omitted (the default) falls back to
+   * today's bounded inline expand, unchanged — including on Chainweb's
+   * own `PureKeypairsTab.tsx`, which this prop deliberately has no
+   * equivalent of (the owner asked for Arweave only: "THe pure chainweb
+   * key can remain as is").
+   */
+  fullScreenPortalTarget?: Element | null;
 }
 
 /** A locked codex surfaces this so the export flow can prompt for unlock rather
@@ -422,21 +583,34 @@ async function parsePublicPem(pemText: string): Promise<PublicPemFragment> {
  *  there is no delete action here at all, only dismiss). */
 type DeleteGuardState = "idle" | "checking" | "confirm" | "blocked";
 
+/** Portals `children` into `target` (mobile, e.g. `ArweavePanel`'s
+ *  `fullScreenPortalTarget`) when supplied, or renders them inline exactly
+ *  where they already are otherwise — the SAME contract `ArweaveSeedsArea.tsx`'s
+ *  own (unexported) `MobilePortal` uses; duplicated here per this package's
+ *  "self-contained module" convention rather than importing it. */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
+}
+
 function PureKeyRow({
   entry,
   decryptArweaveKey,
   renameForeignKey,
   deleteForeignKey,
   getBalance,
+  fullScreenPortalTarget,
 }: {
   entry: ForeignKeyEntry;
   decryptArweaveKey: PureKeysAreaProps["decryptArweaveKey"];
   renameForeignKey: PureKeysAreaProps["renameForeignKey"];
   deleteForeignKey: PureKeysAreaProps["deleteForeignKey"];
   getBalance: PureKeysAreaProps["getBalance"];
+  fullScreenPortalTarget?: Element | null;
 }): React.ReactElement {
   // Plaintext public material only — never `encryptedKeyfile`. See module JSDoc.
   const address = entry.address ?? entry.id;
+  // Round 26 — see the collapsed header's own doc comment below.
+  const isMobile = useIsMobile();
 
   /** The row's own collapsed/expanded state (Chainweb `PureKeypairsTab`'s
    *  `KeypairRow` pattern) — DISTINCT from `RsaParamsSection`'s own `open`
@@ -447,6 +621,20 @@ function PureKeyRow({
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameText, setRenameText] = useState(entry.label ?? "");
+
+  // Round 26 owner correction: "Clicking copy buttons should show the
+  // green check after its been tapped, just like on desktop." This row's
+  // own copy button never had ANY feedback on either platform — unlike
+  // Chainweb's `KeyFieldsHalves`/`MiniBtn`, which already does exactly
+  // this (`useState` + `setTimeout` reset), the same shape `CopyValueBtn`
+  // (`DalosSecretReveal.tsx`) and `IconCopyBtn` (`IconButtons.tsx`) use
+  // elsewhere in this codebase.
+  const [addressCopied, setAddressCopied] = useState(false);
+  const handleCopyAddress = useCallback(() => {
+    void navigator.clipboard?.writeText(address);
+    setAddressCopied(true);
+    setTimeout(() => setAddressCopied(false), 1200);
+  }, [address]);
 
   const [exportOpen, setExportOpen] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -541,122 +729,164 @@ function PureKeyRow({
     >
       {/* Collapsed header — the ENTIRE strip is clickable (Chainweb
           `PureKeypairsTab`'s `KeypairRow` pattern): chevron + circular key
-          avatar + label. No address, no action icons at this level. */}
-      <div
-        data-testid={`arweave-pure-key-toggle-${entry.id}`}
-        onClick={() => setExpanded((v) => !v)}
-        style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
-      >
-        {expanded
-          ? <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
-          : <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          avatar + label. No address, no action icons at this level.
+          Round 26 owner correction: "The key entries need to have same
+          height as the seed entries, slim..." — MOBILE ONLY fork,
+          mirroring `PureKeypairsTab.tsx`'s own identical round-26 change:
+          `6px` top/bottom padding (was 12px) and the 32×32 avatar circle
+          replaced with a small 10×10 colour dot. Desktop keeps the
+          original avatar + padding, unchanged. */}
+      {isMobile ? (
         <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 9999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            backgroundColor: "#262626",
-          }}
+          data-testid={`arweave-pure-key-toggle-${entry.id}`}
+          onClick={() => setExpanded((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px", cursor: "pointer" }}
         >
-          <KeyGlyph style={{ width: 18, height: 18, color: ACCENT }} />
+          {expanded
+            ? <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
+            : <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          <span
+            title="Pure key"
+            aria-hidden="true"
+            style={{ flexShrink: 0, width: 10, height: 10, borderRadius: "50%", backgroundColor: ACCENT }}
+          />
+          <span
+            style={{
+              flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#d2d3d4",
+            }}
+          >
+            {entry.label ?? "Untitled key"}
+          </span>
         </div>
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontWeight: 600,
-            fontSize: 14,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            color: "#d2d3d4",
-          }}
+      ) : (
+        <div
+          data-testid={`arweave-pure-key-toggle-${entry.id}`}
+          onClick={() => setExpanded((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
         >
-          {entry.label ?? "Untitled key"}
-        </span>
-      </div>
+          {expanded
+            ? <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
+            : <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              backgroundColor: "#262626",
+            }}
+          >
+            <KeyGlyph style={{ width: 18, height: 18, color: ACCENT }} />
+          </div>
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontWeight: 600,
+              fontSize: 14,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "#d2d3d4",
+            }}
+          >
+            {entry.label ?? "Untitled key"}
+          </span>
+        </div>
+      )}
 
       {/* Expanded body — address, action icons, and every rename/export/
           delete-confirm panel + the RSA parameters section, all reachable
-          only once the row is expanded. */}
-      {expanded && (
-        <div
-          style={{
-            padding: "10px 16px 12px",
-            borderTop: "1px solid #262626",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
+          only once the row is expanded.
+          Round 27 owner correction: "clickign fathippo, opens it in
+          place. i want it to be opened in new page, same as seed, this is
+          only for arweave as it has more detail." Mirrors
+          `ArweaveSeedsArea.tsx`'s own `SeedRow` round-21 change exactly:
+          MOBILE ONLY, this whole body portals into a full-screen
+          `CodexModalShell` instead of growing the row inline; DESKTOP
+          keeps the exact original inline expand, byte-identical. Content
+          itself (`expandedContent` below) is unchanged either way — only
+          its WRAPPER differs. */}
+      {expanded && (() => {
+        const expandedContent = (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontFamily: MONO,
-                fontSize: 12,
-                color: "#888",
-                overflowWrap: "anywhere",
-              }}
+          {/* Round 28 owner correction: "lets make here the Account string
+              be on a single line, shorted same as teh arweave addresses.
+              and then the buttons below it, and then the detailmedalion
+              beneath the square buttons." Was one horizontal row (address
+              + RSA toggle + 4 icon buttons all crammed together, address
+              WRAPPING across lines via `overflowWrap: anywhere`); now a
+              vertical stack — address (single line, live-measured +
+              truncated + first-3/last-3 highlighted, the SAME
+              `ArweaveAddressHighlight` `ArweaveAccountsArea.tsx`'s own
+              account rows already use), then the square action-icon
+              buttons, then the RSA-parameters toggle ("detail medallion")
+              on its own line beneath them. */}
+          <ArweaveAddressHighlight address={address} baseColor="#888" style={{ fontFamily: MONO, fontSize: 12 }} />
+
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            <button
+              type="button"
+              data-testid={`arweave-pure-key-copy-${entry.id}`}
+              title={addressCopied ? "Copied" : "Copy address"}
+              aria-label={addressCopied ? "Copied" : "Copy address"}
+              onClick={handleCopyAddress}
+              style={
+                addressCopied
+                  ? { ...iconButtonStyle, backgroundColor: "#0a2a14", color: "#4ade80", border: "1px solid rgba(74,222,128,0.4)" }
+                  : iconButtonStyle
+              }
             >
-              {address}
-            </div>
+              {addressCopied ? <CheckGlyph style={{ width: 13, height: 13 }} /> : <CopyGlyph style={{ width: 13, height: 13 }} />}
+            </button>
+            <button
+              type="button"
+              data-testid={`arweave-pure-key-rename-${entry.id}`}
+              title="Rename this key"
+              aria-label="Rename this key"
+              onClick={() => setRenameOpen((v) => !v)}
+              style={iconButtonStyle}
+            >
+              <PencilGlyph style={{ width: 13, height: 13 }} />
+            </button>
+            <button
+              type="button"
+              data-testid={`arweave-pure-key-export-${entry.id}`}
+              title="Export keyfile"
+              aria-label="Export keyfile"
+              onClick={() => setExportOpen((v) => !v)}
+              style={iconButtonStyle}
+            >
+              <DownloadGlyph style={{ width: 13, height: 13 }} />
+            </button>
+            <button
+              type="button"
+              data-testid={`arweave-pure-key-delete-${entry.id}`}
+              title="Delete this key"
+              aria-label="Delete this key"
+              onClick={handleDeleteClick}
+              style={dangerIconButtonStyle}
+            >
+              <TrashGlyph style={{ width: 13, height: 13 }} />
+            </button>
+          </span>
 
-            <RsaParamsToggle
-              prefix="arweave-pure-key"
-              index={entry.id}
-              open={rsaParams.open}
-              toggle={rsaParams.toggle}
-            />
-
-            <span style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}>
-              <button
-                type="button"
-                data-testid={`arweave-pure-key-copy-${entry.id}`}
-                title="Copy address"
-                aria-label="Copy address"
-                onClick={() => void navigator.clipboard?.writeText(address)}
-                style={iconButtonStyle}
-              >
-                <CopyGlyph style={{ width: 13, height: 13 }} />
-              </button>
-              <button
-                type="button"
-                data-testid={`arweave-pure-key-rename-${entry.id}`}
-                title="Rename this key"
-                aria-label="Rename this key"
-                onClick={() => setRenameOpen((v) => !v)}
-                style={iconButtonStyle}
-              >
-                <PencilGlyph style={{ width: 13, height: 13 }} />
-              </button>
-              <button
-                type="button"
-                data-testid={`arweave-pure-key-export-${entry.id}`}
-                title="Export keyfile"
-                aria-label="Export keyfile"
-                onClick={() => setExportOpen((v) => !v)}
-                style={iconButtonStyle}
-              >
-                <DownloadGlyph style={{ width: 13, height: 13 }} />
-              </button>
-              <button
-                type="button"
-                data-testid={`arweave-pure-key-delete-${entry.id}`}
-                title="Delete this key"
-                aria-label="Delete this key"
-                onClick={handleDeleteClick}
-                style={dangerIconButtonStyle}
-              >
-                <TrashGlyph style={{ width: 13, height: 13 }} />
-              </button>
-            </span>
-          </div>
+          <RsaParamsToggle
+            prefix="arweave-pure-key"
+            index={entry.id}
+            open={rsaParams.open}
+            toggle={rsaParams.toggle}
+          />
 
           <RsaParamsPanel prefix="arweave-pure-key" index={entry.id} {...rsaParams} />
 
@@ -802,8 +1032,30 @@ function PureKeyRow({
               </button>
             </div>
           )}
-        </div>
-      )}
+          </div>
+        );
+        return isMobile ? (
+          <MobilePortal target={fullScreenPortalTarget}>
+            <CodexModalShell
+              title={entry.label ?? "Untitled key"}
+              onClose={() => setExpanded(false)}
+              dialogTestId={`arweave-pure-key-expand-modal-${entry.id}`}
+              closeTestId="arweave-pure-key-expand-close"
+            >
+              {expandedContent}
+            </CodexModalShell>
+          </MobilePortal>
+        ) : (
+          <div
+            style={{
+              padding: "10px 16px 12px",
+              borderTop: "1px solid #262626",
+            }}
+          >
+            {expandedContent}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1461,13 +1713,50 @@ export function PureKeysArea(props: PureKeysAreaProps): React.ReactElement {
     renameForeignKey,
     deleteForeignKey,
     getBalance,
+    onPaginationHandleChange,
+    fullScreenPortalTarget,
   } = props;
+  const isMobile = useIsMobile();
 
   // Seedless only — a key WITH a `seedId` is Seeds'/Accounts' territory (module JSDoc).
   const entries = useMemo(
     () => foreignKeys.filter((e) => e.seedId === undefined),
     [foreignKeys],
   );
+
+  // MOBILE ONLY — round 9/10 owner correction: "we need pagination on the
+  // pure keys as well, which should kick in once enough entries exist, of
+  // course." Mirrors Chainweb `PureKeypairsTab.tsx`'s own identical
+  // pagination shape, including the "report externally once a caller opts
+  // in, otherwise render inline" fallback rule.
+  const { containerRef: keysPageContainerRef, rowRef: keysPageRowRef, pageSize: mobileKeysPageSize } = useMobileKeypairPageSize();
+  const [page, setPage] = useState(0);
+  const mobilePages = useMemo(() => {
+    if (entries.length === 0) return [[]] as ForeignKeyEntry[][];
+    const out: ForeignKeyEntry[][] = [];
+    for (let i = 0; i < entries.length; i += mobileKeysPageSize) out.push(entries.slice(i, i + mobileKeysPageSize));
+    return out;
+  }, [entries, mobileKeysPageSize]);
+  const totalPages = isMobile ? mobilePages.length : 1;
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageEntries = isMobile ? (mobilePages[clampedPage] ?? []) : entries;
+
+  const reportsPaginationExternally = !!onPaginationHandleChange;
+  useEffect(() => {
+    if (!reportsPaginationExternally) return;
+    if (totalPages <= 1) {
+      onPaginationHandleChange?.(null);
+      return;
+    }
+    onPaginationHandleChange?.({
+      page: clampedPage,
+      totalPages,
+      onPrev: () => setPage((p) => Math.max(0, p - 1)),
+      onNext: () => setPage((p) => Math.min(totalPages - 1, p + 1)),
+      onJump: (p) => setPage(p),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsPaginationExternally, totalPages, clampedPage, onPaginationHandleChange]);
 
   const [subTab, setSubTab] = useState<PureKeysSubTab>("list");
   const goToList = useCallback(() => setSubTab("list"), []);
@@ -1511,39 +1800,102 @@ export function PureKeysArea(props: PureKeysAreaProps): React.ReactElement {
     [handleImportFile],
   );
 
-  const TABS: { key: PureKeysSubTab; label: string }[] = [
-    { key: "list", label: `Keys (${entries.length})` },
-    { key: "generate", label: "Generate" },
-    { key: "import", label: "Import" },
+  const TABS: { key: PureKeysSubTab; label: string; Icon: (p: { style?: React.CSSProperties }) => React.ReactElement }[] = [
+    { key: "list", label: `Keys (${entries.length})`, Icon: KeyGlyph },
+    { key: "generate", label: "Generate", Icon: SparkleGlyph },
+    { key: "import", label: "Import", Icon: DownloadGlyph },
   ];
 
   return (
-    <div data-testid="arweave-pure-keys-area" style={{ display: "flex", flexDirection: "column", gap: 16, color: "#d2d3d4" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {TABS.map(({ key, label }) => {
+    <div
+      data-testid="arweave-pure-keys-area"
+      style={{
+        display: "flex", flexDirection: "column", gap: 16, color: "#d2d3d4",
+        // MOBILE ONLY — bounds this component to whatever height its host
+        // gives it, so `useMobileKeypairPageSize` measures a real available
+        // height instead of the list just growing with its own content.
+        height: isMobile ? "100%" : undefined,
+        minHeight: isMobile ? 0 : undefined,
+      }}
+    >
+      {/* Round 26 owner correction: "the 3 buttons from pure keys are a
+          bit to big, making the view get a horisontal scroll... we should
+          move to icons instead of thsse buttons. Then the buttons need to
+          stay put, scrolling shouldnt move them." Reverses round 19's
+          "keep the labels, just equalize width" call — ported here from
+          `PureKeypairsTab.tsx`'s identical round-26 reversal. Icon-only,
+          small fixed squares (mobile only; desktop keeps its original
+          left-aligned, wrapping, labeled row); `position: sticky` pins the
+          row to the top of `ArweavePanel`'s own scrolling ancestor. */}
+      <div
+        role="tablist"
+        aria-label="Pure Keys categories"
+        style={{
+          display: "flex", flexWrap: isMobile ? "nowrap" : "wrap", justifyContent: isMobile ? "center" : "flex-start", gap: 8,
+          position: isMobile ? "sticky" : undefined,
+          top: isMobile ? 0 : undefined,
+          zIndex: isMobile ? 5 : undefined,
+          backgroundColor: isMobile ? "#0a0a0a" : undefined,
+          paddingTop: isMobile ? 4 : undefined,
+          paddingBottom: isMobile ? 4 : undefined,
+        }}
+      >
+        {TABS.map(({ key, label, Icon }) => {
           const active = subTab === key;
+          const badgeCount = key === "list" ? entries.length : 0;
           return (
             <button
               key={key}
               type="button"
               data-testid={`arweave-pure-keys-subtab-${key}`}
               aria-pressed={active}
+              aria-label={label}
+              title={label}
               onClick={() => setSubTab(key)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 14px",
-                borderRadius: 10,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                border: `1px solid ${active ? ACCENT : "#262626"}`,
-                backgroundColor: active ? ACCENT : "#111",
-                color: active ? "#0a0a0a" : "#888",
-              }}
+              style={
+                isMobile
+                  ? {
+                      position: "relative",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 44, height: 36, borderRadius: 8, cursor: "pointer",
+                      border: `1px solid ${active ? ACCENT : "#262626"}`,
+                      backgroundColor: active ? ACCENT : "#111",
+                      color: active ? "#0a0a0a" : "#888",
+                    }
+                  : {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      padding: "8px 14px",
+                      borderRadius: 10,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      border: `1px solid ${active ? ACCENT : "#262626"}`,
+                      backgroundColor: active ? ACCENT : "#111",
+                      color: active ? "#0a0a0a" : "#888",
+                    }
+              }
             >
-              {label}
+              {isMobile ? (
+                <>
+                  <Icon style={{ width: 16, height: 16 }} />
+                  {badgeCount > 0 && (
+                    <span
+                      style={{
+                        position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, padding: "0 3px",
+                        borderRadius: 9999, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center",
+                        backgroundColor: ACCENT, color: "#0a0a0a", border: "1px solid #0a0a0a",
+                      }}
+                    >
+                      {badgeCount}
+                    </span>
+                  )}
+                </>
+              ) : (
+                label
+              )}
             </button>
           );
         })}
@@ -1563,6 +1915,55 @@ export function PureKeysArea(props: PureKeysAreaProps): React.ReactElement {
           >
             No pure keys yet. Generate one at random, or import an existing Arweave keyfile.
           </div>
+        ) : isMobile ? (
+          <>
+            {/* MOBILE ONLY — the measured, paginated entry area (round
+                9/10 owner correction: "we need pagination on the pure
+                keys as well, which should kick in once enough entries
+                exist"). Deliberately NO `overflow: hidden` — a
+                `PureKeyRow` expands INLINE (accordion), so a page's total
+                height can legitimately grow past the measured bound while
+                a row is open; forcing a hard clip there would risk
+                silently cutting the very content the user just opened.
+                Mirrors Chainweb `PureKeypairsTab.tsx`'s identical
+                tradeoff. */}
+            <div ref={keysPageContainerRef} style={{ display: "flex", flexDirection: "column", gap: KEYPAIR_ROW_GAP, padding: KEYPAIR_ROW_GAP, flex: 1, minHeight: 0 }}>
+              {(() => {
+                let measured = false;
+                return pageEntries.map((entry) => {
+                  const shouldMeasure = !measured;
+                  if (shouldMeasure) measured = true;
+                  return (
+                    <div key={entry.id} ref={shouldMeasure ? keysPageRowRef : undefined}>
+                      <PureKeyRow
+                        entry={entry}
+                        decryptArweaveKey={decryptArweaveKey}
+                        renameForeignKey={renameForeignKey}
+                        deleteForeignKey={deleteForeignKey}
+                        getBalance={getBalance}
+                        fullScreenPortalTarget={fullScreenPortalTarget}
+                      />
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            {/* Prev/Next — rendered INLINE only when no caller opted into
+                `onPaginationHandleChange` (round 9's "standard pagination
+                controls zone" — `ArweavePanel` renders the shared
+                medallion version otherwise). */}
+            {!reportsPaginationExternally && totalPages > 1 && (
+              <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+                <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={clampedPage === 0} style={pageBtn(clampedPage === 0)}>
+                  ← Prev
+                </button>
+                <PageJumpIndicator page={clampedPage} totalPages={totalPages} onJump={setPage} />
+                <button type="button" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={clampedPage >= totalPages - 1} style={pageBtn(clampedPage >= totalPages - 1)}>
+                  Next →
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {entries.map((entry) => (
@@ -1573,6 +1974,7 @@ export function PureKeysArea(props: PureKeysAreaProps): React.ReactElement {
                 renameForeignKey={renameForeignKey}
                 deleteForeignKey={deleteForeignKey}
                 getBalance={getBalance}
+                fullScreenPortalTarget={fullScreenPortalTarget}
               />
             ))}
           </div>

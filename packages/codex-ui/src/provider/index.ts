@@ -6,7 +6,7 @@
  * package imports nothing chain-bound (no value @stoachain / Ouronet / zbom).
  */
 
-export { CodexProvider, useCodexStore, useSigningClientOverride, useResolverProvider } from "./CodexProvider.js";
+export { CodexProvider, useCodexStore, useCodexStoreOptional, useSigningClientOverride, useResolverProvider } from "./CodexProvider.js";
 export type {
   CodexProviderProps,
   CodexStore,

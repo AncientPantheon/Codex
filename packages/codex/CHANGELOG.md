@@ -2,6 +2,64 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.12.0 — 2026-09-24
+
+**MINOR — full Pantheonic-mobile compliance across the whole packaged UI
+surface, plus a wallet-sweep addition to native Arweave send. No breaking
+changes.**
+
+### Added — mobile UI parity (embeddable inside a host like OuronetUI)
+
+The entire `CodexUiRoot` surface (`codex-ui` + `codex-ouronet`'s UI +
+`codex-arweave`'s panel) now degrades correctly when embedded in a
+constrained host rectangle instead of owning the full viewport — matching
+the Pantheonic Mobile UI spec's container-relative framing, not just
+viewport-relative. New shared primitives in `codex-ui`: a container-relative
+`useIsMobile`, `SwipeDeck` (paginated/gesture panes with snap-scroll
+correction), the Controls riser/drawer pattern, `EdgeRail`, and
+`CodexModalShell`'s full-screen-on-mobile flip (every zbom/UrStoa/Send modal
+built on it inherits this for free).
+
+- **Chainweb (Ouronet) side** — Seed Words, Pure Keypairs, Ouronet Accounts,
+  and Address Book tabs all got mobile-specific layouts: icon-only sticky
+  sub-tab bars, slimmed collapsed rows (matched heights across tabs),
+  responsive word grids with marquee overflow for long seed words, and —
+  the headline pattern — tapping a row now opens its full detail as a
+  genuine full-screen page (a `CodexModalShell` portal) instead of an inline
+  expand bounded to a small on-screen zone, for seed rows, pure-key rows,
+  and Ouronet account rows alike. ZBOM action modals (Rotate/Activate/etc.)
+  now stack correctly ON TOP of that full-screen detail view instead of
+  rendering invisibly behind it, and also go edge-to-edge full-screen on
+  mobile instead of the old fixed-width desktop card.
+- **Arweave side** — Pure Keys, Seeds, and Accounts panels mirror the same
+  mobile patterns: icon-only seed-source buttons, portaled triple-dot row
+  menus (escaping the swipe carousel's transform-clipping), full-screen
+  expand for Pure Key detail (single-line truncated address, action buttons,
+  then the RSA-parameter disclosure, each its own row), and 2-line compact
+  account/seed rows.
+- **Seed-words persistence.** Stoa Dalos and Arweave seeds can now carry a
+  separately-encrypted `wordsSecret` alongside their existing derived
+  bitstring secret, so a seed genuinely created from typed/generated words
+  can show those same words back on later reveal — previously only the raw
+  bitstring was ever recoverable.
+- **The header debouncer's "What is this?" explainer**, present in the
+  original OuronetUI implementation, is now wired here too: a labeled pill
+  (replacing an easy-to-miss icon) opens a full-screen page explaining the
+  seven-tier read taxonomy, reusing the existing Settings → Debouncer
+  content. Also fixed: the debouncer's per-tier hover tooltip no longer gets
+  clipped when mounted inside a bounded host rectangle (it now portals to
+  `document.body` with viewport-relative positioning).
+- **Playground**: a new `OuronetShellMock` testing harness (mimics
+  OuronetUI's real mobile shell — 7-icon bottom tab bar, constrained
+  embedded rectangle) so the mobile experience is exercised the way it's
+  actually consumed, not just full-viewport standalone.
+
+### Added — Arweave: Super Max wallet sweep
+
+- Send AR gained a "Super Max" mode that attempts a full wallet sweep using
+  the exact live network fee (no safety buffer), for the case where a user
+  wants to fully empty an account.
+
 ## 0.11.0 — 2026-09-17
 
 **MINOR — two new chain capabilities: native Arweave (balance, send, keyring,

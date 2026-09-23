@@ -4,16 +4,30 @@
  * `react-redux` / `wallet-context`. Styled via `--codex-*` tokens + per-type
  * accents (inline `style`), so a consumer reskins by overriding the tokens.
  *
- * Four subsections, mirroring My Codex:
- *   • Ouronet     — Ѻ. recipient addresses (blue accent)
- *   • StoaChain™  — k:/c:/w:/u: addresses (gold accent)
- *   • StoicTags   — bare §tag names (green accent); resolved on-chain via
- *                   `getStoicTagSelectorData` (URC_0027b) to show the bound
- *                   account / released / not-registered status. The bare name
- *                   is stored in `address`; the `§` sigil is added for
- *                   display/copy and stripped on save.
- *   • Arweave     — 43-character base64url addresses (amber accent); rendered
- *                   through the same plain middle-ellipsis path as StoaChain.
+ * Four `AddressKind`s, mirroring My Codex, presented as a Tier 1 / Tier 2 nav
+ * (docs/work/codex-ui-mobile/design.md §9 — a pure presentation-layer
+ * reorganization, `AddressBookEntry.type` is UNCHANGED, no data migration):
+ *
+ *   Tier 1 "Ouronet"
+ *     • Accounts  ("ouronet" kind) — Ѻ. recipient addresses (blue accent)
+ *     • StoicTags ("stoic-tag" kind) — bare §tag names (green accent);
+ *       resolved on-chain via `getStoicTagSelectorData` (URC_0027b) to show
+ *       the bound account / released / not-registered status. The bare name
+ *       is stored in `address`; the `§` sigil is added for display/copy and
+ *       stripped on save.
+ *   Tier 1 "Foreign Blockchains"
+ *     • Chainweb ("stoa" kind) — k:/c:/w:/u: addresses (gold accent). Display
+ *       label only ("StoaChain™" → "Chainweb") — grounded in the production
+ *       mount (`OuronetUI/src/routes/logged-in/codex-ui.tsx`): `CodexTabs`'s
+ *       own "Blockchain Accounts" Class already groups Seed Words / Pure Keys
+ *       / Stoa Accounts under a foreign-chain rail entry literally id'd
+ *       `"chainweb"` — the SAME underlying chain as the `"stoa"` kind, just
+ *       reached via the generic multi-chain path instead of the
+ *       Ouronet-branded one. This rehaul extends that same split into the
+ *       Address Book rather than inventing a new one.
+ *     • Arweave ("arweave" kind) — 43-character base64url addresses (amber
+ *       accent); rendered through the same plain middle-ellipsis path as
+ *       Chainweb.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -53,7 +67,9 @@ interface TabConfig {
 
 const TAB_CONFIG: Record<TabType, TabConfig> = {
   ouronet: {
-    label: "Ouronet",
+    // Tier 2 label under the "Ouronet" Tier 1 group (design.md §9) — "Accounts",
+    // not "Ouronet" again (the Tier 1 row already says that).
+    label: "Accounts",
     accent: "#3b82f6",
     addressLabel: "Address",
     placeholder: "Ѻ.recipient-address…",
@@ -63,13 +79,13 @@ const TAB_CONFIG: Record<TabType, TabConfig> = {
     validate: (v) => v.startsWith("Ѻ."),
   },
   stoa: {
-    label: "StoaChain™",
+    label: "Chainweb",
     accent: "#ceac5f",
     addressLabel: "Address",
     placeholder: "k:, c:, w: or u: address…",
     hint: "Must start with k:, c:, w: or u:",
-    emptyTitle: "No StoaChain™ Addresses",
-    emptyAction: "StoaChain™ Address",
+    emptyTitle: "No Chainweb Addresses",
+    emptyAction: "Chainweb Address",
     validate: (v) => /^[kcwu]:/.test(v),
   },
   "stoic-tag": {
@@ -94,7 +110,29 @@ const TAB_CONFIG: Record<TabType, TabConfig> = {
   },
 };
 
-const TAB_ORDER: TabType[] = ["ouronet", "stoa", "stoic-tag", "arweave"];
+// ── Tier 1 / Tier 2 nav (design.md §9) — a presentation-layer grouping ON TOP
+// of the four existing AddressKinds. `Tier1Key` is derived FROM `activeTab`
+// (a lookup table, `TAB_TO_TIER1`), never tracked as separate state — one
+// source of truth, no sync bugs between "which tier1 is shown" and "which
+// kind is actually filtering the list".
+type Tier1Key = "ouronet" | "foreign";
+
+const TIER1_LABEL: Record<Tier1Key, string> = {
+  ouronet: "Ouronet",
+  foreign: "Foreign Blockchains",
+};
+
+const TIER1_TABS: Record<Tier1Key, TabType[]> = {
+  ouronet: ["ouronet", "stoic-tag"],
+  foreign: ["stoa", "arweave"],
+};
+
+const TAB_TO_TIER1: Record<TabType, Tier1Key> = {
+  ouronet: "ouronet",
+  "stoic-tag": "ouronet",
+  stoa: "foreign",
+  arweave: "foreign",
+};
 
 // Register the StoaChain chain validator on the module-level default registry so
 // the tab dispatches every address check through the pluggable per-chain seam
@@ -137,6 +175,21 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
   const [tagLoading, setTagLoading] = useState(false);
 
   const cfg = TAB_CONFIG[activeTab];
+  const activeTier1 = TAB_TO_TIER1[activeTab];
+
+  const selectTab = (tab: TabType) => {
+    setActiveTab(tab);
+    setSearchQuery("");
+    cancelAdd();
+  };
+
+  /** Switching Tier 1 lands on that group's FIRST Tier 2 kind — mirrors how
+   *  picking a new top-level view elsewhere in the app resets to its default
+   *  sub-item, rather than leaving no tier-2 selection. */
+  const selectTier1 = (tier1: Tier1Key) => {
+    if (tier1 === activeTier1) return;
+    selectTab(TIER1_TABS[tier1][0]);
+  };
 
   const visible = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -259,22 +312,58 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
 
   return (
     <div className={className} style={{ fontFamily: "var(--codex-font)", color: "var(--codex-text)" }}>
-      {/* Tabs */}
+      {/* Tier 1 — Ouronet / Foreign Blockchains (design.md §9). */}
       <div
+        role="tablist"
+        aria-label="Recipient category"
+        style={{
+          display: "flex", gap: "6px", marginBottom: "8px",
+        }}
+      >
+        {(Object.keys(TIER1_LABEL) as Tier1Key[]).map((tier1) => {
+          const active = activeTier1 === tier1;
+          return (
+            <button
+              key={tier1}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => selectTier1(tier1)}
+              style={{
+                flex: 1, padding: "10px 16px", borderRadius: "var(--codex-radius)",
+                fontSize: "13px", fontWeight: 700, cursor: "pointer",
+                letterSpacing: "0.02em",
+                backgroundColor: active ? "var(--codex-surface-2)" : "transparent",
+                color: active ? "var(--codex-text)" : "var(--codex-text-dim)",
+                border: `1px solid ${active ? "var(--codex-border)" : "transparent"}`,
+              }}
+            >
+              {TIER1_LABEL[tier1]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tier 2 — the two AddressKinds under the active Tier 1. */}
+      <div
+        role="tablist"
+        aria-label="Recipient kind"
         style={{
           display: "flex", gap: "4px", padding: "4px",
           borderRadius: "var(--codex-radius)", backgroundColor: "var(--codex-surface-2)",
           border: "1px solid var(--codex-border)", marginBottom: "16px",
         }}
       >
-        {TAB_ORDER.map((tab) => {
+        {TIER1_TABS[activeTier1].map((tab) => {
           const active = activeTab === tab;
           const accent = TAB_CONFIG[tab].accent;
           return (
             <button
               key={tab}
               type="button"
-              onClick={() => { setActiveTab(tab); setSearchQuery(""); cancelAdd(); }}
+              role="tab"
+              aria-selected={active}
+              onClick={() => selectTab(tab)}
               style={{
                 flex: 1, padding: "8px 16px", borderRadius: "6px", fontSize: "14px",
                 fontWeight: 600, cursor: "pointer",

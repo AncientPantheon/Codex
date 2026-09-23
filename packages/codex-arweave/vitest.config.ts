@@ -109,7 +109,27 @@ export default defineConfig({
         // dispatcher and every test that reaches the Accounts category throws
         // "Cannot read properties of null (reading 'useSyncExternalStore')".
         // Identical fix already proven in apps/codex-playground/vitest.config.ts.
-        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/, /lucide-react/, "zustand"],
+        //
+        // `@radix-ui/*` needs the SAME treatment for the SAME reason:
+        // `SendArweaveModal`'s Max/Super Max buttons now render codex-ouronet's
+        // `ActionTooltip` (a styled Radix tooltip, replacing the native `title=`
+        // bubble) unconditionally. An externalized `@radix-ui/react-tooltip`
+        // (and its own `@radix-ui/react-*` internal deps — react-context,
+        // react-primitive, react-portal, …) resolves ITS `react` import against
+        // the root copy, so a hook inside one of those reads a null dispatcher
+        // and EVERY test in the file that mounts `SendArweaveModal` throws
+        // "Cannot read properties of null (reading '<hook>')" — not just the
+        // Accounts-category ones. The BROAD `/@radix-ui\//` pattern (not a
+        // single subpackage name) is required because Tooltip pulls in several
+        // Radix internal packages, each with its own `react` import to pin —
+        // same fix already proven in codex-ouronet/vitest.config.ts.
+        // `@floating-ui/*` too — Radix's Tooltip.Content positions itself via
+        // `@radix-ui/react-popper`, which uses `@floating-ui/react-dom`'s
+        // `useFloating()` hook; same null-dispatcher failure ("Cannot read
+        // properties of null (reading 'useState')") the moment the tooltip
+        // actually OPENS (Content only mounts on open, so this only surfaced
+        // once a test opened one, not on every render like the others above).
+        inline: [/@ancientpantheon\/codex-core/, /@ancientpantheon\/codex-ouronet/, /@ancientpantheon\/codex-arweave/, /@ancientpantheon\/codex-ui/, /lucide-react/, "zustand", /@radix-ui\//, /@floating-ui\//],
         external: [/^node:sqlite$/],
       },
     },

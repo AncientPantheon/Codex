@@ -250,17 +250,19 @@ describe("Dashboard — the export-to-JSON button reuses the REAL useCodexBackup
   });
 });
 
-describe("Dashboard — the Arweave mode defaults to real, with the mock/real toggle reachable from Settings", () => {
+describe("Dashboard — the Arweave mode toggle is gone (Settings-page cleanup round)", () => {
   // WHY (history): `arweaveMode` was first hardcoded to mock entirely
   // (commit 12c135d0, no toggle mounted anywhere) — real mode was
-  // UNREACHABLE. That was fixed by restoring the toggle, defaulted to mock.
-  // Per explicit owner directive afterward: a standalone Codex should show
-  // real balances out of the box with no manual step, and the toggle box
-  // must not sit on the main Accounts view — it now lives in the "Codex UI
-  // Settings" view (a sibling below the Network card), and the DEFAULT mode
-  // is real, not mock. Mock stays fully reachable as an offline/dev choice,
-  // just no longer the first thing a user sees or has to click past.
-  it("defaults to real with no manual step, and the toggle is reachable from Settings (not the main Accounts view)", async () => {
+  // UNREACHABLE. That was fixed by restoring the toggle. Later, the owner
+  // relocated the raw/unstyled toggle into Settings rather than removing it.
+  // This latest round removed it ENTIRELY (owner directive: "that mockup bad
+  // text arweave blockchain selector... it's got no purpose any more, I
+  // don't want it showing in production") — real mode is now simply the
+  // fixed default (`network.arweaveMode ?? ARWEAVE_WIRING_MODE_REAL`), with
+  // no user-facing control left anywhere. The proper, already-styled
+  // Settings → Network card's per-chain URL field is the sole remaining way
+  // to edit the Arweave gateway.
+  it("the 'Arweave mode' region is not present on the Accounts view OR the Settings view", async () => {
     const user = userEvent.setup();
     const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
     render(
@@ -270,21 +272,15 @@ describe("Dashboard — the Arweave mode defaults to real, with the mock/real to
     );
 
     await screen.findByRole("tab", { name: /blockchain accounts/i });
-    // Not present on the landing (Accounts) view.
     expect(screen.queryByRole("region", { name: /arweave mode/i })).toBeNull();
 
     await user.click(screen.getByRole("tab", { name: /codex ui settings/i }));
-    const modeSection = await screen.findByRole("region", { name: /arweave mode/i });
-    expect(within(modeSection).getByText("real")).toBeInTheDocument();
-    expect(within(modeSection).getByRole("alert")).toBeInTheDocument();
-
-    await user.click(
-      within(modeSection).getByRole("button", { name: /switch to mock \(offline\)/i }),
-    );
-    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
+    await screen.findByText(/network/i);
+    expect(screen.queryByRole("region", { name: /arweave mode/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /switch to (mock|real)/i })).toBeNull();
   });
 
-  it("boots directly into mock mode when arweaveMode:'mock' was already persisted from a prior session (mode choice still survives a remount, real is only the DEFAULT)", async () => {
+  it("a prior session's persisted arweaveMode:'mock' still applies internally (the underlying default/persistence is unchanged — only the UI control is gone)", async () => {
     window.localStorage.setItem(
       "codex-playground:network-settings",
       JSON.stringify({
@@ -295,7 +291,6 @@ describe("Dashboard — the Arweave mode defaults to real, with the mock/real to
       }),
     );
 
-    const user = userEvent.setup();
     const adapter = await hydrateFromPlaintextSnapshot(emptySnapshot);
     render(
       <CodexProvider adapter={adapter} deviceVariant="dev">
@@ -303,10 +298,10 @@ describe("Dashboard — the Arweave mode defaults to real, with the mock/real to
       </CodexProvider>,
     );
 
+    // Renders without throwing and reaches the normal dashboard — no crash
+    // from the now-unreachable "mock" mode persisting with no toggle to
+    // display it.
     await screen.findByRole("tab", { name: /blockchain accounts/i });
-    await user.click(screen.getByRole("tab", { name: /codex ui settings/i }));
-    const modeSection = await screen.findByRole("region", { name: /arweave mode/i });
-    expect(within(modeSection).getByText(/mock \(offline\)/i)).toBeInTheDocument();
   });
 });
 
@@ -338,8 +333,17 @@ describe("Dashboard — relabeling a watched Arweave address updates it in place
     await user.type(screen.getByTestId("arweave-watch-input"), address);
     await user.click(screen.getByTestId("arweave-watch-submit"));
 
+    // Round 19 owner correction ("the arweave account must be shorted same
+    // as stoa accounts, first 3 last 3 characters coloured, and ... in the
+    // middle") means the row's address now renders as 3 sibling spans
+    // (head/mid/tail), not one text node — RTL's `getByText` doesn't match
+    // text split across elements by default. This matcher targets the
+    // element whose own FULL (concatenated-children) text is exactly the
+    // address — `ArweaveAddressHighlight`'s own outer wrapper span.
+    const byAddressText = (_: string, element: Element | null) => element?.textContent === address;
+
     await waitFor(() => {
-      expect(screen.getAllByText(address)).toHaveLength(1);
+      expect(screen.getAllByText(byAddressText)).toHaveLength(1);
     });
 
     // Set a label on the now-single row.
@@ -353,7 +357,7 @@ describe("Dashboard — relabeling a watched Arweave address updates it in place
 
     // The address must still appear exactly once — relabeling updated the
     // SAME row, it did not create a second one.
-    expect(screen.getAllByText(address)).toHaveLength(1);
+    expect(screen.getAllByText(byAddressText)).toHaveLength(1);
   });
 });
 

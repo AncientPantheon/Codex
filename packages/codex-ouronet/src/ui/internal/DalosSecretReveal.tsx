@@ -14,7 +14,7 @@
  */
 
 import * as React from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AlertTriangle, Check, Eye, EyeOff, Grid3x3, Hash, Binary, Copy, Download } from "lucide-react";
 import { encodeBitmapBMP } from "@ancientpantheon/codex-core";
 
@@ -80,6 +80,7 @@ import {
 } from "@stoachain/stoa-core/dalos";
 import { rebuildFullKey } from "../../codex-identity/rebuildFullKey.js";
 import type { OuroOriginMode, OuroOriginSeedTab, OuronetOriginCurve } from "../../types/entities.js";
+import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 
 const MONO = "var(--codex-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)";
 const APOLLO_ROWS = 32, APOLLO_COLS = 32, APOLLO_BITS = 1024;
@@ -133,33 +134,112 @@ const masked = (unmasked: boolean): React.CSSProperties => ({
   filter: unmasked ? "none" : "blur(4px)", transition: "filter 120ms ease",
 });
 
-/** A seed word longer than this wraps to enough lines in the 8-column grid
- *  that the grid stops being readable (the DALOS charset allows up to 256
- *  glyphs per word — the grid was designed for short, dictionary-style
- *  words). Past this length the WHOLE seed switches to one word per line,
- *  single line, middle-truncated — never a mix of the two layouts. */
-const LONG_SEED_WORD_THRESHOLD = 24;
+/**
+ * Round 24 owner correction: "for smaller display we should go with 1 or 2
+ * words per line, horisontaly. not like that [a hardcoded 8-column grid],
+ * depending on how long the word is. we always fit max 8 horisontaly, (if
+ * they fit) if not 6 then 4 then 2 then 1. but the word should be one per
+ * line. if it doesnt fit one per line, we dont shorten it, but ratel
+ * carusell it moving it slowly liek a train, from right to left, and
+ * placing a copy button at its end, remaing on one word per line."
+ *
+ * Replaces the old two-branch system (a hardcoded 8-column grid for
+ * "short" words, middle-truncated one-per-line for "long" ones — DALOS
+ * custom words run up to 256 glyphs, well past anything a fixed grid
+ * could show) with ONE responsive grid: measure the real available width
+ * (`useMeasuredWidth` below), then pick the WIDEST of these candidate
+ * column counts at which every word still fits, single line, in its own
+ * cell. A word that still doesn't fit even at 1 column (full width) is
+ * never truncated — it gets the marquee treatment instead (see
+ * `codex-word-marquee` in tokens.css), so the actual, complete value stays
+ * readable/verifiable rather than losing characters to an ellipsis.
+ */
+const GRID_CANDIDATE_COLUMNS = [8, 6, 4, 2, 1] as const;
+/** ~0.6em per character is a typical monospace advance width (this grid
+ *  always renders words in `MONO`); rounded up for a safety margin — better
+ *  to drop a column early than let a word silently clip its cell. */
+const MONO_CHAR_WIDTH_PX = 8.5;
+/** Matches the grid's own column gap (`gap: "14px 8px"` below). */
+const GRID_CELL_GAP_PX = 8;
+/** Matches the cell's own left+right padding (`padding: "10px 8px 8px"` — 8px each side). */
+const GRID_CELL_PADDING_PX = 16;
 
-/** Keeps the first `head` and last `tail` characters, replacing the middle
- *  with a single "…" — the same "the tail is what you check a value by"
- *  convention the RSA-parameter panels already use, applied here because a
- *  256-glyph word cannot render on one line otherwise. */
-function truncateMiddle(value: string, head: number, tail: number): string {
-  if (value.length <= head + tail + 1) return value;
-  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
+function fitWordColumns(
+  containerWidth: number,
+  words: readonly string[],
+): { columns: number; overflow: ReadonlySet<number> } {
+  for (const columns of GRID_CANDIDATE_COLUMNS) {
+    const cellWidth = (containerWidth - (columns - 1) * GRID_CELL_GAP_PX) / columns;
+    const usable = cellWidth - GRID_CELL_PADDING_PX;
+    const overflow = new Set<number>();
+    words.forEach((w, i) => {
+      if (w.length * MONO_CHAR_WIDTH_PX > usable) overflow.add(i);
+    });
+    // Either everything fits at this column count, or this is the last
+    // (narrowest) candidate — stop here either way; any remaining
+    // `overflow` entries get marqueed instead of shrinking further.
+    if (overflow.size === 0 || columns === 1) return { columns, overflow };
+  }
+  /* istanbul ignore next -- unreachable: 1 is always the final candidate above. */
+  return { columns: 1, overflow: new Set(words.map((_, i) => i)) };
+}
+
+/** Live-measures a DOM node's own content width via `ResizeObserver`,
+ *  through a callback ref (no separate `useEffect` + stored-element-ref
+ *  needed). Defaults to a generous 800px — "plenty of room" — until the
+ *  first real measurement lands, so jsdom (which never resolves real
+ *  layout) and the very first paint both fall back to the widest grid
+ *  (8 columns, no marquee) rather than assuming the narrowest. */
+function useMeasuredWidth(fallback = 800): [(node: HTMLDivElement | null) => void, number] {
+  const [width, setWidth] = useState(fallback);
+  const [observer, setObserver] = useState<ResizeObserver | null>(null);
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    observer?.disconnect();
+    if (!node) {
+      setObserver(null);
+      return;
+    }
+    setWidth(node.clientWidth || fallback);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setWidth(w);
+    });
+    ro.observe(node);
+    setObserver(ro);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return [ref, width];
 }
 
 function RepPanel({ value, unmasked, label, color, icon }: { value: string; unmasked: boolean; label: string; color: string; icon: React.ReactNode }) {
+  // Round 22 owner correction: "the bit string display isnt using the
+  // available space, and is shwoing scroll, when clearly you can see it
+  // has extension place. it is only after the available space is consumed
+  // should the scroll be used." MOBILE ONLY (inside a `fillBody`
+  // `CodexModalShell`, which establishes the definite-height flex chain
+  // this needs — see that prop's own doc comment): the value box flex-
+  // fills whatever room is left in the card instead of stopping at a fixed
+  // 240px, and only scrolls once its OWN content genuinely exceeds that —
+  // never before. Desktop (or any host without a `fillBody` ancestor)
+  // keeps the exact fixed 240px cap it always had.
+  const isMobile = useIsMobile();
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: isMobile ? 1 : undefined, minHeight: isMobile ? 0 : undefined }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color }}>{icon}{label}</div>
         <CopyValueBtn value={value} />
       </div>
-      <div style={{ borderRadius: 8, border: `1px solid ${color}30`, padding: 12, maxHeight: 240, overflowY: "auto", backgroundColor: "#0a0a0a" }}>
+      <div
+        style={{
+          borderRadius: 8, border: `1px solid ${color}30`, padding: 12, overflowY: "auto", backgroundColor: "#0a0a0a",
+          maxHeight: isMobile ? undefined : 240,
+          flex: isMobile ? 1 : undefined,
+          minHeight: isMobile ? 0 : undefined,
+        }}
+      >
         <code style={{ display: "block", fontFamily: MONO, fontSize: 11, lineHeight: 1.6, wordBreak: "break-all", color: "#d2d3d4", ...masked(unmasked) }}>{value}</code>
       </div>
-      <p style={{ margin: 0, fontSize: 10, color: "#555" }}>{value.length} characters</p>
+      <p style={{ margin: 0, fontSize: 10, color: "#555", flexShrink: 0 }}>{value.length} characters</p>
     </div>
   );
 }
@@ -184,10 +264,19 @@ export interface DalosSecretRevealProps {
 export function DalosSecretReveal({ plaintext, originMode = "seedWords", originSeedTab, originCurve = "dalos", isSmart = false, sourceLabelOverride, hideAddress = false }: DalosSecretRevealProps) {
   const [active, setActive] = useState<string>(originMode === "seedWords" ? "seed" : originMode === "bitmap" ? "bitmap" : originMode === "bitString" ? "bitstring" : originMode === "integerBase10" ? "int10" : originMode === "integerBase49" ? "int49" : "seed");
   const [unmasked, setUnmasked] = useState(false);
+  // See `RepPanel`'s own doc comment — this is the same "fill available
+  // space, only scroll once truly full" flex chain, one level up.
+  const isMobile = useIsMobile();
 
   const full = useMemo(() => (plaintext ? rebuildFullKey(plaintext, originMode, originCurve) : null), [plaintext, originMode, originCurve]);
   const color = originColor(originMode, originSeedTab, originCurve);
   const seedWords = originMode === "seedWords" ? plaintext.trim().split(/\s+/).filter(Boolean) : [];
+  // Round 24 — see `fitWordColumns`'s own doc comment.
+  const [wordGridRef, wordGridWidth] = useMeasuredWidth();
+  const { columns: wordColumns, overflow: wordOverflow } = useMemo(
+    () => fitWordColumns(wordGridWidth, seedWords),
+    [wordGridWidth, seedWords],
+  );
   const isApollo = originCurve === "apollo";
   const rows = isApollo ? APOLLO_ROWS : BITMAP_ROWS;
   const cols = isApollo ? APOLLO_COLS : BITMAP_COLS;
@@ -203,9 +292,9 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
     ]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: isMobile ? 1 : undefined, minHeight: isMobile ? 0 : undefined }}>
       {/* Origin chip + Reveal toggle */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <Check style={{ width: 14, height: 14, color: "#22c55e", flexShrink: 0 }} />
         <span style={{ fontSize: 12, color: "#888" }}>Created from <strong style={{ color }}>{sourceLabelOverride ?? originLabel(originMode, originSeedTab, originCurve)}</strong></span>
         <div style={{ flex: 1 }} />
@@ -215,7 +304,7 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
       </div>
 
       {/* Warning */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: 8, borderRadius: 8, backgroundColor: isApollo ? "#f9731608" : "#8b1a1a08", border: `1px solid ${isApollo ? "#f9731640" : "#8b1a1a30"}` }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: 8, borderRadius: 8, backgroundColor: isApollo ? "#f9731608" : "#8b1a1a08", border: `1px solid ${isApollo ? "#f9731640" : "#8b1a1a30"}`, flexShrink: 0 }}>
         <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: isApollo ? COLORS.apollo : "#c0392b" }} />
         <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: isApollo ? "#f0a978" : "#c0392b" }}>
           {isApollo
@@ -225,7 +314,7 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${tabs.length}, 1fr)`, gap: 4, padding: 4, borderRadius: 8, backgroundColor: "#18181B" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${tabs.length}, 1fr)`, gap: 4, padding: 4, borderRadius: 8, backgroundColor: "#18181B", flexShrink: 0 }}>
         {tabs.map((t) => {
           const on = active === t.v;
           return (
@@ -238,77 +327,34 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
       </div>
 
       {/* Panels */}
-      <div>
+      <div style={{ flex: isMobile ? 1 : undefined, minHeight: isMobile ? 0 : undefined, display: isMobile ? "flex" : undefined, flexDirection: isMobile ? "column" : undefined }}>
         {active === "seed" && originMode === "seedWords" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color }}>Seed · {seedWords.length} words</span>
               <CopyValueBtn value={plaintext} />
             </div>
-            {seedWords.some((w) => w.length > LONG_SEED_WORD_THRESHOLD) ? (
-              // Long words (up to 256 DALOS glyphs each) cannot read on a
-              // grid — wrapping a 256-character word across many lines is
-              // what made the grid unreadable. One word per line, ONE
-              // physical line each, middle-truncated, with its own copy
-              // button (`Copy Value` above copies the whole plaintext, not
-              // any one word) — never a mix with the short-word grid below.
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {seedWords.map((w, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "6px 10px",
-                      borderRadius: 8,
-                      border: `1px solid ${color}30`,
-                      backgroundColor: color + "10",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: color + "99",
-                        fontFamily: MONO,
-                        minWidth: 32,
-                        textAlign: "right",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {i + 1}.
-                    </span>
-                    <span
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        fontSize: 13,
-                        fontFamily: MONO,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        color: "#d2d3d4",
-                        ...masked(unmasked),
-                      }}
-                    >
-                      {truncateMiddle(w, 48, 8)}
-                    </span>
-                    <CopyValueBtn value={w} />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              // Short (dictionary-style) words: an 8-per-row grid, the
-              // position rendered as a medallion straddling the cell's top
-              // edge — not inline text stealing width from the word itself.
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: "14px 8px" }}>
-                {seedWords.map((w, i) => (
+            {/* Round 24 — ONE responsive grid replaces the old fixed
+                8-column / middle-truncated-list split (see `fitWordColumns`'s
+                own doc comment): as many columns as genuinely fit (8, 6, 4,
+                2, down to 1), every word single-line in its own cell, no
+                shortening — a word that STILL doesn't fit at 1 column
+                (DALOS custom words run up to 256 glyphs) scrolls instead
+                of truncating. */}
+            <div
+              ref={wordGridRef}
+              style={{ display: "grid", gridTemplateColumns: `repeat(${wordColumns}, 1fr)`, gap: "14px 8px" }}
+            >
+              {seedWords.map((w, i) => {
+                const marquee = wordOverflow.has(i);
+                return (
                   <div
                     key={i}
                     style={{
                       position: "relative",
                       display: "flex",
-                      justifyContent: "center",
+                      alignItems: "center",
+                      justifyContent: marquee ? "flex-start" : "center",
                       padding: "10px 8px 8px",
                       borderRadius: 8,
                       border: `1px solid ${color}30`,
@@ -337,22 +383,58 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
                     >
                       {i + 1}
                     </span>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontFamily: MONO,
-                        wordBreak: "break-word",
-                        textAlign: "center",
-                        color: "#d2d3d4",
-                        ...masked(unmasked),
-                      }}
-                    >
-                      {w}
-                    </span>
+                    {marquee ? (
+                      // Too wide even at 1 column — a fixed copy button
+                      // "at its end", the text itself scrolling right to
+                      // left behind it, full value intact (never
+                      // shortened). `overflow: hidden` on the track is
+                      // what makes the marquee invisible outside the cell;
+                      // the animated span is `width: max-content` so its
+                      // own length drives the loop, not the cell's.
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: "max-content",
+                              whiteSpace: "nowrap",
+                              fontSize: 13,
+                              fontFamily: MONO,
+                              color: "#d2d3d4",
+                              // "moving it slowly liek a train" — duration
+                              // scales with the word's own length so every
+                              // word crosses at roughly the same visual
+                              // speed, not the same fixed time.
+                              animation: `codex-word-marquee ${Math.max(6, w.length * 0.18)}s linear infinite`,
+                              ...masked(unmasked),
+                            }}
+                          >
+                            {w}
+                          </span>
+                        </div>
+                        <CopyValueBtn value={w} />
+                      </div>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontFamily: MONO,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: "100%",
+                          textAlign: "center",
+                          color: "#d2d3d4",
+                          ...masked(unmasked),
+                        }}
+                      >
+                        {w}
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
           </div>
         )}
         {active === "bitmap" && (full ? (
@@ -379,7 +461,7 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
 
       {/* Derived address — Smart (Σ./Π.) for smart accounts, Standard (Ѻ./₱.) otherwise */}
       {full && !hideAddress && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: "#555" }}>{isSmart ? "Smart address" : "Standard address"}</span>
             <CopyValueBtn value={isSmart ? full.smartAddress : full.standardAddress} />

@@ -21,6 +21,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { executeStakeUrStoa } from "@ouronet/ouronet-core/interactions/urStoaFunctions";
 import { formatDecimalForPact } from "@stoachain/stoa-core/pact";
 import { useGetKeypair } from "../../hooks/index.js";
@@ -52,6 +53,22 @@ export interface StakeUrStoaModalProps {
    *  `paymentKeyAddress`, the on-chain identity performing the stake. */
   address: string;
   onSuccess?: (requestKey: string) => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — round 10 owner correction: "the buttons, stake unstake
+   * collect transfer, must expand on the full screen, and once executed,
+   * they get out of the full screen." Mirrors `TransferUrStoaModal.tsx`'s
+   * identical fix. Omitted (the default) falls back to the bounded-to-
+   * this-component behavior every `CodexModalShell` caller has without it.
+   */
+  fullScreenPortalTarget?: Element | null;
+}
+
+/** Portals `children` into `target` when supplied, renders inline
+ *  otherwise — duplicated per this package's own "self-contained module"
+ *  convention (see `SeedWordsTab.tsx`). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
 }
 
 export function StakeUrStoaModal({
@@ -60,6 +77,7 @@ export function StakeUrStoaModal({
   publicKey,
   address,
   onSuccess,
+  fullScreenPortalTarget,
 }: StakeUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -122,26 +140,32 @@ export function StakeUrStoaModal({
   if (!isOpen) return null;
 
   return (
-    <CodexModalShell title="Stake UrStoa" subtitle="coin.C_URV|Stake" onClose={onClose}>
-      <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>
-        Stakes native UrStoa from <code>{address}</code> into the UrStoa Vault to earn STOA rewards.
-      </p>
-      <label style={modalLabel} htmlFor="stake-urstoa-amount">Amount</label>
-      <input
-        id="stake-urstoa-amount"
-        type="text"
-        inputMode="decimal"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="0.000"
-        autoComplete="off"
-        aria-invalid={validationMessage ? "true" : undefined}
-        style={modalInput}
-      />
-      {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
-      <ModalFeedback error={lastError} requestKey={null} />
-      <ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Stake UrStoa" />
-    </CodexModalShell>
+    <MobilePortal target={fullScreenPortalTarget}>
+      <CodexModalShell
+        title="Stake UrStoa"
+        subtitle="coin.C_URV|Stake"
+        onClose={onClose}
+        footer={<ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Stake UrStoa" />}
+      >
+        <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px", overflowWrap: "anywhere" }}>
+          Stakes native UrStoa from <code style={{ wordBreak: "break-all" }}>{address}</code> into the UrStoa Vault to earn STOA rewards.
+        </p>
+        <label style={modalLabel} htmlFor="stake-urstoa-amount">Amount</label>
+        <input
+          id="stake-urstoa-amount"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.000"
+          autoComplete="off"
+          aria-invalid={validationMessage ? "true" : undefined}
+          style={modalInput}
+        />
+        {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
+        <ModalFeedback error={lastError} requestKey={null} />
+      </CodexModalShell>
+    </MobilePortal>
   );
 }
 

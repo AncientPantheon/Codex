@@ -16,6 +16,7 @@ export type { CodexProviderProps } from "./CodexProvider.js";
 // provider all live in codex-ui's provider now; re-export the byte-stable names.
 export {
   useCodexStore,
+  useCodexStoreOptional,
   useSigningClientOverride,
   useResolverProvider,
 } from "@ancientpantheon/codex-ui/provider";

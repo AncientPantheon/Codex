@@ -55,6 +55,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk } from "@ancientpantheon/arweave-core";
@@ -64,6 +65,7 @@ import {
   type BitStringAccount,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
 import { DalosSecretReveal, CodexModalShell, BitmapKeyInput } from "@ancientpantheon/codex-ouronet/ui";
+import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist as BIP_ENGLISH_WORDLIST } from "@scure/bip39/wordlists/english";
@@ -217,6 +219,53 @@ export interface ArweaveSeedsAreaProps {
    *  unmount, so a stale activity can never linger in the parent. Purely
    *  ADDITIVE: a consumer that omits it sees no behavior change. */
   onRunActivityChange?: (activity: { seedLabel: string; cancel: () => void } | null) => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — "same structure and design and placement of buttons
+   * as what we did for chainweb": mirrors `SeedWordsTab.tsx`'s own
+   * `fullScreenPortalTarget` contract exactly, so the "View Seed" reveal
+   * overlay below covers the whole screen on mobile instead of being
+   * bounded to this tab's own Zone 3 rectangle. Omitted (the default)
+   * falls back to the same bounded-to-this-component behavior every other
+   * `CodexModalShell` caller in this codebase falls back to.
+   */
+  fullScreenPortalTarget?: Element | null;
+  /**
+   * Reports the seed-list's OWN pagination state so `ArweavePanel` can
+   * render it in the shared "middle of the bottom seam" medallion slot —
+   * round 9 owner correction: "we also need to agree on a standard
+   * pagination controls zone. If no expand collapse medallion exists at
+   * the middle of the bottom page... that's where the pagination controls
+   * should be in their own medallion." Mirrors `SeedWordsTab.tsx`'s own
+   * `onPaginationHandleChange` exactly, including the same "controlled
+   * prop with internal-state fallback" rule: omitted (every standalone
+   * mount, including every pre-round-9 test), this component keeps
+   * rendering its OWN inline/portaled Prev/Next exactly as before this
+   * prop existed.
+   */
+  onPaginationHandleChange?: (
+    handle: { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null,
+  ) => void;
+  /**
+   * MOBILE ONLY — reports this component's OWN `openDefine` function up to
+   * `ArweavePanel`, so its shared mobile tablist row can render a "+"
+   * button in the same right-hand slot `ChainwebPanel.tsx` reserves for
+   * `SeedWordsTab`'s "Create New Seed" ("add arweave seed must be similar
+   * to how chainwebs seed is added wit ha plus button in the upper line
+   * aligned right"). A HANDLE rather than a lifted open/close boolean,
+   * because `openDefine` also resets every define-form field — mirrors the
+   * same "report a handle upward" shape `onPaginationHandleChange` already
+   * uses. Fires the current `openDefine` on mount/whenever it changes, and
+   * `null` on unmount, so a stale handle can never linger in the parent.
+   * Omitted (the default) leaves this component's own bottom "Add Arweave
+   * Seed" button as the only way to open the form — unchanged from before
+   * this prop existed.
+   */
+  onOpenSeedFormHandleChange?: (open: (() => void) | null) => void;
+  /** See `RsaParamsSectionProps.ensureCodexUnlocked`'s own doc comment —
+   *  forwarded down to every seed's stored keys' RSA-parameter panels.
+   *  Wire it from `ArweavePanel.tsx`'s own `useEnsureCodexUnlocked()`. */
+  ensureCodexUnlocked?: () => Promise<boolean>;
 }
 
 /* ───────────────────────────── the constants ──────────────────────────── */
@@ -251,6 +300,60 @@ const ChevronDownGlyph = ({ style }: { style?: React.CSSProperties }): React.Rea
 const ChevronRightGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
   <svg {...svgBase} style={style}><path d="m9 18 6-6-6-6" /></svg>
 );
+/** The seed-list Prev pagination button's glyph — same inline-SVG rule as
+ *  every other icon in this module. */
+const ChevronLeftGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}><path d="m15 18-6-6 6-6" /></svg>
+);
+
+/** A codex with hundreds of seeds can genuinely paginate into double
+ *  digits — owner correction (design.md §8, round 8 follow-up): "when
+ *  there are more than 10 pages available the entry 15/24 when clicked
+ *  needs to allow the input of a given page, to jump directly to a wanted
+ *  page." Below 10 pages, the plain "N / M" text is unchanged. Duplicated
+ *  from `StoaAccountsTab.tsx`'s identical component per this package's
+ *  own "self-contained module" convention. */
+function PageJumpIndicator({ page, totalPages, onJump }: { page: number; totalPages: number; onJump: (page: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (totalPages <= 10) {
+    return <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>{page + 1} / {totalPages}</span>;
+  }
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(String(page + 1)); setEditing(true); }}
+        title="Jump to a page"
+        style={{ fontSize: 12, fontFamily: MONO, color: "#ceac5f", background: "transparent", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline dotted" }}
+      >
+        {page + 1} / {totalPages}
+      </button>
+    );
+  }
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n)) onJump(Math.max(0, Math.min(totalPages - 1, n - 1)));
+    setEditing(false);
+  };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        autoFocus
+        type="number"
+        min={1}
+        max={totalPages}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        onBlur={commit}
+        aria-label={`Jump to page (1-${totalPages})`}
+        style={{ width: 44, fontSize: 12, fontFamily: MONO, padding: "2px 4px", borderRadius: 6, border: "1px solid #ceac5f", backgroundColor: "#0a0a0a", color: "#d2d3d4", textAlign: "center" }}
+      />
+      <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>/ {totalPages}</span>
+    </span>
+  );
+}
 /** The Prime row's toggle, gold-and-locked instead of a chevron — ported from
  *  `SeedWordsTab.tsx`'s `Lock` glyph swap. Decorative only: `onToggle` still
  *  opens/closes the row exactly as the chevron did. */
@@ -268,6 +371,41 @@ const TrashGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElem
     <path d="M3 6h18" />
     <path d="M8 6V4h8v2" />
     <path d="M19 6l-1 14H6L5 6" />
+  </svg>
+);
+/** MOBILE row triple-dot trigger — same glyph `SeedWordsTab.tsx`'s own
+ *  `MoreVertical` (lucide-react) draws, hand-rolled per this module's own
+ *  inline-SVG rule (`lucide-react` resolves to a second React here). */
+const MoreVerticalGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} fill="currentColor" stroke="none" style={style}>
+    <circle cx="12" cy="5" r="1.5" />
+    <circle cx="12" cy="12" r="1.5" />
+    <circle cx="12" cy="19" r="1.5" />
+  </svg>
+);
+/** Round 22 owner correction: "So we need icons for these. 3 Icosn, one for
+ *  Own Seed, One for Ouronet Seed and one for Chainweb seed" — the three
+ *  seed-source picker glyphs, mobile-only (replacing the full-text buttons
+ *  that individually wrapped to their own line on a narrow screen, per the
+ *  owner's screenshot — "then we get more space for the seed word field to
+ *  extend onto"). */
+const OwnSeedGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+const OuronetAccountGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+  </svg>
+);
+const ChainwebSeedGlyph = ({ style }: { style?: React.CSSProperties }): React.ReactElement => (
+  <svg {...svgBase} style={style}>
+    <path d="M9 17H7a5 5 0 0 1 0-10h2" />
+    <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+    <line x1="8" y1="12" x2="16" y2="12" />
   </svg>
 );
 
@@ -900,6 +1038,138 @@ type AddressRow =
   | { kind: "fresh"; index: number; key: RunKey }
   | { kind: "pending"; index: number };
 
+/** Portals `children` into `target` when supplied (a DOM node spanning the
+ *  host's WHOLE mobile body — see `ArweaveSeedsAreaProps.fullScreenPortalTarget`'s
+ *  doc comment); otherwise renders inline, unchanged. Same tiny wrapper
+ *  `SeedWordsTab.tsx`'s own `MobilePortal` is — ported, not imported (this
+ *  module's own "self-contained" convention). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
+}
+
+/** Fallback px height of one COLLAPSED seed row, used only before the
+ *  first real row has mounted/measured — see `useMobileSeedPageSize`'s
+ *  `rowRef`. */
+const SEED_ROW_HEIGHT_FALLBACK = 58;
+const SEED_ROW_GAP = 8;
+/** `PrimeSeparator`'s own rough height — small enough a fixed estimate is
+ *  "close enough" (only ever affects page 0's own capacity). Ported from
+ *  `SeedWordsTab.tsx`'s own identical constant/reasoning. */
+const PRIME_SEPARATOR_HEIGHT_ESTIMATE = 24;
+
+/**
+ * MOBILE ONLY — measured seed-list pagination ("same structure and design
+ * and placement of buttons as what we did for chainweb" — round 8 follow-
+ * up: "we need [the] same pagination... at the seeds level"). Ported from
+ * `SeedWordsTab.tsx`'s own `useMobileSeedPageSize` (this module's own
+ * "self-contained, nothing shared across chain-panel packages"
+ * convention) — live-measure a real COLLAPSED row via `rowRef`,
+ * live-measure the container via `containerRef`, `Math.floor((height +
+ * GAP) / (rowHeight + GAP))`.
+ *
+ * Unlike Chainweb's seed rows (which defer their own key list to a
+ * SEPARATE full-screen view on mobile), an Arweave `SeedRow` EXPANDS
+ * INLINE (an accordion — `openSeedId`, at most one open at a time) to a
+ * highly variable height (its own generate controls + a live address
+ * list). Measuring that reliably is a much bigger undertaking than this
+ * pass attempts — the page size below is therefore based ONLY on a
+ * COLLAPSED row's height, and the caller deliberately does NOT force a
+ * hard `overflow: hidden` bound on the list the way `StoaAccountsTab`'s/
+ * `SeedWordsTab`'s own paginated areas do: an expanded row's variable
+ * height stays free to grow, falling back to `ArweavePanel`'s own
+ * existing `overflow-y: auto` scroller rather than risking silently
+ * clipping it. This still delivers the actual ask (a bounded, measured
+ * PAGE of collapsed rows instead of the whole codex's seed list rendered
+ * at once) without the added risk of mis-measuring a variable-height
+ * accordion row on a file this large.
+ */
+function useMobileSeedPageSize(): {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  rowRef: (node: HTMLDivElement | null) => void;
+  pageSize: number;
+  /** How many row-slots' worth of height `PrimeSeparator` costs, at the
+   *  CURRENT measured row height — subtract this from `pageSize` ONLY when
+   *  slicing page 0, and only when that page will actually render the
+   *  separator (more than one seed on it). */
+  firstPageRowsForSeparator: number;
+} {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(SEED_ROW_HEIGHT_FALLBACK);
+  const [pageSize, setPageSize] = useState(4);
+
+  useEffect(() => {
+    if (!rowEl) return;
+    const measure = () => {
+      const h = rowEl.getBoundingClientRect().height;
+      if (h > 0) setRowHeight(h);
+    };
+    measure();
+    // Owner-reported live bug (round 9, on Chainweb's own Seeds list, same
+    // measurement shape here): "the next button to change page doesn't
+    // work, and i can clearly see that 4 entries would fit, so why aren't
+    // there 4 entries there?" A `ResizeObserver` only refires once the
+    // row's OWN size later changes — it does not protect against the row
+    // being measured WRONG on this very first pass (a web font swapping in
+    // a few ms after mount, or the host shell's own anchor wiring settling
+    // a frame later). A `requestAnimationFrame` + `document.fonts`
+    // follow-up re-measure catches either without waiting on a resize
+    // event that may never come.
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(measure);
+    const fontsReady = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;
+    fontsReady?.then(measure).catch(() => {});
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(rowEl);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [rowEl]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const compute = () => {
+      // Round 10 owner correction — "same size of the border left right up
+      // and down": the container carries `padding: SEED_ROW_GAP` on every
+      // side on mobile (see its own JSX comment); `clientHeight` counts
+      // that as part of the box, so subtract it back out here — harmless
+      // on desktop too, which never reads `pageSize` at all.
+      const height = el.clientHeight - 2 * SEED_ROW_GAP;
+      if (height <= 0) return;
+      const maxRows = Math.floor((height + SEED_ROW_GAP) / (rowHeight + SEED_ROW_GAP));
+      setPageSize(Math.max(1, maxRows));
+    };
+    compute();
+    // Same "don't trust the very first reading alone" reasoning, PLUS a
+    // `window` resize listener — an orientation change or on-screen-
+    // keyboard dismissal changes the container's real available height
+    // without necessarily firing this element's OWN `ResizeObserver` in
+    // every host environment.
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(compute);
+    if (typeof window !== "undefined") window.addEventListener("resize", compute);
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(compute);
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      if (typeof window !== "undefined") window.removeEventListener("resize", compute);
+    };
+  }, [rowHeight]);
+
+  const firstPageRowsForSeparator = Math.ceil((PRIME_SEPARATOR_HEIGHT_ESTIMATE + SEED_ROW_GAP) / (rowHeight + SEED_ROW_GAP));
+
+  return { containerRef, rowRef: setRowEl, pageSize, firstPageRowsForSeparator };
+}
+
 /* ─────────────────────────────── the surface ──────────────────────────── */
 
 export function ArweaveSeedsArea({
@@ -917,6 +1187,10 @@ export function ArweaveSeedsArea({
   onDeleteSeed,
   decryptArweaveKey,
   onRunActivityChange,
+  fullScreenPortalTarget,
+  onPaginationHandleChange,
+  onOpenSeedFormHandleChange,
+  ensureCodexUnlocked,
 }: ArweaveSeedsAreaProps = {}): React.ReactElement {
   /** Seeds defined in this session. Merged with (not replacing) the prop list,
    *  so the surface works both controlled and standalone. */
@@ -1107,6 +1381,17 @@ export function ArweaveSeedsArea({
     setDirectBitmap(null);
     setDefining(true);
   }, []);
+
+  // Reports `openDefine` up to `ArweavePanel` so its shared mobile tablist
+  // row can offer the same "+" button `ChainwebPanel.tsx` already gives
+  // `SeedWordsTab` — see `onOpenSeedFormHandleChange`'s own doc comment.
+  // `openDefine` is referentially stable (empty deps above), so this only
+  // actually re-fires on the callback prop identity changing or on
+  // mount/unmount — never on every render.
+  useEffect(() => {
+    onOpenSeedFormHandleChange?.(openDefine);
+    return () => onOpenSeedFormHandleChange?.(null);
+  }, [onOpenSeedFormHandleChange, openDefine]);
 
   /** The C toggle's own handler: switching INTO Direct always resets its width
    *  to 1600, so re-entering Direct is never left showing a width toggle that
@@ -1339,6 +1624,180 @@ export function ArweaveSeedsArea({
 
   /* ── generation state ── */
   const [openSeedId, setOpenSeedId] = useState<string | null>(null);
+
+  // MOBILE ONLY — measured seed-list pagination (see `useMobileSeedPageSize`'s
+  // own doc comment for the full reasoning, including why it's collapsed-
+  // row-height-only, no hard `overflow: hidden` bound). Desktop stays
+  // fully unpaginated, unchanged.
+  const isMobile = useIsMobile();
+  const { containerRef: seedsPageContainerRef, rowRef: seedsPageRowRef, pageSize: mobileSeedPageSize, firstPageRowsForSeparator } = useMobileSeedPageSize();
+  const [seedPage, setSeedPage] = useState(0);
+  const wouldFitMoreThanOneSeed = mobileSeedPageSize > 1;
+  const firstSeedPageSize = wouldFitMoreThanOneSeed ? Math.max(1, mobileSeedPageSize - firstPageRowsForSeparator) : mobileSeedPageSize;
+  const mobileSeedPages = useMemo(() => {
+    if (seeds.length === 0) return [[]] as ArweaveSeedRecord[][];
+    const out: ArweaveSeedRecord[][] = [seeds.slice(0, firstSeedPageSize)];
+    for (let i = firstSeedPageSize; i < seeds.length; i += mobileSeedPageSize) {
+      out.push(seeds.slice(i, i + mobileSeedPageSize));
+    }
+    return out;
+  }, [seeds, firstSeedPageSize, mobileSeedPageSize]);
+  const seedTotalPages = isMobile ? mobileSeedPages.length : 1;
+  const clampedSeedPage = Math.min(seedPage, seedTotalPages - 1);
+
+  // Round 9 "standard pagination controls zone" — reports upward whenever a
+  // caller opts in (see `onPaginationHandleChange`'s own doc comment for
+  // the fallback rule); `ArweavePanel` renders the ACTUAL medallion.
+  const reportsPaginationExternally = !!onPaginationHandleChange;
+  useEffect(() => {
+    if (!reportsPaginationExternally) return;
+    if (seedTotalPages <= 1) {
+      onPaginationHandleChange?.(null);
+      return;
+    }
+    onPaginationHandleChange?.({
+      page: clampedSeedPage,
+      totalPages: seedTotalPages,
+      onPrev: () => setSeedPage((p) => Math.max(0, p - 1)),
+      onNext: () => setSeedPage((p) => Math.min(seedTotalPages - 1, p + 1)),
+      onJump: (p) => setSeedPage(p),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsPaginationExternally, seedTotalPages, clampedSeedPage, onPaginationHandleChange]);
+
+  /**
+   * Round 21 owner correction: "same slide swipe animation must be for the
+   * seed view as well, which now currently doesnt have such a thing" — a
+   * direct port of `ArweaveAccountsArea.tsx`'s own identical drag-following,
+   * two-pane swipe carousel (rounds 11/18/20 there), MOBILE ONLY. Desktop
+   * (`seedTotalPages` always 1, per above) never mounts the swipe track at
+   * all — see the JSX below.
+   *
+   * Safe to bound the container with `overflow: hidden` on mobile now
+   * (round 21's other change): an expanded seed row no longer grows this
+   * list's own height on mobile — `SeedRow`'s `open` state now portals a
+   * full-screen `CodexModalShell` instead of an inline accordion (see
+   * round 21's `SeedRow` change), so there is nothing left for a clipped
+   * overflow to cut off. Desktop is untouched — it still expands inline,
+   * and its own branch below never sets `overflow: hidden`.
+   */
+  const seedSwipeStart = useRef<{ x: number; y: number } | null>(null);
+  const [seedSwipeAxis, setSeedSwipeAxis] = useState<"horizontal" | "vertical" | null>(null);
+  const [seedDragX, setSeedDragX] = useState(0);
+  const [seedDragTransition, setSeedDragTransition] = useState(false);
+  const [seedDragDirection, setSeedDragDirection] = useState<"next" | "prev" | null>(null);
+  const SEED_SWIPE_THRESHOLD_PX = 40;
+  const SEED_SWIPE_AXIS_DEADZONE_PX = 8;
+  const SEED_SWIPE_SETTLE_MS = 200;
+  const onSeedsTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    if (!t) return;
+    seedSwipeStart.current = { x: t.clientX, y: t.clientY };
+    setSeedSwipeAxis(null);
+    setSeedDragDirection(null);
+    setSeedDragTransition(false);
+  };
+  const onSeedsTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = seedSwipeStart.current;
+    const t = e.touches[0];
+    if (!start || !t) return;
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    let axis = seedSwipeAxis;
+    if (axis === null) {
+      if (Math.abs(dx) < SEED_SWIPE_AXIS_DEADZONE_PX && Math.abs(dy) < SEED_SWIPE_AXIS_DEADZONE_PX) return;
+      axis = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+      setSeedSwipeAxis(axis);
+    }
+    if (axis !== "horizontal") return;
+    const atFirstPage = clampedSeedPage === 0;
+    const atLastPage = clampedSeedPage >= seedTotalPages - 1;
+    const resisted = (dx > 0 && atFirstPage) || (dx < 0 && atLastPage) ? dx * 0.35 : dx;
+    setSeedDragX(resisted);
+    if (seedDragDirection === null) {
+      if (dx < 0 && !atLastPage) setSeedDragDirection("next");
+      else if (dx > 0 && !atFirstPage) setSeedDragDirection("prev");
+    }
+  };
+  const onSeedsTouchEnd = () => {
+    const start = seedSwipeStart.current;
+    seedSwipeStart.current = null;
+    const axis = seedSwipeAxis;
+    setSeedSwipeAxis(null);
+    if (!start || axis !== "horizontal") { setSeedDragTransition(true); setSeedDragX(0); return; }
+    const committingNext = seedDragX <= -SEED_SWIPE_THRESHOLD_PX && clampedSeedPage < seedTotalPages - 1;
+    const committingPrev = seedDragX >= SEED_SWIPE_THRESHOLD_PX && clampedSeedPage > 0;
+    if (!committingNext && !committingPrev) { setSeedDragTransition(true); setSeedDragX(0); return; }
+    const containerWidth = seedsPageContainerRef.current?.clientWidth || 320;
+    setSeedDragTransition(true);
+    setSeedDragX(committingNext ? -containerWidth : containerWidth);
+    window.setTimeout(() => {
+      setSeedPage((p) => (committingNext ? Math.min(seedTotalPages - 1, p + 1) : Math.max(0, p - 1)));
+      setSeedDragTransition(false);
+      setSeedDragX(0);
+      setSeedDragDirection(null);
+    }, SEED_SWIPE_SETTLE_MS);
+  };
+
+  /** Renders ONE page's worth of seed rows — factored out so the swipe
+   *  carousel can mount it up to three times (current page, plus whichever
+   *  adjacent page `seedDragDirection` is currently revealing). On desktop
+   *  (`!isMobile`), `pageIndex` is irrelevant — the full unpaginated `seeds`
+   *  list renders exactly as it always has. `measureFirstRow` is true ONLY
+   *  for the currently-displayed page's own first (collapsed) row. */
+  const renderSeedsPage = (pageIndex: number, measureFirstRow: boolean): React.ReactNode => {
+    const list = isMobile ? (mobileSeedPages[pageIndex] ?? []) : seeds;
+    let measured = false;
+    return list.map((seed) => {
+      const shouldMeasure = measureFirstRow && isMobile && !measured && openSeedId !== seed.id;
+      if (shouldMeasure) measured = true;
+      return (
+        <React.Fragment key={seed.id}>
+          <div ref={shouldMeasure ? seedsPageRowRef : undefined}>
+            <SeedRow
+              seed={seed}
+              isPrime={seed === primeSeed}
+              fullScreenPortalTarget={fullScreenPortalTarget}
+              open={openSeedId === seed.id}
+              onToggle={() => setOpenSeedId((prev) => (prev === seed.id ? null : seed.id))}
+              keys={existingKeys}
+              confirmingDelete={pendingDeleteId === seed.id}
+              onRequestDelete={() => setPendingDeleteId(seed.id)}
+              onCancelDelete={() => setPendingDeleteId(null)}
+              onConfirmDelete={() => confirmDelete(seed)}
+              decryptKey={decryptArweaveKey}
+              run={run !== null && run.seedId === seed.id ? run : null}
+              isMobile={isMobile}
+              ensureCodexUnlocked={ensureCodexUnlocked}
+            >
+              <GenerateControls
+                cap={cap}
+                mode={mode}
+                setMode={setMode}
+                positionText={positionText}
+                setPositionText={setPositionText}
+                upToText={upToText}
+                setUpToText={setUpToText}
+                rangesText={rangesText}
+                setRangesText={setRangesText}
+                error={generateError}
+                run={run !== null && run.seedId === seed.id ? run : null}
+                running={running}
+                canGenerate={workerFactory !== undefined && persistKey !== undefined}
+                onRun={() => void startRun(seed)}
+                onCancel={cancelRun}
+              />
+            </SeedRow>
+          </div>
+          {/* The separator marks the boundary between the Prime seed and
+              every other one — ported from `SeedWordsTab.tsx`, only when
+              there IS a "rest" to separate it from ON THIS PAGE. */}
+          {seed === primeSeed && list.length > 1 && <PrimeSeparator label="Other Seeds" />}
+        </React.Fragment>
+      );
+    });
+  };
+
   const [mode, setMode] = useState<GenerateMode>("default");
   const [positionText, setPositionText] = useState("1");
   const [upToText, setUpToText] = useState("10");
@@ -1404,6 +1863,21 @@ export function ArweaveSeedsArea({
       }
       if (plan.ranges.length === 0) {
         setGenerateError("Every requested position already has a key — nothing to generate.");
+        return;
+      }
+
+      // Round 25 owner correction: "couldnt add a new RSA key, codex is
+      // locked" — every generated key's `persistKey` call needs the codex
+      // password to encrypt it; a locked codex made EVERY key found during
+      // the run fail to store (silently dropped, `held`/`sessionIndices`
+      // rolled back so a later run could retry) while the crypto search
+      // itself kept burning CPU regardless, surfacing only as a
+      // `generateError` overwritten by every next key's identical failure.
+      // Gate ONCE, up front — same `ensureCodexUnlocked` shape
+      // `useRsaParamsSection`'s own round-22 fix already uses — so the
+      // whole run only starts once the password is actually available; a
+      // cancelled prompt stops here, before any worker/CPU time is spent.
+      if (ensureCodexUnlocked !== undefined && !(await ensureCodexUnlocked())) {
         return;
       }
 
@@ -1516,7 +1990,7 @@ export function ArweaveSeedsArea({
         abortRef.current = null;
       }
     },
-    [buildSelection, existingKeys, cap, workerFactory, persistKey],
+    [buildSelection, existingKeys, cap, workerFactory, persistKey, ensureCodexUnlocked],
   );
 
   const cancelRun = useCallback((): void => {
@@ -1655,7 +2129,11 @@ export function ArweaveSeedsArea({
   return (
     <div
       data-testid="arweave-seeds-area"
-      style={{ display: "flex", flexDirection: "column", gap: 12, color: "#d2d3d4" }}
+      style={{
+        display: "flex", flexDirection: "column", gap: 12, color: "#d2d3d4",
+        height: isMobile ? "100%" : undefined,
+        minHeight: isMobile ? 0 : undefined,
+      }}
     >
       {/* The Prime Arweave Seed ALWAYS occupies the first row — defined or not.
           In a Codex with no Arweave material this row IS the entry point. */}
@@ -1729,48 +2207,140 @@ export function ArweaveSeedsArea({
           )}
         </>
       ) : (
-        seeds.map((seed) => (
-          <React.Fragment key={seed.id}>
-            <SeedRow
-              seed={seed}
-              isPrime={seed === primeSeed}
-              open={openSeedId === seed.id}
-              onToggle={() => setOpenSeedId((prev) => (prev === seed.id ? null : seed.id))}
-              keys={existingKeys}
-              confirmingDelete={pendingDeleteId === seed.id}
-              onRequestDelete={() => setPendingDeleteId(seed.id)}
-              onCancelDelete={() => setPendingDeleteId(null)}
-              onConfirmDelete={() => confirmDelete(seed)}
-              decryptKey={decryptArweaveKey}
-              run={run !== null && run.seedId === seed.id ? run : null}
+        <div
+          ref={seedsPageContainerRef}
+          data-testid="arweave-seeds-page-surface"
+          onTouchStart={isMobile ? onSeedsTouchStart : undefined}
+          onTouchMove={isMobile ? onSeedsTouchMove : undefined}
+          onTouchEnd={isMobile ? onSeedsTouchEnd : undefined}
+          style={{
+            display: "flex", flexDirection: "column",
+            // Round 10 owner correction: "we need to have the same
+            // separator everywhere. so there needs to be the same size of
+            // the border left right up and down." MOBILE gets `SEED_ROW_GAP`
+            // — the exact constant `useMobileSeedPageSize` measures with —
+            // so the real rendered spacing can't drift from what the engine
+            // assumed. Desktop's own `gap: 12` is untouched (byte-identical
+            // to before this round).
+            gap: isMobile ? SEED_ROW_GAP : 12,
+            // MOBILE ONLY — bounds this list to whatever's actually left
+            // over, so `useMobileSeedPageSize` measures real available
+            // height (design.md §8, round 8 follow-up: "we need [the] same
+            // pagination... at the seeds level"). Round 21: now SAFE to
+            // clip (`overflow: hidden`, matching `ArweaveAccountsArea.tsx`'s
+            // own identical container) — an expanded row no longer grows
+            // this list on mobile (it portals full screen instead, see
+            // `SeedRow`'s own round-21 change), so there's nothing left to
+            // cut off; this is also what the swipe track below needs to
+            // have anything to slide WITHIN. Desktop is untouched — still
+            // unbounded, still grows naturally.
+            flex: isMobile ? 1 : undefined,
+            minHeight: isMobile ? 0 : undefined,
+            overflow: isMobile ? "hidden" : undefined,
+            // MOBILE ONLY — matching padding on every side, same reasoning
+            // as the `gap` above; `useMobileSeedPageSize` subtracts this
+            // back out of the measured `clientHeight` before packing.
+            padding: isMobile ? SEED_ROW_GAP : undefined,
+          }}
+        >
+          {isMobile ? (
+            // Round 21 — the drag-following two-pane swipe carousel, a
+            // direct port of `ArweaveAccountsArea.tsx`'s own identical
+            // structure (see the hooks above for the full reasoning).
+            <div
+              data-testid="arweave-seeds-page-swipe-track"
+              style={{
+                display: "flex", flexDirection: "row",
+                transform: `translateX(${(seedDragDirection === "prev" ? -(seedsPageContainerRef.current?.clientWidth || 320) : 0) + seedDragX}px)`,
+                transition: seedDragTransition ? `transform ${SEED_SWIPE_SETTLE_MS}ms ease-out` : "none",
+              }}
             >
-              <GenerateControls
-                cap={cap}
-                mode={mode}
-                setMode={setMode}
-                positionText={positionText}
-                setPositionText={setPositionText}
-                upToText={upToText}
-                setUpToText={setUpToText}
-                rangesText={rangesText}
-                setRangesText={setRangesText}
-                error={generateError}
-                run={run !== null && run.seedId === seed.id ? run : null}
-                running={running}
-                canGenerate={workerFactory !== undefined && persistKey !== undefined}
-                onRun={() => void startRun(seed)}
-                onCancel={cancelRun}
-              />
-            </SeedRow>
-            {/* The separator marks the boundary between the Prime seed and
-                every other one — ported from `SeedWordsTab.tsx`, only when
-                there IS a "rest" to separate it from. */}
-            {seed === primeSeed && seeds.length > 1 && <PrimeSeparator label="Other Seeds" />}
-          </React.Fragment>
-        ))
+              {seedDragDirection === "prev" && (
+                <div style={{ width: seedsPageContainerRef.current?.clientWidth || 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: SEED_ROW_GAP }}>
+                  {renderSeedsPage(clampedSeedPage - 1, false)}
+                </div>
+              )}
+              <div
+                style={{
+                  width: seedDragDirection ? (seedsPageContainerRef.current?.clientWidth || 320) : "100%",
+                  flexShrink: 0, display: "flex", flexDirection: "column", gap: SEED_ROW_GAP,
+                }}
+              >
+                {renderSeedsPage(clampedSeedPage, true)}
+              </div>
+              {seedDragDirection === "next" && (
+                <div style={{ width: seedsPageContainerRef.current?.clientWidth || 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: SEED_ROW_GAP }}>
+                  {renderSeedsPage(clampedSeedPage + 1, false)}
+                </div>
+              )}
+            </div>
+          ) : (
+            renderSeedsPage(0, false)
+          )}
+        </div>
       )}
 
-      {primeSeed !== undefined && !defining && (
+      {/* Prev/Next — MOBILE ONLY (design.md §8, round 8 follow-up: "we need
+          [the] same pagination... at the seeds level"). Mirrors
+          `SeedWordsTab.tsx`'s own Prev/Next styling. Round 8 follow-up —
+          owner correction: "if we bring the pagination engine in the bar
+          below (see 4th screenshot), probably 4 would have fit." Portaled
+          OUT of the measured column into `fullScreenPortalTarget` and
+          docked to the bottom edge, mirroring `SeedWordsTab.tsx`'s own
+          identical correction — frees the row this control used to occupy
+          back to the seed list. Falls back to the old inline placement
+          (unchanged) when no portal target is supplied. Round 9 —
+          "standard pagination controls zone": once a caller opts into
+          `onPaginationHandleChange`, THIS rendering is suppressed entirely
+          — `ArweavePanel` renders the shared medallion version instead. */}
+      {!reportsPaginationExternally && isMobile && primeSeed !== undefined && seedTotalPages > 1 && (
+        <MobilePortal target={fullScreenPortalTarget}>
+          <div
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+              position: fullScreenPortalTarget ? "absolute" : undefined,
+              left: fullScreenPortalTarget ? 0 : undefined,
+              right: fullScreenPortalTarget ? 0 : undefined,
+              bottom: fullScreenPortalTarget ? 12 : undefined,
+              marginTop: fullScreenPortalTarget ? undefined : 4,
+              zIndex: fullScreenPortalTarget ? 5 : undefined,
+              pointerEvents: fullScreenPortalTarget ? "none" : undefined,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, pointerEvents: "auto" }}>
+              <button
+                type="button"
+                aria-label="Previous page"
+                onClick={() => setSeedPage(Math.max(0, clampedSeedPage - 1))}
+                disabled={clampedSeedPage === 0}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, border: "1px solid #262626", background: "transparent", color: "#d2d3d4", cursor: clampedSeedPage === 0 ? "default" : "pointer", opacity: clampedSeedPage === 0 ? 0.3 : 1 }}
+              >
+                <ChevronLeftGlyph style={{ width: 14, height: 14 }} />
+              </button>
+              <PageJumpIndicator page={clampedSeedPage} totalPages={seedTotalPages} onJump={setSeedPage} />
+              <button
+                type="button"
+                aria-label="Next page"
+                onClick={() => setSeedPage(Math.min(seedTotalPages - 1, clampedSeedPage + 1))}
+                disabled={clampedSeedPage >= seedTotalPages - 1}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, border: "1px solid #262626", background: "transparent", color: "#d2d3d4", cursor: clampedSeedPage >= seedTotalPages - 1 ? "default" : "pointer", opacity: clampedSeedPage >= seedTotalPages - 1 ? 0.3 : 1 }}
+              >
+                <ChevronRightGlyph style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+        </MobilePortal>
+      )}
+
+      {/* MOBILE round 20 owner correction: "add arweave seed must be similar
+          to how chainwebs seed is added wit ha plus button in the upper line
+          aligned right" — that "+" now lives in `ArweavePanel.tsx`'s shared
+          mobile tablist row (via `onOpenSeedFormHandleChange` above), the
+          same relocation `SeedWordsTab.tsx` already applies to ITS own
+          "Create New Seed" button on mobile. This bottom button stays
+          exactly as it was, but ONLY on desktop now, to avoid offering the
+          same action twice on a phone-width screen. */}
+      {primeSeed !== undefined && !defining && !isMobile && (
         <button
           type="button"
           data-testid="arweave-add-seed"
@@ -1782,51 +2352,85 @@ export function ArweaveSeedsArea({
         </button>
       )}
 
+      {/* Round 21 owner correction: "Clicking plus to add seed on arweave
+          must open it full screen, same as on chainweb" — `CodexModalShell`
+          renders as a modal on EVERY width (a centered card on desktop, a
+          full-bleed sheet on mobile — its own built-in split, see its doc
+          comment), so wrapping here gives BOTH the desktop parity AND the
+          mobile full-screen behavior `CreateStoaChainSeedModal.tsx` already
+          has — the exact same recipe this file's own "View Seed" reveal
+          uses a few lines below. `DefineSeedForm`'s own root no longer
+          carries its own border/padding (removed above): the modal card
+          supplies that chrome now, so nothing nests box-in-box. */}
       {defining && (
-        <DefineSeedForm
-          primeDefinition={primeSeed === undefined}
-          generatorMode={generatorMode}
-          setGeneratorMode={handleSetGeneratorMode}
-          directWidth={directWidth}
-          setDirectWidth={setDirectWidth}
-          directKind={directKind}
-          setDirectKind={setDirectKind}
-          directBitStringText={directBitStringText}
-          setDirectBitStringText={setDirectBitStringText}
-          directInt10Text={directInt10Text}
-          setDirectInt10Text={setDirectInt10Text}
-          directInt49Text={directInt49Text}
-          setDirectInt49Text={setDirectInt49Text}
-          directBitmap={directBitmap}
-          setDirectBitmap={setDirectBitmap}
-          directResolution={directResolution}
-          source={source}
-          setSource={setSource}
-          seedInputTile={seedInputTile}
-          setSeedInputTile={chooseSeedInputTile}
-          wordsText={wordsText}
-          setWordsText={setWordsText}
-          restrictedWords={restrictedWords}
-          setWordAt={setWordAt}
-          restrictedInvalid={restrictedInvalid}
-          restrictedNotice={restrictedNotice}
-          dictionaryWords={dictionaryWords}
-          confirmBlocked={source === "words" && variant === "restricted" && !restrictedReady}
-          labelText={labelText}
-          setLabelText={setLabelText}
-          accounts={dalosAccounts}
-          selectedAccountId={selectedAccountId}
-          setAccountChoice={setAccountChoice}
-          chainwebSeeds={chainwebSeeds}
-          selectedChainwebId={selectedChainwebId}
-          setChainwebChoice={setChainwebChoice}
-          onGeneratePhrase={() => void fillRandomPhrase()}
-          onClearWords={clearWords}
-          busy={defining0}
-          error={defineError}
-          onConfirm={() => void confirmDefine()}
-          onCancel={() => setDefining(false)}
-        />
+        <MobilePortal target={fullScreenPortalTarget}>
+          <CodexModalShell
+            title="Add Arweave Seed"
+            onClose={() => setDefining(false)}
+            maxWidth={560}
+            dialogTestId="arweave-seed-define-modal"
+            closeTestId="arweave-seed-define-close"
+            // Round 22 owner correction: "the name with the input field
+            // define seed and calce. must be at the bottom of the page,
+            // fixes... they must remain at all times on screen" — the SAME
+            // fixed-header/scrolling-body/pinned-footer split this shell
+            // already offers every other modal in the app; `DefineSeedForm`
+            // (now body-only) is `children`, `DefineSeedFormFooter` is
+            // `footer`.
+            footer={
+              <DefineSeedFormFooter
+                primeDefinition={primeSeed === undefined}
+                generatorMode={generatorMode}
+                directResolution={directResolution}
+                confirmBlocked={source === "words" && variant === "restricted" && !restrictedReady}
+                labelText={labelText}
+                setLabelText={setLabelText}
+                busy={defining0}
+                error={defineError}
+                onConfirm={() => void confirmDefine()}
+                onCancel={() => setDefining(false)}
+              />
+            }
+          >
+            <DefineSeedForm
+              primeDefinition={primeSeed === undefined}
+              generatorMode={generatorMode}
+              setGeneratorMode={handleSetGeneratorMode}
+              directWidth={directWidth}
+              setDirectWidth={setDirectWidth}
+              directKind={directKind}
+              setDirectKind={setDirectKind}
+              directBitStringText={directBitStringText}
+              setDirectBitStringText={setDirectBitStringText}
+              directInt10Text={directInt10Text}
+              setDirectInt10Text={setDirectInt10Text}
+              directInt49Text={directInt49Text}
+              setDirectInt49Text={setDirectInt49Text}
+              directBitmap={directBitmap}
+              setDirectBitmap={setDirectBitmap}
+              directResolution={directResolution}
+              source={source}
+              setSource={setSource}
+              seedInputTile={seedInputTile}
+              setSeedInputTile={chooseSeedInputTile}
+              wordsText={wordsText}
+              setWordsText={setWordsText}
+              restrictedWords={restrictedWords}
+              setWordAt={setWordAt}
+              restrictedInvalid={restrictedInvalid}
+              restrictedNotice={restrictedNotice}
+              dictionaryWords={dictionaryWords}
+              accounts={dalosAccounts}
+              selectedAccountId={selectedAccountId}
+              setAccountChoice={setAccountChoice}
+              chainwebSeeds={chainwebSeeds}
+              selectedChainwebId={selectedChainwebId}
+              setChainwebChoice={setChainwebChoice}
+              onGeneratePhrase={() => void fillRandomPhrase()}
+              onClearWords={clearWords}
+            />
+          </CodexModalShell>
+        </MobilePortal>
       )}
     </div>
   );
@@ -1904,6 +2508,102 @@ function PrimeSeparator({ label }: { label: string }): React.ReactElement {
   );
 }
 
+/** MOBILE-only per-seed triple-dot menu — "as it is now follow similar
+ *  architecture, with triple point for view seed and clicking it enters
+ *  full screen for the details" — a direct port of `SeedWordsTab.tsx`'s own
+ *  `SeedActions`, using this module's inline-SVG glyph convention instead
+ *  of `lucide-react`. No Rename item: unlike Chainweb seeds, Arweave seeds
+ *  have no rename affordance at all today, on desktop or mobile. */
+function SeedRowActions({
+  seedId,
+  onView,
+  onDelete,
+}: {
+  /** Suffixes every testid so a page with multiple rows never has two
+   *  elements answering to the same `data-testid` (each row mounts its
+   *  own `SeedRowActions`). */
+  seedId: string;
+  onView: () => void;
+  onDelete: () => void;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  // Anchored to the viewport (position: fixed), same reasoning as
+  // `SeedActions`' own comment: this row's card clips overflow for its
+  // rounded corners, so a child dropdown would get cut off.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const item: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px",
+    background: "transparent", border: "none", cursor: "pointer", fontSize: 13, textAlign: "left",
+  };
+  const toggle = (): void => {
+    if (!open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    }
+    setOpen((v) => !v);
+  };
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid={`arweave-seed-row-actions-trigger-${seedId}`}
+        aria-label="Seed actions"
+        onClick={toggle}
+        style={{
+          width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center",
+          borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", color: "#888",
+        }}
+      >
+        <MoreVerticalGlyph style={{ width: 18, height: 18 }} />
+      </button>
+      {/* Round 22 owner correction: "clicking the triple point makes the
+          menu appear in the wrong place." Root cause: round 21's swipe
+          carousel wraps every row in a `transform: translateX(...)`
+          ancestor (the swipe track) — even at rest (`translateX(0px)`), a
+          non-`none` `transform` on an ancestor makes THAT ancestor the
+          containing block for any `position: fixed` descendant instead of
+          the viewport (CSS Transforms spec), so `pos` (computed viewport-
+          relative via `getBoundingClientRect`) landed nowhere near the
+          trigger. Portaling straight to `document.body` — the SAME fix
+          applied to `SeedWordsTab.tsx`'s identical `SeedActions` — escapes
+          ANY transformed ancestor, regardless of what the swipe carousel
+          is doing. */}
+      {open && createPortal(
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 1000 }} />
+          <div
+            style={{
+              position: "fixed", top: pos.top, right: pos.right, zIndex: 1001, width: 176, padding: "4px 0",
+              borderRadius: 8, backgroundColor: "#1f1f1f", border: "1px solid #262626", boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            }}
+          >
+            <button
+              type="button"
+              data-testid={`arweave-seed-row-actions-view-${seedId}`}
+              style={{ ...item, color: "#d2d3d4" }}
+              onClick={() => { setOpen(false); onView(); }}
+            >
+              <EyeGlyph style={{ width: 16, height: 16 }} /> View Seed
+            </button>
+            <div style={{ height: 1, backgroundColor: "#919eab3d", margin: "4px 0" }} />
+            <button
+              type="button"
+              data-testid={`arweave-seed-row-actions-delete-${seedId}`}
+              style={{ ...item, color: "#c0392b" }}
+              onClick={() => { setOpen(false); onDelete(); }}
+            >
+              <TrashGlyph style={{ width: 16, height: 16 }} /> Delete
+            </button>
+          </div>
+        </>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
 function SeedRow({
   seed,
   isPrime,
@@ -1917,6 +2617,9 @@ function SeedRow({
   decryptKey,
   run,
   children,
+  fullScreenPortalTarget,
+  isMobile,
+  ensureCodexUnlocked,
 }: {
   seed: ArweaveSeedRecord;
   isPrime: boolean;
@@ -1934,6 +2637,18 @@ function SeedRow({
   run: RunState | null;
   /** The generate box. Rendered FIRST, above the address list. */
   children: React.ReactNode;
+  /** See `ArweaveSeedsAreaProps`'s own doc comment. */
+  fullScreenPortalTarget?: Element | null;
+  /** MOBILE ONLY — swaps the always-visible "View Seed" text link + trash
+   *  icon for a single triple-dot menu (`SeedRowActions`), the same
+   *  compact-row architecture `SeedWordsTab.tsx`'s own `SeedActions`
+   *  already uses ("as it is now follow similar architecture, with triple
+   *  point for view seed and clicking it enters full screen"). Desktop is
+   *  untouched — both buttons stay inline exactly as before. */
+  isMobile: boolean;
+  /** See `RsaParamsSectionProps.ensureCodexUnlocked`'s own doc comment —
+   *  forwarded to every stored key's RSA-parameter panel below. */
+  ensureCodexUnlocked?: () => Promise<boolean>;
 }): React.ReactElement {
   /** Whether this row's "View Seed" overlay is open (arweave-seed-reveal-v1). */
   const [revealOpen, setRevealOpen] = useState(false);
@@ -1988,85 +2703,84 @@ function SeedRow({
       data-defined="true"
       data-seed-id={seed.id}
       style={{
+        // Round 19 owner correction: "THe seed entryies on arweve are way
+        // to unoptimal as we should strive to use the whole width" — this
+        // card had no `width` at all, relying only on the list container's
+        // own `flexDirection: column` default `align-items: stretch` to
+        // fill it, which evidently didn't land reliably on mobile. Explicit
+        // `width: 100%, boxSizing: border-box` — the SAME convention
+        // `SeedWordsTab.tsx`'s own mobile row header already establishes —
+        // is a strictly stronger guarantee than leaning on flex defaults.
+        width: "100%",
+        boxSizing: "border-box",
         border: isPrime ? "1px solid #ceac5f40" : "1px solid #262626",
         borderRadius: 12,
         overflow: "hidden",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", backgroundColor: "#0d0d0d" }}>
-        <button
-          type="button"
-          data-testid={`arweave-seed-toggle-${seed.id}`}
-          aria-expanded={open}
-          onClick={onToggle}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flex: 1,
-            minWidth: 0,
-            padding: "12px 14px",
-            cursor: "pointer",
-            border: "none",
-            backgroundColor: "transparent",
-            textAlign: "left",
-            color: "inherit",
-          }}
-        >
-          {/* The Prime row swaps its chevron for a lock — decorative only:
-              the toggle still opens/closes the row exactly as before. */}
-          {isPrime ? (
-            <LockGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} />
-          ) : open ? (
-            <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
-          ) : (
-            <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />
-          )}
-          <span style={{ flex: 1 }}>
-            <span
-              style={{
-                fontWeight: 600,
-                fontSize: 14,
-                display: "block",
-                color: isPrime ? "#ceac5f" : "#d2d3d4",
-              }}
-            >
-              {seed.label}
+      {isMobile ? (
+        // Round 25 owner correction: "the seed entry on arweave, we need to
+        // make it to text row, and decrease its height. Upperl left
+        // corener aligned, name. Lower lweft corener bit size 1600 bit
+        // (nothing more). Upper right corner the 3 point menu, and in its
+        // left the numebr of keys stored. we remove prime medalion, we
+        // designed that it is prime simply via colour." A dedicated
+        // compact mobile layout — two lines total (name, bit size), no
+        // "DALOS seed"/"· Prime" suffix text and no Prime badge pill
+        // (prime is already conveyed by the lock icon + gold name color,
+        // same "differentiate by colour alone" rule `SeedWordsTab.tsx`'s
+        // own mobile row already applies). Desktop's own row (below) is
+        // untouched.
+        <div style={{ display: "flex", alignItems: "center", gap: 4, backgroundColor: "#0d0d0d" }}>
+          <button
+            type="button"
+            data-testid={`arweave-seed-toggle-${seed.id}`}
+            aria-expanded={open}
+            onClick={onToggle}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flex: 1,
+              minWidth: 0,
+              padding: "6px 14px",
+              cursor: "pointer",
+              border: "none",
+              backgroundColor: "transparent",
+              textAlign: "left",
+              color: "inherit",
+            }}
+          >
+            {isPrime ? (
+              <LockGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} />
+            ) : open ? (
+              <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
+            ) : (
+              <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />
+            )}
+            <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontSize: 14,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: isPrime ? "#ceac5f" : "#d2d3d4",
+                }}
+              >
+                {seed.label}
+              </span>
+              {/* Bit size ONLY — no "DALOS seed"/"· Prime" suffix (that
+                  text is what round 25 asks to drop). */}
+              <span style={{ fontSize: 11, color: "#666" }}>
+                {`${seed.bitLength ?? SEED_BIT_LENGTH}-bit`}
+              </span>
             </span>
-            {/* The seed BITS are key material and are never rendered — only their
-                width, which is a fixed, public property of every Arweave seed.
-                `bitLength` is absent for every Seed-Based seed (always 1600,
-                DALOS); a Direct-mode seed sets it explicitly, and a 1024-bit
-                one is APOLLO, not DALOS — this must not lie about either. */}
-            <span style={{ fontSize: 11, color: "#666" }}>
-              {`${seed.bitLength ?? SEED_BIT_LENGTH}-bit ${
-                (seed.bitLength ?? SEED_BIT_LENGTH) === 1024 ? "APOLLO" : "DALOS"
-              } seed`}
-              {isPrime ? " · Prime" : ""}
-            </span>
-          </span>
-          {/* `SeedWordsTab.tsx`'s exact badge style, ported verbatim. */}
-          {isPrime && (
-            <span
-              data-testid="arweave-prime-badge"
-              style={{
-                flexShrink: 0,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "2px 8px",
-                borderRadius: 9999,
-                fontSize: 10,
-                fontWeight: 600,
-                color: "#ceac5f",
-                backgroundColor: "#ceac5f20",
-              }}
-            >
-              {"\u{1F512} Prime"}
-            </span>
-          )}
+          </button>
           <span
             style={{
+              flexShrink: 0,
               fontSize: 11,
               fontWeight: 600,
               padding: "1px 8px",
@@ -2077,51 +2791,144 @@ function SeedRow({
           >
             {addressCount}
           </span>
-        </button>
-        {/* View this seed's key material (arweave-seed-reveal-v1) — same
-            visual weight as the delete button beside it. */}
-        <button
-          type="button"
-          data-testid={`arweave-seed-reveal-${seed.id}`}
-          aria-label={`View ${seed.label}`}
-          title="View this seed's key material"
-          onClick={() => setRevealOpen(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "10px 14px",
-            border: "none",
-            backgroundColor: "transparent",
-            color: "#888",
-            fontSize: 12,
-            cursor: "pointer",
-          }}
-        >
-          <EyeGlyph style={{ width: 15, height: 15 }} />
-          View Seed
-        </button>
-        {/* The Prime seed is deletable FOR NOW (development): the shipped build
-            makes it permanent, and only the warning copy ships in this pass. */}
-        <button
-          type="button"
-          data-testid={`arweave-seed-delete-${seed.id}`}
-          aria-label={`Delete ${seed.label}`}
-          title="Delete this seed and every Arweave key derived from it"
-          onClick={onRequestDelete}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "10px 14px",
-            border: "none",
-            backgroundColor: "transparent",
-            color: confirmingDelete ? "#f87171" : "#666",
-            cursor: "pointer",
-          }}
-        >
-          <TrashGlyph style={{ width: 15, height: 15 }} />
-        </button>
-      </div>
+          <SeedRowActions
+            seedId={seed.id}
+            onView={() => setRevealOpen(true)}
+            onDelete={onRequestDelete}
+          />
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", backgroundColor: "#0d0d0d" }}>
+          <button
+            type="button"
+            data-testid={`arweave-seed-toggle-${seed.id}`}
+            aria-expanded={open}
+            onClick={onToggle}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flex: 1,
+              minWidth: 0,
+              padding: "12px 14px",
+              cursor: "pointer",
+              border: "none",
+              backgroundColor: "transparent",
+              textAlign: "left",
+              color: "inherit",
+            }}
+          >
+            {/* The Prime row swaps its chevron for a lock — decorative only:
+                the toggle still opens/closes the row exactly as before. */}
+            {isPrime ? (
+              <LockGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#ceac5f" }} />
+            ) : open ? (
+              <ChevronDownGlyph style={{ width: 16, height: 16, flexShrink: 0, color: ACCENT }} />
+            ) : (
+              <ChevronRightGlyph style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />
+            )}
+            <span style={{ flex: 1 }}>
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontSize: 14,
+                  display: "block",
+                  color: isPrime ? "#ceac5f" : "#d2d3d4",
+                }}
+              >
+                {seed.label}
+              </span>
+              {/* The seed BITS are key material and are never rendered — only their
+                  width, which is a fixed, public property of every Arweave seed.
+                  `bitLength` is absent for every Seed-Based seed (always 1600,
+                  DALOS); a Direct-mode seed sets it explicitly, and a 1024-bit
+                  one is APOLLO, not DALOS — this must not lie about either. */}
+              <span style={{ fontSize: 11, color: "#666" }}>
+                {`${seed.bitLength ?? SEED_BIT_LENGTH}-bit ${
+                  (seed.bitLength ?? SEED_BIT_LENGTH) === 1024 ? "APOLLO" : "DALOS"
+                } seed`}
+                {isPrime ? " · Prime" : ""}
+              </span>
+            </span>
+            {/* `SeedWordsTab.tsx`'s exact badge style, ported verbatim. */}
+            {isPrime && (
+              <span
+                data-testid="arweave-prime-badge"
+                style={{
+                  flexShrink: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "2px 8px",
+                  borderRadius: 9999,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "#ceac5f",
+                  backgroundColor: "#ceac5f20",
+                }}
+              >
+                {"\u{1F512} Prime"}
+              </span>
+            )}
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: "1px 8px",
+                borderRadius: 9999,
+                color: "#555",
+                backgroundColor: "#1a1a1a",
+              }}
+            >
+              {addressCount}
+            </span>
+          </button>
+          {/* View this seed's key material (arweave-seed-reveal-v1) — same
+              visual weight as the delete button beside it. */}
+          <button
+            type="button"
+            data-testid={`arweave-seed-reveal-${seed.id}`}
+            aria-label={`View ${seed.label}`}
+            title="View this seed's key material"
+            onClick={() => setRevealOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "10px 14px",
+              border: "none",
+              backgroundColor: "transparent",
+              color: "#888",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            <EyeGlyph style={{ width: 15, height: 15 }} />
+            View Seed
+          </button>
+          {/* The Prime seed is deletable FOR NOW (development): the shipped
+              build makes it permanent, and only the warning copy ships in
+              this pass. */}
+          <button
+            type="button"
+            data-testid={`arweave-seed-delete-${seed.id}`}
+            aria-label={`Delete ${seed.label}`}
+            title="Delete this seed and every Arweave key derived from it"
+            onClick={onRequestDelete}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "10px 14px",
+              border: "none",
+              backgroundColor: "transparent",
+              color: confirmingDelete ? "#f87171" : "#666",
+              cursor: "pointer",
+            }}
+          >
+            <TrashGlyph style={{ width: 15, height: 15 }} />
+          </button>
+        </div>
+      )}
 
       {confirmingDelete && (
         <div
@@ -2162,105 +2969,166 @@ function SeedRow({
         </div>
       )}
 
-      {open && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12 }}>
-          {/* The generate box FIRST. It is the control the list below GROWS
-              from: under a seed holding two hundred addresses it would
-              otherwise sit a screenful down, and a run's Cancel with it. */}
-          {children}
-          {rows.length === 0 ? (
-            <div
-              data-testid={`arweave-seed-unused-${seed.id}`}
-              style={{ fontSize: 12, color: "#666" }}
+      {open && (() => {
+        // The generate box FIRST. It is the control the list below GROWS
+        // from: under a seed holding two hundred addresses it would
+        // otherwise sit a screenful down, and a run's Cancel with it.
+        const expandedContent = (
+          <>
+            {children}
+            {rows.length === 0 ? (
+              <div
+                data-testid={`arweave-seed-unused-${seed.id}`}
+                style={{ fontSize: 12, color: "#666" }}
+              >
+                Unused — this seed has generated no Arweave addresses yet.
+              </div>
+            ) : (
+              <div
+                data-testid={`arweave-seed-addresses-${seed.id}`}
+                style={{ display: "flex", flexDirection: "column", gap: 6 }}
+              >
+                {/* A STORED key gets the SAME RSA-parameter panel a freshly
+                    generated one does — that panel used to hang off the run list
+                    alone, so it vanished for every key the user came back to.
+                    The JWK is ciphertext here, so it is decrypted ON EXPAND. */}
+                {rows.map((row) =>
+                  row.kind === "pending" ? (
+                    <PendingKeyRow key={`pending-${row.index}`} index={row.index} />
+                  ) : row.kind === "fresh" ? (
+                    <ArweaveKeyRow
+                      key={`fresh-${row.index}`}
+                      prefix="arweave-generate-key"
+                      index={row.index}
+                      address={row.key.address}
+                      jwk={row.key.jwk}
+                      ensureCodexUnlocked={ensureCodexUnlocked}
+                    />
+                  ) : (
+                    <ArweaveKeyRow
+                      key={row.entry.id}
+                      prefix="arweave-seed-key"
+                      index={row.index}
+                      address={row.entry.address ?? row.entry.id}
+                      loadJwk={
+                        decryptKey === undefined ? undefined : () => decryptKey(row.entry)
+                      }
+                      ensureCodexUnlocked={ensureCodexUnlocked}
+                    />
+                  ),
+                )}
+              </div>
+            )}
+          </>
+        );
+        // Round 21 owner correction: "clicking a seed, must open it full
+        // screen" — mirrors `SeedWordsTab.tsx`'s own `expanded && isMobile`
+        // full-screen `CodexModalShell` for its key list. Desktop keeps the
+        // exact same inline accordion it always has (byte-identical wrapper
+        // below) — only mobile gets the modal.
+        return isMobile ? (
+          <MobilePortal target={fullScreenPortalTarget}>
+            <CodexModalShell
+              title={`${seed.label} — Keys`}
+              onClose={onToggle}
+              dialogTestId={`arweave-seed-expand-modal-${seed.id}`}
+              closeTestId="arweave-seed-expand-close"
             >
-              Unused — this seed has generated no Arweave addresses yet.
-            </div>
-          ) : (
-            <div
-              data-testid={`arweave-seed-addresses-${seed.id}`}
-              style={{ display: "flex", flexDirection: "column", gap: 6 }}
-            >
-              {/* A STORED key gets the SAME RSA-parameter panel a freshly
-                  generated one does — that panel used to hang off the run list
-                  alone, so it vanished for every key the user came back to.
-                  The JWK is ciphertext here, so it is decrypted ON EXPAND. */}
-              {rows.map((row) =>
-                row.kind === "pending" ? (
-                  <PendingKeyRow key={`pending-${row.index}`} index={row.index} />
-                ) : row.kind === "fresh" ? (
-                  <ArweaveKeyRow
-                    key={`fresh-${row.index}`}
-                    prefix="arweave-generate-key"
-                    index={row.index}
-                    address={row.key.address}
-                    jwk={row.key.jwk}
-                  />
-                ) : (
-                  <ArweaveKeyRow
-                    key={row.entry.id}
-                    prefix="arweave-seed-key"
-                    index={row.index}
-                    address={row.entry.address ?? row.entry.id}
-                    loadJwk={
-                      decryptKey === undefined ? undefined : () => decryptKey(row.entry)
-                    }
-                  />
-                ),
-              )}
-            </div>
-          )}
-        </div>
-      )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {expandedContent}
+              </div>
+            </CodexModalShell>
+          </MobilePortal>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12 }}>
+            {expandedContent}
+          </div>
+        );
+      })()}
 
       {revealOpen && (
         // The SAME popup chrome ViewSeedModal (Ouronet accounts) renders
         // into, at the SAME maxWidth — unified, not just size-matched, so an
         // Ouronet account's Secret Reveal and an Arweave seed's read as one
-        // surface rather than two differently-built lookalikes.
-        <CodexModalShell
-          title={`View ${seed.label}`}
-          onClose={() => setRevealOpen(false)}
-          maxWidth={880}
-          dialogTestId={`arweave-seed-reveal-modal-${seed.id}`}
-          closeTestId="arweave-seed-reveal-close"
-        >
-          {seed.bits === "" ? (
-            // A seed exists but the host has not decrypted it yet (locked
-            // codex) — `DalosSecretReveal` must NEVER mount on an empty
-            // plaintext (its own derivation would just fail silently).
-            <div data-testid="arweave-seed-reveal-locked" style={revealLockedStyle}>
-              This seed's material could not be decrypted — the codex may be
-              locked.
-            </div>
-          ) : seed.words !== undefined && seed.words.length > 0 ? (
-            // The seed genuinely has typed/decrypted words (typed-words,
-            // Chainweb-seed, or a seed-words-origin account source) —
-            // `originMode="seedWords"` gives it DalosSecretReveal's Seed
-            // tab (blurred, revealable via the SAME Reveal/Hide toggle every
-            // other representation already uses) IN ADDITION to the four
-            // derived tabs, not instead of them.
-            <DalosSecretReveal
-              plaintext={seed.words.join(" ")}
-              originMode="seedWords"
-              originCurve="dalos"
-              sourceLabelOverride={seed.sourceLabel}
-              hideAddress
-            />
-          ) : (
-            // No words — either a bitstring-origin Seed-Based source or a
-            // Direct-mode seed (which NEVER sets `words`). `originCurve` must
-            // match the seed's ACTUAL width: a 1024-bit Direct seed is APOLLO,
-            // and passing "dalos" here would make `DalosSecretReveal` derive
-            // (and size its Bitmap tab) on the wrong curve entirely.
-            <DalosSecretReveal
-              plaintext={seed.bits}
-              originMode="bitString"
-              originCurve={(seed.bitLength ?? SEED_BIT_LENGTH) === 1024 ? "apollo" : "dalos"}
-              sourceLabelOverride={seed.sourceLabel}
-              hideAddress
-            />
-          )}
-        </CodexModalShell>
+        // surface rather than two differently-built lookalikes. Portaled to
+        // `fullScreenPortalTarget` when supplied (mobile) — "same structure
+        // and design and placement of buttons as what we did for
+        // chainweb" — so it covers the WHOLE screen instead of being
+        // bounded to this tab's own Zone 3 rectangle.
+        <MobilePortal target={fullScreenPortalTarget}>
+          <CodexModalShell
+            title={`View ${seed.label}`}
+            onClose={() => setRevealOpen(false)}
+            maxWidth={880}
+            dialogTestId={`arweave-seed-reveal-modal-${seed.id}`}
+            closeTestId="arweave-seed-reveal-close"
+            fillBody
+          >
+            {seed.bits === "" ? (
+              // A seed exists but the host has not decrypted it yet (locked
+              // codex) — `DalosSecretReveal` must NEVER mount on an empty
+              // plaintext (its own derivation would just fail silently).
+              <div data-testid="arweave-seed-reveal-locked" style={revealLockedStyle}>
+                This seed's material could not be decrypted — the codex may be
+                locked.
+              </div>
+            ) : seed.words !== undefined && seed.words.length > 0 ? (
+              // The seed genuinely has typed/decrypted words (typed-words,
+              // Chainweb-seed, or a seed-words-origin account source) —
+              // `originMode="seedWords"` gives it DalosSecretReveal's Seed
+              // tab (blurred, revealable via the SAME Reveal/Hide toggle every
+              // other representation already uses) IN ADDITION to the four
+              // derived tabs, not instead of them.
+              <DalosSecretReveal
+                plaintext={seed.words.join(" ")}
+                originMode="seedWords"
+                originCurve="dalos"
+                sourceLabelOverride={seed.sourceLabel}
+                hideAddress
+              />
+            ) : (
+              // No words — either a bitstring-origin Seed-Based source or a
+              // Direct-mode seed (which NEVER sets `words`). `originCurve` must
+              // match the seed's ACTUAL width: a 1024-bit Direct seed is APOLLO,
+              // and passing "dalos" here would make `DalosSecretReveal` derive
+              // (and size its Bitmap tab) on the wrong curve entirely.
+              //
+              // Round 19 owner correction: "i can only see the bitstring, i
+              // should be able to see the seed words as well." This branch
+              // genuinely has no words to show — `seedWordsToBitString` is a
+              // ONE-WAY hash (no inverse exists anywhere in this codebase).
+              // `words` is `undefined` for TWO distinct reasons this
+              // component cannot reliably tell apart from its own data (see
+              // `ArweaveSeedRecord.words`'s own doc comment: a Direct-mode
+              // seed never captures words at all BY DESIGN, and a
+              // words-origin seed's session-only words are just as
+              // `undefined` once lost after a reload) — so rather than
+              // guess and risk telling the user something false, this note
+              // covers both truthfully instead of silently omitting them
+              // (which reads as a bug rather than an explained limitation).
+              <>
+                <div
+                  data-testid="arweave-seed-reveal-no-words-note"
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 8, padding: 8, borderRadius: 8,
+                    backgroundColor: "#1a1a0a08", border: "1px solid #ceac5f30", marginBottom: 14, fontSize: 11, lineHeight: 1.5, color: "#ceac5f",
+                  }}
+                >
+                  <span>
+                    No seed words to show for this seed — either it was created directly from a bitstring (Direct mode, which never has typed words behind it), or its typed words were only ever kept for this session and are gone after a reload. Every OTHER representation below still fully reconstructs the same key.
+                  </span>
+                </div>
+                <DalosSecretReveal
+                  plaintext={seed.bits}
+                  originMode="bitString"
+                  originCurve={(seed.bitLength ?? SEED_BIT_LENGTH) === 1024 ? "apollo" : "dalos"}
+                  sourceLabelOverride={seed.sourceLabel}
+                  hideAddress
+                />
+              </>
+            )}
+          </CodexModalShell>
+        </MobilePortal>
       )}
     </div>
   );
@@ -2611,6 +3479,27 @@ export interface RsaParamsSectionProps {
    *  when omitted, so a caller whose `index` already IS the address (e.g. a
    *  Pure Key's `entry.id`) needs nothing extra here. */
   address?: string;
+  /**
+   * Round 22 owner correction: "then i think we have a problem here when
+   * attempting to show RSA details" — a locked codex made `loadJwk()`
+   * throw `CodexLockedError` straight into the panel's error text, instead
+   * of popping the real unlock prompt `SendArweaveModal.tsx`'s own
+   * `handleSubmit` already does via `useEnsureCodexUnlocked()`. INJECTED
+   * as a prop, deliberately NOT called directly inside this hook —
+   * `useEnsureCodexUnlocked()` hard-throws without a `<CodexProvider>`
+   * ancestor, and `ArweaveSeedsArea`/`PureKeysArea` (this hook's two
+   * callers) are BOTH designed to stay provider-agnostic, reachable from
+   * a bare render with no app-level context at all (every existing test
+   * in this package's own suite relies on exactly that). The real
+   * `ArweavePanel.tsx` — which per this package's own established
+   * convention IS always mounted inside `<CodexProvider>` in production
+   * (`SendArweaveModal` already depends on that unconditionally) — is
+   * where this gets wired to the real hook. Omitted (the default, and
+   * `PureKeysArea.tsx`'s own three call sites today) falls back to a
+   * no-op gate that always proceeds straight to `loadJwk()`, i.e.
+   * BYTE-IDENTICAL behavior to before this prop existed.
+   */
+  ensureCodexUnlocked?: () => Promise<boolean>;
 }
 
 /**
@@ -2628,7 +3517,8 @@ export function useRsaParamsSection({
   loadJwk,
   address,
   index,
-}: Pick<RsaParamsSectionProps, "jwk" | "loadJwk" | "address" | "index">) {
+  ensureCodexUnlocked,
+}: Pick<RsaParamsSectionProps, "jwk" | "loadJwk" | "address" | "index" | "ensureCodexUnlocked">) {
   const [open, setOpen] = useState(false);
   /** The panel-wide reveal — every private row at once. */
   const [revealAll, setRevealAll] = useState(false);
@@ -2641,6 +3531,16 @@ export function useRsaParamsSection({
 
   const jwk = providedJwk ?? decrypted;
 
+  // Round 22 owner correction: "then i think we have a problem here when
+  // attempting to show RSA details" — a locked codex made `loadJwk()`
+  // throw `CodexLockedError` ("Codex is locked; operation 'getPassword'
+  // requires authentication...") straight into `panelError` as a dead-end
+  // message, instead of popping the real unlock prompt the way
+  // `SendArweaveModal.tsx`'s `handleSubmit` already does (itself following
+  // `f8a2cf4`'s fix for the UrStoa/Send STOA modals). Same shape here, but
+  // gated behind the INJECTED `ensureCodexUnlocked` prop — see
+  // `RsaParamsSectionProps.ensureCodexUnlocked`'s own doc comment for why
+  // this hook never calls `useEnsureCodexUnlocked()` directly.
   const load = useCallback(async (): Promise<void> => {
     if (loadJwk === undefined) {
       setPanelError(
@@ -2650,6 +3550,11 @@ export function useRsaParamsSection({
     }
     setDecrypting(true);
     setPanelError(null);
+    const unlocked = ensureCodexUnlocked === undefined || (await ensureCodexUnlocked());
+    if (!unlocked) {
+      setDecrypting(false);
+      return;
+    }
     try {
       setDecrypted(await loadJwk());
     } catch (cause) {
@@ -2657,7 +3562,7 @@ export function useRsaParamsSection({
     } finally {
       setDecrypting(false);
     }
-  }, [loadJwk]);
+  }, [loadJwk, ensureCodexUnlocked]);
 
   const toggle = useCallback((): void => {
     if (open) {
@@ -2995,6 +3900,7 @@ function ArweaveKeyRow({
   address,
   jwk: providedJwk,
   loadJwk,
+  ensureCodexUnlocked,
 }: {
   /** Namespaces the row's test ids: `arweave-generate-key` for a run's key,
    *  `arweave-seed-key` for one already stored under the seed. */
@@ -3006,6 +3912,8 @@ function ArweaveKeyRow({
   /** Decrypts a STORED key on demand. Absent → the row still offers the panel
    *  and says why it cannot show the numbers. */
   loadJwk?: () => Promise<ArweaveJwk>;
+  /** See `RsaParamsSectionProps.ensureCodexUnlocked`'s own doc comment. */
+  ensureCodexUnlocked?: () => Promise<boolean>;
 }): React.ReactElement {
   return (
     <div
@@ -3036,6 +3944,7 @@ function ArweaveKeyRow({
         jwk={providedJwk}
         loadJwk={loadJwk}
         address={address}
+        ensureCodexUnlocked={ensureCodexUnlocked}
       />
     </div>
   );
@@ -3409,9 +4318,6 @@ function DefineSeedForm({
   restrictedInvalid,
   restrictedNotice,
   dictionaryWords,
-  confirmBlocked,
-  labelText,
-  setLabelText,
   accounts,
   selectedAccountId,
   setAccountChoice,
@@ -3420,10 +4326,6 @@ function DefineSeedForm({
   setChainwebChoice,
   onGeneratePhrase,
   onClearWords,
-  busy,
-  error,
-  onConfirm,
-  onCancel,
 }: {
   primeDefinition: boolean;
   generatorMode: GeneratorMode;
@@ -3452,9 +4354,6 @@ function DefineSeedForm({
   restrictedInvalid: readonly boolean[];
   restrictedNotice: string | null;
   dictionaryWords: readonly string[];
-  confirmBlocked: boolean;
-  labelText: string;
-  setLabelText: (v: string) => void;
   accounts: readonly ArweaveSeedAccountSource[];
   selectedAccountId: string;
   setAccountChoice: (v: string) => void;
@@ -3463,36 +4362,35 @@ function DefineSeedForm({
   setChainwebChoice: (v: string) => void;
   onGeneratePhrase: () => void;
   onClearWords: () => void;
-  busy: boolean;
-  error: string | null;
-  onConfirm: () => void;
-  onCancel: () => void;
 }): React.ReactElement {
-  // Free Seed Input auto-grows WITH its content, never ahead of it: an empty
-  // (or short) box stays a normal few-line box, and only typing (or Max
-  // Entropy's 256×256-glyph worst case) pushes it taller — up to most of the
-  // viewport, past which `maxHeight` + `overflowY` below take over as an
-  // internal scrollbar. A fixed tall box regardless of content was the
-  // opposite of useful: an empty textarea occupying the whole page.
+  // Round 22 owner correction: "the seed input field, must extend to the
+  // available screen space, and the scroll must be only within the input
+  // field, not the whole zone as a scroll" — MOBILE ONLY (inside the
+  // `CodexModalShell` `footer` split this component's own caller now
+  // wires — see `ArweaveSeedsArea`'s render call site — which gives this
+  // whole body a definite, flex-fillable height).
+  const isMobile = useIsMobile();
+
+  // Free Seed Input auto-grows WITH its content on DESKTOP (an empty box
+  // stays a normal few-line box; typing pushes it taller up to `maxHeight`,
+  // past which it gets its own internal scrollbar). MOBILE skips this
+  // entirely: the textarea's height is governed by `flex: 1` instead (see
+  // its own style below) — imperatively setting `el.style.height` there
+  // would fight the flex layout every time this effect re-fires.
   const wordsInputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
+    if (isMobile) return;
     const el = wordsInputRef.current;
     if (el === null) return;
     el.style.height = "auto"; // shrink back down before re-measuring, so deleting text un-grows it too
     el.style.height = `${el.scrollHeight}px`;
-  }, [wordsText]);
-
-  /** Direct mode's Confirm gate, mirroring how `confirmBlocked` already gates
-   *  the Restricted word grid: blocked until the current input resolves to a
-   *  valid bitstring, at either supported width. */
-  const directBlocked =
-    generatorMode === "direct" &&
-    (directResolution === null || "error" in directResolution);
+  }, [wordsText, isMobile]);
 
   const sourceButton = (
     id: DefineSource,
     testId: string,
     label: string,
+    Icon: (p: { style?: React.CSSProperties }) => React.ReactElement,
     disabled: boolean,
     hint: string,
   ): React.ReactElement => (
@@ -3501,16 +4399,33 @@ function DefineSeedForm({
       data-testid={testId}
       role="radio"
       aria-checked={source === id}
+      aria-label={label}
       disabled={disabled}
-      title={disabled ? hint : undefined}
+      title={disabled ? hint : label}
       onClick={() => setSource(id)}
-      style={{
-        ...(source === id ? primaryButtonStyle : secondaryButtonStyle),
-        opacity: disabled ? 0.45 : 1,
-        cursor: disabled ? "not-allowed" : "pointer",
-      }}
+      style={
+        isMobile
+          ? {
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flex: 1,
+              height: 40,
+              borderRadius: 8,
+              cursor: disabled ? "not-allowed" : "pointer",
+              border: source === id ? `1px solid ${ACCENT}` : "1px solid #262626",
+              backgroundColor: source === id ? `${ACCENT}22` : "transparent",
+              color: source === id ? ACCENT : "#888",
+              opacity: disabled ? 0.45 : 1,
+            }
+          : {
+              ...(source === id ? primaryButtonStyle : secondaryButtonStyle),
+              opacity: disabled ? 0.45 : 1,
+              cursor: disabled ? "not-allowed" : "pointer",
+            }
+      }
     >
-      {label}
+      {isMobile ? <Icon style={{ width: 18, height: 18 }} /> : label}
     </button>
   );
 
@@ -3521,10 +4436,8 @@ function DefineSeedForm({
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        padding: 14,
-        borderRadius: 12,
-        border: "1px solid #262626",
-        backgroundColor: "#0a0a0a",
+        flex: isMobile ? 1 : undefined,
+        minHeight: isMobile ? 0 : undefined,
       }}
     >
       <div
@@ -3534,6 +4447,7 @@ function DefineSeedForm({
           justifyContent: "space-between",
           flexWrap: "wrap",
           gap: 8,
+          flexShrink: 0,
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 600 }}>Define an Arweave seed</div>
@@ -3602,6 +4516,7 @@ function DefineSeedForm({
             backgroundColor: "#1a1206",
             color: "#fbbf24",
             fontSize: 12,
+            flexShrink: 0,
           }}
         >
           This is the Prime Arweave Seed. Defining it is a one-way act: in the shipped build the
@@ -3627,30 +4542,32 @@ function DefineSeedForm({
         />
       ) : (
         <>
-      <div style={{ fontSize: 11, color: "#666" }}>
+      <div style={{ fontSize: 11, color: "#666", flexShrink: 0 }}>
         {`Every Arweave seed is exactly ${SEED_BIT_LENGTH} bits on the DALOS ellipse. A source that cannot produce exactly ${SEED_BIT_LENGTH} bits is refused, never padded.`}
       </div>
 
-      <div role="radiogroup" aria-label="Seed source" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {sourceButton("words", "arweave-seed-source-words", "1 · Enter your own seed", false, "")}
+      <div role="radiogroup" aria-label="Seed source" style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0 }}>
+        {sourceButton("words", "arweave-seed-source-words", isMobile ? "Enter your own seed" : "1 · Enter your own seed", OwnSeedGlyph, false, "")}
         {sourceButton(
           "account",
           "arweave-seed-source-account",
-          "2 · Use an Ouronet account",
+          isMobile ? "Use an Ouronet account" : "2 · Use an Ouronet account",
+          OuronetAccountGlyph,
           accounts.length === 0,
           "No activated, seed-words-origin DALOS-curve Ouronet account exists in this Codex.",
         )}
         {sourceButton(
           "chainweb",
           "arweave-seed-source-chainweb",
-          "3 · Use a Chainweb seed",
+          isMobile ? "Use a Chainweb seed" : "3 · Use a Chainweb seed",
+          ChainwebSeedGlyph,
           chainwebSeeds.length === 0,
           "No Chainweb seed exists in this Codex.",
         )}
       </div>
 
       {source === "words" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: isMobile ? 1 : undefined, minHeight: isMobile ? 0 : undefined }}>
           {/* The single flat 3-tile picker — ported from `CreateStoaChainSeedModal`'s
               `SEED_TYPE_OPTIONS` tile row: "Stoa Dalos" is Free Seed Input's
               free-form textarea; the two Dictionary tiles are the BIP-gated
@@ -3670,6 +4587,7 @@ function DefineSeedForm({
               padding: 4,
               borderRadius: 8,
               backgroundColor: "#18181B",
+              flexShrink: 0,
             }}
           >
             {SEED_INPUT_TILE_OPTIONS.map((option) => {
@@ -3704,7 +4622,7 @@ function DefineSeedForm({
 
           {seedInputTile === "dalos" ? (
             <>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0 }}>
                 <DalosCharsetInfo />
                 {/* Worst-case stress input: 256 words of 256 random DALOS
                     glyphs each — the absolute ceiling `validateSeedWords`
@@ -3731,25 +4649,33 @@ function DefineSeedForm({
                 value={wordsText}
                 onChange={(e) => setWordsText(e.target.value)}
                 placeholder="1-256 words, each 1-256 glyphs from the DALOS charset"
-                // Height tracks CONTENT (the effect above sets it from
-                // scrollHeight on every change) — an empty box is a normal
-                // few-line box, not a giant empty rectangle. `maxHeight` is
-                // the hard ceiling that turns growth into an internal
-                // scrollbar once content would otherwise push past most of
-                // the viewport (Max Entropy's 256×256-glyph worst case).
+                // DESKTOP: height tracks CONTENT (the effect above sets it
+                // from scrollHeight on every change) — an empty box is a
+                // normal few-line box, not a giant empty rectangle;
+                // `maxHeight` is the hard ceiling that turns growth into an
+                // internal scrollbar once content would otherwise push past
+                // most of the viewport (Max Entropy's 256×256-glyph worst
+                // case). MOBILE (round 22): `flex: 1` instead — the field
+                // extends to fill whatever room the tile picker/charset row
+                // above leave in this modal's own fixed-height body, and
+                // ONLY IT scrolls internally (`overflowY: auto`, native
+                // textarea behavior) once its own content exceeds that —
+                // never before, and never the whole modal.
                 style={{
                   ...inputStyle,
                   width: "100%",
                   fontFamily: MONO,
-                  maxHeight: "70vh",
+                  maxHeight: isMobile ? undefined : "70vh",
                   overflowY: "auto",
-                  resize: "vertical",
+                  resize: isMobile ? "none" : "vertical",
+                  flex: isMobile ? 1 : undefined,
+                  minHeight: isMobile ? 0 : undefined,
                 }}
               />
             </>
           ) : (
             <>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0 }}>
                 <button
                   type="button"
                   data-testid="arweave-seed-random-phrase"
@@ -3820,15 +4746,57 @@ function DefineSeedForm({
 
         </>
       )}
+    </div>
+  );
+}
 
+/**
+ * Round 22 owner correction: "the name with the input field define seed and
+ * calce. must be at the bottom of the page, fixes... they must remain at
+ * all times on screen." Split out of `DefineSeedForm` (which used to render
+ * this at its own tail, scrolling away with everything else) so
+ * `ArweaveSeedsArea`'s render call site can hand it to `CodexModalShell`'s
+ * `footer` slot instead — pinned to the card's own bottom edge, MOBILE ONLY,
+ * never carried away by the body's scroll (the same split
+ * `CreateStoaChainSeedModal`-adjacent modals already use elsewhere in this
+ * codebase). On DESKTOP this renders in the exact same DOM position it
+ * always did (`CodexModalShell`'s own `footer` prop falls back to appending
+ * it right after `children`, byte-identical there).
+ */
+function DefineSeedFormFooter({
+  primeDefinition,
+  generatorMode,
+  directResolution,
+  confirmBlocked,
+  labelText,
+  setLabelText,
+  busy,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  primeDefinition: boolean;
+  generatorMode: GeneratorMode;
+  directResolution: DirectResolution | null;
+  confirmBlocked: boolean;
+  labelText: string;
+  setLabelText: (v: string) => void;
+  busy: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const directBlocked =
+    generatorMode === "direct" &&
+    (directResolution === null || "error" in directResolution);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* The FIRST-EVER seed's name is not a choice: it is always the Prime
           Arweave Seed. The field stays visible (so the name is stated where a
           name is expected) but is read-only, and `confirmDefine` ignores
           `labelText` for a prime definition regardless of what reaches it.
           Shared across BOTH generator modes — a Direct-defined seed still
-          gets a name (or the locked Prime one), same as a Seed-Based one;
-          this field previously sat inside the Seed-Based-only branch above
-          and was silently missing whenever Direct mode was active. */}
+          gets a name (or the locked Prime one), same as a Seed-Based one. */}
       <input
         type="text"
         data-testid="arweave-seed-label-input"

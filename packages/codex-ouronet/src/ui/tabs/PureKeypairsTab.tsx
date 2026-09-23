@@ -21,7 +21,7 @@
  */
 
 import * as React from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyRound, Plus, Sparkles, Download, Copy, Check, AlertTriangle, Lock, RefreshCw, ShieldCheck, ChevronDown, ChevronRight,
 } from "lucide-react";
@@ -32,7 +32,7 @@ import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
-import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
+import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile } from "@ancientpantheon/codex-ui/ui";
 import { IconDeleteBtn, IconDeleteBtnDisabled } from "../internal/IconButtons.js";
 import { KeyFieldsHalves } from "../internal/KeyFieldsHalves.js";
 import type { IPureKeypair } from "../../types/entities.js";
@@ -56,7 +56,157 @@ const fieldLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 
 
 export interface PureKeypairsTabProps {
   className?: string;
+  /**
+   * Reports the list's OWN pagination state so `ChainwebPanel` can render
+   * it in the shared "middle of the bottom seam" medallion slot — round 9/
+   * 10 owner correction: "we need pagination on the pure keys as well,
+   * which should kick in once enough entries exist" + "standard pagination
+   * controls zone." Pure Keys NEVER has a Collapse-All medallion of its
+   * own (it's a flat list, no groups), so the shared slot is always free
+   * for its own pagination — same "controlled prop with internal-state
+   * fallback" pattern `SeedWordsTab.tsx`'s own `onPaginationHandleChange`
+   * uses: omitted (every standalone mount), this component keeps rendering
+   * its own inline Prev/Next.
+   */
+  onPaginationHandleChange?: (
+    handle: { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null,
+  ) => void;
 }
+
+/** One `KeypairRow`'s measured height + the gap between rows — same
+ *  measurement shape as `SeedWordsTab.tsx`'s own `useMobileSeedPageSize`
+ *  (a flat, uniform-height list, no half-slot headers here — Pure Keys has
+ *  no grouping concept at all). Duplicated per this package's own
+ *  "self-contained module" convention. */
+/** Round 26: trimmed alongside `KeypairRow`'s own mobile padding/avatar cut
+ *  (58px → ~34px real row height) — same "slim, like the seed rows" ask,
+ *  same treatment `SeedWordsTab.tsx`'s own `SEED_ROW_HEIGHT_FALLBACK` got
+ *  in round 24. Only the FALLBACK moves; the real row is always
+ *  live-measured once mounted. */
+const KEYPAIR_ROW_HEIGHT_FALLBACK = 34;
+const KEYPAIR_ROW_GAP = 6;
+
+function useMobileKeypairPageSize(): {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  rowRef: (node: HTMLDivElement | null) => void;
+  pageSize: number;
+} {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(KEYPAIR_ROW_HEIGHT_FALLBACK);
+  const [pageSize, setPageSize] = useState(4);
+
+  useEffect(() => {
+    if (!rowEl) return;
+    const measure = () => {
+      const h = rowEl.getBoundingClientRect().height;
+      if (h > 0) setRowHeight(h);
+    };
+    measure();
+    // See `SeedWordsTab.tsx`'s identical hook for why: a `ResizeObserver`
+    // alone doesn't protect against the row being measured wrong on this
+    // very first pass (a web font swapping in a few ms after mount, or the
+    // host shell's own anchor wiring settling a frame later).
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(measure);
+    const fontsReady = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;
+    fontsReady?.then(measure).catch(() => {});
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(rowEl);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [rowEl]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const compute = () => {
+      // Round 10 owner correction — "same size of the border left right up
+      // and down": the container carries `padding: KEYPAIR_ROW_GAP` on
+      // every side on mobile (see its own JSX comment); `clientHeight`
+      // counts that as part of the box, so subtract it back out.
+      const height = el.clientHeight - 2 * KEYPAIR_ROW_GAP;
+      if (height <= 0) return;
+      const maxRows = Math.floor((height + KEYPAIR_ROW_GAP) / (rowHeight + KEYPAIR_ROW_GAP));
+      setPageSize(Math.max(1, maxRows));
+    };
+    compute();
+    let raf = 0;
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(compute);
+    if (typeof window !== "undefined") window.addEventListener("resize", compute);
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(compute);
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      if (typeof window !== "undefined") window.removeEventListener("resize", compute);
+    };
+  }, [rowHeight]);
+
+  return { containerRef, rowRef: setRowEl, pageSize };
+}
+
+/** A codex can hold hundreds of pure keypairs — owner correction (round 9
+ *  follow-up): "when there are more than 10 pages available the entry
+ *  15/24 when clicked needs to allow the input of a given page, to jump
+ *  directly to a wanted page." Below 10 pages, the plain "N / M" text is
+ *  unclickable. Duplicated from `StoaAccountsTab.tsx`'s identical
+ *  component per this package's own "self-contained module" convention. */
+function PageJumpIndicator({ page, totalPages, onJump }: { page: number; totalPages: number; onJump: (page: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (totalPages <= 10) {
+    return <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>{page + 1} / {totalPages}</span>;
+  }
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => { setDraft(String(page + 1)); setEditing(true); }}
+        title="Jump to a page"
+        style={{ fontSize: 12, fontFamily: MONO, color: "#ceac5f", background: "transparent", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline dotted" }}
+      >
+        {page + 1} / {totalPages}
+      </button>
+    );
+  }
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n)) onJump(Math.max(0, Math.min(totalPages - 1, n - 1)));
+    setEditing(false);
+  };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        autoFocus
+        type="number"
+        min={1}
+        max={totalPages}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        onBlur={commit}
+        aria-label={`Jump to page (1-${totalPages})`}
+        style={{ width: 44, fontSize: 12, fontFamily: MONO, padding: "2px 4px", borderRadius: 6, border: "1px solid #ceac5f", backgroundColor: "#0a0a0a", color: "#d2d3d4", textAlign: "center" }}
+      />
+      <span style={{ fontSize: 12, fontFamily: MONO, color: "#888" }}>/ {totalPages}</span>
+    </span>
+  );
+}
+
+/** Mirrors `StoaAccountsTab.tsx`'s own Prev/Next pagination button style. */
+const pageBtn = (disabled: boolean): React.CSSProperties => ({
+  fontSize: 12, padding: "6px 12px", borderRadius: 8, border: "1px solid #262626", color: "#d2d3d4",
+  background: "transparent", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.3 : 1,
+});
 
 /* ─────────────── List subtab ─────────────── */
 function KeypairRow({
@@ -82,27 +232,63 @@ function KeypairRow({
   const border = isGuardPrime ? "#a78bfa55" : protRaw ? "#ceac5f40" : "#262626";
   const bg = isGuardPrime ? "#a78bfa10" : protRaw ? "#ceac5f08" : "#18181B";
   const badgeColor = isGuardPrime ? "#a78bfa" : "#ceac5f";
+  // Owner correction (design.md §8, the "further optimize round 6"): "i
+  // want scrolling to show full entries... this must be done everywhere" —
+  // opts into the scroll-snap ChainwebPanel's mobile content wrapper
+  // already enables (inert unless a row opts in; desktop is unaffected).
+  const isMobile = useIsMobile();
 
   return (
-    <div data-keypair-id={keypair.id} style={{ border: `1px solid ${border}`, borderRadius: 12, overflow: "hidden", backgroundColor: bg }}>
-      {/* Collapsed header — icon + label + badge, click to expand (Ouronet-Accounts style). */}
-      <div
-        onClick={() => setExpanded((v) => !v)}
-        style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
-      >
-        {expanded
-          ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: accent }} />
-          : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
-        <div style={{ width: 32, height: 32, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: "#262626" }}>
-          <KeyRound style={{ width: 18, height: 18, color: accent }} />
+    <div data-keypair-id={keypair.id} style={{ border: `1px solid ${border}`, borderRadius: 12, overflow: "hidden", backgroundColor: bg, scrollSnapAlign: isMobile ? "start" : undefined }}>
+      {/* Collapsed header — icon + label + badge, click to expand (Ouronet-Accounts style).
+          Round 26 owner correction: "The key entries need to have same
+          height as the seed entries, slim and they woould allow for a lot
+          of entries even on smaller pages" — MOBILE ONLY fork, mirroring
+          `SeedWordsTab.tsx`'s own trimmed `SeedRow` header exactly: `6px`
+          top/bottom padding (was 12px) and the 32×32 avatar circle
+          replaced with the same small 10×10 colour dot `SeedRow` uses —
+          the avatar was this row's own height floor, same root cause as
+          the seed row's old triple-dot-driven floor. Desktop keeps the
+          original avatar + padding, unchanged. */}
+      {isMobile ? (
+        <div
+          onClick={() => setExpanded((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px", cursor: "pointer" }}
+        >
+          {expanded
+            ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: accent }} />
+            : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          <span
+            title="Pure key"
+            aria-hidden="true"
+            style={{ flexShrink: 0, width: 10, height: 10, borderRadius: "50%", backgroundColor: accent }}
+          />
+          <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: locked ? accent : "#d2d3d4" }}>{label}</span>
+          {locked && protLabel && (
+            isGuardPrime
+              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
+              : <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}><Lock size={10} /> {protLabel}</span>
+          )}
         </div>
-        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: locked ? accent : "#d2d3d4" }}>{label}</span>
-        {locked && protLabel && (
-          isGuardPrime
-            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
-            : <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}><Lock size={10} /> {protLabel}</span>
-        )}
-      </div>
+      ) : (
+        <div
+          onClick={() => setExpanded((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
+        >
+          {expanded
+            ? <ChevronDown style={{ width: 16, height: 16, flexShrink: 0, color: accent }} />
+            : <ChevronRight style={{ width: 16, height: 16, flexShrink: 0, color: "#555" }} />}
+          <div style={{ width: 32, height: 32, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, backgroundColor: "#262626" }}>
+            <KeyRound style={{ width: 18, height: 18, color: accent }} />
+          </div>
+          <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: locked ? accent : "#d2d3d4" }}>{label}</span>
+          {locked && protLabel && (
+            isGuardPrime
+              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
+              : <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}><Lock size={10} /> {protLabel}</span>
+          )}
+        </div>
+      )}
 
       {/* Expanded breakdown — public | private key halves + delete, all on one
           row (the delete sits inline at the end, matching the Seed Words rows). */}
@@ -318,7 +504,8 @@ function ImportSubtab({ onAdded }: { onAdded: () => void }) {
 }
 
 /* ─────────────── Main tab ─────────────── */
-export function PureKeypairsTab({ className }: PureKeypairsTabProps) {
+export function PureKeypairsTab({ className, onPaginationHandleChange }: PureKeypairsTabProps) {
+  const isMobile = useIsMobile();
   const { keypairs, deleteKeypair } = usePureKeypairs();
   const { getCurrentPassword } = useCodexAuth();
   const { uiSettings } = useCodex();
@@ -337,6 +524,41 @@ export function PureKeypairsTab({ className }: PureKeypairsTabProps) {
     return { guardKp: g, rest: g ? all.filter((k) => k.id !== g.id) : all };
   }, [keypairs, guardId]);
   const sorted = guardKp ? [guardKp, ...rest] : rest;
+
+  // MOBILE ONLY — round 9/10 owner correction: "we need pagination on the
+  // pure keys as well, which should kick in once enough entries exist, of
+  // course." A flat, uniform-height list (no groups, unlike Accounts) —
+  // mirrors `SeedWordsTab.tsx`'s own plain pagination shape exactly,
+  // including the "report externally once a caller opts in, otherwise
+  // render inline" fallback rule.
+  const { containerRef: keypairsPageContainerRef, rowRef: keypairsPageRowRef, pageSize: mobileKeypairPageSize } = useMobileKeypairPageSize();
+  const [page, setPage] = useState(0);
+  const mobilePages = useMemo(() => {
+    if (sorted.length === 0) return [[]] as IPureKeypair[][];
+    const out: IPureKeypair[][] = [];
+    for (let i = 0; i < sorted.length; i += mobileKeypairPageSize) out.push(sorted.slice(i, i + mobileKeypairPageSize));
+    return out;
+  }, [sorted, mobileKeypairPageSize]);
+  const totalPages = isMobile ? mobilePages.length : 1;
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageKeypairs = isMobile ? (mobilePages[clampedPage] ?? []) : sorted;
+
+  const reportsPaginationExternally = !!onPaginationHandleChange;
+  useEffect(() => {
+    if (!reportsPaginationExternally) return;
+    if (totalPages <= 1) {
+      onPaginationHandleChange?.(null);
+      return;
+    }
+    onPaginationHandleChange?.({
+      page: clampedPage,
+      totalPages,
+      onPrev: () => setPage((p) => Math.max(0, p - 1)),
+      onNext: () => setPage((p) => Math.min(totalPages - 1, p + 1)),
+      onJump: (p) => setPage(p),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportsPaginationExternally, totalPages, clampedPage, onPaginationHandleChange]);
 
   // Per-keypair decrypt closure for PrivateKeyReveal (unlock gate + decrypt).
   const decryptFor = (k: IPureKeypair) => async () => {
@@ -357,17 +579,89 @@ export function PureKeypairsTab({ className }: PureKeypairsTabProps) {
   ];
 
   return (
-    <div className={className} style={{ fontFamily: "var(--codex-font, inherit)", color: "#d2d3d4", display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Subtab pills */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+    <div
+      className={className}
+      style={{
+        fontFamily: "var(--codex-font, inherit)", color: "#d2d3d4", display: "flex", flexDirection: "column", gap: 12,
+        // MOBILE ONLY — bounds this component to whatever height its host
+        // actually gives it, so `useMobileKeypairPageSize` measures a real
+        // available height instead of the list just growing with its own
+        // content (same reasoning as `SeedWordsTab.tsx`'s own root wrapper).
+        height: isMobile ? "100%" : undefined,
+        minHeight: isMobile ? 0 : undefined,
+      }}
+    >
+      {/* Subtab pills. Round 26 owner correction: "the 3 buttons from pure
+          keys are a bit to big, making the view get a horisontal scroll...
+          we should move to icons instead of thsse buttons. Then the
+          buttons need to stay put, scrolling shouldnt move them." Reverses
+          round 19's "keep the text, three short pills fit fine" call — on
+          a genuinely narrow phone (375px) they didn't. Icon-only, small
+          fixed squares (mobile only; desktop keeps its original
+          left-aligned, wrapping, labeled row) — the "Keys" count moves to
+          a small corner badge instead of inline text. `position: sticky`
+          (mobile only) pins the row to the top of `ChainwebPanel`'s own
+          scrolling ancestor (the actual scroll container — this
+          component's own root has no scroller of its own), the same
+          "buttons stay fixed, only entries scroll" contract every other
+          fixed mobile header in this app already has, just via a lighter
+          mechanism (no separate zone split needed) since this row has
+          nothing else pinned alongside it. */}
+      <div
+        role="tablist"
+        aria-label="Pure Keypairs categories"
+        style={{
+          display: "flex", flexWrap: isMobile ? "nowrap" : "wrap", justifyContent: isMobile ? "center" : "flex-start", gap: 8,
+          position: isMobile ? "sticky" : undefined,
+          top: isMobile ? 0 : undefined,
+          zIndex: isMobile ? 5 : undefined,
+          backgroundColor: isMobile ? "#0a0a0a" : undefined,
+          paddingTop: isMobile ? 4 : undefined,
+          paddingBottom: isMobile ? 4 : undefined,
+        }}
+      >
         {TABS.map(({ key, label, icon: Icon, color }) => {
           const active = sub === key;
+          const badgeCount = key === "list" ? keypairs.length : 0;
           return (
-            <button key={key} type="button" onClick={() => setSub(key)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer",
-                border: `1px solid ${active ? color : "#262626"}`, backgroundColor: active ? color + "1a" : "transparent", color: active ? color : "#888" }}>
-              <Icon style={{ width: 14, height: 14 }} />
-              {label}{key === "list" ? ` (${keypairs.length})` : ""}
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSub(key)}
+              aria-label={key === "list" ? `${label} (${keypairs.length})` : label}
+              title={label}
+              style={
+                isMobile
+                  ? {
+                      position: "relative",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 44, height: 36, borderRadius: 8, cursor: "pointer",
+                      border: `1px solid ${active ? color : "#262626"}`,
+                      backgroundColor: active ? color + "1a" : "transparent",
+                      color: active ? color : "#888",
+                    }
+                  : {
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                      border: `1px solid ${active ? color : "#262626"}`, backgroundColor: active ? color + "1a" : "transparent", color: active ? color : "#888",
+                    }
+              }
+            >
+              <Icon style={{ width: isMobile ? 16 : 14, height: isMobile ? 16 : 14 }} />
+              {isMobile ? (
+                badgeCount > 0 && (
+                  <span
+                    style={{
+                      position: "absolute", top: -5, right: -5, minWidth: 15, height: 15, padding: "0 3px",
+                      borderRadius: 9999, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center",
+                      backgroundColor: color, color: "#0a0a0a", border: "1px solid #0a0a0a",
+                    }}
+                  >
+                    {badgeCount}
+                  </span>
+                )
+              ) : (
+                <>{label}{key === "list" ? ` (${keypairs.length})` : ""}</>
+              )}
             </button>
           );
         })}
@@ -383,6 +677,60 @@ export function PureKeypairsTab({ className }: PureKeypairsTabProps) {
                 <Plus style={{ width: 16, height: 16 }} /> Generate Your First Keypair
               </button>
             </div>
+          ) : isMobile ? (
+            <>
+              {/* MOBILE ONLY — the measured, paginated entry area (round
+                  9/10 owner correction: "we need pagination on the pure
+                  keys as well, which should kick in once enough entries
+                  exist"). Deliberately NO `overflow: hidden` — a
+                  `KeypairRow` expands INLINE (accordion, like
+                  `ArweaveSeedsArea`'s own seed rows), so a page's total
+                  height can legitimately grow past the measured bound
+                  while a row is open; forcing a hard clip there would risk
+                  silently cutting the very content the user just opened.
+                  Falls back to `ChainwebPanel`'s own ancestor scroller
+                  instead, same tradeoff `ArweaveSeedsArea.tsx` already
+                  documents. The Prime/Guard key is differentiated by
+                  colour alone here (no separator — round 8's "if we
+                  remove the separator, [more] entries would have fit"
+                  correction, same reasoning applied fresh to this list). */}
+              <div ref={keypairsPageContainerRef} style={{ display: "flex", flexDirection: "column", gap: KEYPAIR_ROW_GAP, padding: KEYPAIR_ROW_GAP, flex: 1, minHeight: 0 }}>
+                {(() => {
+                  let measured = false;
+                  return pageKeypairs.map((kp) => {
+                    const shouldMeasure = !measured;
+                    if (shouldMeasure) measured = true;
+                    const isGuard = kp === guardKp;
+                    return (
+                      <div key={kp.id} ref={shouldMeasure ? keypairsPageRowRef : undefined}>
+                        <KeypairRow
+                          keypair={kp}
+                          index={isGuard ? 0 : rest.indexOf(kp)}
+                          onDelete={isGuard ? () => { /* prime — non-deletable */ } : (id) => void handleDelete(id)}
+                          decryptFor={decryptFor}
+                          primeName={isGuard ? codexIdPrimeName(CODEXID_PRIME_NAMES.guard, guardKp!.label) : undefined}
+                        />
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              {/* Prev/Next — rendered INLINE only when no caller opted into
+                  `onPaginationHandleChange` (round 9's "standard pagination
+                  controls zone" — `ChainwebPanel` renders the shared
+                  medallion version otherwise). */}
+              {!reportsPaginationExternally && totalPages > 1 && (
+                <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+                  <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={clampedPage === 0} style={pageBtn(clampedPage === 0)}>
+                    ← Prev
+                  </button>
+                  <PageJumpIndicator page={clampedPage} totalPages={totalPages} onJump={setPage} />
+                  <button type="button" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={clampedPage >= totalPages - 1} style={pageBtn(clampedPage >= totalPages - 1)}>
+                    Next →
+                  </button>
+                </div>
+              )}
+            </>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {guardKp && (

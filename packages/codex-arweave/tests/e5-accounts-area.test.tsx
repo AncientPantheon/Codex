@@ -36,9 +36,12 @@ import { winstonToAr } from "@ancientpantheon/arweave-core";
 import { registerChainAddressValidator } from "@ancientpantheon/codex-ouronet/hooks";
 import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 
-import { ArweaveAccountsArea } from "../src/panel/ArweaveAccountsArea";
+import { ArweaveAccountsArea, type ArweaveAccountsAreaProps } from "../src/panel/ArweaveAccountsArea";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import { arweaveValidator } from "../src/address-book/arweaveValidator";
+import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
+import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 
 const CIPHERTEXT = "ENCRYPTED-KEYFILE-CIPHERTEXT-MUST-NEVER-RENDER";
 
@@ -60,6 +63,25 @@ function makeWatchEntry(overrides: Partial<WatchListEntry> = {}): WatchListEntry
     createdAt: "2025-01-01T00:00:00.000Z",
     ...overrides,
   };
+}
+
+/**
+ * Round 19 owner correction: "the arweave account must be shorted same as
+ * stoa accounts, first 3 last 3 characters coloured, and ... in the
+ * middle." `ArweaveAddressHighlight` (the component this now renders
+ * through) splits any address over 6 characters into 3 sibling `<span>`s
+ * (head/mid/tail) for the per-edge colour — RTL's `getByText` does NOT
+ * match text split across multiple elements by default (the classic
+ * "text broken up by multiple elements" limitation). This custom matcher
+ * targets the SAME node `getNodeText` would have matched pre-highlight —
+ * the element whose OWN full (concatenated-children) `textContent` is
+ * EXACTLY the given string — which is precisely `ArweaveAddressHighlight`'s
+ * own outer wrapper span. Short fixture addresses (≤6 chars, e.g.
+ * "ADDR-0") never split at all and still match a plain string query fine;
+ * this is only needed for the longer ones.
+ */
+function addressText(text: string) {
+  return (_: string, element: Element | null) => element?.textContent === text;
 }
 
 afterEach(() => cleanup());
@@ -95,8 +117,8 @@ describe("ArweaveAccountsArea", () => {
       />,
     );
 
-    expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).getByText("ADDR-A0")).toBeInTheDocument();
-    expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText("ADDR-B0")).toBeInTheDocument();
+    expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).getByText(addressText("ADDR-A0"))).toBeInTheDocument();
+    expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText(addressText("ADDR-B0"))).toBeInTheDocument();
   });
 
   it("puts a true-orphan (unknown seedId) entry under Unassigned, and a genuinely seedless (no seedId) entry under Pure Keys", () => {
@@ -114,19 +136,19 @@ describe("ArweaveAccountsArea", () => {
     render(<ArweaveAccountsArea entries={entries} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
 
     const unassigned = screen.getByTestId("arweave-accounts-group-unassigned");
-    expect(within(unassigned).getByText("ADDR-ORPHAN")).toBeInTheDocument();
+    expect(within(unassigned).getByText(addressText("ADDR-ORPHAN"))).toBeInTheDocument();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
 
     const pureKeys = screen.getByTestId("arweave-accounts-group-pure-keys");
-    expect(within(pureKeys).getByText("ADDR-LEGACY")).toBeInTheDocument();
+    expect(within(pureKeys).getByText(addressText("ADDR-LEGACY"))).toBeInTheDocument();
     expect(screen.getByText("Pure Keys")).toBeInTheDocument();
 
     // The known entry stays in its own group — neither catch-all is a bucket for all.
-    expect(within(unassigned).queryByText("ADDR-KNOWN")).toBeNull();
-    expect(within(pureKeys).queryByText("ADDR-KNOWN")).toBeNull();
+    expect(within(unassigned).queryByText(addressText("ADDR-KNOWN"))).toBeNull();
+    expect(within(pureKeys).queryByText(addressText("ADDR-KNOWN"))).toBeNull();
     // Cross-checks: the orphan is not in Pure Keys, the legacy/seedless entry is not in Unassigned.
-    expect(within(unassigned).queryByText("ADDR-LEGACY")).toBeNull();
-    expect(within(pureKeys).queryByText("ADDR-ORPHAN")).toBeNull();
+    expect(within(unassigned).queryByText(addressText("ADDR-LEGACY"))).toBeNull();
+    expect(within(pureKeys).queryByText(addressText("ADDR-ORPHAN"))).toBeNull();
     // Nothing is dropped: 3 in, 3 rendered.
     expect(screen.getAllByTestId("arweave-account-row")).toHaveLength(3);
   });
@@ -190,13 +212,13 @@ describe("ArweaveAccountsArea", () => {
     );
 
     const toggle = screen.getByTestId("arweave-accounts-toggle-seed-1");
-    expect(screen.getByText("ADDR-ZERO")).toBeInTheDocument();
+    expect(screen.getByText(addressText("ADDR-ZERO"))).toBeInTheDocument();
 
     fireEvent.click(toggle);
-    expect(screen.queryByText("ADDR-ZERO")).toBeNull();
+    expect(screen.queryByText(addressText("ADDR-ZERO"))).toBeNull();
 
     fireEvent.click(toggle);
-    expect(screen.getByText("ADDR-ZERO")).toBeInTheDocument();
+    expect(screen.getByText(addressText("ADDR-ZERO"))).toBeInTheDocument();
   });
 
   it("shows a seed with no entries as an empty group rather than hiding the seed", () => {
@@ -329,6 +351,39 @@ describe("ArweaveAccountsArea", () => {
 
     expect(screen.getByTestId("arweave-accounts-count-seed-1")).toHaveTextContent("2");
     expect(screen.getByTestId("arweave-accounts-count-seed-2")).toHaveTextContent("1");
+  });
+
+  // Same "smaller screen" overflow fix as `StoaAccountsTab`'s own
+  // `GroupRow` header (design.md §8, round 8 follow-up — owner-reported
+  // live bug: "on a smaller screen, the seeds view on accounts when
+  // collapsing, some weird shit is happening with the entries that they
+  // are not displayed properly on their entry line"). A `flex: 1` label
+  // with no `minWidth: 0` refuses to shrink below its own text width,
+  // which can push the count badge off its own line instead of the label
+  // truncating.
+  it("a long seed label truncates (ellipsis) instead of overflowing its header row — the count badge never gets pushed off its line", () => {
+    // The array's FIRST seed always renders as the locked "Prime Arweave
+    // Seed" regardless of its own `label` — use a SECOND seed to actually
+    // exercise its own label text.
+    render(
+      <ArweaveAccountsArea
+        entries={[
+          makeEntry({ seedId: "seed-0", index: 0, address: "ADDR-P0" }),
+          makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-A0" }),
+        ]}
+        seeds={[
+          { id: "seed-0", label: "Prime" },
+          { id: "seed-1", label: "A".repeat(80) },
+        ]}
+      />,
+    );
+    const nameSpan = screen.getByText("A".repeat(80));
+    expect(nameSpan.style.minWidth).toBe("0px");
+    expect(nameSpan.style.overflow).toBe("hidden");
+    expect(nameSpan.style.textOverflow).toBe("ellipsis");
+    expect(nameSpan.style.whiteSpace).toBe("nowrap");
+    const badge = screen.getByTestId("arweave-accounts-count-seed-1");
+    expect(badge.style.flexShrink).toBe("0");
   });
 
   /* ── T2: copy, explorer, confirm-then-delete ── */
@@ -1043,6 +1098,366 @@ describe("ArweaveAccountsArea", () => {
 
       expect(screen.queryByTestId("arweave-watched-send-w-3")).toBeNull();
       expect(screen.queryByText(/^Send/)).toBeNull();
+    });
+  });
+
+  // Owner correction (design.md §8, round 8 follow-up): "when there are
+  // more than 10 pages available the entry 15/24 when clicked needs to
+  // allow the input of a given page, to jump directly to a wanted page."
+  // Same "same structure and design... as what we did for chainweb"
+  // mandate this whole file exists to enforce — the mobile pagination
+  // engine (ported from `StoaAccountsTab`) needs the SAME jump-to-page
+  // affordance past 10 pages.
+  describe("mobile pagination — page-jump input past 10 pages", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    // Round 9 "standard pagination controls zone": the Watched subtab has
+    // no groups, so the Collapse-All medallion never occupies the shared
+    // slot there — pagination is ALWAYS reported upward instead of inline
+    // for Watched once a caller opts in. Capture the reported handle and
+    // drive it directly, same as `ArweavePanel` would from its own
+    // medallion buttons — `PageJumpIndicator` itself (still used inline for
+    // the multi-group Codex case) is unit-identical either way.
+    type PaginationHandle = { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null;
+
+    function renderMobile(watchedEntries: WatchListEntry[], handleRef: { current: PaginationHandle }) {
+      return render(
+        <CodexUiRoot>
+          <ArweaveAccountsArea
+            entries={[]}
+            seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+            watchedEntries={watchedEntries}
+            onPaginationHandleChange={(h) => { handleRef.current = h; }}
+          />
+        </CodexUiRoot>,
+      );
+    }
+
+    it("reports a plain (non-jump) handle at 10 or fewer pages", () => {
+      // jsdom's `clientHeight` never resolves above 0, so the slot engine
+      // stays at its safe default of 4 slots/page — 40 uniform watched
+      // entries (1 slot each) → exactly 10 pages.
+      const handleRef: { current: PaginationHandle } = { current: null };
+      const entries = Array.from({ length: 40 }, (_, i) => makeWatchEntry({ id: `w${i}` }));
+      renderMobile(entries, handleRef);
+      fireEvent.click(screen.getByTestId("arweave-accounts-subtab-watch"));
+      expect(handleRef.current).toEqual(expect.objectContaining({ page: 0, totalPages: 10 }));
+      expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
+    });
+
+    it("past 10 pages, jumping via the handle advances to the typed page", () => {
+      const handleRef: { current: PaginationHandle } = { current: null };
+      const entries = Array.from({ length: 44 }, (_, i) => makeWatchEntry({ id: `w${i}` }));
+      renderMobile(entries, handleRef);
+      fireEvent.click(screen.getByTestId("arweave-accounts-subtab-watch"));
+      expect(handleRef.current).toEqual(expect.objectContaining({ page: 0, totalPages: 11 }));
+      act(() => handleRef.current?.onJump(8));
+      expect(handleRef.current).toEqual(expect.objectContaining({ page: 8, totalPages: 11 }));
+    });
+  });
+
+  // Round 11 owner correction (ported from `StoaAccountsTab.tsx`'s
+  // identical redesign): "instead of listing the entries as part of a
+  // seed, we should make the entry carry a medallion to see from which
+  // seed it belongs, thus making all entries having a fixed size." Mobile
+  // ONLY — desktop's own `GroupSection` list (exercised extensively above,
+  // with no `CodexUiRoot` ancestor) stays byte-identical.
+  describe("mobile: the flat fixed-row Codex list (round 11)", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    function renderMobileCodex(entries: ForeignKeyEntry[], seeds: { id: string; label: string }[]) {
+      return render(
+        <CodexUiRoot>
+          <ArweaveAccountsArea entries={entries} seeds={seeds} />
+        </CodexUiRoot>,
+      );
+    }
+
+    it("no group HEADER ever renders — instead each row carries a colour-coded corner dot (type) plus a thin pill naming its own seed (identity) — owner correction (round 12): 'the coloured point is perfect for showing the type of seed it belongs to' + a thin medallion for the name", () => {
+      const entries = [
+        makeEntry({ id: "a0", seedId: "seed-1", address: "ADDR-A0", index: 0 }),
+        makeEntry({ id: "b0", seedId: "seed-2", address: "ADDR-B0", index: 0 }),
+      ];
+      const seeds = [
+        { id: "seed-1", label: "Seed A" },
+        { id: "seed-2", label: "Seed B" },
+      ];
+      renderMobileCodex(entries, seeds);
+      // No GROUP header (a shared banner sitting above several rows) —
+      // but the seed's name now legitimately appears ON each row's own
+      // thin pill, once per row, which is the whole point of round 12.
+      expect(screen.getByText(addressText("ADDR-A0"))).toBeTruthy();
+      expect(screen.getByText(addressText("ADDR-B0"))).toBeTruthy();
+      expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+      expect(screen.getByText("Seed B")).toBeTruthy();
+      expect(screen.getByLabelText("From Prime Arweave Seed")).toBeTruthy();
+      expect(screen.getByLabelText("From Seed B")).toBeTruthy();
+    });
+
+    // Round 20 owner correction: "the fat hippo name needs to be in its
+    // own medalion on the opposite side" — a Pure Key's own custom label
+    // previously overflowed straight out of the small circular position
+    // medallion (no numeric index to show there instead).
+    it("a label-only entry (no numeric index, e.g. a Pure Key) shows its own label in a SEPARATE pill on the OPPOSITE side from the group's seedBadge pill, and a short avatar initial (not the full label) inside the circular medallion", () => {
+      const entries = [makeEntry({ id: "pk1", address: "ADDR-PK", label: "FatHippo" })];
+      renderMobileCodex(entries, []);
+
+      // The group pill ("Pure Keys" — no seedId) — unchanged, still there.
+      expect(screen.getByText("Pure Keys")).toBeTruthy();
+      // The entry's OWN label now has its own pill — the full name is
+      // findable as real text, not truncated/overflowing.
+      const labelPill = screen.getByTitle("FatHippo");
+      expect(labelPill).toBeTruthy();
+      expect(labelPill.style.right).toBe("14px");
+      expect(labelPill.style.left).toBe("");
+      // The circle shows a short initial, not the full "FatHippo" text
+      // (which is what actually overflowed before this fix).
+      expect(screen.queryByText("FatHippo", { selector: "div" })).toBeNull();
+      expect(screen.getByText("FA")).toBeTruthy();
+    });
+
+    it("a left swipe on the entry area advances to the next page, a right swipe goes back — owner correction: 'we can add swiping mechanic to move page'", async () => {
+      const entries = Array.from({ length: 5 }, (_, i) =>
+        makeEntry({ id: `e${i}`, seedId: "seed-1", address: `ADDR-${i}`, index: i }));
+      renderMobileCodex(entries, [{ id: "seed-1", label: "Seed A" }]);
+      const surface = screen.getByTestId("arweave-accounts-page-surface");
+
+      expect(screen.getByText("ADDR-0")).toBeTruthy();
+      expect(screen.queryByText("ADDR-4")).toBeNull();
+
+      // Round 18 — the gesture must actually MOVE (a `touchmove`) past the
+      // dead-zone to be recognised as a horizontal page-swipe at all (this
+      // is what now drives the live drag feedback) — a bare
+      // touchstart+touchend with no move in between is exactly the "just
+      // a tap" case that must NOT flip a page.
+      const swipe = (fromX: number, toX: number) => {
+        fireEvent.touchStart(surface, { touches: [{ clientX: fromX, clientY: 0 }] });
+        fireEvent.touchMove(surface, { touches: [{ clientX: toX, clientY: 0 }] });
+        fireEvent.touchEnd(surface, { changedTouches: [{ clientX: toX, clientY: 0 }] });
+      };
+
+      // The page change itself is deliberately ASYNC now (it waits for the
+      // "animate off-screen" settle animation to finish first). Round 20's
+      // two-pane carousel means "ADDR-4" becomes visible almost
+      // immediately (mounted as the peeking adjacent pane as soon as the
+      // drag direction locks in) — no longer a reliable signal that the
+      // page-INDEX swap itself has completed. Wait for "ADDR-0" to
+      // actually disappear instead.
+      swipe(300, 200);
+      await waitFor(() => expect(screen.queryByText("ADDR-0")).toBeNull());
+      expect(screen.getByText("ADDR-4")).toBeTruthy();
+
+      swipe(200, 300);
+      await waitFor(() => expect(screen.queryByText("ADDR-4")).toBeNull());
+      expect(screen.getByText("ADDR-0")).toBeTruthy();
+    });
+
+    it("visually follows the finger while dragging, resists past the first/last page, and never moves for a vertical gesture (round 18)", async () => {
+      const entries = Array.from({ length: 5 }, (_, i) =>
+        makeEntry({ id: `e${i}`, seedId: "seed-1", address: `ADDR-${i}`, index: i }));
+      renderMobileCodex(entries, [{ id: "seed-1", label: "Seed A" }]);
+      const surface = screen.getByTestId("arweave-accounts-page-surface");
+      const track = screen.getByTestId("arweave-accounts-page-swipe-track");
+      expect(track.style.transform).toBe("translateX(0px)");
+
+      // Live drag tracking, no transition while the finger is still down.
+      fireEvent.touchStart(surface, { touches: [{ clientX: 300, clientY: 0 }] });
+      fireEvent.touchMove(surface, { touches: [{ clientX: 220, clientY: 0 }] });
+      expect(screen.getByText("ADDR-0")).toBeTruthy();
+      expect(track.style.transform).toBe("translateX(-80px)");
+      expect(track.style.transition).toBe("none");
+      fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 220, clientY: 0 }] });
+      // Round 20 — wait for the ACTUAL settle (the transform resets to 0
+      // in the same batched update as the real page-index swap) rather
+      // than for "ADDR-4" to appear (already visible well before this).
+      await waitFor(() => expect(track.style.transform).toBe("translateX(0px)"));
+      expect(screen.getByText("ADDR-4")).toBeTruthy();
+      expect(screen.queryByText("ADDR-0")).toBeNull();
+
+      // Already on the LAST page — dragging further LEFT resists (0.35×)
+      // instead of moving 1:1 with the finger.
+      fireEvent.touchStart(surface, { touches: [{ clientX: 300, clientY: 0 }] });
+      fireEvent.touchMove(surface, { touches: [{ clientX: 200, clientY: 0 }] });
+      expect(track.style.transform).toBe("translateX(-35px)"); // -100 * 0.35
+      fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 200, clientY: 0 }] });
+
+      // A predominantly VERTICAL gesture never moves the track at all.
+      fireEvent.touchStart(surface, { touches: [{ clientX: 200, clientY: 200 }] });
+      fireEvent.touchMove(surface, { touches: [{ clientX: 210, clientY: 260 }] });
+      expect(track.style.transform).toBe("translateX(0px)");
+      fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 210, clientY: 260 }] });
+      expect(screen.getByText("ADDR-4")).toBeTruthy();
+    });
+
+    it("round 20 — the ADJACENT page's real content mounts as a second pane and slides INTO view WHILE dragging, instead of the old blank gap ('the next page isnt there, it simply appears when the prev page is complelety gone')", async () => {
+      const entries = Array.from({ length: 5 }, (_, i) =>
+        makeEntry({ id: `e${i}`, seedId: "seed-1", address: `ADDR-${i}`, index: i }));
+      renderMobileCodex(entries, [{ id: "seed-1", label: "Seed A" }]);
+      const surface = screen.getByTestId("arweave-accounts-page-surface");
+
+      expect(screen.queryByText("ADDR-4")).toBeNull();
+
+      fireEvent.touchStart(surface, { touches: [{ clientX: 300, clientY: 0 }] });
+      fireEvent.touchMove(surface, { touches: [{ clientX: 260, clientY: 0 }] });
+      // Still mid-drag (well under the commit threshold) — "ADDR-4" (page
+      // 2's own real content) is ALREADY mounted, sliding in.
+      expect(screen.getByText("ADDR-0")).toBeTruthy();
+      expect(screen.getByText("ADDR-4")).toBeTruthy();
+
+      // Releasing under the threshold bounces back — the peek was a real
+      // preview, not a premature commit.
+      fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 260, clientY: 0 }] });
+      expect(screen.getByText("ADDR-0")).toBeTruthy();
+    });
+  });
+
+  // Round 17 owner correction: "we need to do the same thing with the
+  // addresses of arweave, arweave account one line, balance one line, and
+  // buttons below on the lower bar, with entry selection" — ports
+  // `StoaAccountsTab.tsx`'s own mobile selection + shared bottom action
+  // bar pattern.
+  describe("mobile: entry selection + shared bottom action bar (round 17)", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    function renderMobile(props: Partial<ArweaveAccountsAreaProps> = {}) {
+      // `SendArweaveModal` calls `useEnsureCodexUnlocked` (codex-ouronet/
+      // zbom) UNCONDITIONALLY at its own top level, regardless of `isOpen`
+      // — so simply MOUNTING it (whenever `deps` is truthy) requires a
+      // `<CodexProvider>` ancestor, the SAME one `apps/codex-playground`
+      // always wraps `ArweavePanel` in (mirrors `e4-panel-categories.test.tsx`'s
+      // own `renderPanel`/`renderPanelMobile` helpers).
+      return render(
+        <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+          <CodexUiRoot>
+            <ArweaveAccountsArea entries={[]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} {...props} />
+          </CodexUiRoot>
+        </CodexProvider>,
+      );
+    }
+
+    it("selects the first Codex entry by default — no tap needed — and the shared bar shows Send/Copy/Explorer for it", () => {
+      const entries = [
+        makeEntry({ id: "e0", seedId: "seed-1", index: 0, address: "ADDR-0" }),
+        makeEntry({ id: "e1", seedId: "seed-1", index: 1, address: "ADDR-1" }),
+      ];
+      renderMobile({ entries, deps: {} as never });
+      expect(screen.getByLabelText("Send AR")).toBeTruthy();
+      expect(screen.getByLabelText("Copy address")).toBeTruthy();
+      expect(screen.getByLabelText("Open in Explorer")).toBeTruthy();
+      // No delete/remove control for a Codex-owned entry — see `AccountRow`'s
+      // own `deleteGuard` doc comment: a seed-derived key is only ever
+      // deleted via its own seed, never from this surface.
+      expect(screen.queryByLabelText("Stop watching this address")).toBeNull();
+    });
+
+    it("tapping a different row switches the selection — the shared bar now acts on the NEWLY selected entry", () => {
+      const writeText = vi.fn();
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      const entries = [
+        makeEntry({ id: "e0", seedId: "seed-1", index: 0, address: "ADDR-0" }),
+        makeEntry({ id: "e1", seedId: "seed-1", index: 1, address: "ADDR-1" }),
+      ];
+      renderMobile({ entries });
+
+      // Default selection is the first entry.
+      fireEvent.click(screen.getByLabelText("Copy address"));
+      expect(writeText).toHaveBeenLastCalledWith("ADDR-0");
+
+      // Tap the SECOND row (its own address text) to switch selection.
+      fireEvent.click(screen.getByText("ADDR-1"));
+      fireEvent.click(screen.getByLabelText("Copy address"));
+      expect(writeText).toHaveBeenLastCalledWith("ADDR-1");
+    });
+
+    it("no per-row buttons render on mobile Codex rows — only the leading medallion, the address line, and the balance line", () => {
+      const entries = [makeEntry({ id: "e0", seedId: "seed-1", index: 0, address: "ADDR-0" })];
+      renderMobile({ entries, deps: {} as never });
+      // The per-row `data-testid`s (desktop-only now) never render on mobile.
+      expect(screen.queryByTestId("arweave-account-send-e0")).toBeNull();
+      expect(screen.queryByTestId("arweave-account-copy-e0")).toBeNull();
+      expect(screen.queryByTestId("arweave-account-explorer-e0")).toBeNull();
+      // Exactly one of each control exists — the shared bar's own.
+      expect(screen.getAllByLabelText("Send AR").length).toBe(1);
+      expect(screen.getAllByLabelText("Copy address").length).toBe(1);
+    });
+
+    it("selecting a WATCHED entry hides Send (no private key behind a watched address) and shows a remove-from-watch control instead", () => {
+      const onRemoveWatched = vi.fn();
+      const watched = [makeWatchEntry({ id: "w0", address: "WATCH-0" })];
+      renderMobile({ deps: {} as never, watchedEntries: watched, onRemoveWatched });
+      fireEvent.click(screen.getByTestId("arweave-accounts-subtab-watch"));
+
+      expect(screen.queryByLabelText("Send AR")).toBeNull();
+      expect(screen.getByLabelText("Copy address")).toBeTruthy();
+      const removeBtn = screen.getByLabelText("Stop watching this address");
+      expect(removeBtn).toBeTruthy();
+
+      fireEvent.click(removeBtn);
+      expect(onRemoveWatched).toHaveBeenCalledWith("w0");
+    });
+
+    it("portals the shared bottom bar into a supplied zone3AnchorTarget, landing on that target's OWN bottom border", () => {
+      const railTarget = document.createElement("div");
+      document.body.appendChild(railTarget);
+      const entries = [makeEntry({ id: "e0", seedId: "seed-1", index: 0, address: "ADDR-0" })];
+      const { container } = renderMobile({ entries, deps: {} as never, zone3AnchorTarget: railTarget });
+
+      const sendBtn = screen.getByLabelText("Send AR");
+      expect(railTarget.contains(sendBtn)).toBe(true);
+      expect(container.contains(sendBtn)).toBe(false);
+      const stack = sendBtn.parentElement as HTMLElement;
+      expect(stack.style.bottom).toBe("0px");
+      expect(stack.style.transform).toBe("translateY(50%)");
+
+      document.body.removeChild(railTarget);
     });
   });
 });

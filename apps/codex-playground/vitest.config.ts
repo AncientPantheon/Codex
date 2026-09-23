@@ -88,9 +88,19 @@ export default defineConfig({
         //   - lucide-react → the shell's tab icons (<Atom>, <Sprout>, …) are
         //     React-18 elements handed to the React-19 reconciler, which throws
         //     "A React Element from an older version of React was rendered".
+        //   - @radix-ui/* → e.g. the rotate-guard dialog's `TooltipProvider`
+        //     throws `Cannot read properties of null (reading 'useRef')` — the
+        //     SAME class of bug, already fixed the same way in codex-ouronet's
+        //     own `vitest.config.ts` (`server.deps.inline: [..., /@radix-ui\//]`);
+        //     this app's config had simply never carried the same fix, so it
+        //     surfaced here only once a test's module graph happened to load a
+        //     Radix-dependent component transitively (the "Blockchain Accounts"
+        //     cleanup round's `ArweavePanel` -> `@ancientpantheon/codex-ui/ui`
+        //     import made that path reachable from a test file it wasn't
+        //     before — a real, previously-latent gap, not a new one).
         // Inlining routes each dep's `react`/`jsx-runtime` import through the
         // single-copy alias so every module renders on ONE React instance.
-        inline: ["zustand", "lucide-react"],
+        inline: ["zustand", "lucide-react", /@radix-ui\//],
       },
     },
   },

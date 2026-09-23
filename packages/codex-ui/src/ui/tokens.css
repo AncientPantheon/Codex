@@ -80,3 +80,11 @@
   0%, 100% { text-shadow: 0 0 4px currentColor, 0 0 8px currentColor; opacity: 0.92; }
   50%      { text-shadow: 0 0 12px currentColor, 0 0 22px currentColor; opacity: 1; }
 }
+
+/* Mirrors `codex-ouronet`'s own copy — see that file's doc comment.
+ * `DalosSecretReveal.tsx` (codex-ouronet) is the only current user; kept
+ * in sync here per this file's own "byte-identical sibling" convention. */
+@keyframes codex-word-marquee {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(-100%); }
+}

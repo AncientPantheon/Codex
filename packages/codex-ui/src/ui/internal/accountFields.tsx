@@ -106,8 +106,47 @@ export function AddressFieldBox({ label, address, copyText }: { label: string; a
 
 /** The account "Public Key" section (immutable badge + break-all code + copy).
  *  Optional `headerAction` renders at the section header's upper-right (e.g. a
- *  per-key "Reveal Seed" button). */
-export function PublicKeyFieldBox({ label = "Public Key", publicKey, headerAction }: { label?: string; publicKey: string; headerAction?: React.ReactNode }) {
+ *  per-key "Reveal Seed" button).
+ *
+ *  `compact` (docs/work/codex-ui-mobile/design.md §8, Zone 2 rework): ONE
+ *  line, no wrap — the "medallions" (label + the immutable lock) shrink to
+ *  icon-size, and the key value fills all remaining width with a plain CSS
+ *  end-ellipsis (`overflow:hidden; textOverflow:ellipsis`) instead of
+ *  wrapping across multiple lines. `headerAction` is expected to ALSO be its
+ *  own compact/icon-only rendering in this mode (the caller's concern — see
+ *  `RevealSeedBtn`'s own `compact` prop). Desktop's own branch is completely
+ *  unchanged. */
+export function PublicKeyFieldBox({
+  label = "Public Key", publicKey, headerAction, compact,
+}: {
+  label?: string; publicKey: string; headerAction?: React.ReactNode; compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <div style={{ ...sectionBox, marginTop: 0, padding: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ ...sectionLabel, fontSize: 9, flexShrink: 0 }}>{label}</span>
+          <span
+            title="Immutable — the public key is derived deterministically from the private key, it cannot be changed."
+            style={{ display: "inline-flex", flexShrink: 0 }}
+          >
+            <Lock style={{ width: 11, height: 11, color: "#c0392b" }} aria-label="immutable" />
+          </span>
+          <code
+            title={publicKey}
+            style={{
+              flex: 1, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
+              fontFamily: MONO, fontSize: 10, color: "#c0c0c0",
+            }}
+          >
+            {publicKey}
+          </code>
+          <IconCopyBtn text={publicKey} size={20} />
+          {headerAction}
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={sectionBox}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -125,17 +164,32 @@ export function PublicKeyFieldBox({ label = "Public Key", publicKey, headerActio
 }
 
 /** The account "Guard" section (label + Rotate-Guard button + content). */
+/** `compact` (design.md §8, Zone 2 rework): tighter box + a shorter rotate
+ *  label ("Rotate" instead of "Rotate Guard") so the header row reliably
+ *  stays on one line in a narrow column. Desktop's own branch unchanged. */
 export function GuardFieldBox({
-  label = "Guard", rotateLabel = "Rotate Guard", onRotate, children,
+  label = "Guard", rotateLabel, onRotate, children, compact,
 }: {
-  label?: string; rotateLabel?: string; onRotate: () => void; children: React.ReactNode;
+  label?: string; rotateLabel?: string; onRotate: () => void; children: React.ReactNode; compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <div style={{ ...sectionBox, marginTop: 0, padding: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+          <span style={{ ...sectionLabel, fontSize: 9 }}>{label}</span>
+          <div style={{ flex: 1 }} />
+          <GoldenBtn icon={<Shield style={{ width: 12, height: 12 }} />} label={rotateLabel ?? "Rotate"} onClick={onRotate} />
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div style={sectionBox}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <span style={sectionLabel}>{label}</span>
         <div style={{ flex: 1 }} />
-        <GoldenBtn icon={<Shield style={{ width: 14, height: 14 }} />} label={rotateLabel} onClick={onRotate} />
+        <GoldenBtn icon={<Shield style={{ width: 14, height: 14 }} />} label={rotateLabel ?? "Rotate Guard"} onClick={onRotate} />
       </div>
       {children}
     </div>

@@ -63,9 +63,10 @@ import type {
   // ── STAY-set tabs aggregator type companions (local) ──
   CodexTabsProps,
   CodexTabKey,
-  // ── STAY-set debouncer-trio type companions (local) ──
+  // ── STAY-set debouncer-quartet type companions (local) ──
   CodexDebouncerPanelProps,
   CodexReadFn,
+  DebouncerInfoModalProps,
   // ── STAY-set @stoachain-edged card type companions (local) ──
   CodexInfoCardProps,
   EncryptionCardProps,
@@ -108,10 +109,14 @@ const EXPECTED_UI_VALUE_EXPORTS = [
   "OuronetAccountsTab",
   // STAY-set: the Ouronet-composed tabs aggregator (local)
   "CodexTabs",
-  // STAY-set: the zbom debouncer trio (value zbom edge)
+  // STAY-set: the zbom debouncer quartet (value zbom edge) — `DebouncerInfoModal`
+  // added (owner correction: "in the OuronetUI implementation this also has
+  // an i infomatic... we need the same here"): the full-screen explainer a
+  // host wires `CodexDebouncerPanel`'s `onInfo` trigger to.
   "CodexDebouncerPanel",
   "codexClock",
   "CODEX_READ_REGISTRY",
+  "DebouncerInfoModal",
   // STAY-set: the @stoachain-edged settings cards (C4)
   "CodexInfoCard",
   "EncryptionCard",
@@ -135,6 +140,10 @@ const EXPECTED_UI_VALUE_EXPORTS = [
   // panel's seed reveal so both surfaces share ONE modal, not just a
   // matching width.
   "CodexModalShell",
+  // The real Ouronet-account seed-reveal modal — now also wired as
+  // ObservationalCodexIdDisplay's `renderViewSeedModal` injection slot
+  // (design.md §8), so a consumer needs to import it from the public barrel.
+  "ViewSeedModal",
   // The Spawn modal's draw/randomize/import bitmap grid — reused by the
   // Arweave panel's Direct Deterministic RSA Generation Bitmap input.
   "BitmapKeyInput",
@@ -162,7 +171,7 @@ describe("ui barrel — forward lock (every named value export present)", () => 
       (name) => (ouronetUi as Record<string, unknown>)[name] !== undefined,
     );
     expect(present).toHaveLength(EXPECTED_UI_VALUE_EXPORTS.length);
-    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(35);
+    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(37);
   });
 });
 
@@ -216,9 +225,10 @@ describe("ui barrel — type-shape lock (Props / companion type exports present)
     // STAY-set tabs aggregator companions
     acceptType<CodexTabsProps>();
     acceptType<CodexTabKey>();
-    // STAY-set debouncer-trio companions
+    // STAY-set debouncer-quartet companions
     acceptType<CodexDebouncerPanelProps>();
     acceptType<CodexReadFn>();
+    acceptType<DebouncerInfoModalProps>();
     // STAY-set @stoachain-edged card companions
     acceptType<CodexInfoCardProps>();
     acceptType<EncryptionCardProps>();

@@ -29,6 +29,7 @@ import type { LibraryEntry, LibraryStore } from "../src/library/types";
 import { CodexLockedError } from "@ancientpantheon/codex-ouronet/errors";
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 
@@ -191,7 +192,12 @@ describe("PureKeysArea — list scope", () => {
     render(<PureKeysArea {...(makeProps({ foreignKeys: [entry] }) as unknown as PureKeysAreaProps)} />);
     expect(screen.getByText("Pure Key One")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${entry.id}`));
-    expect(screen.getByText(THROWAWAY_ADDRESS)).toBeInTheDocument();
+    // Round 28: the address renders via `ArweaveAddressHighlight` — the
+    // FULL address is split across highlighted head/mid/tail spans (and
+    // may be visually truncated), so `getByText` no longer matches it as
+    // one node; its `title` attribute always carries the untruncated
+    // value, same convention every other address-highlight caller uses.
+    expect(screen.getByTitle(THROWAWAY_ADDRESS)).toBeInTheDocument();
   });
 
   it("excludes a key that carries a seedId — that is Seeds'/Accounts' territory, not Pure Keys'", () => {
@@ -239,7 +245,12 @@ describe("PureKeysArea — collapsed/expand row presentation (Chainweb-style res
 
     // Expanding the FIRST row only reveals ITS address + action icons.
     fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${first.id}`));
-    expect(screen.getByText(THROWAWAY_ADDRESS)).toBeInTheDocument();
+    // Round 28: the address renders via `ArweaveAddressHighlight` — the
+    // FULL address is split across highlighted head/mid/tail spans (and
+    // may be visually truncated), so `getByText` no longer matches it as
+    // one node; its `title` attribute always carries the untruncated
+    // value, same convention every other address-highlight caller uses.
+    expect(screen.getByTitle(THROWAWAY_ADDRESS)).toBeInTheDocument();
     expect(screen.getByTestId(`arweave-pure-key-copy-${first.id}`)).toBeInTheDocument();
     expect(screen.getByTestId(`arweave-pure-key-rename-${first.id}`)).toBeInTheDocument();
     expect(screen.getByTestId(`arweave-pure-key-export-${first.id}`)).toBeInTheDocument();
@@ -251,6 +262,134 @@ describe("PureKeysArea — collapsed/expand row presentation (Chainweb-style res
     expect(screen.queryByTestId(`arweave-pure-key-rename-${second.id}`)).not.toBeInTheDocument();
     expect(screen.queryByTestId(`arweave-pure-key-export-${second.id}`)).not.toBeInTheDocument();
     expect(screen.queryByTestId(`arweave-pure-key-delete-${second.id}`)).not.toBeInTheDocument();
+  });
+});
+
+// Round 26 owner correction: "the 3 buttons from pure keys are a bit to
+// big, making the view get a horisontal scroll... we should move to
+// icons instead of thsse buttons. Then the buttons need to stay put,
+// scrolling shouldnt move them." + "The key entries need to have same
+// height as the seed entries, slim..."
+describe("PureKeysArea — mobile: icon-only sticky subtab row + slim key rows (round 26)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderMobile(overrides: Record<string, unknown> = {}) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const props = makeProps(overrides);
+    return render(
+      <CodexUiRoot>
+        <PureKeysArea {...(props as unknown as PureKeysAreaProps)} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("renders the subtab row icon-only (no visible text), reachable by accessible name, and pinned via position: sticky", () => {
+    renderMobile({ foreignKeys: [makeEntry()] });
+    const listBtn = screen.getByTestId("arweave-pure-keys-subtab-list");
+    expect(listBtn).toHaveAttribute("aria-label", "Keys (1)");
+    expect(listBtn.textContent).not.toContain("Keys");
+    const row = listBtn.parentElement as HTMLElement;
+    expect(row.style.position).toBe("sticky");
+    expect(row.style.top).toBe("0px");
+  });
+
+  it("desktop: keeps the full text label, not sticky", () => {
+    const props = makeProps({ foreignKeys: [makeEntry()] });
+    render(<PureKeysArea {...(props as unknown as PureKeysAreaProps)} />);
+    const listBtn = screen.getByTestId("arweave-pure-keys-subtab-list");
+    expect(listBtn.textContent).toBe("Keys (1)");
+    const row = listBtn.parentElement as HTMLElement;
+    expect(row.style.position).toBe("");
+  });
+
+  it("mobile: the key row header drops the 32×32 avatar for a small 10×10 colour dot and trims its own padding", () => {
+    const entry = makeEntry();
+    renderMobile({ foreignKeys: [entry] });
+    const label = screen.getByText("Pure Key One");
+    const header = label.parentElement as HTMLElement;
+    expect(header.style.padding).toBe("6px 16px");
+    const row = screen.getByTestId(`arweave-pure-key-row-${entry.id}`);
+    expect(row.querySelector('[style*="width: 32px"]')).toBeNull();
+  });
+
+  it("desktop: still shows the 32×32 avatar and the original padding, unchanged", () => {
+    const entry = makeEntry();
+    const props = makeProps({ foreignKeys: [entry] });
+    render(<PureKeysArea {...(props as unknown as PureKeysAreaProps)} />);
+    const label = screen.getByText("Pure Key One");
+    const header = label.parentElement as HTMLElement;
+    expect(header.style.padding).toBe("12px 16px");
+    const row = screen.getByTestId(`arweave-pure-key-row-${entry.id}`);
+    expect(row.querySelector('[style*="width: 32px"]')).not.toBeNull();
+  });
+});
+
+// Round 27 owner correction: "clickign fathippo, opens it in place. i
+// want it to be opened in new page, same as seed, this is only for
+// arweave as it has more detail. THe pure chainweb key can remain as is."
+describe("PureKeysArea — mobile: expanding a key opens full screen (round 27, Arweave only)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderMobile(overrides: Record<string, unknown> = {}) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const props = makeProps(overrides);
+    return render(
+      <CodexUiRoot>
+        <PureKeysArea {...(props as unknown as PureKeysAreaProps)} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("mobile: opens the expanded detail inside a full-screen CodexModalShell", () => {
+    const entry = makeEntry();
+    renderMobile({ foreignKeys: [entry] });
+    fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${entry.id}`));
+    expect(screen.getByTestId(`arweave-pure-key-expand-modal-${entry.id}`)).toBeInTheDocument();
+    // The address + action icons still render, now inside the modal.
+    expect(screen.getByTestId(`arweave-pure-key-copy-${entry.id}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("arweave-pure-key-expand-close"));
+    expect(screen.queryByTestId(`arweave-pure-key-expand-modal-${entry.id}`)).toBeNull();
+  });
+
+  it("desktop: still expands inline, no modal — unchanged", () => {
+    const entry = makeEntry();
+    const props = makeProps({ foreignKeys: [entry] });
+    render(<PureKeysArea {...(props as unknown as PureKeysAreaProps)} />);
+    fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${entry.id}`));
+    expect(screen.queryByTestId(`arweave-pure-key-expand-modal-${entry.id}`)).toBeNull();
+    expect(screen.getByTestId(`arweave-pure-key-copy-${entry.id}`)).toBeInTheDocument();
+  });
+
+  it("portals into the supplied fullScreenPortalTarget, escaping this tab's own bounded Zone 3", () => {
+    const entry = makeEntry();
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const { container } = renderMobile({ foreignKeys: [entry], fullScreenPortalTarget: target });
+    fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${entry.id}`));
+    const modal = screen.getByTestId(`arweave-pure-key-expand-modal-${entry.id}`);
+    expect(target.contains(modal)).toBe(true);
+    expect(container.contains(modal)).toBe(false);
+    document.body.removeChild(target);
   });
 });
 
@@ -910,6 +1049,33 @@ describe("PureKeysArea — copy", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SECOND_ADDRESS));
     expect(writeText).not.toHaveBeenCalledWith(THROWAWAY_ADDRESS);
   });
+
+  // Round 26 owner correction: "Clicking copy buttons should show the
+  // green check after its been tapped, just like on desktop."
+  it("shows a green checkmark after copying, then reverts", async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn(async () => {});
+      Object.assign(navigator, { clipboard: { writeText } });
+      const entry = makeEntry();
+      const props = makeProps({ foreignKeys: [entry] });
+      render(<PureKeysArea {...(props as unknown as PureKeysAreaProps)} />);
+
+      fireEvent.click(screen.getByTestId(`arweave-pure-key-toggle-${entry.id}`));
+      const copyBtn = screen.getByTestId(`arweave-pure-key-copy-${entry.id}`);
+      expect(copyBtn).toHaveAttribute("aria-label", "Copy address");
+
+      fireEvent.click(copyBtn);
+      expect(copyBtn).toHaveAttribute("aria-label", "Copied");
+
+      act(() => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(copyBtn).toHaveAttribute("aria-label", "Copy address");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("PureKeysArea — RSA parameters (reused RsaParamsSection)", () => {
@@ -931,7 +1097,7 @@ describe("PureKeysArea — RSA parameters (reused RsaParamsSection)", () => {
     assertNoPrivateJwkInDom();
   });
 
-  it("places the RSA-parameters toggle on the SAME row as the action icons, before them, so an unopened panel costs no extra row", () => {
+  it("places the RSA-parameters toggle on its own row below the action icons, so an unopened panel costs no extra row", () => {
     const entry = makeEntry();
     const props = makeProps({ foreignKeys: [entry] });
     render(<PureKeysArea {...(props as unknown as PureKeysAreaProps)} />);
@@ -940,12 +1106,15 @@ describe("PureKeysArea — RSA parameters (reused RsaParamsSection)", () => {
 
     const toggle = screen.getByTestId(`arweave-pure-key-params-toggle-${entry.id}`);
     const copyIcon = screen.getByTestId(`arweave-pure-key-copy-${entry.id}`);
-    // Same flex row: they share an immediate parent...
+    // Round 28 owner correction ("address on a single line... buttons
+    // below it... detail medallion beneath the square buttons") turned the
+    // address/icons/toggle row into a vertical stack: the toggle and the
+    // icon group are still siblings of that same stack wrapper...
     expect(toggle.parentElement).toBe(copyIcon.parentElement?.parentElement);
-    // ...and the toggle comes BEFORE the icon group in DOM order (address —
-    // toggle — icons), per the requested layout.
+    // ...but the toggle now comes AFTER the icon group in DOM order
+    // (address — icons — toggle), per the requested layout.
     expect(
-      toggle.compareDocumentPosition(copyIcon) & Node.DOCUMENT_POSITION_FOLLOWING,
+      copyIcon.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     // Collapsed by default: the panel body is not mounted alongside it.
     expect(screen.queryByTestId(`arweave-pure-key-params-${entry.id}`)).not.toBeInTheDocument();
@@ -962,9 +1131,11 @@ describe("PureKeysArea — RSA parameters (reused RsaParamsSection)", () => {
     fireEvent.click(toggle);
 
     const panel = await screen.findByTestId(`arweave-pure-key-params-${entry.id}`);
-    // The panel is NOT inside the address/icons row the toggle lives in — it
-    // sits on its own row below, as a sibling of that row.
-    expect(panel.parentElement).not.toBe(toggle.parentElement);
+    // Round 28: the toggle and the panel are now both direct children of
+    // the same vertical stack (address — buttons — toggle — panel), so
+    // they share a parent; the panel still renders strictly AFTER the
+    // toggle, on its own row below it.
+    expect(panel.parentElement).toBe(toggle.parentElement);
     expect(
       toggle.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

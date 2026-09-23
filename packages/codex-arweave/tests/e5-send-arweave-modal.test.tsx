@@ -702,12 +702,30 @@ describe("<SendArweaveModal>", () => {
         expect((screen.getByTestId("arweave-send-super-max") as HTMLButtonElement).disabled).toBe(true);
       });
 
-      it("both Max and Super Max carry an explanatory tooltip describing the 1.2x buffer vs. the exact-fee sweep", () => {
+      it("both Max and Super Max carry a styled ActionTooltip (not a native title= bubble) describing the 1.2x buffer vs. the exact-fee sweep", async () => {
+        // Regression: these used to be native `title=` attributes — the
+        // "standard ugly tooltip", unstyled and single-line. Neither button
+        // may carry a native title now; the explanation lives in the SAME
+        // Radix ActionTooltip StoaAccountsTab's action buttons already use
+        // (@ancientpantheon/codex-ouronet/zbom), opened here via `focus()` —
+        // the same accessible path a keyboard user takes, per
+        // @radix-ui/react-tooltip's TooltipTrigger onFocus handler.
         render(<SendArweaveModal entry={makeEntry()} isOpen onClose={() => {}} deps={makeDeps()} />);
-        expect(screen.getByTestId("arweave-send-max").getAttribute("title")).toMatch(/1\.2x/i);
-        const superMaxTitle = screen.getByTestId("arweave-send-super-max").getAttribute("title");
-        expect(superMaxTitle).toMatch(/exact/i);
-        expect(superMaxTitle).toMatch(/sweep/i);
+        const maxBtn = screen.getByTestId("arweave-send-max");
+        const superMaxBtn = screen.getByTestId("arweave-send-super-max");
+        expect(maxBtn.getAttribute("title")).toBeNull();
+        expect(superMaxBtn.getAttribute("title")).toBeNull();
+
+        fireEvent.focus(maxBtn);
+        await waitFor(() => {
+          expect(screen.getAllByText(/1\.2x/i).length).toBeGreaterThan(0);
+        });
+
+        fireEvent.focus(superMaxBtn);
+        await waitFor(() => {
+          expect(screen.getAllByText(/exact/i).length).toBeGreaterThan(0);
+          expect(screen.getAllByText(/sweep/i).length).toBeGreaterThan(0);
+        });
       });
     });
 

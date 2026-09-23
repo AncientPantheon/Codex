@@ -1,16 +1,27 @@
 /**
  * CodexModalShell — the popup chrome the packaged CodexUI modals render into:
- * a fixed full-viewport backdrop + a centered, scrollable card with a title
- * bar and close button. The package's signing modals (Rotate*, etc.) are
- * headless (render-prop) by design; this shell is the UI-layer skin that turns
- * them into real centered popups matching My Codex's modal look (dark card,
- * gold title, dashed-free border), without coupling the headless components to
- * any styling.
+ * a centered, scrollable card with a title bar and close button. The
+ * package's signing modals (Rotate*, etc.) are headless (render-prop) by
+ * design; this shell is the UI-layer skin that turns them into real centered
+ * popups matching My Codex's modal look (dark card, gold title, dashed-free
+ * border), without coupling the headless components to any styling.
+ *
+ * MOBILE: on a narrow `CodexUiRoot` (`useIsMobile()`, container-relative —
+ * see `docs/work/codex-ui-mobile/design.md` §7, the Pantheonic mobile doc's
+ * "modals go full-screen on mobile" rule), this is the ONE shared component
+ * change that flips EVERY modal built on this shell at once: the backdrop
+ * becomes `position: absolute` (anchored to `CodexUiRoot`, which is
+ * `position: relative` — see `CodexUiRoot.tsx` — so a modal never escapes an
+ * embedded CodexUI's own rectangle the way `position: fixed` against the
+ * viewport would), and the card becomes a full-bleed, content-height sheet
+ * (no max-width cap, no rounded corners) instead of a centered, capped-width
+ * card.
  */
 
 import * as React from "react";
 import { useState } from "react";
 import { X, Eye, EyeOff } from "lucide-react";
+import { useIsMobile } from "../mobile/MobileContext.js";
 
 export interface CodexModalShellProps {
   title: string;
@@ -30,33 +41,42 @@ export function CodexModalShell({
   accent = "#ceac5f",
   maxWidth = 520,
 }: CodexModalShellProps) {
+  const isMobile = useIsMobile();
   return (
     <div
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position: "fixed",
+        position: isMobile ? "absolute" : "fixed",
         inset: 0,
         zIndex: 9999,
         display: "flex",
-        alignItems: "center",
+        alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",
-        padding: 16,
+        padding: isMobile ? 0 : 16,
         backgroundColor: "rgba(0,0,0,0.75)",
         backdropFilter: "blur(2px)",
+        // Explicit (not just the implicit default) — a caller MAY portal this
+        // shell into a `pointer-events: none` overlay wrapper (e.g. a
+        // full-screen modal-portal target spanning a mobile shell's whole
+        // body — docs/work/codex-ui-mobile/design.md §8), and `pointer-events`
+        // is inherited; without this override the whole dialog would
+        // silently become unclickable in that case.
+        pointerEvents: "auto",
       }}
     >
       <div
         style={{
           width: "100%",
-          maxWidth,
-          maxHeight: "90vh",
+          maxWidth: isMobile ? "none" : maxWidth,
+          height: isMobile ? "100%" : undefined,
+          maxHeight: isMobile ? "100%" : "90vh",
           overflowY: "auto",
           backgroundColor: "#0a0a0a",
-          border: "1px solid #262626",
-          borderRadius: 16,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          border: isMobile ? "none" : "1px solid #262626",
+          borderRadius: isMobile ? 0 : 16,
+          boxShadow: isMobile ? "none" : "0 20px 60px rgba(0,0,0,0.6)",
           fontFamily: "var(--codex-font, inherit)",
           color: "#d2d3d4",
         }}

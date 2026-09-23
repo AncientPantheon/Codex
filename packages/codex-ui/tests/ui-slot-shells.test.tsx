@@ -17,15 +17,41 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect, afterEach } from "vitest";
+import type { ReactElement } from "react";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { KeyRound, Shield } from "lucide-react";
 
 import { CodexTabsShell } from "../src/ui/CodexTabsShell.js";
 import type { CodexTabsShellItem } from "../src/ui/CodexTabsShell.js";
 import { CodexSettingsSectionShell } from "../src/ui/settings/CodexSettingsSectionShell.js";
 import type { CodexSettingsSubtab } from "../src/ui/settings/CodexSettingsSectionShell.js";
+import { CodexUiRoot } from "../src/ui/CodexUiRoot.js";
 
 afterEach(cleanup);
+
+class FakeResizeObserver {
+  callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+  observe(target: Element) {
+    this.callback(
+      [{ contentRect: { width: FakeResizeObserver.nextWidth } } as unknown as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+    void target;
+  }
+  unobserve() {}
+  disconnect() {}
+  static nextWidth = 1024;
+}
+
+function renderMobile(ui: ReactElement) {
+  FakeResizeObserver.nextWidth = 390;
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  return render(<CodexUiRoot>{ui}</CodexUiRoot>);
+}
 
 // ---------------------------------------------------------------------------
 // CodexTabsShell — injected tab list, active-tab switching
@@ -111,6 +137,55 @@ describe("CodexSettingsSectionShell — injected subtab/card slots", () => {
     fireEvent.click(screen.getByRole("button", { name: "Security" }));
     expect(screen.getByText("security-cards")).toBeTruthy();
     expect(screen.queryByText("ops-cards")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CodexSettingsSectionShell — MOBILE (design.md §8, the Settings-page
+// cleanup round): icon-only, single-line subtab row instead of the wrapping
+// text-pill bar.
+// ---------------------------------------------------------------------------
+
+describe("CodexSettingsSectionShell — mobile: icon-only single-line subtab row", () => {
+  const subtabsWithIcons: CodexSettingsSubtab[] = [
+    { key: "ops", label: "Operations", color: "#ceac5f", cards: <div>ops-cards</div>, Icon: Shield },
+    { key: "security", label: "Security", color: "#22c55e", cards: <div>security-cards</div>, Icon: KeyRound },
+  ];
+
+  it("renders an icon-only button per subtab (accessible name still carries the full label via title/aria-label)", () => {
+    const { container } = renderMobile(<CodexSettingsSectionShell subtabs={subtabsWithIcons} />);
+    const opsBtn = screen.getByRole("button", { name: "Operations" });
+    expect(opsBtn).toBeTruthy();
+    // No bare label TEXT node inside the button — only the icon svg + the
+    // title/aria-label carrying the string (an icon-only button, not a pill
+    // with visible text like desktop's).
+    expect(opsBtn.textContent).toBe("");
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("keeps the subtab row on a single line (no wrap)", () => {
+    renderMobile(<CodexSettingsSectionShell subtabs={subtabsWithIcons} />);
+    const row = screen.getByRole("button", { name: "Operations" }).parentElement as HTMLElement;
+    expect(row.style.flexWrap).not.toBe("wrap");
+  });
+
+  it("keeps the SAME gap (10px) Zone 3's own mobile filter row uses between its icon row and the content below", () => {
+    renderMobile(<CodexSettingsSectionShell subtabs={subtabsWithIcons} />);
+    const row = screen.getByRole("button", { name: "Operations" }).parentElement as HTMLElement;
+    expect(row.style.marginBottom).toBe("10px");
+  });
+
+  it("still swaps the visible card group when a different icon button is clicked", () => {
+    renderMobile(<CodexSettingsSectionShell subtabs={subtabsWithIcons} />);
+    fireEvent.click(screen.getByRole("button", { name: "Security" }));
+    expect(screen.getByText("security-cards")).toBeTruthy();
+    expect(screen.queryByText("ops-cards")).toBeNull();
+  });
+
+  it("desktop (no CodexUiRoot ancestor) is unaffected — still the wrapping text-pill bar", () => {
+    render(<CodexSettingsSectionShell subtabs={subtabsWithIcons} />);
+    const opsBtn = screen.getByRole("button", { name: "Operations" });
+    expect(opsBtn.textContent).toBe("Operations");
   });
 });
 

@@ -74,6 +74,13 @@ interface SecretRef {
 function* iterateCodexSecretRefs(snapshot: CodexSnapshot): Generator<SecretRef> {
   for (const s of snapshot.kadenaSeeds ?? []) {
     yield { slice: "kadenaSeeds", id: s.id, field: "secret", read: () => s.secret, write: (v) => { s.secret = v; } };
+    // `wordsSecret` (round 22/23 — see `IStoaChainSeed.wordsSecret`'s own
+    // doc comment) is a SEPARATE encrypted envelope, only ever present on a
+    // `"stoic"` seed that was captured with real words behind it — the
+    // SAME `ouroAccounts` `secret`+`backup` dual-field precedent just
+    // below. Omitting it here would leave it sealed under the OLD password
+    // after a rekey, silently failing to decrypt from then on.
+    yield { slice: "kadenaSeeds", id: s.id, field: "wordsSecret", read: () => s.wordsSecret, write: (v) => { s.wordsSecret = v; } };
   }
   for (const a of snapshot.ouroAccounts ?? []) {
     yield { slice: "ouroAccounts", id: a.id, field: "secret", read: () => a.secret, write: (v) => { a.secret = v; } };
@@ -93,6 +100,9 @@ function* iterateCodexSecretRefs(snapshot: CodexSnapshot): Generator<SecretRef> 
   // unreproducible. They must re-key with every other secret slice.
   for (const s of snapshot.arweaveSeeds ?? []) {
     yield { slice: "arweaveSeeds", id: s.id, field: "secret", read: () => s.secret, write: (v) => { s.secret = v; } };
+    // `wordsSecret` — same reasoning as `kadenaSeeds`' own identical
+    // yield just above (see `IArweaveSeed.wordsSecret`'s own doc comment).
+    yield { slice: "arweaveSeeds", id: s.id, field: "wordsSecret", read: () => s.wordsSecret, write: (v) => { s.wordsSecret = v; } };
   }
   const identity = snapshot.codexIdentity;
   if (identity) {

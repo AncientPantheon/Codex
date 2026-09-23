@@ -290,6 +290,19 @@ export function useCodexStore(): CodexStore {
 }
 
 /**
+ * Same as `useCodexStore()`, but returns `null` instead of throwing when
+ * there is no `<CodexProvider>` ancestor — for a hook built on top of it
+ * that is SOMETIMES used from a surface deliberately mountable with no
+ * providers at all (e.g. `ArweavePanel`'s own "degrades to a visible 'not
+ * available' state rather than crashing when no provider is wired" test).
+ * Mirrors `codex-ui`'s own `useControlsOptional()`/`useIsMobile()` "safe
+ * default with no ancestor" precedent.
+ */
+export function useCodexStoreOptional(): CodexStore | null {
+  return useContext(CodexStoreContext);
+}
+
+/**
  * Internal hook — returns the optional signingClient override, or null when
  * none was supplied. Does NOT throw outside a provider.
  */

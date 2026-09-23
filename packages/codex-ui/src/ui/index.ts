@@ -14,6 +14,29 @@
 export { CodexUiRoot } from "./CodexUiRoot.js";
 export type { CodexUiRootProps } from "./CodexUiRoot.js";
 
+// ── Pantheonic-mobile: the container-relative breakpoint (see
+//    docs/work/codex-ui-mobile/design.md and mobile/MobileContext.tsx) ──
+export { useIsMobile, CODEX_MOBILE_BREAKPOINT } from "./mobile/MobileContext.js";
+
+// ── Pantheonic-mobile: the Controls registry (ghosted-button relocation —
+//    see docs/work/codex-ui-mobile/design.md §5, mobile/controls-context.tsx) ──
+export {
+  ControlsProvider,
+  useControls,
+  useControlsOptional,
+  useRegisterControls,
+  useRegisterControlsOptional,
+} from "./mobile/controls-context.js";
+export type { ControlItem, ControlGroup } from "./mobile/controls-context.js";
+export { ControlsDrawer } from "./mobile/ControlsDrawer.js";
+export { SwipeDeck } from "./mobile/SwipeDeck.js";
+export type { SwipeDeckProps, SwipeDeckHandle } from "./mobile/SwipeDeck.js";
+export { EdgeRail } from "./mobile/EdgeRail.js";
+export type { EdgeRailProps } from "./mobile/EdgeRail.js";
+export { MobileCategoryIconBtn } from "./mobile/MobileCategoryIconBtn.js";
+export type { MobileCategoryIconBtnProps } from "./mobile/MobileCategoryIconBtn.js";
+export { useSnapScrollCorrection } from "./mobile/useSnapScrollCorrection.js";
+
 // ── Pure display leaves ──
 export { CodexIdField, CopyValueTag } from "./CodexIdField.js";
 export type { CodexIdFieldProps } from "./CodexIdField.js";

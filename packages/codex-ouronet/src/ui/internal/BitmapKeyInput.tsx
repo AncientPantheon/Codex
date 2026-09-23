@@ -227,16 +227,30 @@ export function BitmapKeyInput({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Round 22 owner correction: "The display of the bitmap also
+          streches outside of screen area, needs to fit width wise in the
+          available screen area." `gridSize` (rows × `cellSize`, e.g. 360px
+          for the 40×40 DALOS default) is a fixed PIXEL size that can
+          genuinely exceed a phone's available width once modal padding is
+          subtracted. `width: "100%", maxWidth: gridSize` keeps the exact
+          same natural size on desktop (plenty of room, so `maxWidth` is
+          what actually applies) while letting it shrink on a narrow
+          screen; `aspectRatio: "1 / 1"` (cols === rows always, per this
+          component's own DALOS/APOLLO-only callers) keeps it square at any
+          width without needing a live JS measurement. The SVG's own
+          `viewBox` already does proportional scaling for free once its
+          `width`/`height` attributes are percentages instead of the same
+          fixed pixel count. */}
       <div
         style={{
           position: "relative", userSelect: "none", borderRadius: 8, border: "1px solid #262626",
-          backgroundColor: "#0a0a0a", overflow: "hidden", width: gridSize, height: gridSize,
+          backgroundColor: "#0a0a0a", overflow: "hidden", width: "100%", maxWidth: gridSize, aspectRatio: "1 / 1",
           margin: "0 auto", imageRendering: "pixelated",
         }}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <svg width={gridSize} height={gridSize} viewBox={`0 0 ${cols} ${rows}`} style={{ display: "block" }} shapeRendering="crispEdges">
+        <svg width="100%" height="100%" viewBox={`0 0 ${cols} ${rows}`} style={{ display: "block" }} shapeRendering="crispEdges">
           {bitmap.map((row: unknown, r: number) =>
             (row as unknown as (number | boolean)[]).map((cell, c) => (
               <rect

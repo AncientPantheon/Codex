@@ -16,7 +16,8 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Lock, Unlock, HelpCircle } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Lock, Unlock } from "lucide-react";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
@@ -37,39 +38,69 @@ const CIRCLE_SIZE = 20;
 const CIRCLE_R = 8;
 
 // ─── Hover Tooltip (custom, scrollable) ─────────────────────────────────────
+/** Half of the tooltip's own 256px width plus an 8px viewport margin — used
+ *  to clamp its horizontal anchor away from the screen edge on a narrow
+ *  mobile header, where a medallion can sit right at the left/right edge. */
+const TOOLTIP_HALF_WIDTH = 136;
+
 function HoverTooltip({ children, content }: { children: React.ReactNode; content: React.ReactNode }) {
   const [show, setShow] = useState(false);
-  const [pos, setPos] = useState<"bottom" | "top">("bottom");
+  const [coords, setCoords] = useState<{ left: number; top: number; placement: "bottom" | "top" } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (show && ref.current) {
-      const rect = ref.current.getBoundingClientRect();
-      setPos(rect.bottom + 260 > window.innerHeight ? "top" : "bottom");
-    }
-  }, [show]);
+  // Owner-reported render bug (screenshot: the "SLOW (T5)" tooltip rendering
+  // cut off, half-hidden behind the header card): this panel is routinely
+  // mounted inside an `overflow: hidden` ancestor (e.g. the mock host's own
+  // `.cxpg-osm-stage`, or any real embedding host's equivalent clip
+  // boundary) — the OLD locally-`position: absolute` tooltip was silently
+  // clipped by that ancestor the instant it grew past its edge. Portaled to
+  // `document.body` with `position: fixed`, computed from the trigger's own
+  // `getBoundingClientRect()`, so it always escapes ANY ancestor's overflow
+  // clip regardless of where this panel is mounted — mirrors
+  // `OuronetAccountsTab.tsx`'s own `StoicTagPillar` hover card, the SAME
+  // fix for the SAME class of bug.
+  const openTooltip = () => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    const placement: "bottom" | "top" = rect.bottom + 260 > window.innerHeight ? "top" : "bottom";
+    const left = Math.min(Math.max(rect.left + rect.width / 2, TOOLTIP_HALF_WIDTH), window.innerWidth - TOOLTIP_HALF_WIDTH);
+    setCoords({ left, top: placement === "bottom" ? rect.bottom + 6 : rect.top - 6, placement });
+    setShow(true);
+  };
+  const closeTooltip = () => setShow(false);
+
+  // Since the card portals OUTSIDE this wrapper's own DOM subtree, moving
+  // the mouse off the (small, 76×28) trigger cell and onto the card itself
+  // would otherwise fire `onMouseLeave` before the cursor ever reaches it —
+  // the SAME "bridge" problem the old local-sibling `<div>` gap-filler
+  // patched, solved here by also treating hovering the card itself as
+  // "still open."
+  const card = show && coords
+    ? createPortal(
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseEnter={openTooltip}
+          onMouseLeave={closeTooltip}
+          style={{
+            position: "fixed", zIndex: 2147483647, width: 256, maxHeight: 240, overflowY: "auto",
+            borderRadius: 8, border: "1px solid #404040", backgroundColor: "rgba(23,23,23,0.97)",
+            backdropFilter: "blur(4px)", boxShadow: "0 10px 30px rgba(0,0,0,0.5)", padding: 10,
+            fontSize: 10, lineHeight: 1.5, fontFamily: "var(--codex-font-mono, ui-monospace, monospace)", color: "#d4d4d4",
+            left: coords.left,
+            top: coords.top,
+            transform: coords.placement === "bottom" ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+          }}
+        >
+          {content}
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
-    <div ref={ref} style={{ position: "relative" }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <div ref={ref} style={{ position: "relative" }} onMouseEnter={openTooltip} onMouseLeave={closeTooltip}>
       {children}
-      {show && (
-        <>
-          <div style={{ position: "absolute", zIndex: 9998, left: 0, right: 0, ...(pos === "bottom" ? { top: "100%", height: 10 } : { bottom: "100%", height: 10 }) }} />
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: "absolute", zIndex: 9999, width: 256, maxHeight: 240, overflowY: "auto",
-              borderRadius: 8, border: "1px solid #404040", backgroundColor: "rgba(23,23,23,0.97)",
-              backdropFilter: "blur(4px)", boxShadow: "0 10px 30px rgba(0,0,0,0.5)", padding: 10,
-              fontSize: 10, lineHeight: 1.5, fontFamily: "var(--codex-font-mono, ui-monospace, monospace)", color: "#d4d4d4",
-              left: "50%", transform: "translateX(-50%)",
-              ...(pos === "bottom" ? { top: "calc(100% + 6px)" } : { bottom: "calc(100% + 6px)" }),
-            }}
-          >
-            {content}
-          </div>
-        </>
-      )}
+      {card}
     </div>
   );
 }
@@ -153,7 +184,7 @@ function TierMedallion({ tier, remaining, total, isFetching, isActive }: { tier:
 
   return (
     <HoverTooltip content={tooltipContent}>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, borderRadius: 6, width: CELL_W, height: CELL_H, minWidth: CELL_W, maxWidth: CELL_W, minHeight: CELL_H, maxHeight: CELL_H, backgroundColor: bgColor, border: `1px solid ${color}25`, padding: "0 6px", opacity: !isActive && !isFetching ? 0.4 : 1 }}>
+      <div data-testid={`debouncer-tier-${tier}`} style={{ display: "flex", alignItems: "center", gap: 4, borderRadius: 6, width: CELL_W, height: CELL_H, minWidth: CELL_W, maxWidth: CELL_W, minHeight: CELL_H, maxHeight: CELL_H, backgroundColor: bgColor, border: `1px solid ${color}25`, padding: "0 6px", opacity: !isActive && !isFetching ? 0.4 : 1 }}>
         <CountdownCircle fraction={fraction} color={color} isFetching={isFetching} label={tier.replace("T", "")} />
         <span style={{ fontFamily: "var(--codex-font-mono, ui-monospace, monospace)", fontWeight: 700, fontSize: 10, color, width: 28, textAlign: "right", flexShrink: 0, overflow: "hidden" }}>
           {formatSeconds(remaining)}
@@ -255,15 +286,33 @@ export function CodexDebouncerPanel({ onInfo, className }: CodexDebouncerPanelPr
         backgroundColor: "#0f0f0f", border: "1px solid #262626", height: 71, boxSizing: "border-box",
       }}
     >
+      {/* Owner correction: "in the OuronetUI implementation this also has an
+          i infomatic, that brings up an infomatic page. we need the same
+          here... maybe instead of an i, maybe a short medallion on the
+          upper right part with the text What is This? that would bring to
+          the infomatics page instead of the i that the users might miss."
+          A labeled pill reads as an obvious affordance at a glance — the
+          previous 16px circular "?" glyph was easy to overlook entirely.
+          `onInfo` is unchanged (still an injected callback — this package
+          has no router, so what it opens is entirely up to the host; see
+          `DebouncerInfoModal` for the full-screen explainer this package
+          ships to wire it to). */}
       {onInfo && (
         <button
           type="button"
           onClick={onInfo}
-          title="What is this? — Debouncer info"
-          aria-label="Debouncer info"
-          style={{ position: "absolute", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 9999, width: 16, height: 16, top: -6, right: -6, backgroundColor: "#0a0a0a", border: "1px solid #262626", color: "#888", zIndex: 2, cursor: "pointer" }}
+          data-testid="debouncer-info-trigger"
+          title="What is this? — opens the Debouncer explainer"
+          aria-label="What is this? — opens the Debouncer explainer"
+          style={{
+            position: "absolute", display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 3, whiteSpace: "nowrap", borderRadius: 9999, height: 16, padding: "0 7px",
+            top: -8, right: -6, backgroundColor: "#0a0a0a", border: "1px solid #ceac5f50",
+            color: "#ceac5f", fontSize: 8, fontWeight: 700, letterSpacing: "0.02em",
+            zIndex: 2, cursor: "pointer",
+          }}
         >
-          <HelpCircle size={10} strokeWidth={2.5} />
+          What is This?
         </button>
       )}
       {TOP_ROW.map(medallion)}

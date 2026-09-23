@@ -23,6 +23,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { executeNativeUrStoaTransfer, checkCoinAccountExists } from "@ouronet/ouronet-core/interactions/urStoaFunctions";
 import { formatDecimalForPact } from "@stoachain/stoa-core/pact";
 import { useGetKeypair } from "../../hooks/index.js";
@@ -59,6 +60,27 @@ export interface TransferUrStoaModalProps {
    *  sender, since the patronless flow makes the sender its own payment key. */
   address: string;
   onSuccess?: (requestKey: string) => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — round 10 owner correction: "the buttons, stake unstake
+   * collect transfer, must expand on the full screen, and once executed,
+   * they get out of the full screen." `CodexModalShell` already flips to a
+   * full-bleed sheet on mobile via its own `useIsMobile()` check, but a
+   * `position: absolute` shell rendered inline resolves against THIS
+   * component's own (Zone-3-bounded) frame, not the whole screen — mirrors
+   * `SeedWordsTab.tsx`'s own `fullScreenPortalTarget` contract exactly.
+   * Omitted (the default) falls back to that bounded-to-this-component
+   * behavior. Closing (including the existing auto-close on success) works
+   * identically either way.
+   */
+  fullScreenPortalTarget?: Element | null;
+}
+
+/** Portals `children` into `target` when supplied, renders inline
+ *  otherwise — same tiny helper duplicated across this package's own
+ *  "self-contained module" convention (see `SeedWordsTab.tsx`). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
 }
 
 export function TransferUrStoaModal({
@@ -67,6 +89,7 @@ export function TransferUrStoaModal({
   publicKey,
   address,
   onSuccess,
+  fullScreenPortalTarget,
 }: TransferUrStoaModalProps): React.JSX.Element | null {
   const getKeypair = useGetKeypair();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -164,37 +187,43 @@ export function TransferUrStoaModal({
   if (!isOpen) return null;
 
   return (
-    <CodexModalShell title="Transfer UrStoa" subtitle="coin.C_UR|Transfer" onClose={onClose}>
-      <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>
-        Transfers native UrStoa from <code>{address}</code>.
-      </p>
-      <label style={modalLabel} htmlFor="transfer-urstoa-receiver">Receiver</label>
-      <input
-        id="transfer-urstoa-receiver"
-        type="text"
-        value={receiver}
-        onChange={(e) => setReceiver(e.target.value)}
-        placeholder="k:, c:, u:, or w: account"
-        autoComplete="off"
-        aria-invalid={receiverMessage ? "true" : undefined}
-        style={{ ...modalInput, marginBottom: 12 }}
-      />
-      <label style={modalLabel} htmlFor="transfer-urstoa-amount">Amount</label>
-      <input
-        id="transfer-urstoa-amount"
-        type="text"
-        inputMode="decimal"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="0.000"
-        autoComplete="off"
-        aria-invalid={amountMessage ? "true" : undefined}
-        style={modalInput}
-      />
-      {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
-      <ModalFeedback error={lastError} requestKey={null} />
-      <ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Transfer UrStoa" />
-    </CodexModalShell>
+    <MobilePortal target={fullScreenPortalTarget}>
+      <CodexModalShell
+        title="Transfer UrStoa"
+        subtitle="coin.C_UR|Transfer"
+        onClose={onClose}
+        footer={<ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Transfer UrStoa" />}
+      >
+        <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px", overflowWrap: "anywhere" }}>
+          Transfers native UrStoa from <code style={{ wordBreak: "break-all" }}>{address}</code>.
+        </p>
+        <label style={modalLabel} htmlFor="transfer-urstoa-receiver">Receiver</label>
+        <input
+          id="transfer-urstoa-receiver"
+          type="text"
+          value={receiver}
+          onChange={(e) => setReceiver(e.target.value)}
+          placeholder="k:, c:, u:, or w: account"
+          autoComplete="off"
+          aria-invalid={receiverMessage ? "true" : undefined}
+          style={{ ...modalInput, marginBottom: 12 }}
+        />
+        <label style={modalLabel} htmlFor="transfer-urstoa-amount">Amount</label>
+        <input
+          id="transfer-urstoa-amount"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.000"
+          autoComplete="off"
+          aria-invalid={amountMessage ? "true" : undefined}
+          style={modalInput}
+        />
+        {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
+        <ModalFeedback error={lastError} requestKey={null} />
+      </CodexModalShell>
+    </MobilePortal>
   );
 }
 

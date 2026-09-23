@@ -41,6 +41,7 @@
 
 import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Copy, Eye, EyeOff, RefreshCw, BookKey } from "lucide-react";
 import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
@@ -147,6 +148,25 @@ const ALLOWED_PREFIXED_PATH = (i: number) => `m'/44'/626'/${i}'`;
 
 export interface CreateStoaChainSeedModalProps {
   onClose: () => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — owner correction (design.md §8, round 8 follow-up):
+   * "clicking create new seed must be opened on the whole screen real
+   * estate area, so it must be full screen." Without it this modal's
+   * `CodexModalShell` (mobile full-bleed flip) resolves against the
+   * nearest `CodexUiRoot` ancestor — Zone 3's own, bounding it to Zone 3's
+   * rectangle instead of the whole screen. Omitted (the default) falls
+   * back to that bounded behavior, same as every other `CodexModalShell`
+   * caller in this codebase without a portal target.
+   */
+  fullScreenPortalTarget?: Element | null;
+}
+
+/** Portals `children` into `target` when supplied; otherwise renders
+ *  inline, unchanged. Same tiny wrapper `SeedWordsTab.tsx`'s own
+ *  `MobilePortal` is. */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
 }
 
 /** Account picker for the Stoic seed type's "existing" sub-mode — lists
@@ -225,7 +245,7 @@ function StoicAccountPicker({
   );
 }
 
-export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalProps): React.JSX.Element {
+export function CreateStoaChainSeedModal({ onClose, fullScreenPortalTarget }: CreateStoaChainSeedModalProps): React.JSX.Element {
   const { seeds, addSeed } = useStoaChainSeeds();
   const { accounts: ouroAccounts } = useOuroAccounts();
   const { getCurrentPassword, authenticate } = useCodexAuth();
@@ -358,7 +378,19 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
   // "existing" and "new" is where `bitString` comes from (decrypt an
   // existing account vs. hash typed words); everything from here on is
   // identical: authenticate, derive Key #0/#1, persist an IStoaChainSeed.
-  async function finalizeStoicSeed(bitString: string): Promise<void> {
+  //
+  // `words`, round 22/23 owner correction ("i think we need to update the
+  // arweave seeds... to followe the same structure" / repeated asks: "still
+  // a chainweb seed doesnt show words"): the REAL typed word list, when one
+  // is genuinely in hand at THIS exact moment — the one point in the whole
+  // flow where it still exists before `seedWordsToBitString`'s one-way hash
+  // (or, for "existing", before `originModePlaintextToBitString`) throws it
+  // away for good. Optional: `handleSubmitStoicNew` always has real words;
+  // `handleSubmitStoicExisting` only does when the SOURCE account's own
+  // `originMode` is `"seedWords"` — a bitmap/bitstring/scalar-origin source
+  // account has no words to pass on, and passing its non-word plaintext off
+  // as "words" here would just be wrong.
+  async function finalizeStoicSeed(bitString: string, words?: readonly string[]): Promise<void> {
     authenticate(password, ttl);
 
     // Auto-derive Key #0 and Key #1, same pattern as the mnemonic path.
@@ -380,6 +412,14 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
       // stoic seed still works even if a source Ouronet account is later
       // renamed/removed (or, for "new", never existed at all).
       secret: await encryptStringV2(bitString, password),
+      // See `IStoaChainSeed.wordsSecret`'s own doc comment — a SEPARATE
+      // encrypted field (own `encryptStringV2` pass), never derivable back
+      // from `secret` alone. `words?.length` guards against persisting an
+      // empty-but-defined array as a falsely "real" `wordsSecret`.
+      wordsSecret:
+        words && words.length > 0
+          ? await encryptStringV2(words.join(" "), password)
+          : undefined,
       seedType: "stoic",
       main: derivedAccounts[0]!.publicKey,
       createdAt: new Date().toISOString(),
@@ -408,8 +448,13 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
         setSubmitting(false);
         return;
       }
-      const bitString = originModePlaintextToBitString(plaintext, selectedOuroAccount.originMode ?? "seedWords");
-      await finalizeStoicSeed(bitString);
+      const sourceOriginMode = selectedOuroAccount.originMode ?? "seedWords";
+      const bitString = originModePlaintextToBitString(plaintext, sourceOriginMode);
+      // Real words only when the SOURCE account's own plaintext genuinely
+      // IS space-separated words — a bitmap/bitstring/base-10/base-49
+      // origin account's `plaintext` is that representation, not words.
+      const words = sourceOriginMode === "seedWords" ? plaintext.trim().split(/\s+/).filter(Boolean) : undefined;
+      await finalizeStoicSeed(bitString, words);
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Failed to add seed.");
       setSubmitting(false);
@@ -430,7 +475,7 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
       const ok = await verifyPassword(password);
       if (!ok) { setNotice("Incorrect password."); setSubmitting(false); return; }
       const bitString = seedWordsToBitString(stoicNewWords);
-      await finalizeStoicSeed(bitString);
+      await finalizeStoicSeed(bitString, stoicNewWords);
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Failed to add seed.");
       setSubmitting(false);
@@ -492,6 +537,7 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
   };
 
   return (
+    <MobilePortal target={fullScreenPortalTarget}>
     <CodexModalShell title="Add Seed to Codex" accent={accent} maxWidth={480} onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {/* Mode toggle — not applicable to Stoic (no mnemonic to generate or restore) */}
@@ -655,6 +701,7 @@ export function CreateStoaChainSeedModal({ onClose }: CreateStoaChainSeedModalPr
         </div>
       </div>
     </CodexModalShell>
+    </MobilePortal>
   );
 }
 

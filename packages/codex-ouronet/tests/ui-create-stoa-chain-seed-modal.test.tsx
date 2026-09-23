@@ -67,7 +67,9 @@ function SeedsProbe() {
   return (
     <ul data-testid="seeds-probe">
       {seeds.map((s) => (
-        <li key={s.id}>{s.seedType}:{s.accounts[0]?.publicKey ?? ""}</li>
+        <li key={s.id} data-has-words-secret={s.wordsSecret !== undefined}>
+          {s.seedType}:{s.accounts[0]?.publicKey ?? ""}
+        </li>
       ))}
     </ul>
   );
@@ -180,6 +182,36 @@ describe("<CreateStoaChainSeedModal>", () => {
       );
     }, 15000);
 
+    // Round 22/23 owner correction, asked four times: "A Chainwe[b]
+    // Stoa-Dalos based Seed still cant show me the seed words." The typed
+    // words are known right here, right before `seedWordsToBitString`'s
+    // one-way hash would otherwise throw them away for good — this
+    // sub-mode must always persist `wordsSecret`.
+    it("persists wordsSecret (the real typed words, separately encrypted) — round 22/23", async () => {
+      await renderModal();
+      fireEvent.click(seedTypeButton(/stoa dalos/i));
+      fireEvent.click(screen.getByRole("button", { name: /enter new seed words/i }));
+
+      const textarea = screen.getByPlaceholderText(/type brand-new dalos seed words/i);
+      fireEvent.change(textarea, { target: { value: VALID_WORDS } });
+
+      await screen.findByText(/key #0 preview/i);
+      fillName("My Stoa Dalos Seed");
+      fillPassword(PASSWORD);
+
+      await waitFor(() => expect(addSeedButton().disabled).toBe(false));
+      fireEvent.click(addSeedButton());
+
+      await waitFor(
+        () => {
+          const probe = screen.getByTestId("seeds-probe");
+          const row = within(probe).getByText(/^stoic:/);
+          expect(row.getAttribute("data-has-words-secret")).toBe("true");
+        },
+        { timeout: 10000 },
+      );
+    }, 15000);
+
     it("blocks submission and shows a notice when seed words exceed the 256-word maximum", async () => {
       await renderModal();
       fireEvent.click(seedTypeButton(/stoa dalos/i));
@@ -271,6 +303,40 @@ describe("<CreateStoaChainSeedModal>", () => {
         () => {
           const probe = screen.getByTestId("seeds-probe");
           expect(within(probe).getByText(/^stoic:/)).toBeTruthy();
+        },
+        { timeout: 10000 },
+      );
+    }, 15000);
+
+    // Round 22/23 — same ask, the "existing account" sub-mode. The picker
+    // only ever lists seedWords-origin accounts (see the "lists only
+    // dalos-curve, seedWords-origin accounts" test above), so the source's
+    // decrypted plaintext genuinely IS real words here — must persist them.
+    it("persists wordsSecret — the SOURCE account's own real words", async () => {
+      const eligible = ouroFx({
+        id: "eligible",
+        name: "Eligible Account",
+        originCurve: "dalos",
+        originMode: "seedWords",
+        secret: await smartEncrypt(VALID_WORDS, PASSWORD, "1.0"),
+      });
+
+      await renderModal({ accounts: [eligible] });
+      fireEvent.click(seedTypeButton(/stoa dalos/i));
+      fireEvent.click(screen.getByRole("button", { name: /use existing ouronet seed/i }));
+      fireEvent.click(await screen.findByText("Eligible Account"));
+      fillPassword(PASSWORD);
+
+      await screen.findByText(/key #0 preview/i);
+      fillName("From Existing");
+      await waitFor(() => expect(addSeedButton().disabled).toBe(false));
+      fireEvent.click(addSeedButton());
+
+      await waitFor(
+        () => {
+          const probe = screen.getByTestId("seeds-probe");
+          const row = within(probe).getByText(/^stoic:/);
+          expect(row.getAttribute("data-has-words-secret")).toBe("true");
         },
         { timeout: 10000 },
       );

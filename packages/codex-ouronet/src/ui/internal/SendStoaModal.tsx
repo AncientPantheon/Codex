@@ -35,6 +35,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Pact } from "@stoachain/kadena-stoic-legacy/client";
 import {
   KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID,
@@ -80,12 +81,28 @@ export interface SendStoaModalProps {
    *  from useStoaChainBalances's perChain map — no extra read here. */
   senderChainBalance?: number;
   onSuccess?: (requestKey: string) => void;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — round 10 owner correction: "the buttons, stake unstake
+   * collect transfer, must expand on the full screen, and once executed,
+   * they get out of the full screen." Mirrors `TransferUrStoaModal.tsx`'s
+   * identical fix. Omitted (the default) falls back to the bounded-to-
+   * this-component behavior every `CodexModalShell` caller has without it.
+   */
+  fullScreenPortalTarget?: Element | null;
 }
 
 /** Sends and receives on the SAME chain (Kadena coin.transfer is single-chain
  *  by protocol — cross-chain requires a separate SPV continuation flow this
  *  modal doesn't do), so one constant names both "from" and "to". */
 const fmt12 = (n: number): string => n.toFixed(12);
+
+/** Portals `children` into `target` when supplied, renders inline
+ *  otherwise — duplicated per this package's own "self-contained module"
+ *  convention (see `SeedWordsTab.tsx`). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
+}
 
 export function SendStoaModal({
   isOpen,
@@ -94,6 +111,7 @@ export function SendStoaModal({
   address,
   senderChainBalance,
   onSuccess,
+  fullScreenPortalTarget,
 }: SendStoaModalProps): React.JSX.Element | null {
   const { execute } = useSignTransaction();
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
@@ -220,47 +238,53 @@ export function SendStoaModal({
   if (!isOpen) return null;
 
   return (
-    <CodexModalShell title="Send STOA" subtitle="coin.C_Transfer / coin.C_TransferAnew" onClose={onClose}>
-      <div style={{ fontSize: 12, color: "#888", margin: "0 0 12px", padding: "10px 12px", borderRadius: 8, border: "1px solid #1a1a1a", backgroundColor: "#0a0a0a" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span>Sending on <strong style={{ color: "#ceac5f" }}>StoaChain — Chain {STOACHAIN_CHAIN_ID}</strong></span>
-          <span>
-            Balance: <strong style={{ color: "#d2d3d4", fontFamily: "var(--codex-font-mono, ui-monospace, monospace)" }}>
-              {senderChainBalance === undefined ? "—" : `${fmt12(senderChainBalance)} STOA`}
-            </strong>
-          </span>
+    <MobilePortal target={fullScreenPortalTarget}>
+      <CodexModalShell
+        title="Send STOA"
+        subtitle="coin.C_Transfer / coin.C_TransferAnew"
+        onClose={onClose}
+        footer={<ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Send STOA" />}
+      >
+        <div style={{ fontSize: 12, color: "#888", margin: "0 0 12px", padding: "10px 12px", borderRadius: 8, border: "1px solid #1a1a1a", backgroundColor: "#0a0a0a" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+            <span>Sending on <strong style={{ color: "#ceac5f" }}>StoaChain — Chain {STOACHAIN_CHAIN_ID}</strong></span>
+            <span>
+              Balance: <strong style={{ color: "#d2d3d4", fontFamily: "var(--codex-font-mono, ui-monospace, monospace)" }}>
+                {senderChainBalance === undefined ? "—" : `${fmt12(senderChainBalance)} STOA`}
+              </strong>
+            </span>
+          </div>
+          <div style={{ marginTop: 6, overflowWrap: "anywhere" }}>
+            From <code style={{ wordBreak: "break-all" }}>{address}</code> to a receiver on the same chain (Chain {STOACHAIN_CHAIN_ID}) — native Stoa transfers don't cross chains.
+          </div>
+          <div style={{ marginTop: 6, color: "#666" }}>Gas is paid by the Ouronet Gas Station.</div>
         </div>
-        <div style={{ marginTop: 6 }}>
-          From <code>{address}</code> to a receiver on the same chain (Chain {STOACHAIN_CHAIN_ID}) — native Stoa transfers don't cross chains.
-        </div>
-        <div style={{ marginTop: 6, color: "#666" }}>Gas is paid by the Ouronet Gas Station.</div>
-      </div>
-      <label style={modalLabel} htmlFor="send-stoa-receiver">Receiver address</label>
-      <input
-        id="send-stoa-receiver"
-        type="text"
-        value={receiver}
-        onChange={(e) => setReceiver(e.target.value)}
-        placeholder="k:, c:, u:, w:, or custom account"
-        autoComplete="off"
-        style={modalInput}
-      />
-      <label style={{ ...modalLabel, marginTop: 12 }} htmlFor="send-stoa-amount">Amount</label>
-      <input
-        id="send-stoa-amount"
-        type="text"
-        inputMode="decimal"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="0.000000000000"
-        autoComplete="off"
-        aria-invalid={validationMessage ? "true" : undefined}
-        style={modalInput}
-      />
-      {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
-      <ModalFeedback error={lastError} requestKey={null} />
-      <ModalExecuteRow onCancel={onClose} onSubmit={handleSubmit} submitting={submitting} canSubmit={canSubmit} label="Send STOA" />
-    </CodexModalShell>
+        <label style={modalLabel} htmlFor="send-stoa-receiver">Receiver address</label>
+        <input
+          id="send-stoa-receiver"
+          type="text"
+          value={receiver}
+          onChange={(e) => setReceiver(e.target.value)}
+          placeholder="k:, c:, u:, w:, or custom account"
+          autoComplete="off"
+          style={modalInput}
+        />
+        <label style={{ ...modalLabel, marginTop: 12 }} htmlFor="send-stoa-amount">Amount</label>
+        <input
+          id="send-stoa-amount"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.000000000000"
+          autoComplete="off"
+          aria-invalid={validationMessage ? "true" : undefined}
+          style={modalInput}
+        />
+        {validationMessage && <p role="alert" style={{ marginTop: 8, fontSize: 12, color: "#f87171" }}>{validationMessage}</p>}
+        <ModalFeedback error={lastError} requestKey={null} />
+      </CodexModalShell>
+    </MobilePortal>
   );
 }
 

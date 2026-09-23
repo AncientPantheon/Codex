@@ -1,0 +1,236 @@
+/* ==========================================================================
+   OuronetShellMock — the playground's "embedded inside OuronetUI" mobile
+   testing harness. Scoped to `.cxpg-osm-*` (separate from `.cxpg-*`, the
+   standalone chrome, and `.codex-ui`, the packaged token scope this wraps).
+   ========================================================================== */
+
+.cxpg-osm-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background: #05060a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.cxpg-osm-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1c2334;
+  background: #0b0e17;
+}
+
+.cxpg-osm-wordmark {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: linear-gradient(180deg, #fff 0%, #ceac5f 70%, #b8912f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.cxpg-osm-mockbadge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #ff8b8b;
+  border: 1px solid #4a1f1f;
+  background: #200b0b;
+}
+
+/* The rectangle a real embedded CodexUI would actually get — constrained,
+   NOT the full viewport (that's the whole point of this harness).
+   `overflow: hidden`, NOT `auto` — Codex's own mobile shell owns its own
+   Zone1/Zone2 (reserved) vs Zone3 (scrolling) split internally
+   (`.cxpg-container--mobile` in app.css); this stage must not ALSO scroll
+   its child as one block, or Zone1/Zone2 would scroll away with it. */
+.cxpg-osm-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.cxpg-osm-tabbar-wrap {
+  position: relative;
+  flex: none;
+}
+
+.cxpg-osm-controls-riser {
+  position: absolute;
+  left: 8px;
+  bottom: 100%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid #3a2f10;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: #0a0a0af0;
+  color: #ceac5f;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* The Address Book riser SLOT — same family/positioning as the Controls
+   riser above, mirrored to the right edge, flush against the tab bar.
+   Empty (zero size, no visible chrome of its own) until CodexTabs portals
+   its own styled trigger button into it — this div is purely an anchor
+   point, not a second button shape layered underneath. */
+.cxpg-osm-addressbook-riser-slot {
+  position: absolute;
+  right: 8px;
+  bottom: 100%;
+  z-index: 10;
+}
+
+/* The Ouronet Accounts pagination riser SLOT — same family, CENTERED between
+   the Controls riser (left) and the Address Book riser (right), flush
+   against the tab bar. */
+.cxpg-osm-pagination-riser-slot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100%;
+  z-index: 10;
+}
+
+/* The Zone 3 swipe-bullets + EdgeRails SLOT — a SEPARATE band from the
+   Controls/Pagination/Address Book row above (owner correction: "the
+   bullet... is something beneath Zone 3... a different entity" that "works
+   in concert" with, but is not merged into, the Prev/Next pagination
+   stripe). Positioned a further 22px above the tab bar's top edge — i.e.
+   directly above that row (16px riser height + 6px gap) — spanning the
+   FULL width so the EdgeRails (edge-docked to ITS left/right edges) and the
+   centered bullets both land at the correct spot. This is also the exact
+   level the owner asked the side EdgeRail buttons to dock at instead of the
+   whole-screen center: "this creates a great enough separation between the
+   rectangle of Zone 3 and the footer, such that at this level we can add
+   the side buttons." */
+.cxpg-osm-swipe-indicator-riser-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 22px);
+  height: 16px;
+  z-index: 10;
+}
+
+/* Outside-tap dismiss backdrop for the Codex tier-2 menu — transparent,
+   fills the stage so a tap anywhere outside the menu/bar closes it. */
+.cxpg-osm-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+/* The Codex tier-2 popup — "Codex UI / Settings / Export / Import", opened by
+   tapping the Codex tab instead of navigating straight through (design.md
+   §8). ONE ROW of icon+label cells — `grid auto-flow: column`, mirroring
+   OuronetUI's own real tier-2 drawer markup exactly (`grid auto-cols-fr
+   grid-flow-col`), NOT four stacked full-width rows. Pops up from the tab
+   bar, same family as the Controls riser. */
+.cxpg-osm-codex-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 100%;
+  z-index: 10;
+  margin-bottom: 4px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid #262626;
+  border-radius: 10px;
+  background: #0a0a0af5;
+  backdrop-filter: blur(10px);
+}
+
+.cxpg-osm-codex-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cxpg-osm-codex-menu-item--active {
+  color: #ceac5f;
+  background: rgba(206, 172, 95, 0.12);
+}
+
+.cxpg-osm-tabbar {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid #262626;
+  background: #0a0a0af0;
+  backdrop-filter: blur(8px);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.cxpg-osm-tab {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+}
+
+.cxpg-osm-tab span {
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The ONE wired tab. */
+.cxpg-osm-tab--live {
+  color: #ceac5f;
+  cursor: default;
+}
+
+/* The six unwired mockups — visibly "redded"/muted + disabled, per the
+   design ask: a real host tab, but nothing behind it in this playground. */
+.cxpg-osm-tab--mock {
+  color: #7f5555;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cxpg-osm-tab--mock:disabled {
+  pointer-events: none;
+}

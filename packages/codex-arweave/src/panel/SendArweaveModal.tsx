@@ -76,11 +76,12 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { arToWinston, winstonToAr, getTransactionStatus, InvalidTransactionIdError } from "@ancientpantheon/arweave-core";
 import { CodexModalShell } from "@ancientpantheon/codex-ouronet/ui";
-import { txPending, useEnsureCodexUnlocked } from "@ancientpantheon/codex-ouronet/zbom";
+import { txPending, useEnsureCodexUnlocked, ActionTooltip } from "@ancientpantheon/codex-ouronet/zbom";
 
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 import type { ArweavePanelDeps } from "./context.js";
@@ -166,6 +167,24 @@ export interface SendArweaveModalProps {
    *  only means the amount+fee-fits check and the Max button are unavailable
    *  until it resolves. */
   senderBalanceWinston?: bigint;
+  /**
+   * MOBILE ONLY — a DOM node spanning the host's WHOLE mobile body, via
+   * `createPortal` — round 10 owner correction: "the buttons, stake unstake
+   * collect transfer, must expand on the full screen, and once executed,
+   * they get out of the full screen." Mirrors `SendStoaModal.tsx`'s
+   * identical fix — Arweave's own Send is the direct analog here (no
+   * Stake/Unstake/Collect/Transfer-UrStoa equivalent exists on this chain).
+   * Omitted (the default) falls back to the bounded-to-this-component
+   * behavior every `CodexModalShell` caller has without it.
+   */
+  fullScreenPortalTarget?: Element | null;
+}
+
+/** Portals `children` into `target` when supplied, renders inline
+ *  otherwise — duplicated per this package's own "self-contained module"
+ *  convention (see `ArweaveSeedsArea.tsx`'s own identical helper). */
+function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
+  return target ? createPortal(children, target) : <>{children}</>;
 }
 
 export function SendArweaveModal({
@@ -175,6 +194,7 @@ export function SendArweaveModal({
   deps,
   onSuccess,
   senderBalanceWinston,
+  fullScreenPortalTarget,
 }: SendArweaveModalProps): React.ReactElement | null {
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
   const [recipient, setRecipient] = useState("");
@@ -391,6 +411,7 @@ export function SendArweaveModal({
   if (!isOpen) return null;
 
   return (
+    <MobilePortal target={fullScreenPortalTarget}>
     <CodexModalShell
       title="Send AR"
       subtitle="Arweave transfer"
@@ -466,10 +487,10 @@ export function SendArweaveModal({
           Amount (AR)
         </label>
         <div style={{ display: "flex", gap: 6 }}>
+          <ActionTooltip content="Fills the whole balance and reserves a 1.2x buffer over the live fee quote as the cap — the safe default. A small amount may remain if the network fee moves before this confirms.">
           <button
             type="button"
             data-testid="arweave-send-max"
-            title="Fills the whole balance and reserves a 1.2x buffer over the live fee quote as the cap — the safe default. A small amount may remain if the network fee moves before this confirms."
             onClick={() => {
               if (maxAmount !== null) setAmount(maxAmount);
               setSuperMax(false);
@@ -487,10 +508,11 @@ export function SendArweaveModal({
           >
             Max
           </button>
+          </ActionTooltip>
+          <ActionTooltip content="Attempts to fully sweep the wallet: uses the exact live-quoted fee as the cap, with no safety buffer. If the fee moves even slightly before this confirms, the send fails and can be retried.">
           <button
             type="button"
             data-testid="arweave-send-super-max"
-            title="Attempts to fully sweep the wallet: uses the exact live-quoted fee as the cap, with no safety buffer. If the fee moves even slightly before this confirms, the send fails and can be retried."
             onClick={() => {
               if (superMaxAmount === null) return;
               setFeeMode("included");
@@ -510,6 +532,7 @@ export function SendArweaveModal({
           >
             Super Max
           </button>
+          </ActionTooltip>
         </div>
       </div>
       <input
@@ -605,6 +628,7 @@ export function SendArweaveModal({
         </button>
       </div>
     </CodexModalShell>
+    </MobilePortal>
   );
 }
 

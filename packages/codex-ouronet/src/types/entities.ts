@@ -87,6 +87,27 @@ export interface IStoaChainSeed {
    *  There is exactly one prime seed per codex, set atomically by
    *  `kickstartCodex`. Added v0.2.0. */
   isPrime?: boolean;
+  /**
+   * OPTIONAL, encrypted separately from `secret` (own AES pass, same
+   * `encryptStringV2`/password) — the seed's real DALOS typed word list,
+   * space-joined, when it was actually known at creation time. Added to
+   * close a real gap the owner reported repeatedly: for a `"stoic"` seed,
+   * `secret` is ALWAYS the derived bitstring (`seedWordsToBitString` is a
+   * ONE-WAY hash — there is no way back from a bitstring to its words), so
+   * without this field the typed words a user entered (or an existing
+   * Ouronet account's own decrypted mnemonic, for the "use an existing
+   * account" sub-mode) were thrown away the instant the bitstring was
+   * derived — genuinely unrecoverable, not merely hidden. Populated by
+   * `CreateStoaChainSeedModal.tsx`'s `finalizeStoicSeed` whenever real words
+   * are in hand; absent for a seed with no words behind it at all (Direct/
+   * bitstring-origin), or for any seed persisted before this field existed.
+   * `SeedWordsTab.tsx`'s "View Seed Words" decrypts it alongside `secret`
+   * and, when present, feeds `DalosSecretReveal` `originMode="seedWords"`
+   * instead of `"bitString"` — the same shape `IOuroAccount.secret`+
+   * `backup` already establishes for storing two independently-encrypted
+   * representations of one account's material. Non-`"stoic"` seed types
+   * never set this (their `secret` already IS the real mnemonic). */
+  wordsSecret?: string;
 }
 
 /** A single derived kadena account flattened with its seed linkage + live
@@ -133,6 +154,27 @@ export interface IArweaveSeed {
    *  keeps the Prime Arweave Seed deletable in development builds (the block
    *  lands before release). */
   isPrime?: boolean;
+  /**
+   * OPTIONAL, encrypted separately from `secret` (own AES pass, same
+   * `encryptStringV2`/password) — the seed's real word list, space-joined,
+   * when it was actually known at creation time. Mirrors
+   * `IStoaChainSeed.wordsSecret` exactly (see that field's own doc comment
+   * for the full "why a second field" reasoning) — an Arweave seed's
+   * `secret` is the derived 1600-bit bitstring for EVERY "Seed-Based"
+   * source (typed words, an existing Ouronet account, or a Chainweb seed),
+   * never the words themselves, so without this field the real words a
+   * user typed (or an existing account's/seed's own decrypted mnemonic)
+   * were thrown away the instant the bitstring was derived. Populated by
+   * `apps/codex-playground/src/ForeignChainsWiring.tsx`'s
+   * `createArweaveSeedPersistence` whenever real words are in hand;
+   * absent for a Direct-mode (bitstring/bitmap/scalar-origin) seed, which
+   * never has words at all, or for any seed persisted before this field
+   * existed. `ArweaveSeedsArea.tsx`'s own "View Seed" reveal already
+   * branches on `seed.words` (the DECRYPTED in-memory form this
+   * round-trips to/from) to show the real Seed (words) tab instead of a
+   * bitstring-only dump.
+   */
+  wordsSecret?: string;
 }
 
 /** A raw Pact -g keypair stored directly in the codex (not derived from a

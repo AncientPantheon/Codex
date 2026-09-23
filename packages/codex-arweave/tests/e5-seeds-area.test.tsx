@@ -50,6 +50,27 @@ import type { LibraryStore } from "../src/library/types";
 import type { ReactNode } from "react";
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
+
+// Round 25: `ArweavePanel.tsx` now calls `useEnsureCodexUnlockedOptional()`
+// unconditionally and threads it into `ArweaveSeedsArea`'s own
+// `ensureCodexUnlocked` prop (the fix for "couldnt add a new RSA key,
+// codex is locked" — gates `startRun` the same way round 22's RSA-params
+// fix gates `useRsaParamsSection`). The tests in this file that mount
+// `ArweavePanel` inside a real `<CodexProvider>` never call `authenticate`
+// first, so the REAL hook's `requestPassword()` would hang forever waiting
+// on a `<PasswordModal>` this test tree never mounts. Mirrors
+// `e5-send-arweave-modal.test.tsx`'s own identical mock — defaults to
+// "already unlocked" so every existing test's flow is unaffected.
+const ensureCodexUnlockedMock = vi.fn(async () => true);
+vi.mock("@ancientpantheon/codex-ouronet/zbom", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useEnsureCodexUnlocked: () => ensureCodexUnlockedMock,
+    useEnsureCodexUnlockedOptional: () => ensureCodexUnlockedMock,
+  };
+});
 
 /**
  * `SendArweaveModal` (mounted inside `ArweavePanel`'s Accounts category) now
@@ -1960,6 +1981,77 @@ describe("ArweaveSeedsArea — the ported RSA-parameter panel (T13 · 2)", () =>
     expect(screen.getByTestId("arweave-seed-key-download-json-9")).toBeInTheDocument();
   });
 
+  // Round 22 owner correction: "then i think we have a problem here when
+  // attempting to show RSA details" — a locked codex made `decryptArweaveKey`
+  // throw straight into a dead-end error message. Now gated behind the
+  // injected `ensureCodexUnlocked` prop (see `RsaParamsSectionProps`'s own
+  // doc comment for why it's injected rather than called directly).
+  describe("gates decrypt behind the injected ensureCodexUnlocked (round 22)", () => {
+    it("calls it BEFORE decryptArweaveKey, and proceeds to decrypt once it resolves true", async () => {
+      const ensureCodexUnlocked = vi.fn(async () => true);
+      const { decryptArweaveKey } = await openStoredKeyPanel({ ensureCodexUnlocked });
+      expect(ensureCodexUnlocked).toHaveBeenCalledTimes(1);
+      expect(decryptArweaveKey).toHaveBeenCalledTimes(1);
+    });
+
+    it("a cancelled prompt (resolves false) skips decryptArweaveKey entirely — no error shown", async () => {
+      const ensureCodexUnlocked = vi.fn(async () => false);
+      const { decryptArweaveKey } = await openStoredKeyPanel({ ensureCodexUnlocked });
+      expect(ensureCodexUnlocked).toHaveBeenCalledTimes(1);
+      expect(decryptArweaveKey).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("arweave-seed-key-params-error-9")).toBeNull();
+    });
+
+    it("omitted (the default) proceeds straight to decryptArweaveKey — byte-identical to before this prop existed", async () => {
+      const { decryptArweaveKey } = await openStoredKeyPanel();
+      expect(decryptArweaveKey).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Round 25 owner correction: "couldnt add a new RSA key, codex is
+  // locked" — `startRun` (key generation) now gates on the SAME injected
+  // `ensureCodexUnlocked` prop, spawning the worker only once it resolves.
+  describe("startRun gates on the injected ensureCodexUnlocked prop (round 25)", () => {
+    it("a cancelled prompt (resolves false) never spawns the worker — no wasted crypto search", async () => {
+      const ensureCodexUnlocked = vi.fn(async () => false);
+      const workerFactory = vi.fn(() => new FakeWorker() as unknown as Worker);
+      renderArea({
+        seeds: [PRIME_SEED],
+        workerFactory,
+        persistKey: vi.fn(),
+        ensureCodexUnlocked,
+      });
+      fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+      fireEvent.click(screen.getByTestId("arweave-generate-run"));
+      await waitFor(() => expect(ensureCodexUnlocked).toHaveBeenCalledTimes(1));
+      expect(workerFactory).not.toHaveBeenCalled();
+    });
+
+    it("resolving true proceeds to spawn the worker as before", async () => {
+      const ensureCodexUnlocked = vi.fn(async () => true);
+      const worker = new FakeWorker();
+      const workerFactory = vi.fn(() => worker as unknown as Worker);
+      renderArea({
+        seeds: [PRIME_SEED],
+        workerFactory,
+        persistKey: vi.fn(),
+        ensureCodexUnlocked,
+      });
+      fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+      fireEvent.click(screen.getByTestId("arweave-generate-run"));
+      await waitFor(() => expect(workerFactory).toHaveBeenCalledTimes(1));
+    });
+
+    it("omitted (the default) proceeds straight to the worker — byte-identical to before this prop existed", async () => {
+      const worker = new FakeWorker();
+      const workerFactory = vi.fn(() => worker as unknown as Worker);
+      renderArea({ seeds: [PRIME_SEED], workerFactory, persistKey: vi.fn() });
+      fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+      fireEvent.click(screen.getByTestId("arweave-generate-run"));
+      await waitFor(() => expect(workerFactory).toHaveBeenCalledTimes(1));
+    });
+  });
+
   it("SECURITY: a stored key's parameters are decrypted but stay OUT of the DOM until revealed", async () => {
     await openStoredKeyPanel();
 
@@ -3056,6 +3148,27 @@ describe("ArweaveSeedsArea — Direct Deterministic RSA Generation", () => {
     expect(screen.queryByText("Seed")).toBeNull();
   });
 
+  // Round 19 owner correction: "i can only see the bitstring, i should be
+  // able to see the seed words as well." There genuinely are none to show
+  // for a wordless (Direct-mode, or session-reloaded) seed — this asserts
+  // the honest explanatory note now shown instead of a silent, unexplained
+  // bitstring-only dump.
+  it("a wordless seed's reveal shows an explanatory note instead of silently omitting the Seed tab", () => {
+    const APOLLO_SEED: ArweaveSeedRecord = {
+      id: "apollo-direct",
+      label: "Apollo Direct Seed",
+      bits: "0".repeat(1024),
+      bitLength: 1024,
+      sourceLabel: "Direct: BitString (1024-bit)",
+    };
+    renderArea({ seeds: [PRIME_SEED, APOLLO_SEED] });
+
+    fireEvent.click(screen.getByTestId("arweave-seed-reveal-apollo-direct"));
+
+    const note = screen.getByTestId("arweave-seed-reveal-no-words-note");
+    expect(note.textContent).toMatch(/no seed words to show/i);
+  });
+
   it("a 1600-bit Direct seed's reveal shows the 40 × 40 Bitmap tab (DALOS)", () => {
     const DALOS_DIRECT_SEED: ArweaveSeedRecord = {
       id: "dalos-direct",
@@ -3978,5 +4091,576 @@ describe("ArweaveSeedsArea — DALOS Charset info + Max Entropy (Free Seed Input
     const second = (screen.getByTestId("arweave-seed-words-input") as HTMLTextAreaElement).value;
 
     expect(first).not.toBe(second);
+  });
+});
+
+// Owner correction (design.md §8, round 8 follow-up): "when there are more
+// than 10 pages available the entry 15/24 when clicked needs to allow the
+// input of a given page, to jump directly to a wanted page." Same mandate
+// as `StoaAccountsTab`/`SeedWordsTab`'s own jump control — ported here for
+// Arweave's own seed-list pagination.
+describe("ArweaveSeedsArea — mobile seed-list pagination: page-jump input past 10 pages", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderManySeeds(count: number) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: count }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("provides a clickable jump control once seed count pushes past 10 pages, and jumping commits the typed page", () => {
+    // Comfortably past the threshold regardless of the page-0 separator
+    // deduction's exact size (jsdom's measurement stays at safe defaults).
+    renderManySeeds(200);
+    const jumpBtn = screen.getByText(/^1 \/ \d+$/);
+    expect(jumpBtn.tagName).toBe("BUTTON");
+    const totalPages = Number(jumpBtn.textContent!.split("/")[1].trim());
+    expect(totalPages).toBeGreaterThan(10);
+
+    fireEvent.click(jumpBtn);
+    const input = screen.getByLabelText(/jump to page/i);
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: `9 / ${totalPages}` })).toBeTruthy();
+  });
+
+  it("stays a plain, unclickable label at 10 or fewer pages", () => {
+    // A handful of seeds paginates (more than one page, so Prev/Next
+    // renders at all) but stays well under the >10 threshold.
+    renderManySeeds(10);
+    const label = screen.getByText(/^1 \/ \d+$/);
+    expect(label.tagName).not.toBe("BUTTON");
+  });
+
+  // Owner correction (design.md §8, round 8 follow-up): "if we bring the
+  // pagination engine in the bar below (see 4th screenshot), probably 4
+  // would have fit." Mirrors `SeedWordsTab.tsx`'s identical correction.
+  it("portals the Prev/Next bar into fullScreenPortalTarget, freeing the seed-list column of that row", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    const { container } = render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} fullScreenPortalTarget={target} />
+      </CodexUiRoot>,
+    );
+    const prevBtn = screen.getByRole("button", { name: /previous page/i });
+    expect(target.contains(prevBtn)).toBe(true);
+    expect(container.contains(prevBtn)).toBe(false);
+    document.body.removeChild(target);
+  });
+
+  it("without a target, the Prev/Next bar falls back to the bounded inline mount", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    const { container } = render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} />
+      </CodexUiRoot>,
+    );
+    const prevBtn = screen.getByRole("button", { name: /previous page/i });
+    expect(container.contains(prevBtn)).toBe(true);
+  });
+});
+
+// Round 9 owner correction — "standard pagination controls zone": "we also
+// need to agree on a standard pagination controls zone. If no expand
+// collapse medallion exists at the middle of the bottom page... that's
+// where the pagination controls should be in their own medallion." The
+// Seeds view never has a Collapse-All medallion, so once a caller opts
+// into `onPaginationHandleChange`, pagination is reported upward INSTEAD
+// OF rendered inline — mirrors `SeedWordsTab.tsx`'s identical correction.
+describe("ArweaveSeedsArea — reports pagination upward instead of inline once a caller opts in (onPaginationHandleChange)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  type PaginationHandle = { page: number; totalPages: number; onPrev: () => void; onNext: () => void; onJump: (page: number) => void } | null;
+
+  function renderReporting(count: number, handleRef: { current: PaginationHandle }) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: count }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} onPaginationHandleChange={(h) => { handleRef.current = h; }} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("reports the handle, renders no inline/portaled Prev/Next", () => {
+    const handleRef: { current: PaginationHandle } = { current: null };
+    renderReporting(13, handleRef);
+    expect(handleRef.current).toEqual(expect.objectContaining({ page: 0 }));
+    expect(handleRef.current!.totalPages).toBeGreaterThan(1);
+    expect(screen.queryByRole("button", { name: /next page/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /previous page/i })).toBeNull();
+
+    const before = document.querySelectorAll("[data-seed-id]").length;
+    act(() => handleRef.current?.onNext());
+    expect(document.querySelectorAll("[data-seed-id]").length).toBeGreaterThan(0);
+    expect(handleRef.current).toEqual(expect.objectContaining({ page: 1 }));
+    void before;
+  });
+
+  it("reports null once everything fits on one page", () => {
+    const handleRef: { current: PaginationHandle } = { current: null };
+    renderReporting(0, handleRef);
+    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+    expect(handleRef.current).toBeNull();
+  });
+});
+
+// Round 20 owner correction: "add arweave seed must be similar to how
+// chainwebs seed is added wit ha plus button in the upper line aligned
+// right" — `ArweaveSeedsArea` now reports its own `openDefine` up via
+// `onOpenSeedFormHandleChange`, the same "report a handle upward" shape
+// `onPaginationHandleChange` already uses, so `ArweavePanel`'s shared
+// mobile tablist row can render the "+" in the same slot
+// `ChainwebPanel.tsx` reserves for `SeedWordsTab`'s own "Create New Seed".
+describe("ArweaveSeedsArea — reports openDefine upward for the relocated mobile '+' (onOpenSeedFormHandleChange)", () => {
+  it("calls the handler with a function on mount, and with null on unmount", () => {
+    const handleRef: { current: (() => void) | null } = { current: undefined as unknown as null };
+    const { unmount } = render(
+      <ArweaveSeedsArea seeds={[PRIME_SEED]} onOpenSeedFormHandleChange={(h) => { handleRef.current = h; }} />,
+    );
+    expect(typeof handleRef.current).toBe("function");
+    unmount();
+    expect(handleRef.current).toBeNull();
+  });
+
+  it("calling the reported handle opens the SAME define form the bottom button opens", () => {
+    const handleRef: { current: (() => void) | null } = { current: null };
+    render(
+      <ArweaveSeedsArea seeds={[PRIME_SEED]} onOpenSeedFormHandleChange={(h) => { handleRef.current = h; }} />,
+    );
+    expect(screen.queryByTestId("arweave-seed-define-form")).toBeNull(); // form not open yet
+    act(() => handleRef.current?.());
+    expect(screen.getByTestId("arweave-seed-define-form")).toBeInTheDocument();
+  });
+
+  // MOBILE ONLY — desktop keeps the bottom button as the only entry point,
+  // exactly as it always has (no `CodexUiRoot` ancestor here → `isMobile`
+  // defaults false, same convention this file's other describes rely on).
+  it("desktop still shows the bottom 'Add Arweave Seed' button", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    expect(screen.getByTestId("arweave-add-seed")).toBeTruthy();
+  });
+
+  it("mobile hides the bottom button — the '+' handle is the only way in", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+      observe(target: Element) {
+        this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={[PRIME_SEED]} />
+      </CodexUiRoot>,
+    );
+    expect(screen.queryByTestId("arweave-add-seed")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+// Round 20 owner correction: "the seedentry itself, it must have its
+// content shown similar to the chainweb seed... with triple point for view
+// seed and clicking it enters full screen for the details" — mobile-only
+// triple-dot menu replacing the always-visible "View Seed" text link +
+// trash icon. Desktop is exercised extensively elsewhere in this file and
+// stays untouched.
+describe("ArweaveSeedsArea — mobile seed row triple-dot menu (round 20)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  function renderMobile(seeds: ArweaveSeedRecord[] = [PRIME_SEED]) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} />
+      </CodexUiRoot>,
+    );
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("hides the inline 'View Seed' text link and trash icon, showing a triple-dot trigger instead", () => {
+    renderMobile();
+    expect(screen.queryByTestId("arweave-seed-reveal-prime")).toBeNull();
+    expect(screen.queryByTestId("arweave-seed-delete-prime")).toBeNull();
+    expect(screen.getByTestId("arweave-seed-row-actions-trigger-prime")).toBeTruthy();
+  });
+
+  it("opening the menu shows View Seed and Delete", () => {
+    renderMobile();
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
+    expect(screen.getByTestId("arweave-seed-row-actions-view-prime")).toBeTruthy();
+    expect(screen.getByTestId("arweave-seed-row-actions-delete-prime")).toBeTruthy();
+  });
+
+  it("View Seed opens the SAME full-screen reveal the desktop 'View Seed' button opens", () => {
+    renderMobile();
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-view-prime"));
+    expect(screen.getByTestId("arweave-seed-reveal-modal-prime")).toBeTruthy();
+  });
+
+  it("Delete triggers the same delete-confirm panel the desktop trash icon opens", () => {
+    renderMobile();
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-delete-prime"));
+    expect(screen.getByTestId("arweave-seed-delete-confirm-panel-prime")).toBeTruthy();
+  });
+
+  it("each row's menu is independent — opening one seed's menu doesn't affect another's", () => {
+    const other: ArweaveSeedRecord = { id: "s2", label: "Second Seed", bits: PRIME_BITS };
+    renderMobile([PRIME_SEED, other]);
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
+    expect(screen.getByTestId("arweave-seed-row-actions-view-prime")).toBeTruthy();
+    expect(screen.queryByTestId("arweave-seed-row-actions-view-s2")).toBeNull();
+  });
+});
+
+// Round 21 owner correction: "Clicking plus to add seed on arweave must
+// open it full screen, same as on chainweb" — `CreateStoaChainSeedModal.tsx`
+// (Chainweb) has always rendered its define form inside `CodexModalShell`
+// (a modal on every width, full-bleed on mobile); `DefineSeedForm` used to
+// render plain-inline instead. Now both wrap it the same way.
+describe("ArweaveSeedsArea — the define-seed form opens as a real modal (round 21)", () => {
+  it("wraps the form in CodexModalShell, closable via its own × button", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-add-seed"));
+    expect(screen.getByTestId("arweave-seed-define-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-seed-define-form")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("arweave-seed-define-close"));
+    expect(screen.queryByTestId("arweave-seed-define-modal")).toBeNull();
+  });
+
+  it("Cancel inside the form still closes it (same handler as before, now also closing the modal)", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-add-seed"));
+    fireEvent.click(screen.getByTestId("arweave-seed-define-cancel"));
+    expect(screen.queryByTestId("arweave-seed-define-modal")).toBeNull();
+  });
+});
+
+// Round 21 owner correction: "1b) also clicking a seed, must open it full
+// screen." Mirrors `SeedWordsTab.tsx`'s own `expanded && isMobile` full-
+// screen `CodexModalShell` for its key list — mobile ONLY; desktop keeps
+// its existing inline accordion, exercised extensively elsewhere in this
+// file with no `CodexUiRoot` ancestor (so `isMobile` defaults false).
+describe("ArweaveSeedsArea — mobile: clicking a seed row opens its key list full screen (round 21)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("mobile: opens the key list inside a full-screen CodexModalShell", () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={[PRIME_SEED]} />
+      </CodexUiRoot>,
+    );
+    fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+    expect(screen.getByTestId("arweave-seed-expand-modal-prime")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("arweave-seed-expand-close"));
+    expect(screen.queryByTestId("arweave-seed-expand-modal-prime")).toBeNull();
+  });
+
+  it("desktop: still expands inline, no modal", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+    expect(screen.queryByTestId("arweave-seed-expand-modal-prime")).toBeNull();
+    expect(screen.getByTestId("arweave-seed-unused-prime")).toBeInTheDocument();
+  });
+});
+
+// Round 25 owner correction: "the seed entry on arweave, we need to make
+// it to text row, and decrease its height. Upperl left corener aligned,
+// name. Lower lweft corener bit size 1600 bit (nothing more). Upper right
+// corner the 3 point menu, and in its left the numebr of keys stored. we
+// remove prime medalion, we designed that it is prime simply via colour."
+describe("ArweaveSeedsArea — mobile: compact two-line seed row (round 25)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderMobile(seeds: ArweaveSeedRecord[] = [PRIME_SEED]) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("shows the name and bit size only — no 'DALOS seed'/'· Prime' suffix text", () => {
+    renderMobile();
+    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+    expect(screen.getByText("1600-bit")).toBeTruthy();
+    expect(screen.queryByText(/1600-bit DALOS seed/i)).toBeNull();
+    expect(screen.queryByText(/· Prime/i)).toBeNull();
+  });
+
+  it("removes the Prime badge pill entirely — prime is conveyed by colour/lock icon alone", () => {
+    renderMobile();
+    expect(screen.queryByTestId("arweave-prime-badge")).toBeNull();
+    expect(screen.queryByText("🔒 Prime")).toBeNull();
+    // The lock glyph + gold name color are still there, doing the same job.
+    const toggle = screen.getByTestId("arweave-seed-toggle-prime");
+    expect(toggle.innerHTML).toContain("<rect"); // the lock glyph's body
+    expect(getComputedStyle(screen.getByText("Prime Arweave Seed")).color).toBe("rgb(206, 172, 95)");
+  });
+
+  it("still shows the key count and the triple-dot menu trigger", () => {
+    renderMobile();
+    expect(screen.getByText("0")).toBeTruthy(); // key count badge
+    expect(screen.getByTestId("arweave-seed-row-actions-trigger-prime")).toBeInTheDocument();
+  });
+
+  it("desktop keeps the Prime badge and the full 'N-bit DALOS seed · Prime' subtitle, unchanged", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    expect(screen.getByTestId("arweave-prime-badge")).toBeInTheDocument();
+    expect(screen.getByText(/1600-bit DALOS seed/i)).toBeTruthy();
+  });
+});
+
+// Round 21 owner correction: "same slide swipe animation must be for the
+// seed view as well, which now currently doesnt have such a thing" — a
+// direct port of `ArweaveAccountsArea.tsx`'s own drag-following, two-pane
+// swipe carousel tests.
+describe("ArweaveSeedsArea — mobile: the drag-following swipe carousel (round 21)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  function renderManySeeds(count: number) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: count }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea seeds={seeds} />
+      </CodexUiRoot>,
+    );
+  }
+
+  it("a left swipe advances to the next page, a right swipe goes back", async () => {
+    // jsdom's `clientHeight` never resolves, so the slot engine stays at
+    // its safe default (4/page) — 9 extra seeds is comfortably 2+ pages.
+    renderManySeeds(9);
+    const surface = screen.getByTestId("arweave-seeds-page-surface");
+    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+
+    const swipe = (fromX: number, toX: number) => {
+      fireEvent.touchStart(surface, { touches: [{ clientX: fromX, clientY: 0 }] });
+      fireEvent.touchMove(surface, { touches: [{ clientX: toX, clientY: 0 }] });
+      fireEvent.touchEnd(surface, { changedTouches: [{ clientX: toX, clientY: 0 }] });
+    };
+
+    swipe(300, 200);
+    await waitFor(() => expect(screen.queryByText("Prime Arweave Seed")).toBeNull());
+
+    swipe(200, 300);
+    await waitFor(() => expect(screen.getByText("Prime Arweave Seed")).toBeTruthy());
+  });
+
+  it("visually follows the finger while dragging, resists past the first page, and ignores a vertical gesture", () => {
+    renderManySeeds(9);
+    const surface = screen.getByTestId("arweave-seeds-page-surface");
+    const track = screen.getByTestId("arweave-seeds-page-swipe-track");
+    expect(track.style.transform).toBe("translateX(0px)");
+
+    // Already on the FIRST page — dragging RIGHT resists (0.35×) instead
+    // of moving 1:1 with the finger.
+    fireEvent.touchStart(surface, { touches: [{ clientX: 200, clientY: 0 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 300, clientY: 0 }] });
+    expect(track.style.transform).toBe("translateX(35px)"); // 100 * 0.35
+    expect(track.style.transition).toBe("none");
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 300, clientY: 0 }] });
+
+    // A predominantly VERTICAL gesture never moves the track at all.
+    fireEvent.touchStart(surface, { touches: [{ clientX: 200, clientY: 200 }] });
+    fireEvent.touchMove(surface, { touches: [{ clientX: 210, clientY: 260 }] });
+    expect(track.style.transform).toBe("translateX(0px)");
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 210, clientY: 260 }] });
+  });
+
+  it("desktop has no swipe track at all — the list renders directly, unpaginated", () => {
+    const seeds: ArweaveSeedRecord[] = [
+      PRIME_SEED,
+      ...Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, label: `Seed ${i}`, bits: PRIME_BITS })),
+    ];
+    render(<ArweaveSeedsArea seeds={seeds} />);
+    expect(screen.queryByTestId("arweave-seeds-page-swipe-track")).toBeNull();
+    expect(screen.getByText("Seed 8")).toBeTruthy(); // every seed renders, no pagination
+  });
+});
+
+// Round 22 owner correction: "the field is buldging out of hte screen, the
+// seed input field . also the name with the input field define seed and
+// calce. must be at the bottom of the page, fixes... instead they must
+// remain at all times on screen, and the seed input field, must extend to
+// the available screen space... So we need icons for these [3 seed source
+// buttons]."
+describe("ArweaveSeedsArea — mobile: the define-seed form layout fixes (round 22)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  function openDefineMobile() {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const handleRef: { current: (() => void) | null } = { current: null };
+    render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea
+          seeds={[PRIME_SEED]}
+          onOpenSeedFormHandleChange={(h) => { handleRef.current = h; }}
+        />
+      </CodexUiRoot>,
+    );
+    // Mobile has no bottom "Add Arweave Seed" button (round 20) — the "+"
+    // lives in `ArweavePanel`'s own tablist row, reached via the reported
+    // handle (see the round-20 describe block above for the same pattern).
+    act(() => handleRef.current?.());
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("mobile: the Name field + Define/Cancel buttons render OUTSIDE the scrolling body — a pinned footer", () => {
+    openDefineMobile();
+    const body = screen.getByTestId("arweave-seed-define-modal-body");
+    expect(body.contains(screen.getByTestId("arweave-seed-label-input"))).toBe(false);
+    expect(body.contains(screen.getByTestId("arweave-seed-confirm"))).toBe(false);
+    expect(body.contains(screen.getByTestId("arweave-seed-define-cancel"))).toBe(false);
+    // Still both in the document, and Define seed still works.
+    expect(screen.getByTestId("arweave-seed-label-input")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-seed-confirm")).toBeInTheDocument();
+  });
+
+  it("desktop: Name field + buttons still render, visually stacked right after the form body (CodexModalShell's own byte-identical-on-desktop footer contract)", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-add-seed"));
+    expect(screen.getByTestId("arweave-seed-define-form")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-seed-label-input")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-seed-confirm")).toBeInTheDocument();
+  });
+
+  it("mobile: the three seed-source buttons render as icons, not the numbered text labels", () => {
+    openDefineMobile();
+    expect(screen.queryByText(/1 · Enter your own seed/i)).toBeNull();
+    expect(screen.queryByText("Enter your own seed")).toBeNull();
+    expect(screen.getByRole("radio", { name: "Enter your own seed" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Use an Ouronet account" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Use a Chainweb seed" })).toBeInTheDocument();
+  });
+
+  it("desktop: the three seed-source buttons keep their full numbered text, unchanged", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-add-seed"));
+    expect(screen.getByText("1 · Enter your own seed")).toBeInTheDocument();
+    expect(screen.getByText("2 · Use an Ouronet account")).toBeInTheDocument();
+    expect(screen.getByText("3 · Use a Chainweb seed")).toBeInTheDocument();
+  });
+
+  it("mobile: the seed-words textarea has no fixed maxHeight cap — it flex-fills instead", () => {
+    openDefineMobile();
+    const textarea = screen.getByTestId("arweave-seed-words-input") as HTMLTextAreaElement;
+    expect(textarea.style.maxHeight).toBe("");
+    expect(textarea.style.flexGrow).toBe("1");
+  });
+
+  it("desktop: the seed-words textarea keeps its 70vh maxHeight cap, unchanged", () => {
+    render(<ArweaveSeedsArea seeds={[PRIME_SEED]} />);
+    fireEvent.click(screen.getByTestId("arweave-add-seed"));
+    const textarea = screen.getByTestId("arweave-seed-words-input") as HTMLTextAreaElement;
+    expect(textarea.style.maxHeight).toBe("70vh");
   });
 });
