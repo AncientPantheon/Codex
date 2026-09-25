@@ -6,20 +6,21 @@
  * stored guard). Activation status, the on-chain sovereign/governor, the
  * payment key + its guard + balance, the on-chain public key, and the
  * StoicTag are all CHAIN STATE — they're read from the immutable Pact
- * function via `getAccountSelectorData` (ouronet-core), which routes through
- * the `pactRead` seam the consumer configures at boot (OuronetUI wires its
+ * function via `getAccountSelectorDataLive`, which routes through the
+ * `pactRead` seam the consumer configures at boot (OuronetUI wires its
  * cache-aware reader; a standalone consumer wires its own). The package
  * therefore REFERENCES these on-chain functions and DEPENDS on them — it
  * does not (and cannot) embed them; they live immutably on StoaChain.
  *
- * DPL-UR chain-symbol audit (2026-09-25): the underlying function moved to
- * `ouronet-ns.O-UI-SEVEN.URC_01|Accounts` — DPL-UR (`URC_0027_AccountSelectorMapper`)
- * went into archive mode and no longer resolves on mainnet at all.
- * `getAccountSelectorData` is EXTERNAL (`@ouronet/ouronet-core`, confirmed
- * latest published version 4.6.0 as of this audit) and still constructs the
- * OLD `DPL-UR.*` call internally — this package cannot fix that from here;
- * it needs an O-UI-SEVEN-compatible `@ouronet/ouronet-core` release to pin
- * to. `CODEX_CHAIN_READ_FUNCTIONS` below already names the corrected target.
+ * DPL-UR chain-symbol audit (2026-09-25, follow-up handoff): reads
+ * `ouronet-ns.O-UI-SEVEN.URC_01|Accounts` directly via the package-LOCAL
+ * `getAccountSelectorDataLive` (`../../zbom/ouroSelectorReads.js`) instead of
+ * `@ouronet/ouronet-core`'s `getAccountSelectorData`, which still constructs
+ * the archived `DPL-UR.URC_0027_AccountSelectorMapper` call internally as of
+ * its latest published version (4.6.0, checked 2026-09-25). See that local
+ * file's own doc comment for the full rationale — delete it and revert this
+ * import the day `@ouronet/ouronet-core` ships an O-UI-SEVEN-compatible
+ * release.
  *
  * APOLLO (₱./Π.) observational accounts are excluded from the read: the
  * selector mapper only recognises DALOS Genesis (Ѻ./Σ.) accounts, and one
@@ -29,7 +30,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { getAccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import { getAccountSelectorDataLive } from "../../zbom/ouroSelectorReads.js";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePostTxRefresh } from "../../zbom/toast/usePostTxRefresh.js";
@@ -43,7 +44,7 @@ export const CODEX_CHAIN_READ_FUNCTIONS = [
     name: "ouronet-ns.O-UI-SEVEN.URC_01|Accounts",
     purpose:
       "Live account state for Ouronet accounts — activation, account guard, smart/standard, payment key + guard + balance, on-chain public key, sovereign, governor, and StoicTag.",
-    via: "getAccountSelectorData (@ouronet/ouronet-core — NOT YET updated to O-UI-SEVEN as of v4.6.0, the latest published version; still calls the archived DPL-UR.URC_0027_AccountSelectorMapper internally)",
+    via: "getAccountSelectorDataLive (local — ../../zbom/ouroSelectorReads.js; interim until @ouronet/ouronet-core ships an O-UI-SEVEN-compatible release)",
   },
 ] as const;
 
@@ -78,7 +79,7 @@ export function useAccountChainData(addresses: string[]): AccountChainData {
     setError(null);
     try {
       const rows = await codexClock.report("URC_0027", undefined, () =>
-        getAccountSelectorData(dalos),
+        getAccountSelectorDataLive(dalos),
       );
       const map: Record<string, AccountSelectorData> = {};
       for (const r of rows) map[r["ouronet-account"]] = r;

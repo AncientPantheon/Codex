@@ -25,14 +25,17 @@ import * as React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 
-// The tab reads live URC_0027 chain state via getAccountSelectorData, which
-// hits a real Stoa node. In jsdom there is no node, so each render would fire a
+// The tab reads live URC_0027 chain state via getAccountSelectorDataLive
+// (package-LOCAL, ../src/zbom/ouroSelectorReads.js — DPL-UR chain-symbol
+// audit follow-up, 2026-09-25: reads O-UI-SEVEN.URC_01|Accounts directly
+// instead of @ouronet/ouronet-core's getAccountSelectorData), which hits a
+// real Stoa node. In jsdom there is no node, so each render would fire a
 // hanging network read; left in-flight, those reads race across tests and make
 // the modal-open spec flaky. Stub it to return no rows — the codex-only view
 // these specs assert is exactly what the tab renders when chain data is absent.
-vi.mock("@ouronet/ouronet-core/interactions/ouroAccountFunctions", async (importOriginal) => {
+vi.mock("../src/zbom/ouroSelectorReads.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, getAccountSelectorData: async () => [] };
+  return { ...actual, getAccountSelectorDataLive: async () => [] };
 });
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";

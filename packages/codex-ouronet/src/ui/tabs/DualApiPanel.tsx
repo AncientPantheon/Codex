@@ -8,9 +8,11 @@
  * `PYTHIA.UR_DualLinkRowOrNull`). The Pythia deploy/rename STOA prices come from
  * `DPL-UR.URC_0034_PythiaPrices`. CONFIRMED BROKEN (DPL-UR chain-symbol
  * audit, 2026-09-25) — DPL-UR is archived and neither call resolves on
- * mainnet; no O-UI-SEVEN replacement has been confirmed for either (see
- * `deployApiKey.ts`'s own doc comments on `getDualApiKeySelectorData` /
- * `getPythiaPrices`).
+ * mainnet. Replacements are now NAMED (follow-up handoff, 2026-09-25) —
+ * `P-UI-ONE.URC_02|DualLinks` / `URC_03|Prices` — but NOT switched yet
+ * (ships in `PureV2/19`, not confirmed deployed); see `deployApiKey.ts`'s
+ * own doc comments on `getDualApiKeySelectorData` / `getPythiaPrices` for
+ * the flip-the-switch TODOs.
  *
  * ITERATION 1: the dual-link row is rendered DEFENSIVELY — the documented fields
  * (standard-apollo / smart-apollo / consumer-lane / iz-active) are labelled, and

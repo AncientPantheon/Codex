@@ -40,9 +40,13 @@ import * as React from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 
-vi.mock("@ouronet/ouronet-core/interactions/ouroAccountFunctions", async (importOriginal) => {
+// DPL-UR chain-symbol audit follow-up (2026-09-25): mock the package-LOCAL
+// getAccountSelectorDataLive (../src/zbom/ouroSelectorReads.js) instead of
+// @ouronet/ouronet-core's getAccountSelectorData — see
+// useAccountChainData.ts's own doc comment for why the import moved.
+vi.mock("../src/zbom/ouroSelectorReads.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, getAccountSelectorData: async () => [] };
+  return { ...actual, getAccountSelectorDataLive: async () => [] };
 });
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";

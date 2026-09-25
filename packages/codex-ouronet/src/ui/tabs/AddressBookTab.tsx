@@ -11,10 +11,13 @@
  *   Tier 1 "Ouronet"
  *     • Accounts  ("ouronet" kind) — Ѻ. recipient addresses (blue accent)
  *     • StoicTags ("stoic-tag" kind) — bare §tag names (green accent);
- *       resolved on-chain via `getStoicTagSelectorData` (URC_0027b) to show
- *       the bound account / released / not-registered status. The bare name
- *       is stored in `address`; the `§` sigil is added for display/copy and
- *       stripped on save.
+ *       resolved on-chain via `getStoicTagSelectorDataLive` (package-LOCAL —
+ *       `../../zbom/ouroSelectorReads.js`, reads `O-UI-SEVEN.URC_03|StoicTags`
+ *       directly; DPL-UR's own `URC_0027b_StoicTagSelectorMapper` is
+ *       archived — see that local file's doc comment) to show the bound
+ *       account / released / not-registered status. The bare name is stored
+ *       in `address`; the `§` sigil is added for display/copy and stripped
+ *       on save.
  *   Tier 1 "Foreign Blockchains"
  *     • Chainweb ("stoa" kind) — k:/c:/w:/u: addresses (gold accent). Display
  *       label only ("StoaChain™" → "Chainweb") — grounded in the production
@@ -39,7 +42,7 @@ import {
   getRegisteredChains,
   validateAddress,
 } from "../../hooks/addressBookChain.js";
-import { getStoicTagSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import { getStoicTagSelectorDataLive } from "../../zbom/ouroSelectorReads.js";
 import type { StoicTagSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import {
@@ -213,7 +216,7 @@ export function AddressBookTab({ className }: AddressBookTabProps) {
     let cancelled = false;
     setTagLoading(true);
     codexClock
-      .report("URC_0027b", undefined, () => getStoicTagSelectorData(names))
+      .report("URC_0027b", undefined, () => getStoicTagSelectorDataLive(names))
       .then((rows) => {
         if (cancelled) return;
         const m: Record<string, StoicTagSelectorData> = {};

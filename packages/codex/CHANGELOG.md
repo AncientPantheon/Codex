@@ -2,6 +2,23 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.12.3 — 2026-09-25
+
+**PATCH — genuine functional fix in `codex-ouronet`: 4 of the 7
+`DPL-UR.URC_00*` reads are now read LIVE from `O-UI-SEVEN` directly,
+bypassing the still-unpatched external `@ouronet/ouronet-core` dependency.
+Ouronet Accounts tab hydration, the Stoa Accounts balance summary, and
+Address Book StoicTag status resolution all read live chain data again.
+`codex`-only release (`arweave-core` unchanged).**
+
+- New package-local interim read implementations (`zbom/ouroSelectorReads.ts`)
+  replace the 4 external `@ouronet/ouronet-core` calls that were still
+  constructing the archived `DPL-UR.*` Pact names internally.
+- The remaining 3 (Pythia registration/dual-link/pricing) are now named
+  but deliberately not switched — they ship in a not-yet-confirmed-deployed
+  chain release. See `@ancientpantheon/codex-ouronet`'s own CHANGELOG for
+  the exact target names and flip-the-switch TODOs.
+
 ## 0.12.2 — 2026-09-25
 
 **PATCH — corrects 0.12.1's own characterization of the seven `DPL-UR.URC_00*`

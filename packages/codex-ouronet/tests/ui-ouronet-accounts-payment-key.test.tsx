@@ -21,10 +21,15 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 
 // A per-test-configurable chain read. Each spec sets what URC_0027 returns.
+// DPL-UR chain-symbol audit follow-up (2026-09-25): `useAccountChainData.ts`
+// now reads `O-UI-SEVEN.URC_01|Accounts` directly via the package-LOCAL
+// `getAccountSelectorDataLive` (`../src/zbom/ouroSelectorReads.js`) instead
+// of `@ouronet/ouronet-core`'s `getAccountSelectorData` — mock that local
+// module instead (same shape, same mock, only the intercepted module moved).
 const selectorRows = vi.fn<() => Promise<AccountSelectorData[]>>(async () => []);
-vi.mock("@ouronet/ouronet-core/interactions/ouroAccountFunctions", async (importOriginal) => {
+vi.mock("../src/zbom/ouroSelectorReads.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, getAccountSelectorData: () => selectorRows() };
+  return { ...actual, getAccountSelectorDataLive: () => selectorRows() };
 });
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";

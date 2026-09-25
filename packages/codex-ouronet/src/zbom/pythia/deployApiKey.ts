@@ -130,14 +130,14 @@ export async function getApiKeyRow(apolloAccount: string): Promise<ApiKeyRow | n
  *  registered-ness (a real row carries a non-empty `owner-account`).
  *
  *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25): DPL-UR is
- *  archived and this call fails on mainnet. Unlike `URC_0027/0027b/0027c/
- *  0028` (confirmed O-UI-SEVEN replacements — see `readRegistry.ts`), the
- *  audit found NO replacement for `URC_0031` — "O-UI-SEVEN.URC_01|Accounts"
- *  through `URC_05|StoaAccounts` account for only 4 of the module's
- *  (implied, by its own "SEVEN" name) 7 slots; whichever of the remaining
- *  ones (e.g. `URC_02`/`URC_06`/`URC_07`) carries the registration data is
- *  UNCONFIRMED. Do not guess a name in here without independent chain
- *  verification — that is exactly the class of bug this audit found. */
+ *  archived and this call fails on mainnet. Replacement now NAMED (follow-up
+ *  handoff, 2026-09-25): `ouronet-ns.P-UI-ONE.URC_01|ApiKeys`, same
+ *  arg-list/key-shape ("change the name, change nothing else"). NOT switched
+ *  yet — ships in `PureV2/19`, not confirmed deployed as of this handoff;
+ *  the owner was explicit: "do not switch the last three until the owner
+ *  confirms it is deployed." TODO once confirmed: change the pact code below
+ *  to `${KADENA_NAMESPACE}.P-UI-ONE.URC_01|ApiKeys [${list}]` — nothing else
+ *  in this function needs to change. */
 export async function getApiKeySelectorData(
   apolloAccounts: string[],
 ): Promise<Array<ApiKeyRow | null>> {
@@ -235,9 +235,13 @@ export interface DualLinkRow {
  *  returning one entry per input IN ORDER (index-aligned; `null` where the
  *  composite has no dual-link row). Mirrors `getApiKeySelectorData`.
  *
- *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — see
- *  `getApiKeySelectorData`'s own doc comment above; same situation, no
- *  confirmed O-UI-SEVEN replacement for this one either. */
+ *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — same situation
+ *  as `getApiKeySelectorData` above. Replacement now NAMED (follow-up
+ *  handoff, 2026-09-25): `ouronet-ns.P-UI-ONE.URC_02|DualLinks`, same
+ *  arg-list/key-shape. NOT switched yet — same `PureV2/19`-not-yet-deployed
+ *  gate; see `getApiKeySelectorData`'s doc comment for the full reasoning.
+ *  TODO once confirmed: change the pact code below to
+ *  `${KADENA_NAMESPACE}.P-UI-ONE.URC_02|DualLinks [${list}]`. */
 export async function getDualApiKeySelectorData(
   dualKeys: string[],
 ): Promise<Array<DualLinkRow | null>> {
@@ -267,9 +271,19 @@ export interface PythiaPrices {
 /** Read `ouronet-ns.DPL-UR.URC_0034_PythiaPrices` — the deploy/rename STOA prices
  *  for Apollo-half deploy + dual-link consumer-lane rename.
  *
- *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — see
- *  `getApiKeySelectorData`'s own doc comment above; same situation, no
- *  confirmed O-UI-SEVEN replacement for this one either. */
+ *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — same situation
+ *  as `getApiKeySelectorData` above. Replacement now NAMED (follow-up
+ *  handoff, 2026-09-25): `ouronet-ns.P-UI-ONE.URC_03|Prices`, same
+ *  arg-list/key-shape. NOT switched yet — same `PureV2/19`-not-yet-deployed
+ *  gate; see `getApiKeySelectorData`'s doc comment for the full reasoning.
+ *  TODO once confirmed: change the pact code below to
+ *  `${KADENA_NAMESPACE}.P-UI-ONE.URC_03|Prices`.
+ *
+ *  SEPARATE, NOT caused by the migration (per the handoff, do not code
+ *  around this): even once switched, this read will still fail on chain —
+ *  `DALOS|PricesTable` has no `stoa|price` row, which `PYTHIA::UR_DeployPrice`
+ *  reads. The old `URC_0034` failed identically. That is an owner-side init
+ *  gap, not a bug in this function. */
 export async function getPythiaPrices(): Promise<PythiaPrices | null> {
   try {
     const pactCode = `(${KADENA_NAMESPACE}.DPL-UR.URC_0034_PythiaPrices)`;

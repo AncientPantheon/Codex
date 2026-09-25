@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.12.3 — 2026-09-25
+
+**PATCH — genuine functional fix: 4 of the 7 `DPL-UR.URC_00*` reads are now
+read LIVE from `O-UI-SEVEN` directly, bypassing the still-unpatched
+external `@ouronet/ouronet-core` dependency. Owner follow-up handoff:
+"your DPL-UR reads are gone. Here is where they moved" — confirmed
+object-for-object against mainnet, for a real account and a non-existent
+one.**
+
+- **New `zbom/ouroSelectorReads.ts`** — package-LOCAL, interim
+  implementations of `getAccountSelectorDataLive`, `getStoicTagSelectorDataLive`,
+  `getStoicTagInfoLive`, `getStoaAccountSelectorDataLive`, reading
+  `O-UI-SEVEN.URC_01|Accounts`, `URC_03|StoicTags`, `URC_04|StoicTag`,
+  `URC_05|StoaAccounts` respectively via a direct `pactRead` — byte-for-byte
+  the same implementation as `@ouronet/ouronet-core`'s equivalents (same
+  tiers, same "no data ⇒ `[]`/`null`" shape, same reused result types), only
+  the Pact module/function name changed. Mirrors the `deployApiKey.ts`
+  "interim; upstream to ouronet-core" pattern already established for
+  `URC_0031`. Delete this file (and revert the 3 call sites below) the day
+  `@ouronet/ouronet-core` ships an O-UI-SEVEN-compatible release — it's
+  still on the archived `DPL-UR.*` names internally as of its latest
+  published version (4.6.0).
+- **`useAccountChainData.ts`, `useStoaChainBalances.ts`, `AddressBookTab.tsx`**
+  now import from the new local module instead of `@ouronet/ouronet-core`
+  — this is the actual fix: Ouronet Accounts tab hydration, the Stoa
+  Accounts "Stoa Balance" summary line, and Address Book StoicTag status
+  resolution all read live chain data again.
+- **Sentinel values changed shape but not type** (`iz-smart` can now be the
+  number `-1` instead of `false` for "account does not exist",
+  `payment-key-balance` as `-1.0` instead of `0.0`, `payment-key` as the
+  literal `"|"` BAR sentinel instead of `""`) — the reused
+  `AccountSelectorData` type already accommodated all three; no type
+  changes were needed. `StoicTagSelectorData`'s three-state shape
+  (never-registered / active / released) was likewise already a distinct
+  field per state.
+- **The remaining 3** (`URC_0031`, `URC_0033_DualApiKeyMapper`,
+  `URC_0034_PythiaPrices` — Pythia registration/dual-link/pricing, all
+  LOCAL to `deployApiKey.ts` unlike the 4 above) are now NAMED
+  (`P-UI-ONE.URC_01|ApiKeys` / `URC_02|DualLinks` / `URC_03|Prices`) but
+  deliberately NOT switched yet — they ship in `PureV2/19`, not confirmed
+  deployed as of this handoff. Flip-the-switch TODOs are documented inline
+  at each of the three call sites. Separately, `URC_03|Prices` (ex-`URC_0034`)
+  is expected to keep failing even once switched — `DALOS|PricesTable` has
+  no `stoa|price` row, an owner-side init gap, not a bug in this package.
+
 ## 0.12.2 — 2026-09-25
 
 **PATCH — corrects 0.12.1's own characterization of the seven `DPL-UR.URC_00*`

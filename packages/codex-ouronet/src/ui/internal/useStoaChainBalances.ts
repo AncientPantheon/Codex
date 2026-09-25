@@ -6,13 +6,15 @@
  *   A. `coin.get-balance` — ONE read per chain (STOA_CHAINS, 0–9), each batching
  *      a `map`/`try` over every address. Drives the per-chain grid + the row
  *      total. A non-existent account on a chain yields {balance:0, exists:false}.
- *   B. `ouronet-ns.O-UI-SEVEN.URC_05|StoaAccounts` (getStoaAccountSelectorData) —
- *      one batched call over the codex addresses; its `balance` feeds the
- *      single "Stoa Balance" summary line. Optional / best-effort. (DPL-UR
- *      chain-symbol audit, 2026-09-25: renamed from the archived
- *      `DPL-UR.URC_0028_StoaAccountSelectorMapper` — `getStoaAccountSelectorData`
- *      is external, `@ouronet/ouronet-core`, and still calls the old name
- *      internally as of its latest published version, 4.6.0.)
+ *   B. `ouronet-ns.O-UI-SEVEN.URC_05|StoaAccounts` (getStoaAccountSelectorDataLive,
+ *      package-LOCAL — `../../zbom/ouroSelectorReads.js`) — one batched call
+ *      over the codex addresses; its `balance` feeds the single "Stoa
+ *      Balance" summary line. Optional / best-effort. (DPL-UR chain-symbol
+ *      audit, 2026-09-25, follow-up handoff: reads O-UI-SEVEN directly
+ *      instead of `@ouronet/ouronet-core`'s `getStoaAccountSelectorData`,
+ *      which still calls the archived `DPL-UR.URC_0028_StoaAccountSelectorMapper`
+ *      internally as of its latest published version, 4.6.0 — see the local
+ *      file's own doc comment for the full rationale.)
  *
  * Mirrors the `useAccountChainData` hook shape (byAddress / loading / error /
  * refresh). The package owns no reader — reads only work once the consumer has
@@ -22,7 +24,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { pactRead } from "@stoachain/stoa-core/reads";
 import { STOA_CHAINS, getPactUrl } from "@stoachain/stoa-core/constants";
-import { getStoaAccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import { getStoaAccountSelectorDataLive } from "../../zbom/ouroSelectorReads.js";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 
 export interface ChainBalance {
@@ -112,7 +114,7 @@ export function useStoaChainBalances(addresses: string[], selectorAddresses: str
         if (selAddrs.length) {
           try {
             const sel = await codexClock.report("URC_0028", undefined, () =>
-              getStoaAccountSelectorData(selAddrs),
+              getStoaAccountSelectorDataLive(selAddrs),
             );
             for (const d of sel) selector[d.account] = coerce(d.balance);
           } catch { /* selector is optional; ignore */ }
