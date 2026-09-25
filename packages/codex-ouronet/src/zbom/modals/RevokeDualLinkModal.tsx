@@ -197,7 +197,12 @@ export default function RevokeDualLinkModal({
   const blockerReason = (() => {
     if (isProcessing) return null;
     if (!patronAccount) return "Pick a patron";
-    if (loadingInfo || info === null) return "Loading function info…";
+    // NO "Loading function info…" gate here (removed, chain-symbol handoff
+    // follow-up, 2026-09-25): `info` is now PERMANENTLY `null` — its live
+    // read was deleted above (confirmed non-existent on chain, not
+    // guess-renamed) — so this gate PERMANENTLY disabled the Revoke button.
+    // Own bug: the read removal and this stale gate were fixed in two
+    // separate passes; this one was missed the first time.
     if (insufficientIgnis) return "Insufficient IGNIS";
     if (!standardOwner) return "Standard half not in this Codex — both owners must sign";
     if (!sameOwner && !smartOwner) return "Smart half not in this Codex — both owners must sign";
@@ -260,8 +265,13 @@ export default function RevokeDualLinkModal({
       </div>
       <div className="flex items-center justify-between rounded-lg border p-2.5" style={{ borderColor: "#8b1a1a30", backgroundColor: "#0a0a0a" }}>
         <span className="text-xs" style={{ color: "#888" }}>IGNIS fee</span>
-        <span className="text-xs font-bold" style={{ color: insufficientIgnis ? "#c0392b" : "#c0392b" }}>
-          {loadingInfo || info === null ? "…" : ignisCost > 0 ? `${ignisCost} IGNIS` : "free"}
+        {/* No live cost preview (its read was deleted, confirmed non-existent
+            on chain — see the removed useEffect above) — an honest "≤1
+            IGNIS" estimate per this op's own doc'd shape ("1 unit, or 0
+            when virtual gas is zero"), NOT a perpetual "…" or a
+            confidently-wrong "free". */}
+        <span className="text-xs font-bold" style={{ color: "#c0392b" }} title="No live cost preview available; the actual charge is 1 IGNIS unit, or 0 when virtual gas is zero.">
+          ≤1 IGNIS (est.)
         </span>
       </div>
       {guardsLoaded && stdGuard && stdAnalysis.foreignKeys.length > 0 && !stdAnalysis.satisfied && (

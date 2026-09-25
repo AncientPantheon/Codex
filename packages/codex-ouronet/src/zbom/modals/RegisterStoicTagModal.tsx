@@ -11,6 +11,17 @@
  * Pact functions:
  *   INFO    — (ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag patron tag-name account)
  *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag patron tag-name account)
+ *
+ * The INFO read routes through the package-LOCAL `getRegisterStoicTagInfoLive`
+ * (`../ouroSelectorReads.js`), not `@ouronet/ouronet-core`'s own
+ * `getRegisterStoicTagInfo` — found while testing every Ouronet execute
+ * flow's wiring (2026-09-25): that external function still builds the WRONG
+ * `CODEX.CODEX|INFO_RegisterStoicTag` (name-order swap) and
+ * `DALOS.UR_AccountKadena` (retired) calls internally, confirmed at its
+ * latest published version (4.6.0) — so `info` never resolved, and since
+ * `blockerReason` gates on `info !== null`, "Register StoicTag" was
+ * PERMANENTLY DISABLED. The EXECUTE call above (`buildRegisterStoicTagPactCode`,
+ * still external) is unaffected — neither chain-symbol audit flagged it.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -23,7 +34,7 @@ import { txPending } from "../toast/toastManager.js";
 import { Tag, Loader2, AlertTriangle, Trash2 } from "lucide-react";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
-import { getRegisterStoicTagInfo } from "@ouronet/ouronet-core/interactions/ouroAccountFunctions";
+import { getRegisterStoicTagInfoLive } from "../ouroSelectorReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
@@ -159,7 +170,7 @@ export default function RegisterStoicTagModal({
     setFullInfo(null);
     let aborted = false;
     const t = setTimeout(() => {
-      getRegisterStoicTagInfo(patronAccount.address, tagName, account.address)
+      getRegisterStoicTagInfoLive(patronAccount.address, tagName, account.address)
         .then((r) => { if (!aborted) setFullInfo(r); })
         .catch(() => { if (!aborted) setFullInfo(null); })
         .finally(() => { if (!aborted) setLoadingInfo(false); });
@@ -423,7 +434,7 @@ export default function RegisterStoicTagModal({
           readId="INFO_RegisterStoicTag"
           label="CODEX.INFO_CODEX|RegisterStoicTag"
           pactCall={`(ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag "${(patronAccount?.address ?? "").slice(0, 16)}…" "§${tagName.slice(0, 12)}${tagName.length > 12 ? "…" : ""}" "${account.address.slice(0, 16)}…")`}
-          fetcher={async () => (tagName ? (await getRegisterStoicTagInfo(patronAccount?.address ?? "", tagName, account.address))?.info ?? null : null)}
+          fetcher={async () => (tagName ? (await getRegisterStoicTagInfoLive(patronAccount?.address ?? "", tagName, account.address))?.info ?? null : null)}
         />
 
         {/* ── Zone 1 — Patron ── */}

@@ -2,6 +2,32 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.13.0 — 2026-09-25
+
+**MINOR — a full wiring audit of every Ouronet execute flow, prompted by a
+real reported failure: a signed action on a locked codex hung forever on
+"Processing…" with no visible way to unlock. Found and fixed the root
+cause (affecting ALL 12 ZBOM action modals at once) plus 4 more
+modal-specific bugs, and added the first-ever direct test coverage for
+every Ouronet Pact-code builder. `codex-ouronet` + `codex-ui` release
+(`arweave-core`/`codex-arweave` unchanged).**
+
+- **The dominant bug**: `CodexPasswordPrompt` (the global "Unlock Codex"
+  dialog) could render invisibly BEHIND an already-open ZBOM action modal
+  when a signed action triggered it on a locked codex — the modal-shell
+  component both share gained an always-topmost override, fixing every
+  signed action in the app at once.
+- **2 modals with a permanently-disabled execute button**: `RevokeDualLinkModal`
+  (a stale blocker left over from a prior fix) and `RegisterStoicTagModal`
+  (an external dependency still building a broken Pact call) — both fixed.
+- **2 modals with a silently-wrong cost estimate** (not blocking, but
+  showing "free"/`0` instead of the real price): `ActivateStandardAccountModal`
+  / `ActivateSmartAccountModal` — fixed with new local read overrides.
+- **New direct unit test suite** (16 tests) locking in the exact Pact call
+  every builder in `codex-ouronet` emits — the first test coverage any of
+  these ever had. See `@ancientpantheon/codex-ouronet`'s own CHANGELOG for
+  the full account.
+
 ## 0.12.4 — 2026-09-25
 
 **PATCH — the last 3 `DPL-UR.URC_00*` reads in `codex-ouronet` switched to

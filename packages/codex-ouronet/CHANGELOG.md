@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.13.0 — 2026-09-25
+
+**MINOR — a full wiring audit of every Ouronet execute (write) flow, prompted
+by an owner-reported real failure: "i tested an execution from the codex,
+and it doesnt seem to be working... we need to take all the functions that
+are being executed on Ouronet and test them if their wiring are firing
+correctly." Found and fixed a cross-cutting bug affecting ALL 12 ZBOM
+action modals, plus 3 more modal-specific ones, and added direct unit
+coverage for every Pact-code builder this session touched (previously zero
+— see the new test file's own doc comment).**
+
+### Fixed — the dominant bug: a signed action on a locked codex hung forever
+
+- **Root cause**: `ZbomModalFrame` deliberately sits at z-index 10050 (round
+  29 — so it always stacks above a `CodexModalShell` popup already open
+  underneath it). But `ensureCodexUnlocked()` / `requestPassword()` — called
+  from EVERY ONE of the 12 ZBOM action modals before their execute step —
+  opens `CodexPasswordPrompt`, ALSO a `CodexModalShell`, at the shared
+  default z-index of 9999. Opened from inside an already-open ZBOM modal (a
+  locked codex + any signed action does exactly this), the prompt rendered
+  INVISIBLY BEHIND the ZBOM card: `handleExecute`'s `await
+  ensureCodexUnlocked()` could never resolve because the user could never
+  see or reach the password input it was waiting on. Observed as: the
+  reported screenshot — a `🔒 Locked` codex, "Release StoicTag" stuck on
+  "Processing…" indefinitely, no visible unlock dialog.
+- **Fix**: `CodexModalShell` (this package's own copy; `codex-ui`'s sibling
+  copy got the same fix) gained an optional `zIndex` prop, defaulting to
+  9999 (every existing caller stays byte-identical). `CodexPasswordPrompt`
+  now passes `zIndex={2147483647}` — the same "always topmost, no matter
+  what" sentinel `OuronetAccountsTab.tsx`'s own `StoicTagPillar` hover card
+  already uses — so it always wins the stack regardless of what else is
+  open. This is a ONE-shared-component fix, so it applies to every signed
+  action in the app at once, the same way the mobile full-screen flip did.
+
+### Fixed — 2 more modals with a permanently-disabled execute button
+
+- **`RevokeDualLinkModal`**: 0.12.1 removed the confirmed-broken
+  `PYTHIA|INFO_UnlinkDualApiKey` read (deleted, not guess-renamed) but
+  missed removing the `blockerReason` gate that checked `info !== null` —
+  since `info` now stays permanently `null` by design, the "Revoke" button
+  was permanently disabled. Removed the stale gate; the IGNIS-fee display
+  now shows an honest "≤1 IGNIS (est.)" instead of an eternal loading
+  ellipsis or a confidently-wrong "free".
+- **`RegisterStoicTagModal`**: its INFO read delegates to
+  `@ouronet/ouronet-core`'s own `getRegisterStoicTagInfo`, confirmed STILL
+  building the wrong `CODEX.CODEX|INFO_RegisterStoicTag` (name-order swap)
+  and the retired `DALOS.UR_AccountKadena` internally at that package's
+  latest published version (4.6.0) — never fixed upstream. Since `info`
+  never resolved and `blockerReason` gates on it, "Register StoicTag" was
+  permanently disabled. New package-local `getRegisterStoicTagInfoLive`
+  (`zbom/ouroSelectorReads.ts`) reads the correct names directly.
+
+### Fixed — 2 modals with a silently-wrong (not blocking) cost estimate
+
+- **`ActivateStandardAccountModal` / `ActivateSmartAccountModal`**: same
+  root cause as RegisterStoicTag — `@ouronet/ouronet-core`'s
+  `getDeployStandardAccountInfo(Only)` / `getDeploySmartAccountInfo(Only)`
+  still build the retired `INFO-ZERO.DALOS-INFO|URC_Deploy*Account` +
+  `DALOS.UR_AccountKadena` internally. Unlike RegisterStoicTag this did NOT
+  disable "Activate" (their `canExecute` derives from form state, not this
+  read) but silently showed a "free"/`0` STOA cost instead of the real
+  activation price. New local `getDeployStandardAccountInfo(Only)Live` /
+  `getDeploySmartAccountInfo(Only)Live` (`zbom/ouroSelectorReads.ts`) fix
+  the display.
+
+### Added — direct unit coverage for every Ouronet Pact-code builder
+
+- **New `tests/ouronet-execute-wiring.test.ts`** (16 tests): asserts the
+  EXACT Pact code string every builder/reader in `deployApiKey.ts`,
+  `dualLinkOps.ts`, `linkDualApiKey.ts`, and `ouroSelectorReads.ts` emits —
+  function name AND argument order — using `setPactReader` to capture the
+  call without a real network read. This is the FIRST direct test coverage
+  any of these functions have ever had; every prior bug in this audit
+  thread (the `INFO_` name-order swaps, the Kadena→Stoa renames, the arity
+  fixes, the DPL-UR migration) would have been caught immediately by this
+  suite had it existed before. Locks in all of them as regression tests
+  now.
+- Re-verified via full sweep: every OTHER Ouronet execute modal
+  (`RotateGuardModal`, `RotatePaymentKeyModal`, `RotateGovernorModal`,
+  `RotateSovereignModal`, `ReleaseStoicTagModal`, `ActivateApolloPythiaKeyModal`,
+  `RenameDualLaneModal`) already resolves/rejects its INFO fetch safely
+  (`.catch`/`.finally` present, no hang risk) and reads the already-fixed,
+  correct Pact names.
+
 ## 0.12.4 — 2026-09-25
 
 **PATCH — the last 3 `DPL-UR.URC_00*` reads switched to their `P-UI-ONE`

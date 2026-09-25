@@ -79,3 +79,23 @@ describe("CodexModalShell — mobile full-screen sheet", () => {
     expect(screen.getByText("body")).toBeInTheDocument();
   });
 });
+
+describe("CodexModalShell — zIndex override (owner-reported bug: a signed action on a locked codex hung forever on 'Processing…' because the password prompt opened invisibly behind an already-open ZBOM modal)", () => {
+  it("defaults to 9999 when omitted — every existing caller stays byte-identical", () => {
+    renderModal(1920);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.style.zIndex).toBe("9999");
+  });
+
+  it("a caller (e.g. CodexPasswordPrompt) can override it to render above any other popup in the app", () => {
+    render(
+      <CodexUiRoot>
+        <CodexModalShell title="Elevated" onClose={() => {}} zIndex={2147483647}>
+          <p>body</p>
+        </CodexModalShell>
+      </CodexUiRoot>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.style.zIndex).toBe("2147483647");
+  });
+});

@@ -200,3 +200,32 @@ describe("codex-ouronet CodexModalShell — mobile: topBar pinned above the scro
     expect(body.contains(screen.getByTestId("footer-btn"))).toBe(false);
   });
 });
+
+describe("CodexModalShell — zIndex override (mirrors codex-ui's own copy; owner-reported bug: a signed action on a locked codex hung forever on 'Processing…' because the password prompt opened invisibly behind an already-open ZbomModalFrame)", () => {
+  it("defaults to 9999 when omitted — every existing caller stays byte-identical", () => {
+    FakeResizeObserver.nextWidth = 1920;
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    render(
+      <CodexUiRoot>
+        <CodexModalShell title="Test Modal" onClose={() => {}}>
+          <p>body</p>
+        </CodexModalShell>
+      </CodexUiRoot>,
+    );
+    expect(screen.getByRole("dialog").style.zIndex).toBe("9999");
+  });
+
+  it("a caller can override it to render above ZbomModalFrame's own z-index (10050)", () => {
+    FakeResizeObserver.nextWidth = 1920;
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    render(
+      <CodexUiRoot>
+        <CodexModalShell title="Elevated" onClose={() => {}} zIndex={2147483647}>
+          <p>body</p>
+        </CodexModalShell>
+      </CodexUiRoot>,
+    );
+    const z = Number(screen.getByRole("dialog").style.zIndex);
+    expect(z).toBeGreaterThan(10050);
+  });
+});

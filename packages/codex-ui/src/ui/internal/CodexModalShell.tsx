@@ -31,6 +31,22 @@ export interface CodexModalShellProps {
   /** Accent for the title + top rule. Defaults to the codex gold. */
   accent?: string;
   maxWidth?: number;
+  /**
+   * Stacking-order override. Defaults to 9999 — every EXISTING caller is
+   * byte-identical either way. Owner-reported bug (a "Release StoicTag" ZBOM
+   * action stuck forever on "Processing…"): `ZbomModalFrame` deliberately
+   * sits at z-index 10050 (round 29 — so it always stacks ABOVE a
+   * `CodexModalShell`-based popup already open underneath it, e.g. an
+   * account-detail full-screen view). But `ensureCodexUnlocked()` /
+   * `requestPassword()` can open `CodexPasswordPrompt` — ALSO a
+   * `CodexModalShell` — FROM INSIDE an already-open ZBOM modal (any signed
+   * action on a locked codex does exactly this), and at the shared default
+   * of 9999 that prompt rendered INVISIBLY BEHIND the ZBOM card: the promise
+   * `handleExecute` was awaiting could never resolve because the user could
+   * never see or reach the input it was waiting on. `CodexPasswordPrompt`
+   * now passes an always-topmost value here — see its own call site.
+   */
+  zIndex?: number;
 }
 
 export function CodexModalShell({
@@ -40,6 +56,7 @@ export function CodexModalShell({
   children,
   accent = "#ceac5f",
   maxWidth = 520,
+  zIndex = 9999,
 }: CodexModalShellProps) {
   const isMobile = useIsMobile();
   return (
@@ -50,7 +67,7 @@ export function CodexModalShell({
       style={{
         position: isMobile ? "absolute" : "fixed",
         inset: 0,
-        zIndex: 9999,
+        zIndex,
         display: "flex",
         alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",

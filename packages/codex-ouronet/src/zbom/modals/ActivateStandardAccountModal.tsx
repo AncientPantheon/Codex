@@ -29,10 +29,17 @@ import { StoaChainBrand } from "../ui/StoaChainBrand.js";
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
+// DPL-UR chain-symbol audit follow-up (2026-09-25): reads the package-LOCAL
+// getDeployStandardAccountInfo(Only)Live (../ouroSelectorReads.js) instead
+// of @ouronet/ouronet-core's own getDeployStandardAccountInfo(Only), which
+// still builds INFO-ZERO.DALOS-INFO|URC_DeployStandardAccount (retired)
+// internally at its latest published version (4.6.0) — silently showing a
+// "free"/0 STOA cost instead of the real activation price. See
+// ouroSelectorReads.ts's own doc comment.
 import {
-  getDeployStandardAccountInfoOnly,
-  getDeployStandardAccountInfo,
-} from "@ouronet/ouronet-core/interactions/activateFunctions";
+  getDeployStandardAccountInfoOnlyLive as getDeployStandardAccountInfoOnly,
+  getDeployStandardAccountInfoLive as getDeployStandardAccountInfo,
+} from "../ouroSelectorReads.js";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Key, Loader2, Zap,
 } from "lucide-react";

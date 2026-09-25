@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.0 — 2026-09-25
+
+**MINOR — `CodexModalShell` gained an optional `zIndex` override prop
+(defaults to 9999, every existing caller byte-identical), and
+`CodexPasswordPrompt` now uses it. Owner-reported bug: a signed action on a
+locked codex hung forever on "Processing…" with no visible unlock dialog.**
+
+- **Root cause**: a ZBOM action modal (`codex-ouronet`'s `ZbomModalFrame`,
+  z-index 10050) calls `ensureCodexUnlocked()` / `requestPassword()` from
+  INSIDE itself when the codex is locked, opening `CodexPasswordPrompt` — a
+  `CodexModalShell` at the shared default z-index of 9999. Opened from
+  inside an already-open, higher-z-index ZBOM modal, the prompt rendered
+  INVISIBLY BEHIND it: the promise the caller was awaiting could never
+  resolve because the user could never see or reach the password input.
+- **Fix**: `CodexPasswordPrompt` now passes `zIndex={2147483647}` — the
+  same "always topmost" sentinel already used elsewhere in this codebase for
+  "must win the stack over literally everything" popups — so the global
+  password prompt can never again render invisibly behind whatever modal
+  triggered it, regardless of that modal's own z-index.
+- New regression tests (`ui-codex-password-prompt-zindex.test.tsx`, and a
+  new describe block in `ui-codex-modal-shell-mobile.test.tsx`) lock in both
+  the default (9999, unchanged) and the override behavior.
+
 ## 0.6.0 — 2026-09-24
 
 **MINOR — new shared mobile-UI primitives underpinning Pantheonic-mobile

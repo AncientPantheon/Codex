@@ -93,6 +93,16 @@ export interface CodexModalShellProps {
    * exactly as before, standalone or combined with this prop.
    */
   fillBody?: boolean;
+  /**
+   * Stacking-order override. Defaults to 9999 — every EXISTING caller is
+   * byte-identical either way. Mirrors `codex-ui`'s own copy of this
+   * component (see that file's doc comment for the bug this exists to
+   * fix — a `CodexModalShell`-based popup, e.g. the global password
+   * prompt, opened FROM INSIDE an already-open `ZbomModalFrame`
+   * (z-index 10050) must be able to render ABOVE it, not invisibly behind
+   * it).
+   */
+  zIndex?: number;
 }
 
 export function CodexModalShell({
@@ -108,6 +118,7 @@ export function CodexModalShell({
   bodySnap,
   topBar,
   fillBody,
+  zIndex = 9999,
 }: CodexModalShellProps) {
   const isMobile = useIsMobile();
   // Mobile WITH a footer AND/OR a topBar AND/OR `fillBody` gets the
@@ -124,7 +135,7 @@ export function CodexModalShell({
       style={{
         position: isMobile ? "absolute" : "fixed",
         inset: 0,
-        zIndex: 9999,
+        zIndex,
         display: "flex",
         alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",

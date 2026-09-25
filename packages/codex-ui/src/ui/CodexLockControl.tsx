@@ -19,12 +19,21 @@ import { useCodexAuth } from "../hooks/useCodexAuth.js";
 import { useCodexStore } from "../provider/index.js";
 import { CodexModalShell, PasswordField, ModalExecuteRow } from "./internal/CodexModalShell.js";
 
-/** The styled global password prompt. Mount once inside the provider. */
+/** The styled global password prompt. Mount once inside the provider.
+ *
+ *  `zIndex={2147483647}` (the same "always topmost, no matter what" sentinel
+ *  `OuronetAccountsTab.tsx`'s own `StoicTagPillar` hover card already uses):
+ *  a signed action on a locked codex calls `ensureCodexUnlocked()` /
+ *  `requestPassword()` from INSIDE whatever modal is already open (a ZBOM
+ *  action card, an account-detail popup, …) — this prompt must always win
+ *  the stack over ALL of them, or it renders invisibly behind the caller and
+ *  its promise can never resolve. See `CodexModalShell`'s own `zIndex` prop
+ *  doc comment for the bug this fixes. */
 export function CodexPasswordPrompt() {
   return (
     <PasswordModal
       render={(a) => (
-        <CodexModalShell title="Unlock Codex" subtitle="Enter your codex password to decrypt secrets" accent="#22c55e" onClose={a.onCancel} maxWidth={420}>
+        <CodexModalShell title="Unlock Codex" subtitle="Enter your codex password to decrypt secrets" accent="#22c55e" onClose={a.onCancel} maxWidth={420} zIndex={2147483647}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#888", marginBottom: 6 }}>
             Codex password
           </label>

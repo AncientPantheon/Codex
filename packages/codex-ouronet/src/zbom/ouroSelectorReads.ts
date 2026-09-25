@@ -1,6 +1,16 @@
 /**
- * ouroSelectorReads — LOCAL Ouronet account/StoicTag/StoaAccount selector
- * reads, pointed at the LIVE `O-UI-SEVEN` module.
+ * ouroSelectorReads — LOCAL overrides for `@ouronet/ouronet-core` read
+ * functions confirmed broken at that package's latest published version
+ * (4.6.0), each byte-for-byte the same implementation with only the Pact
+ * call's module/function name corrected. Two unrelated bug classes live
+ * here (see each function's own doc comment for which): the DPL-UR archival
+ * migration (`*Live` selector functions, → `O-UI-SEVEN`), and a separate,
+ * never-fixed rename in `getRegisterStoicTagInfo` (→
+ * `getRegisterStoicTagInfoLive`). Delete each function here (re-pointing
+ * its one caller back to `@ouronet/ouronet-core`) independently, the day
+ * that package fixes the corresponding bug.
+ *
+ * Original DPL-UR module doc comment follows:
  *
  * DPL-UR chain-symbol audit (2026-09-25, follow-up handoff): `ouronet-ns.
  * DPL-UR` went into archive mode (`PureV2/14`) — its 57-function read layer
@@ -111,4 +121,153 @@ export async function getStoaAccountSelectorDataLive(
   const response = await pactRead(pactCode, { tier: "T5" });
   if (!response?.result || response.result.status === "failure") return [];
   return (response.result.data as StoaAccountSelectorData[]) ?? [];
+}
+
+// ── RegisterStoicTag INFO — a DIFFERENT bug class, found while testing every
+//    Ouronet execute flow's wiring (2026-09-25): NOT a DPL-UR archival, an
+//    unfixed rename in @ouronet/ouronet-core's own `getRegisterStoicTagInfo`
+//    (still `CODEX.CODEX|INFO_RegisterStoicTag` instead of the correct
+//    `CODEX.INFO_CODEX|RegisterStoicTag`, AND `DALOS.UR_AccountKadena`
+//    instead of `DALOS.UR_AccountStoa` — both confirmed at that package's
+//    latest published version, 4.6.0). Consequence was worse than a wasted
+//    read: `RegisterStoicTagModal`'s `blockerReason` gates on `info !==
+//    null`, and since the external read always fails, "Register StoicTag"
+//    was PERMANENTLY DISABLED — the same failure shape the chain-symbol
+//    audit found for `LinkDualApiKeyModal`. Same "interim; upstream to
+//    ouronet-core" pattern as every other function in this file. ──────────
+
+/** `{ info, receivers }` — the INFO object + its resolved k:/c: split
+ *  targets. Byte-for-byte the same shape as `@ouronet/ouronet-core`'s
+ *  `RegisterStoicTagFullInfo`. */
+export interface RegisterStoicTagFullInfoLive {
+  info: any | null;
+  receivers: string[];
+}
+
+/** Full INFO for registering a StoicTag — reads the CORRECT
+ *  `CODEX.INFO_CODEX|RegisterStoicTag` AND resolves the STOA-split target
+ *  Ouronet accounts (`kadena.kadena-targets`) to their actual k:/c: payment
+ *  addresses via the CORRECT `DALOS.UR_AccountStoa`, in one `let*` read.
+ *  Drop-in replacement for `@ouronet/ouronet-core`'s `getRegisterStoicTagInfo`
+ *  — same params, same return shape, same "missing arg ⇒ null" behavior. */
+export async function getRegisterStoicTagInfoLive(
+  patron: string,
+  tagName: string,
+  account: string,
+): Promise<RegisterStoicTagFullInfoLive | null> {
+  if (!patron || !tagName || !account) return null;
+  try {
+    const pactCode =
+      `(let*` +
+      `  ((info (${KADENA_NAMESPACE}.CODEX.INFO_CODEX|RegisterStoicTag "${patron}" "${tagName}" "${account}"))` +
+      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
+      `  { "info": info, "receivers": receivers })`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result && response.result.status !== "failure") {
+      const data = response.result.data as { info?: unknown; receivers?: unknown };
+      return { info: data?.info ?? null, receivers: (data?.receivers as string[]) ?? [] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Activate Standard/Smart Account INFO — the SAME bug class as
+//    RegisterStoicTag above: @ouronet/ouronet-core's own
+//    `getDeployStandardAccountInfo(Only)` / `getDeploySmartAccountInfo(Only)`
+//    (`interactions/activateFunctions.ts`) still build
+//    `INFO-ZERO.DALOS-INFO|URC_DeployStandardAccount` /
+//    `URC_DeploySmartAccount` (retired — `INFO-ZERO` now defines only
+//    `GOV|Demiurgoi`) AND `DALOS.UR_AccountKadena` (retired) internally,
+//    confirmed at that package's latest published version (4.6.0). Unlike
+//    RegisterStoicTag this does NOT permanently disable "Activate" — both
+//    `ActivateStandardAccountModal` / `ActivateSmartAccountModal` derive
+//    `canExecute` from FORM STATE (typed keys/addresses), not from this
+//    read — but it DOES mean the shown STOA cost silently reads "free"/`0`
+//    instead of the real activation price. Same "interim; upstream to
+//    ouronet-core" pattern; same drop-in param/return shapes. ─────────────
+
+/** `{ info, receivers }` for account activation — byte-for-byte the same
+ *  shape `getDeployStandardAccountInfo` / `getDeploySmartAccountInfo`
+ *  already return. */
+export interface DeployAccountFullInfoLive {
+  info: any | null;
+  receivers: string[];
+}
+
+/** Full INFO for Activate Standard — reads the CORRECT
+ *  `INFO-ONE.INFO_DALOS|DeployStandardAccount` and resolves receivers via
+ *  the CORRECT `DALOS.UR_AccountStoa`. Drop-in replacement for
+ *  `getDeployStandardAccountInfo`. */
+export async function getDeployStandardAccountInfoLive(
+  account: string,
+): Promise<DeployAccountFullInfoLive | null> {
+  try {
+    const pactCode =
+      `(let*` +
+      `  ((info (${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|DeployStandardAccount "${account}"))` +
+      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
+      `  { "info": info, "receivers": receivers })`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") {
+      const data = response.result.data as { info?: unknown; receivers?: unknown };
+      return { info: data?.info ?? null, receivers: (data?.receivers as string[]) ?? [] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** INFO-only read (no receiver resolution) for Activate Standard — the
+ *  `FunctionInfoZone` fetcher. Drop-in replacement for
+ *  `getDeployStandardAccountInfoOnly`. */
+export async function getDeployStandardAccountInfoOnlyLive(account: string): Promise<any | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|DeployStandardAccount "${account}")`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") return response.result.data ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Full INFO for Activate Smart — reads the CORRECT
+ *  `INFO-ONE.INFO_DALOS|DeploySmartAccount` and resolves receivers via the
+ *  CORRECT `DALOS.UR_AccountStoa`. Drop-in replacement for
+ *  `getDeploySmartAccountInfo`. */
+export async function getDeploySmartAccountInfoLive(
+  account: string,
+): Promise<DeployAccountFullInfoLive | null> {
+  try {
+    const pactCode =
+      `(let*` +
+      `  ((info (${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|DeploySmartAccount "${account}"))` +
+      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
+      `  { "info": info, "receivers": receivers })`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") {
+      const data = response.result.data as { info?: unknown; receivers?: unknown };
+      return { info: data?.info ?? null, receivers: (data?.receivers as string[]) ?? [] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** INFO-only read (no receiver resolution) for Activate Smart — the
+ *  `FunctionInfoZone` fetcher. Drop-in replacement for
+ *  `getDeploySmartAccountInfoOnly`. */
+export async function getDeploySmartAccountInfoOnlyLive(account: string): Promise<any | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|DeploySmartAccount "${account}")`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") return response.result.data ?? null;
+    return null;
+  } catch {
+    return null;
+  }
 }
