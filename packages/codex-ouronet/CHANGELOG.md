@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.12.2 — 2026-09-25
+
+**PATCH — corrects 0.12.1's own characterization of the seven `DPL-UR.URC_00*`
+reads: DPL-UR is archived and these do NOT resolve on mainnet at all (not
+merely "fragile behind a host shim," as 0.12.1 described them). Owner
+correction: "all those reads in DPL-UR dont exist anymore, you have to pull
+the reads from the new module architecture." Documentation/metadata-only —
+no runtime behavior changes.**
+
+- **4 of 7 have a confirmed `O-UI-SEVEN` replacement**, now reflected in
+  `readRegistry.ts`'s `canonical` strings (the Settings → Read Functions
+  page) and every doc comment naming them: `URC_0027_AccountSelectorMapper`
+  → `O-UI-SEVEN.URC_01|Accounts`, `URC_0027b_StoicTagSelectorMapper` →
+  `O-UI-SEVEN.URC_03|StoicTags`, `URC_0027c_StoicTagSelectorSingle` →
+  `O-UI-SEVEN.URC_04|StoicTag`, `URC_0028_StoaAccountSelectorMapper` →
+  `O-UI-SEVEN.URC_05|StoaAccounts`. **This does NOT fix the live read** —
+  all four are invoked through EXTERNAL `@ouronet/ouronet-core` helpers
+  (`getAccountSelectorData`, `getStoicTagSelectorData`, `getStoicTagInfo`,
+  `getStoaAccountSelectorData`), confirmed still on the OLD `DPL-UR.*` names
+  internally as of its latest published version (4.6.0, checked against
+  npm 2026-09-25) — the real fix needs an O-UI-SEVEN-compatible
+  `@ouronet/ouronet-core` release this package can pin to.
+- **3 of 7 have NO confirmed replacement** (`URC_0031`, batch Pythia
+  registration; `URC_0033_DualApiKeyMapper`, batch dual-link rows;
+  `URC_0034_PythiaPrices`, deploy/rename pricing — all local to this
+  package, in `zbom/pythia/deployApiKey.ts`, unlike the 4 above). Flagged
+  CONFIRMED BROKEN in code comments rather than guess-renamed:
+  `O-UI-SEVEN`'s own name implies seven functions, and only 4 slots
+  (`URC_01`/`URC_03`/`URC_04`/`URC_05`) are accounted for — whichever of the
+  remaining ones (e.g. `URC_02`/`URC_06`/`URC_07`) might carry this data is
+  genuinely unknown without independent chain verification. If you have the
+  real names, they're a straightforward drop-in at the three call sites
+  named above.
+
 ## 0.12.1 — 2026-09-25
 
 **PATCH — critical on-chain call-site fixes: several ZBOM reads/writes were

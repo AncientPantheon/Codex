@@ -2,6 +2,22 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.12.2 — 2026-09-25
+
+**PATCH — corrects 0.12.1's own characterization of the seven `DPL-UR.URC_00*`
+reads in `codex-ouronet`: DPL-UR is archived and these do NOT resolve on
+mainnet at all. Documentation/metadata-only — no runtime behavior changes.
+`codex`-only release (`arweave-core` unchanged).**
+
+- 4 of 7 reads have a confirmed `O-UI-SEVEN` replacement, now reflected in
+  this package's read registry and doc comments — but the live read stays
+  broken until the external `@ouronet/ouronet-core` dependency (confirmed
+  still unpatched at its latest published version, 4.6.0) ships a compatible
+  release.
+- 3 of 7 (Pythia registration, dual-link rows, pricing) have no confirmed
+  replacement and are flagged CONFIRMED BROKEN rather than guess-renamed —
+  see `@ancientpantheon/codex-ouronet`'s own CHANGELOG for exactly which.
+
 ## 0.12.1 — 2026-09-25
 
 **PATCH — critical on-chain call-site fixes in `codex-ouronet`. Several ZBOM

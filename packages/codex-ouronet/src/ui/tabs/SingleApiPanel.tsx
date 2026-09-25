@@ -5,6 +5,10 @@
  * (Π., right) — each with its own search + pagination. Each half shows its
  * on-chain API-key status (not deployed / UNLINKED / LINKED) from the shared
  * `DPL-UR.URC_0031` batch read (`ApiKeyRow.counterpart === "BAR"` ⇒ unlinked).
+ * CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — DPL-UR is
+ * archived and this read no longer resolves on mainnet; no O-UI-SEVEN
+ * replacement has been confirmed for it (see `deployApiKey.ts`'s own doc
+ * comment on `getApiKeySelectorData`).
  *
  * The user picks ONE unlinked Standard + ONE unlinked Smart (click a selected
  * half again to deselect); a selection bar then surfaces the pending composite

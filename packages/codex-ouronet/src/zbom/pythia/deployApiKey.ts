@@ -127,7 +127,17 @@ export async function getApiKeyRow(apolloAccount: string): Promise<ApiKeyRow | n
  *  entry per input, IN ORDER (index-aligned with `apolloAccounts`). ONE chain
  *  read for all Apollo accounts (mirrors `getAccountSelectorData`). Entries for
  *  unregistered Apollos come back flagged (not null); the caller decides
- *  registered-ness (a real row carries a non-empty `owner-account`). */
+ *  registered-ness (a real row carries a non-empty `owner-account`).
+ *
+ *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25): DPL-UR is
+ *  archived and this call fails on mainnet. Unlike `URC_0027/0027b/0027c/
+ *  0028` (confirmed O-UI-SEVEN replacements — see `readRegistry.ts`), the
+ *  audit found NO replacement for `URC_0031` — "O-UI-SEVEN.URC_01|Accounts"
+ *  through `URC_05|StoaAccounts` account for only 4 of the module's
+ *  (implied, by its own "SEVEN" name) 7 slots; whichever of the remaining
+ *  ones (e.g. `URC_02`/`URC_06`/`URC_07`) carries the registration data is
+ *  UNCONFIRMED. Do not guess a name in here without independent chain
+ *  verification — that is exactly the class of bug this audit found. */
 export async function getApiKeySelectorData(
   apolloAccounts: string[],
 ): Promise<Array<ApiKeyRow | null>> {
@@ -223,7 +233,11 @@ export interface DualLinkRow {
 /** BATCH dual-link read — `ouronet-ns.DPL-UR.URC_0033_DualApiKeyMapper [dualKey…]`
  *  — maps `PYTHIA.UR_DualLinkRowOrNull` over each `standard|smart` composite,
  *  returning one entry per input IN ORDER (index-aligned; `null` where the
- *  composite has no dual-link row). Mirrors `getApiKeySelectorData`. */
+ *  composite has no dual-link row). Mirrors `getApiKeySelectorData`.
+ *
+ *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — see
+ *  `getApiKeySelectorData`'s own doc comment above; same situation, no
+ *  confirmed O-UI-SEVEN replacement for this one either. */
 export async function getDualApiKeySelectorData(
   dualKeys: string[],
 ): Promise<Array<DualLinkRow | null>> {
@@ -251,7 +265,11 @@ export interface PythiaPrices {
 }
 
 /** Read `ouronet-ns.DPL-UR.URC_0034_PythiaPrices` — the deploy/rename STOA prices
- *  for Apollo-half deploy + dual-link consumer-lane rename. */
+ *  for Apollo-half deploy + dual-link consumer-lane rename.
+ *
+ *  CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — see
+ *  `getApiKeySelectorData`'s own doc comment above; same situation, no
+ *  confirmed O-UI-SEVEN replacement for this one either. */
 export async function getPythiaPrices(): Promise<PythiaPrices | null> {
   try {
     const pactCode = `(${KADENA_NAMESPACE}.DPL-UR.URC_0034_PythiaPrices)`;

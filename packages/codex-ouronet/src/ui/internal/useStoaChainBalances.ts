@@ -6,9 +6,13 @@
  *   A. `coin.get-balance` — ONE read per chain (STOA_CHAINS, 0–9), each batching
  *      a `map`/`try` over every address. Drives the per-chain grid + the row
  *      total. A non-existent account on a chain yields {balance:0, exists:false}.
- *   B. `ouronet-ns.DPL-UR.URC_0028_StoaAccountSelectorMapper` (getStoaAccountSelectorData)
- *      — one batched call over the codex addresses; its `balance` feeds the
- *      single "Stoa Balance" summary line. Optional / best-effort.
+ *   B. `ouronet-ns.O-UI-SEVEN.URC_05|StoaAccounts` (getStoaAccountSelectorData) —
+ *      one batched call over the codex addresses; its `balance` feeds the
+ *      single "Stoa Balance" summary line. Optional / best-effort. (DPL-UR
+ *      chain-symbol audit, 2026-09-25: renamed from the archived
+ *      `DPL-UR.URC_0028_StoaAccountSelectorMapper` — `getStoaAccountSelectorData`
+ *      is external, `@ouronet/ouronet-core`, and still calls the old name
+ *      internally as of its latest published version, 4.6.0.)
  *
  * Mirrors the `useAccountChainData` hook shape (byAddress / loading / error /
  * refresh). The package owns no reader — reads only work once the consumer has

@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.12.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.12.2` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.12.2** — Corrects v0.12.1's own characterization of the seven `DPL-UR.URC_00*` reads in `codex-ouronet`: DPL-UR is archived and these do NOT resolve on mainnet at all, not merely "fragile behind a host shim." 4 of 7 have a confirmed `O-UI-SEVEN` replacement, now reflected in the read registry and doc comments (though the live read stays broken until the external `@ouronet/ouronet-core` dependency, confirmed unpatched at its latest published version 4.6.0, ships a compatible release); 3 of 7 have no confirmed replacement and are flagged confirmed-broken rather than guess-renamed. Documentation/metadata-only — no runtime behavior changes. `codex`-only release (`arweave-core` unchanged).
 
 **v0.12.1** — Critical on-chain call-site fixes in `codex-ouronet`, found via an external chain-symbol audit against mainnet. Several ZBOM cost-preview reads had their `INFO_` name segments swapped (`MODULE|INFO_Action` sent, chain wants `INFO_MODULE|Action`); several others referenced retired Kadena-named/`INFO-ZERO`-hosted functions that have since moved to their Stoa-named/`INFO-ONE` equivalents; three write calls (Revoke/Rename/Link Dual API Key) were one argument short of their declared arity and failed closed instead of executing at all — fixed with a best-justified `executor` argument that is **not independently chain-verified** (see `codex-ouronet`'s own CHANGELOG before shipping a mainnet transaction through these three flows); two cost-preview reads that couldn't be verified to exist under any name were removed rather than guess-renamed, which also fixed an independent bug where the Link Dual API Key button could never become clickable at all. No public API shape changes. `codex`-only release (`arweave-core` unchanged).
 
@@ -69,7 +71,7 @@ Version `0.12.1` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.3.0` |
 | `@ancientpantheon/codex-ui` | `0.6.0` |
-| `@ancientpantheon/codex-ouronet` | `0.12.1` |
+| `@ancientpantheon/codex-ouronet` | `0.12.2` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

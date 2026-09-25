@@ -6,12 +6,20 @@
  * stored guard). Activation status, the on-chain sovereign/governor, the
  * payment key + its guard + balance, the on-chain public key, and the
  * StoicTag are all CHAIN STATE — they're read from the immutable Pact
- * function `ouronet-ns.DPL-UR.URC_0027_AccountSelectorMapper` via
- * `getAccountSelectorData` (ouronet-core), which routes through the
- * `pactRead` seam the consumer configures at boot (OuronetUI wires its
+ * function via `getAccountSelectorData` (ouronet-core), which routes through
+ * the `pactRead` seam the consumer configures at boot (OuronetUI wires its
  * cache-aware reader; a standalone consumer wires its own). The package
  * therefore REFERENCES these on-chain functions and DEPENDS on them — it
  * does not (and cannot) embed them; they live immutably on StoaChain.
+ *
+ * DPL-UR chain-symbol audit (2026-09-25): the underlying function moved to
+ * `ouronet-ns.O-UI-SEVEN.URC_01|Accounts` — DPL-UR (`URC_0027_AccountSelectorMapper`)
+ * went into archive mode and no longer resolves on mainnet at all.
+ * `getAccountSelectorData` is EXTERNAL (`@ouronet/ouronet-core`, confirmed
+ * latest published version 4.6.0 as of this audit) and still constructs the
+ * OLD `DPL-UR.*` call internally — this package cannot fix that from here;
+ * it needs an O-UI-SEVEN-compatible `@ouronet/ouronet-core` release to pin
+ * to. `CODEX_CHAIN_READ_FUNCTIONS` below already names the corrected target.
  *
  * APOLLO (₱./Π.) observational accounts are excluded from the read: the
  * selector mapper only recognises DALOS Genesis (Ѻ./Σ.) accounts, and one
@@ -32,10 +40,10 @@ const isDalos = (addr: string) => DALOS_PREFIXES.some((p) => addr.startsWith(p))
 /** The on-chain read functions this layer references (for the read-deps drawer). */
 export const CODEX_CHAIN_READ_FUNCTIONS = [
   {
-    name: "ouronet-ns.DPL-UR.URC_0027_AccountSelectorMapper",
+    name: "ouronet-ns.O-UI-SEVEN.URC_01|Accounts",
     purpose:
       "Live account state for Ouronet accounts — activation, account guard, smart/standard, payment key + guard + balance, on-chain public key, sovereign, governor, and StoicTag.",
-    via: "getAccountSelectorData (@ouronet/ouronet-core)",
+    via: "getAccountSelectorData (@ouronet/ouronet-core — NOT YET updated to O-UI-SEVEN as of v4.6.0, the latest published version; still calls the archived DPL-UR.URC_0027_AccountSelectorMapper internally)",
   },
 ] as const;
 

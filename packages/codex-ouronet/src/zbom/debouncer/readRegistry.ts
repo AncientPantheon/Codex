@@ -50,9 +50,20 @@ export interface CodexReadFn {
 
 export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   // ── Account / state selectors (T5) ──────────────────────────────────────────
+  // DPL-UR chain-symbol audit (2026-09-25): DPL-UR went into archive mode
+  // (PureV2/14) — its reads no longer resolve on mainnet AT ALL (not merely
+  // fragile). Four of the seven DPL-UR reads this package references have a
+  // confirmed replacement on the new `O-UI-SEVEN` module; the `canonical`
+  // strings below now name those replacements. IMPORTANT: the `helper`
+  // functions are all EXTERNAL (`@ouronet/ouronet-core`, confirmed latest
+  // published version 4.6.0 as of this audit) — they still construct the OLD
+  // `DPL-UR.*` Pact call internally, so updating `canonical` here corrects
+  // this package's OWN documentation/Settings-page display but does NOT by
+  // itself fix the live read; that requires `@ouronet/ouronet-core` to ship
+  // an O-UI-SEVEN-compatible release this package can pin to.
   {
     id: "URC_0027",
-    canonical: "ouronet-ns.DPL-UR.URC_0027_AccountSelectorMapper",
+    canonical: "ouronet-ns.O-UI-SEVEN.URC_01|Accounts",
     helper: "getAccountSelectorData",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T5",
@@ -62,7 +73,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "URC_0028",
-    canonical: "ouronet-ns.DPL-UR.URC_0028_StoaAccountSelectorMapper",
+    canonical: "ouronet-ns.O-UI-SEVEN.URC_05|StoaAccounts",
     helper: "getStoaAccountSelectorData",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T5",
@@ -71,7 +82,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "URC_0027b",
-    canonical: "ouronet-ns.DPL-UR.URC_0027b_StoicTagSelectorMapper",
+    canonical: "ouronet-ns.O-UI-SEVEN.URC_03|StoicTags",
     helper: "getStoicTagSelectorData",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T5",
@@ -81,7 +92,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "URC_0027c",
-    canonical: "ouronet-ns.DPL-UR.URC_0027c_StoicTagSelectorSingle",
+    canonical: "ouronet-ns.O-UI-SEVEN.URC_04|StoicTag",
     helper: "getStoicTagInfo",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T3",
@@ -91,6 +102,12 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "URC_0031",
+    // NO confirmed O-UI-SEVEN replacement as of the 2026-09-25 audit — DPL-UR
+    // is archived so this read is CONFIRMED BROKEN on mainnet, but its
+    // replacement name is unknown (the audit found replacements for
+    // URC_0027/0027b/0027c/0028 only — O-UI-SEVEN's "seven" functions leave
+    // 3 slots, e.g. URC_02/06/07, unaccounted for; do NOT guess one in without
+    // independent chain verification — see deployApiKey.ts's own doc comment).
     canonical: "ouronet-ns.DPL-UR.URC_0031",
     helper: "getApiKeySelectorData",
     subpath: "codex-ouronet/zbom/pythia/deployApiKey (interim; upstream to ouronet-core)",
