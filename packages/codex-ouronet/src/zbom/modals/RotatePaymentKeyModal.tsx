@@ -7,6 +7,26 @@
  *   2 — Function Inputs → StringEntryInput (2.10 free) for <new-payment-key:string>
  *   3 — Signing        → SigningZone
  *   4 — Actions        → Rotate Payment Key
+ *
+ * BOTH the INFO read and the EXECUTE call route through package-LOCAL
+ * replacements — not `@ouronet/ouronet-core`'s own
+ * `getRotateKadenaInfo`/`rotateKadenaPaymentKey` — found 2026-09-26
+ * auditing every Ouronet execute flow's wiring after an owner-reported
+ * failure on a sibling modal (Release StoicTag). Confirmed against mainnet
+ * (`describe-module "ouronet-ns.TS01-C1"` / `"ouronet-ns.INFO-ONE"`):
+ *   - INFO:    `INFO-ZERO.DALOS-INFO|URC_RotateKadena` is a TOMBSTONE (that
+ *     module's own on-chain doc comment: "OBSOLETE TOMBSTONE... DALOS-INFO
+ *     previews moved to INFO-ONE") → now `getRotateStoaChainInfoLive`
+ *     (`../ouroSelectorReads.js`), reading `INFO-ONE.INFO_DALOS|RotateStoa`
+ *     (same 2-arg `(patron account)` signature). `canExecute` gates on this
+ *     resolving, so Rotate Payment Key was PERMANENTLY DISABLED before this
+ *     fix — which is why the EXECUTE bug below was never hit live.
+ *   - EXECUTE: `TS01-C1.DALOS|C_RotateKadena` no longer exists — confirmed
+ *     "no such member" on mainnet (renamed `C_RotateStoa` in the 2026-09-22
+ *     "patron/executor canon" rehaul; arg order/count unchanged) → now
+ *     `rotateStoaChainPaymentKeyLive` (`../rotatePaymentKeyLive.js`), a
+ *     byte-for-byte mirror of the external function with only that one Pact
+ *     call fixed. See that file's own header for the full evidence trail.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -19,7 +39,8 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance } from "../debouncer/monitoredReads.js";
-import { getRotateKadenaInfo as getRotateStoaChainInfo, rotateKadenaPaymentKey as rotateStoaChainPaymentKey } from "@ouronet/ouronet-core/interactions/ouroRotateFunctions";
+import { getRotateStoaChainInfoLive as getRotateStoaChainInfo } from "../ouroSelectorReads.js";
+import { rotateStoaChainPaymentKeyLive as rotateStoaChainPaymentKey } from "../rotatePaymentKeyLive.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
 import { publicKeyFromPrivateKey, publicKeyFromExtendedKey } from "@stoachain/stoa-core/signing";

@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.13.2 — 2026-09-26
+
+**PATCH — the "complete rehaul of all Ouronet code" round. Owner report:
+"i clicked Release Stoic tag execution button... still not working" AFTER
+the 0.13.1 guard-resolution fix, plus the explicit instruction to re-verify
+every executed function's wiring directly against the live chain (`describe-
+module`), not against source-tree greps or prior handoffs, because
+`@ouronet/ouronet-core`'s deployed Pact contracts underwent a full
+"patron/executor canon 2.2" rehaul (2026-09-22) that source-tree audits
+could not see. Confirmed AND fixed 9 distinct broken/disabled execute paths,
+all independently verified against mainnet chain 0 via `describe-module`
+before being touched — no renamed symbol in this release was guessed.**
+
+### Root fix — the StoicTag execute crash itself
+
+- **`ReleaseStoicTagModal` / `RegisterStoicTagModal`**: `@ouronet/ouronet-core`'s
+  `buildReleaseStoicTagPactCode` (2 args) / `buildRegisterStoicTagPactCode`
+  (account-address LAST) both still emit the PRE-rehaul call shape.
+  `describe-module "ouronet-ns.TS01-C4"` confirms the deployed
+  `CODEX|C_ReleaseStoicTag` / `C_RegisterStoicTag` are now BOTH 3-arg
+  `(patron executor tag-name)` — `executor` is the same account this
+  package already had, just moved/renamed. Reproduced the owner's exact
+  error live: `(…C_ReleaseStoicTag "k:test" "testtag")` (the old 2-arg
+  shape) returns `"Program encountered an unhandled error: Evaluation did
+  not reduce to a value"` — the precise text from the report. New local
+  `stoicTagExecOps.ts` builds the correct 3-arg shape for both.
+
+### 5 more execute/INFO paths, found applying the same live-chain check everywhere else this package calls out to `@ouronet/ouronet-core`
+
+- **`getWrapperPaymentKey`** (patron payment-key lookup) called the retired
+  `DALOS.UR_AccountKadena` ("no such member" on mainnet; renamed
+  `DALOS.UR_AccountStoa`, confirmed live) — broke `RegisterStoicTagModal`,
+  `RenameDualLaneModal`, and `ActivateApolloPythiaKeyModal` simultaneously
+  (all three share this one external function). Fixed via new
+  `getWrapperPaymentKeyLive` in `ouroSelectorReads.ts`.
+- **`RotateGuardModal`**: `getRotateGuardInfo` called the tombstoned
+  `INFO-ZERO.DALOS-INFO|URC_RotateGuard` (`INFO-ZERO`'s own on-chain doc
+  comment: "OBSOLETE TOMBSTONE... moved to INFO-ONE") — `canExecute` gated
+  on this resolving, so "Rotate Guard" was PERMANENTLY DISABLED. Fixed via
+  new `getRotateGuardInfoLive` reading the confirmed `INFO-ONE.INFO_DALOS|RotateGuard`.
+- **`RotatePaymentKeyModal`**: BOTH broken. INFO (`getRotateKadenaInfo`) hit
+  the same `INFO-ZERO` tombstone — permanently disabled the Execute button,
+  which had been MASKING the EXECUTE bug underneath: `rotateKadenaPaymentKey`
+  builds `TS01-C1.DALOS|C_RotateKadena`, confirmed "no such member" — renamed
+  `C_RotateStoa` in the same rehaul (arg order/count unchanged). Fixed via
+  new `getRotateStoaChainInfoLive` + a new local `rotatePaymentKeyLive.ts`
+  (a byte-for-byte mirror of the external function's entire dirtyRead→sign→
+  submit pipeline, with only the one Pact call fixed).
+
+### Dual-link INFO reads restored — previously deleted for lack of a confirmed name, now confirmed and reconnected
+
+- **`LinkDualApiKeyModal`** and **`RevokeDualLinkModal`**: an earlier round
+  (0.12.1) had removed their INFO previews entirely after neither of two
+  guessed names resolved on chain, per this project's "never guess a
+  chain-symbol rename" rule. `describe-module "ouronet-ns.PYTHIA"` now
+  confirms the real names — `INFO_PYTHIA|Link` (3-arg, Link) and
+  `INFO_PYTHIA|RevokeLink` (2-arg, Revoke) — same args already being sent,
+  just under the wrong function name. Both previews are restored: Link's
+  (informational, no fee, not gating) and Revoke's (now shows the real IGNIS
+  fee instead of an honest "≤1 IGNIS (est.)" placeholder, and gates
+  `canExecute` on it loading, matching every sibling modal's convention).
+  Also newly CONFIRMED, not merely re-verified: the `executor` value these
+  two plus `RenameDualLaneModal` pass (the Standard half's owner) — each of
+  `PythiaV5.C_LinkDualApiKey` / `C_RevokeDualLink` / `C_UpdateDualConsumerLane`'s
+  own on-chain doc comments states `executor` is proven by
+  `UEV_ExecutorIsHalfOwner`, "a DISJUNCTION" over either half-owner — so this
+  was a correct choice all along, not a guess as previously documented.
+
+### Full re-audit result
+
+- A source-scan-plus-live-`describe-module` sweep of every `ouronet-ns.*`
+  call this package's `src/` makes now returns **zero** unresolved symbols
+  (previously 3, all now fixed above) — the first time this has been
+  independently confirmed against the ACTUAL DEPLOYED byte-code, not a
+  source-tree grep or a prior handoff's table.
+- Deliberately NOT touched: `RotateGuardModal`'s own EXECUTE call
+  (`TS01-C1.DALOS|C_RotateGuard`) and `RotateSovereignModal`/
+  `RotateGovernorModal`'s EXECUTE + INFO calls — all independently
+  re-verified against the same `describe-module` dumps and found already
+  correct (this rehaul renamed/reshaped some functions, not all of them).
+- Deliberately NOT touched: `RotateGuardModal`/`RotatePaymentKeyModal`'s own
+  `account.guard`/`patronAccount.guard` → `analyzeGuard(...)` calls (a
+  DIFFERENT, unrelated potential bug class — `analyzeGuard` degrades an
+  unresolved guard to a vacuously-"satisfied" empty guard rather than
+  crashing, and today it's unreachable in `RotatePaymentKeyModal` because
+  `canExecute` was gated closed anyway) — no concrete evidence of a live
+  failure from this specific class yet; flagged for a future pass, not
+  guessed at here.
+
+New tests: `tests/tx-gas-meta-surface.test.ts` extended with a
+`SELF_CONTAINED_TX_SITES` category for `rotatePaymentKeyLive.ts` (a
+self-contained delegate predating `CodexSigningStrategy.execute()`'s
+ctx-injection contract, exactly like the external function it replaces) —
+locks in that it still puts `gasPrice`/`creationTime` on the wire via its
+own single `stoaGasMeta(safeCreationTime())` read.
+
 ## 0.13.1 — 2026-09-25
 
 **PATCH — fixes a second, previously-masked bug in the same execute flow the

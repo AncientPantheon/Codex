@@ -11,6 +11,14 @@
  * The STOA sibling of RevokeDualLinkModal — the deploy modal's patron/payment/
  * split machinery, plus BOTH half-owner ownership guards and a new-name input.
  * HARD RULE: no seed leaves the Codex.
+ *
+ * Patron payment-key lookup routes through the package-LOCAL
+ * `getWrapperPaymentKeyLive` (`../ouroSelectorReads.js`), not
+ * `@ouronet/ouronet-core`'s own `getWrapperPaymentKey` — found 2026-09-26:
+ * that external function still calls `DALOS.UR_AccountKadena`, confirmed
+ * "no such member" on mainnet (renamed `DALOS.UR_AccountStoa`, same 1-arg
+ * signature, per the 2026-09-22 "patron/executor canon" rehaul). Left the
+ * patron's payment key unresolved forever otherwise.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -22,7 +30,8 @@ import { ManualKeyInput } from "../ui/ManualKeyInput.js";
 import { PaymentKeyInput } from "../ui/ManualKeyInput.js";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
-import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getWrapperPaymentKeyLive as getWrapperPaymentKey } from "../ouroSelectorReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import { KADENA_NAMESPACE as STOACHAIN_NAMESPACE, STOA_AUTONOMIC_OURONETGASSTATION } from "@ouronet/ouronet-core/constants";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
@@ -288,9 +297,9 @@ export default function RenameDualLaneModal({
         seedType: (raw as any).seedType, encryptedSecretKey: (raw as any).encryptedSecretKey, password: (raw as any).password,
       };
 
-      // `executor` — see `dualLinkOps.ts`'s own doc comment: value choice
-      // UNVERIFIED against the contract source (the Standard half's DALOS
-      // owner, the best-justified candidate available from this modal).
+      // `executor` — see `dualLinkOps.ts`'s own doc comment: CONFIRMED valid
+      // (the Standard half's DALOS owner — `UEV_ExecutorIsHalfOwner` accepts
+      // either half-owner as a disjunction).
       const pactCode = buildRenameDualLanePactCode({ patron: patronAccount.address, executor: standardOwner, dualLinkKey, newName: newName.trim() });
       // Signers: patron payment guard + BOTH owner guards. Payment signer carries
       // the coin.TRANSFER split caps.

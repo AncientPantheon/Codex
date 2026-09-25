@@ -10,6 +10,14 @@
  * ZBOM/CFM flow: patron (IGNIS) + BOTH half-owner ownership guards. Gas via the
  * Ouronet gas station (GAS_PAYER); no payment key / no coin.TRANSFER. HARD RULE:
  * no seed leaves the Codex.
+ *
+ * INFO read RESTORED 2026-09-26: the chain-symbol handoff (2026-09-25) had
+ * removed it entirely after both `PYTHIA.PYTHIA|INFO_UnlinkDualApiKey` and
+ * `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey` failed "no such member". The real
+ * name, `INFO_PYTHIA|RevokeLink` (same 2-arg `patron dual-link-key` shape),
+ * was confirmed 2026-09-26 via `describe-module "ouronet-ns.PYTHIA"` against
+ * mainnet — see `getRevokeDualLinkInfoOnly`'s own doc comment in
+ * `../pythia/dualLinkOps.js`.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -27,6 +35,7 @@ import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
+import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { PatronZonePattern2 } from "../cfm/PatronSpend.js";
 import { Zone2Wrapper } from "../cfm/Zone2Wrapper.js";
 import { SigningZone } from "../cfm/SigningZone.js";
@@ -36,7 +45,7 @@ import { useActiveWallet, useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { detectOriginCurve } from "../../ui/internal/originCurve.js";
-import { buildRevokeDualLinkPactCode } from "../pythia/dualLinkOps.js";
+import { buildRevokeDualLinkPactCode, getRevokeDualLinkInfoOnly } from "../pythia/dualLinkOps.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -154,16 +163,27 @@ export default function RevokeDualLinkModal({
   }, [open, patronAccount?.address]);
 
   // ── INFO fetch (debounced) — IGNIS cost. ──
-  // REMOVED (chain-symbol handoff, 2026-09-25): `PYTHIA.PYTHIA|INFO_UnlinkDualApiKey`
-  // does not resolve on mainnet, and neither does the renamed candidate
-  // `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey` — this preview was verified to have
-  // never worked (every call fails "no such member"). `info` intentionally
-  // stays `null` (its initial value) instead of calling a function confirmed
-  // not to exist; `ignisCost` below falls back to 0, matching this call's own
-  // "1 unit, or 0 when virtual gas is zero" doc'd shape. If/when a real
-  // `INFO_UnlinkDualApiKey`-equivalent is confirmed on chain, restore this
-  // effect via `getRevokeDualLinkInfoOnly` in `../pythia/dualLinkOps.js`
-  // (kept, unused, for exactly that).
+  // RESTORED 2026-09-26: the real name is `INFO_PYTHIA|RevokeLink` (2-arg
+  // `patron dual-link-key`), confirmed via `describe-module "ouronet-ns.PYTHIA"`
+  // against mainnet — see `getRevokeDualLinkInfoOnly`'s own doc comment in
+  // `../pythia/dualLinkOps.js`. Previously (chain-symbol handoff, 2026-09-25)
+  // this was left disconnected because neither of the two names tried then
+  // (`PYTHIA.PYTHIA|INFO_UnlinkDualApiKey`, `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey`)
+  // resolved — `info` stayed permanently `null` and `ignisCost` silently
+  // showed 0/free instead of the real fee.
+  useEffect(() => {
+    if (!open || !patronAccount?.address || !dualLinkKey) { setInfo(null); return; }
+    setLoadingInfo(true);
+    setInfo(null);
+    let aborted = false;
+    const t = setTimeout(() => {
+      getRevokeDualLinkInfoOnly({ patron: patronAccount.address, dualLinkKey })
+        .then((r) => { if (!aborted) setInfo(r); })
+        .catch(() => { if (!aborted) setInfo(null); })
+        .finally(() => { if (!aborted) setLoadingInfo(false); });
+    }, 450);
+    return () => { aborted = true; clearTimeout(t); };
+  }, [open, patronAccount?.address, dualLinkKey]);
 
   const ignisCost = toNum(info?.ignis?.["ignis-need"]);
   const virtualToggleActive = ignisCost > 0;
@@ -197,12 +217,10 @@ export default function RevokeDualLinkModal({
   const blockerReason = (() => {
     if (isProcessing) return null;
     if (!patronAccount) return "Pick a patron";
-    // NO "Loading function info…" gate here (removed, chain-symbol handoff
-    // follow-up, 2026-09-25): `info` is now PERMANENTLY `null` — its live
-    // read was deleted above (confirmed non-existent on chain, not
-    // guess-renamed) — so this gate PERMANENTLY disabled the Revoke button.
-    // Own bug: the read removal and this stale gate were fixed in two
-    // separate passes; this one was missed the first time.
+    // RESTORED 2026-09-26 alongside the INFO read itself (see the effect's
+    // own comment above) — matches the established sibling gate
+    // (RenameDualLaneModal's `loadingInfo || info === null`).
+    if (loadingInfo || info === null) return "Loading function info…";
     if (insufficientIgnis) return "Insufficient IGNIS";
     if (!standardOwner) return "Standard half not in this Codex — both owners must sign";
     if (!sameOwner && !smartOwner) return "Smart half not in this Codex — both owners must sign";
@@ -221,9 +239,9 @@ export default function RevokeDualLinkModal({
     const _tx = txPending("Revoke Dual API Key");
     try {
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
-      // `executor` — see `dualLinkOps.ts`'s own doc comment: value choice
-      // UNVERIFIED against the contract source (the Standard half's DALOS
-      // owner, the best-justified candidate available from this modal).
+      // `executor` — see `dualLinkOps.ts`'s own doc comment: CONFIRMED valid
+      // (the Standard half's DALOS owner — `UEV_ExecutorIsHalfOwner` accepts
+      // either half-owner as a disjunction).
       const pactCode = buildRevokeDualLinkPactCode({ patron: patronAccount.address, executor: standardOwner, dualLinkKey });
       const { requestKey } = await execute({
         build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
@@ -265,13 +283,10 @@ export default function RevokeDualLinkModal({
       </div>
       <div className="flex items-center justify-between rounded-lg border p-2.5" style={{ borderColor: "#8b1a1a30", backgroundColor: "#0a0a0a" }}>
         <span className="text-xs" style={{ color: "#888" }}>IGNIS fee</span>
-        {/* No live cost preview (its read was deleted, confirmed non-existent
-            on chain — see the removed useEffect above) — an honest "≤1
-            IGNIS" estimate per this op's own doc'd shape ("1 unit, or 0
-            when virtual gas is zero"), NOT a perpetual "…" or a
-            confidently-wrong "free". */}
-        <span className="text-xs font-bold" style={{ color: "#c0392b" }} title="No live cost preview available; the actual charge is 1 IGNIS unit, or 0 when virtual gas is zero.">
-          ≤1 IGNIS (est.)
+        {/* Live cost preview, RESTORED 2026-09-26 — see the INFO-fetch
+            effect's own comment above. */}
+        <span className="text-xs font-bold" style={{ color: insufficientIgnis ? "#c0392b" : "#888" }}>
+          {loadingInfo || info === null ? "…" : `${ignisCost} IGNIS`}
         </span>
       </div>
       {guardsLoaded && stdGuard && stdAnalysis.foreignKeys.length > 0 && !stdAnalysis.satisfied && (
@@ -312,8 +327,15 @@ export default function RevokeDualLinkModal({
           processingContent: (<><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Processing…</>),
         }}
       >
-        {/* FunctionInfoZone cost-preview REMOVED (chain-symbol handoff,
-            2026-09-25) — see the removed useEffect's comment above for why. */}
+        {/* RESTORED 2026-09-26 — see the INFO-fetch effect's own comment
+            above for the confirmed function name. */}
+        <FunctionInfoZone
+          key={(patronAccount?.address ?? "") + dualLinkKey}
+          readId="INFO_RevokeLink"
+          label="PYTHIA.INFO_PYTHIA|RevokeLink"
+          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|RevokeLink "${(patronAccount?.address ?? "").slice(0, 12)}…" "${dualLinkKey.slice(0, 12)}…")`}
+          fetcher={async () => patronAccount?.address ? await getRevokeDualLinkInfoOnly({ patron: patronAccount.address, dualLinkKey }) : null}
+        />
 
         <PatronZonePattern2
           patronMode={patronMode}

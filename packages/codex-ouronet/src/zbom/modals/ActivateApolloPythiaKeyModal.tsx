@@ -10,6 +10,14 @@
  * ZBOM/CFM flow cloned from RegisterStoicTagModal. The deploy/INFO builders live
  * locally in `../pythia/deployApiKey.js`. HARD RULE: the Apollo SEED never leaves
  * the Codex — only the public key travels.
+ *
+ * Patron payment-key lookup routes through the package-LOCAL
+ * `getWrapperPaymentKeyLive` (`../ouroSelectorReads.js`), not
+ * `@ouronet/ouronet-core`'s own `getWrapperPaymentKey` — found 2026-09-26:
+ * that external function still calls `DALOS.UR_AccountKadena`, confirmed
+ * "no such member" on mainnet (renamed `DALOS.UR_AccountStoa`, same 1-arg
+ * signature, per the 2026-09-22 "patron/executor canon" rehaul). Left the
+ * patron's payment key unresolved forever otherwise.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -22,7 +30,8 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { txPending } from "../toast/toastManager.js";
 import { KeyRound, Loader2, AlertTriangle } from "lucide-react";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
-import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getWrapperPaymentKeyLive as getWrapperPaymentKey } from "../ouroSelectorReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,

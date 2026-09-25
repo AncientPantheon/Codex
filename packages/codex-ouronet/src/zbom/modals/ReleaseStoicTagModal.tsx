@@ -8,9 +8,22 @@
  *
  * Pact functions:
  *   INFO    — (ouronet-ns.CODEX.INFO_CODEX|ReleaseStoicTag patron tag-name)
- *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag patron tag-name)
+ *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag patron executor tag-name)
  *
  * Cost: IGNIS only — 1 per glyph of the tag (surfaced by INFO).
+ *
+ * The EXECUTE call routes through the package-LOCAL
+ * `buildReleaseStoicTagPactCodeLive` (`../stoicTagExecOps.js`), not
+ * `@ouronet/ouronet-core/pact`'s own `buildReleaseStoicTagPactCode` — found
+ * 2026-09-26 chasing an owner-reported "Program encountered an unhandled
+ * error: Evaluation did not reduce to a value" on execute. Confirmed via
+ * `describe-module "ouronet-ns.TS01-C4"` against mainnet: the deployed
+ * function is now 3-arg (`patron executor tag-name`, a 2026-09-22
+ * "patron/executor canon" rehaul), but the external builder still emits the
+ * pre-rehaul 2-arg call — a straight argument-count/resolution error on
+ * every submit, reproduced verbatim against the live chain. `executor` is
+ * this modal's `account.address` — same value, new name. See
+ * `stoicTagExecOps.ts`'s own header for the full chain evidence.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,7 +40,7 @@ import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
-import { buildReleaseStoicTagPactCode } from "@ouronet/ouronet-core/pact";
+import { buildReleaseStoicTagPactCodeLive as buildReleaseStoicTagPactCode } from "../stoicTagExecOps.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount, IStoaChainSeed, IStoaChainWallet } from "../../types/entities.js";
@@ -322,7 +335,8 @@ export default function ReleaseStoicTagModal({
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
 
       const pactCode = buildReleaseStoicTagPactCode({
-        patron:  patronAccount.address,
+        patron:   patronAccount.address,
+        executor: account.address,
         tagName,
       });
 

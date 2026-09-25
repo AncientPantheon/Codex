@@ -2,6 +2,33 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.13.2 — 2026-09-26
+
+**PATCH — the "complete rehaul of all Ouronet code" round: confirmed AND
+fixed 9 distinct broken/disabled execute paths in `codex-ouronet`, each
+independently re-verified against LIVE mainnet chain state
+(`describe-module`) rather than source-tree greps or prior handoffs — the
+deployed Ouronet Pact contracts underwent a full "patron/executor canon
+2.2" rehaul (2026-09-22) that no static check could see. Triggered by an
+owner report that Release StoicTag's execute STILL failed after the 0.13.1
+guard-resolution fix. `codex-ouronet` release only (`codex-ui`/
+`arweave-core`/`codex-arweave` unchanged). See
+`@ancientpantheon/codex-ouronet`'s own CHANGELOG for the full technical
+account.**
+
+- Fixed the StoicTag execute crash itself (Release/Register both sent a
+  stale, pre-rehaul argument shape to the now-deployed contract — reproduced
+  the owner's exact error text live before fixing).
+- Fixed `RegisterStoicTagModal`/`RenameDualLaneModal`/`ActivateApolloPythiaKeyModal`'s
+  shared patron payment-key lookup (a retired chain function).
+- Fixed `RotateGuardModal` (was permanently disabled) and `RotatePaymentKeyModal`
+  (was permanently disabled, masking a second EXECUTE-level bug underneath).
+- Restored the Link / Revoke Dual API Key INFO previews, previously removed
+  for lack of a confirmed on-chain name — now confirmed and reconnected,
+  with Revoke's real IGNIS fee showing again instead of an estimate.
+- A full re-scan of every on-chain call this package's `src/` makes now
+  resolves cleanly against mainnet — zero unresolved symbols, down from 3.
+
 ## 0.13.1 — 2026-09-25
 
 **PATCH — fixes a second bug in the Release/Register StoicTag execute flow

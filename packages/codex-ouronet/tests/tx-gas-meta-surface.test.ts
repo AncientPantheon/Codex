@@ -23,7 +23,7 @@
  *
  * WHAT IS LOCKED (source-text scan, so it holds for sites a unit test can't easily
  * reach — these closures live inside heavy React modals):
- *   (a) inventory — exactly the 14 known `.setMeta(` sites exist. A NEW transaction
+ *   (a) inventory — exactly the 15 known `.setMeta(` sites exist. A NEW transaction
  *       site fails here until it is added below AND satisfies (b)-(d), so the gas
  *       contract can't be forgotten by a future modal.
  *   (b) every `.setMeta({...})` passes `gasPrice`.
@@ -35,9 +35,21 @@
  *
  * NOT LOCKED HERE: the two DELEGATING modals (zbom/modals/RotateGuardModal.tsx and
  * RotatePaymentKeyModal.tsx) build no command of their own — they call
- * `rotateGuard()` / `rotateKadenaPaymentKey()` in @ouronet/ouronet-core, which
- * applies `...stoaGasMeta(...)` itself. They legitimately have zero `.setMeta(`,
- * and the negative inventory assertion in (a) keeps them out.
+ * `rotateGuard()` (still @ouronet/ouronet-core) / `rotateStoaChainPaymentKeyLive()`
+ * (LOCAL, see below), both of which apply `...stoaGasMeta(...)` themselves. They
+ * legitimately have zero `.setMeta(`, and the negative inventory assertion in (a)
+ * keeps them out.
+ *
+ * `zbom/rotatePaymentKeyLive.ts` (added 2026-09-26, SELF_CONTAINED_TX_SITES below)
+ * is the LOCAL replacement for `@ouronet/ouronet-core`'s `rotateKadenaPaymentKey`
+ * (see that file's own header — `C_RotateKadena` no longer exists on mainnet).
+ * It is a byte-for-byte mirror of the external function's OWN self-contained
+ * dirtyRead→sign→submit pipeline, which predates and is independent of
+ * `CodexSigningStrategy.execute()`'s ctx-injection contract — exactly like the
+ * external file it replaces (never itself subject to this scan, being outside
+ * `src/`). It still satisfies (a)-(c) — inventoried, `gasPrice` +
+ * `creationTime` ARE on the wire — but is correctly exempt from (d)-(e), which
+ * assume the `build(ctx)` shape only sites going through `execute()` have.
  */
 
 import { describe, it, expect } from "vitest";
@@ -48,10 +60,12 @@ import { join, relative, resolve } from "node:path";
 // package's vitest transform does not hand these specs a file: URL.
 const SRC = resolve(__dirname, "../src");
 
-/** The 14 confirmed signed/submitted transaction-building sites. Three operations
+/** The 15 confirmed signed/submitted transaction-building sites. Three operations
  *  (RotateSovereign, RotateGuard, RotatePaymentKey) exist as TWO independent copies
  *  across `components/` and `zbom/modals/` — they share no code, so both copies are
- *  listed and both must satisfy the gas contract. */
+ *  listed and both must satisfy the gas contract. The 15th,
+ *  `zbom/rotatePaymentKeyLive.ts`, is the self-contained delegate the ZBOM
+ *  `RotatePaymentKeyModal.tsx` calls — see `SELF_CONTAINED_TX_SITES` below. */
 const EXPECTED_TX_SITES = [
   "components/RotateGuardModal.tsx",
   "components/RotatePaymentKeyModal.tsx",
@@ -67,7 +81,14 @@ const EXPECTED_TX_SITES = [
   "zbom/modals/RotateGovernorModal.tsx",
   "zbom/modals/RotateSovereignModal.tsx",
   "ui/internal/SendStoaModal.tsx",
+  "zbom/rotatePaymentKeyLive.ts",
 ].sort();
+
+/** Self-contained delegate implementations (mirror an external package's OWN
+ *  dirtyRead→sign→submit pipeline, predating `execute()`'s ctx-injection
+ *  contract) — inventoried and checked for (b)/(c), but exempt from (d)/(e)'s
+ *  ctx-shape assertions. See the module doc comment above. */
+const SELF_CONTAINED_TX_SITES = new Set(["zbom/rotatePaymentKeyLive.ts"]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -114,33 +135,69 @@ describe("transaction gas-meta surface", () => {
     expect(txSites).toEqual(EXPECTED_TX_SITES);
   });
 
-  it.each(EXPECTED_TX_SITES)("%s passes gasPrice + creationTime into setMeta", (rel) => {
-    const source = readFileSync(join(SRC, rel), "utf8");
-    const bodies = setMetaBodies(source);
-    expect(bodies.length).toBeGreaterThan(0);
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel)))(
+    "%s passes gasPrice + creationTime into setMeta",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
+      const bodies = setMetaBodies(source);
+      expect(bodies.length).toBeGreaterThan(0);
 
-    for (const body of bodies) {
-      // (b) the live Yin floor must be on the wire, not Pact's 1e-8 default.
-      expect(body, `${rel}: setMeta omits gasPrice`).toMatch(/\bgasPrice\b/);
-      // (c) creationTime must be set explicitly.
-      expect(body, `${rel}: setMeta omits creationTime`).toMatch(/\bcreationTime\b/);
-    }
-  });
+      for (const body of bodies) {
+        // (b) the live Yin floor must be on the wire, not Pact's 1e-8 default.
+        expect(body, `${rel}: setMeta omits gasPrice`).toMatch(/\bgasPrice\b/);
+        // (c) creationTime must be set explicitly.
+        expect(body, `${rel}: setMeta omits creationTime`).toMatch(/\bcreationTime\b/);
+      }
+    },
+  );
 
-  it.each(EXPECTED_TX_SITES)("%s takes gas fields from the injected ctx, not a local clock read", (rel) => {
-    const source = readFileSync(join(SRC, rel), "utf8");
+  it.each([...SELF_CONTAINED_TX_SITES])(
+    "%s (self-contained delegate) spreads stoaGasMeta(...) into setMeta",
+    (rel) => {
+      // The self-contained equivalent of (b)/(c): `...stoaGasMeta(safeCreationTime())`
+      // spread into the object literal puts both `gasPrice` and `creationTime`
+      // on the wire at runtime, but neither identifier appears LITERALLY in the
+      // setMeta body text the way a destructured-ctx site's does — asserted by
+      // this category's own dedicated clock-read test below instead.
+      const source = readFileSync(join(SRC, rel), "utf8");
+      const bodies = setMetaBodies(source);
+      expect(bodies.length).toBeGreaterThan(0);
+      for (const body of bodies) {
+        expect(body, `${rel}: setMeta does not spread stoaGasMeta(...)`)
+          .toMatch(/\.\.\.\s*stoaGasMeta\s*\(/);
+      }
+    },
+  );
 
-    // (d) re-reading the clock inside build() breaks the sim/real hash parity that
-    //     the strategy's single stoaGasMeta() read guarantees.
-    expect(source, `${rel}: must not re-read the clock — use ctx.creationTime`)
-      .not.toMatch(/\bsafeCreationTime\b/);
-    expect(source, `${rel}: must not call stoaGasMeta() locally — use ctx.gasPrice`)
-      .not.toMatch(/\bstoaGasMeta\s*\(/);
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel)))(
+    "%s takes gas fields from the injected ctx, not a local clock read",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
 
-    // (e) the build closure must actually accept the injected fields.
-    const build = /build:\s*\(\{([^}]*)\}/.exec(source);
-    expect(build, `${rel}: no build({...}) closure found`).not.toBeNull();
-    expect(build![1], `${rel}: build ctx does not destructure gasPrice`).toMatch(/\bgasPrice\b/);
-    expect(build![1], `${rel}: build ctx does not destructure creationTime`).toMatch(/\bcreationTime\b/);
-  });
+      // (d) re-reading the clock inside build() breaks the sim/real hash parity that
+      //     the strategy's single stoaGasMeta() read guarantees.
+      expect(source, `${rel}: must not re-read the clock — use ctx.creationTime`)
+        .not.toMatch(/\bsafeCreationTime\b/);
+      expect(source, `${rel}: must not call stoaGasMeta() locally — use ctx.gasPrice`)
+        .not.toMatch(/\bstoaGasMeta\s*\(/);
+
+      // (e) the build closure must actually accept the injected fields.
+      const build = /build:\s*\(\{([^}]*)\}/.exec(source);
+      expect(build, `${rel}: no build({...}) closure found`).not.toBeNull();
+      expect(build![1], `${rel}: build ctx does not destructure gasPrice`).toMatch(/\bgasPrice\b/);
+      expect(build![1], `${rel}: build ctx does not destructure creationTime`).toMatch(/\bcreationTime\b/);
+    },
+  );
+
+  it.each([...SELF_CONTAINED_TX_SITES])(
+    "%s (self-contained delegate) reads the clock itself and still puts gasPrice + creationTime on the wire",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
+      // The inverse of (d) for this category: a self-contained delegate MUST
+      // read the clock itself (it has no injected ctx to take it from) via
+      // the canonical single-read helper, not a hand-rolled substitute.
+      expect(source, `${rel}: expected a single stoaGasMeta(safeCreationTime()) read`)
+        .toMatch(/stoaGasMeta\s*\(\s*safeCreationTime\s*\(\s*\)\s*\)/);
+    },
+  );
 });

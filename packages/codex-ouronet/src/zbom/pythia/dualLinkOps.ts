@@ -14,20 +14,26 @@
  *             they never drift when the on-chain price/targets change.
  *
  *   REVOKE  (ouronet-ns.TS01-C4.PYTHIA|C_RevokeLink patron executor dual-link-key)
- *           INFO — REMOVED entirely, see RevokeDualLinkModal.tsx (neither
- *           `PYTHIA.PYTHIA|INFO_UnlinkDualApiKey` nor the renamed candidate
- *           `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey` resolves on chain).
+ *           INFO (ouronet-ns.PYTHIA.INFO_PYTHIA|RevokeLink patron dual-link-key)  — confirmed 2026-09-26, see below
  *           → IGNIS-only (1 unit, or 0 when virtual gas is zero); no STOA split.
  *
  * `executor` (chain-symbol handoff, 2026-09-25) — both EXECUTE calls above
  * were one argument short of their declared arity (`patron, executor,
- * dual-link-key[, new-name]` per StoicSyntax-Prefixes.md §2.2). Arity/type
- * tooling cannot verify WHICH account belongs in the new `executor` slot
- * (only that one is now present) — this build passes the Standard half's
- * DALOS owner (`standardOwner`, threaded in from each modal's own props),
- * the same best-justified choice `linkDualApiKey.ts` documents for `C_Link`.
- * VERIFY against the actual Pact contract source before this executes a
- * real mainnet transaction.
+ * dual-link-key[, new-name]` per StoicSyntax-Prefixes.md §2.2). This build
+ * passes the Standard half's DALOS owner (`standardOwner`, threaded in from
+ * each modal's own props), the same choice `linkDualApiKey.ts` documents for
+ * `C_Link`. CONFIRMED 2026-09-26 via `describe-module "ouronet-ns.TS01-C4"`
+ * against mainnet: `PythiaV5.C_RevokeDualLink` / `C_UpdateDualConsumerLane`'s
+ * own doc comments both say their `executor` "is bound by
+ * `UEV_ExecutorIsHalfOwner`... as a DISJUNCTION" — either half-owner is
+ * valid, so `standardOwner` is a confirmed-correct choice, not a guess.
+ *
+ * The Revoke INFO read, previously left unresolved ("REMOVED entirely" —
+ * neither `PYTHIA.PYTHIA|INFO_UnlinkDualApiKey` nor
+ * `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey` exist), is now CONFIRMED: the real
+ * name is `INFO_PYTHIA|RevokeLink`, a 2-arg `(patron dual-link-key)` read —
+ * the SAME 2 args already being sent, just under the wrong function name
+ * (found via the same `describe-module` dump, `"ouronet-ns.PYTHIA"`).
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
@@ -91,10 +97,10 @@ export async function getRenameDualLaneInfoOnly(p: RenameDualLaneParams): Promis
   }
 }
 
-/** The rename EXECUTE Pact code. `executor` — see module doc comment (value
- *  choice UNVERIFIED against the contract source); a SEPARATE param from the
- *  3-arg `RenameDualLaneParams` the (unchanged) INFO reads above use, since
- *  only the EXECUTE call's declared arity grew. */
+/** The rename EXECUTE Pact code. `executor` — see module doc comment
+ *  (CONFIRMED valid: either half-owner, per `UEV_ExecutorIsHalfOwner`); a
+ *  SEPARATE param from the 3-arg `RenameDualLaneParams` the (unchanged) INFO
+ *  reads above use, since only the EXECUTE call's declared arity grew. */
 export function buildRenameDualLanePactCode(p: RenameDualLaneParams & { executor: string }): string {
   return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_UpdateDualConsumerLane ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)} ${S(p.newName)})`;
 }
@@ -106,13 +112,13 @@ export interface RevokeDualLinkParams {
   dualLinkKey: string;
 }
 
-/** INFO for the revoke — `PYTHIA|INFO_UnlinkDualApiKey` (IGNIS cost, no STOA
+/** INFO for the revoke — `PYTHIA.INFO_PYTHIA|RevokeLink` (IGNIS cost, no STOA
  *  split). Returned for the FunctionInfoZone + the ignis-need read. */
 export async function getRevokeDualLinkInfoOnly(p: RevokeDualLinkParams): Promise<any | null> {
   const { patron, dualLinkKey } = p;
   if (!patron || !dualLinkKey) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_UnlinkDualApiKey ${S(patron)} ${S(dualLinkKey)})`;
+    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|RevokeLink ${S(patron)} ${S(dualLinkKey)})`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;
@@ -123,8 +129,8 @@ export async function getRevokeDualLinkInfoOnly(p: RevokeDualLinkParams): Promis
   }
 }
 
-/** The revoke EXECUTE Pact code. `executor` — see module doc comment (value
- *  choice UNVERIFIED against the contract source). */
+/** The revoke EXECUTE Pact code. `executor` — see module doc comment
+ *  (CONFIRMED valid: either half-owner, per `UEV_ExecutorIsHalfOwner`). */
 export function buildRevokeDualLinkPactCode(p: RevokeDualLinkParams & { executor: string }): string {
   return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_RevokeLink ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)})`;
 }

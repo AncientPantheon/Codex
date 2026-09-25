@@ -7,6 +7,21 @@
  *   2 — Function Inputs → inline (Define Keys + Use Existing Keyset + safe:bool)
  *   3 — Signing        → SigningZone (+ additionalGuards for New Guard)
  *   4 — Actions        → Rotate Guard
+ *
+ * The INFO read routes through the package-LOCAL `getRotateGuardInfoLive`
+ * (`../ouroSelectorReads.js`), not `@ouronet/ouronet-core`'s own
+ * `getRotateGuardInfo` — found 2026-09-26 auditing every Ouronet execute
+ * flow's wiring after an owner-reported failure on a sibling modal (Release
+ * StoicTag): that external function still calls the tombstoned
+ * `INFO-ZERO.DALOS-INFO|URC_RotateGuard` — `INFO-ZERO`'s own on-chain doc
+ * comment says "OBSOLETE TOMBSTONE... DALOS-INFO previews moved to
+ * INFO-ONE" — so `infoData` never resolved and, since `canExecute` gates on
+ * `infoData !== null`, "Rotate Guard" was PERMANENTLY DISABLED. Confirmed
+ * the replacement (`INFO-ONE.INFO_DALOS|RotateGuard`, same 2-arg
+ * `(patron account)` signature) via `describe-module "ouronet-ns.INFO-ONE"`
+ * against mainnet. `rotateGuard`'s own EXECUTE call (`TS01-C1.DALOS|C_RotateGuard`)
+ * was independently re-verified against `describe-module "ouronet-ns.TS01-C1"`
+ * and is UNCHANGED/correct — only the INFO read was stale.
  */
 
 import { useState, useEffect, useMemo } from "react";
@@ -19,7 +34,8 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
 import { getIgnisBalance } from "../debouncer/monitoredReads.js";
-import { getRotateGuardInfo, rotateGuard } from "@ouronet/ouronet-core/interactions/guardFunctions";
+import { rotateGuard } from "@ouronet/ouronet-core/interactions/guardFunctions";
+import { getRotateGuardInfoLive as getRotateGuardInfo } from "../ouroSelectorReads.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
 import { Shield, Loader2 } from "lucide-react";

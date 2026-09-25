@@ -10,7 +10,7 @@
  *
  * Pact functions:
  *   INFO    — (ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag patron tag-name account)
- *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag patron tag-name account)
+ *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag patron executor tag-name)
  *
  * The INFO read routes through the package-LOCAL `getRegisterStoicTagInfoLive`
  * (`../ouroSelectorReads.js`), not `@ouronet/ouronet-core`'s own
@@ -36,6 +36,21 @@
  * both the patron and account guards via `getStoaChainAccountGuard` for
  * every mode/account type, and gating `canExecute` on both being loaded and
  * non-empty before allowing signing.
+ *
+ * Third bug, found 2026-09-26: the EXECUTE call itself was ALSO stale — this
+ * flow's execute button had been permanently disabled by the first bug
+ * above (INFO never resolving) until this same audit's own fix unblocked
+ * it, which is why this was never hit live before now. `@ouronet/ouronet-core`'s
+ * `buildRegisterStoicTagPactCode` sends `(patron tag-name account-address)`,
+ * but the deployed `ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag` (per a
+ * 2026-09-22 "patron/executor canon" rehaul, confirmed via `describe-module
+ * "ouronet-ns.TS01-C4"` against mainnet) now takes `(patron executor
+ * tag-name)` — the account moved from 3rd to 2nd position. Sending the old
+ * shape puts the account address where `tag-name` belongs, which the chain
+ * then rejects as an invalid glyph string — reproduced verbatim against
+ * live chain evidence. Now routes through the package-LOCAL
+ * `buildRegisterStoicTagPactCodeLive` (`../stoicTagExecOps.js`); see that
+ * file's own header for the full evidence trail.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -47,14 +62,14 @@ import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults
 import { txPending } from "../toast/toastManager.js";
 import { Tag, Loader2, AlertTriangle, Trash2 } from "lucide-react";
 import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
-import { getWrapperPaymentKey, getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
-import { getRegisterStoicTagInfoLive } from "../ouroSelectorReads.js";
+import { getPaymentKeyBalance } from "@ouronet/ouronet-core/interactions/wrapFunctions";
+import { getWrapperPaymentKeyLive as getWrapperPaymentKey, getRegisterStoicTagInfoLive } from "../ouroSelectorReads.js";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
 import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
-import { buildRegisterStoicTagPactCode } from "@ouronet/ouronet-core/pact";
+import { buildRegisterStoicTagPactCodeLive as buildRegisterStoicTagPactCode } from "../stoicTagExecOps.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { classifyPaymentKey, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
@@ -393,9 +408,9 @@ export default function RegisterStoicTagModal({
       };
 
       const pactCode = buildRegisterStoicTagPactCode({
-        patron:         patronAccount.address,
+        patron:   patronAccount.address,
+        executor: account.address,
         tagName,
-        accountAddress: account.address,
       });
 
       // Smart accounts (Σ.) pass the AuthPathZone-resolved branch keyset;

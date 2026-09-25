@@ -34,7 +34,7 @@ Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired t
 
 ## Version history
 
-**v0.13.1** — Fixes a second bug in the Release/Register StoicTag execute flow that v0.13.0's z-index fix had been masking: an owner-reported "unhandled error" once the codex-unlock step could actually be reached. Root cause was an unresolved keyset-ref guard object (both the patron's and the acted-upon account's) passed directly into the signing step, which assumes every guard is already a resolved `{pred, keys}` keyset. Both modals now resolve both guards via `getStoaChainAccountGuard` before signing, mirroring the pattern already proven correct elsewhere in the package. `codex-ouronet` release only (`codex-ui`/`arweave-core`/`codex-arweave` unchanged).
+**v0.13.2** — The "complete rehaul of all Ouronet code" round: confirmed and fixed 9 distinct broken/disabled execute paths in `codex-ouronet`, each independently re-verified against LIVE mainnet chain state (`describe-module`) rather than source-tree greps — the deployed Ouronet Pact contracts underwent a full "patron/executor canon 2.2" rehaul (2026-09-22) invisible to static checks. Triggered by Release StoicTag's execute STILL failing after v0.13.1. Fixes the StoicTag execute crash itself (stale pre-rehaul argument shape), the shared patron payment-key lookup used by three modals (a retired chain function), Rotate Guard and Rotate Payment Key (both permanently disabled; Rotate Payment Key's disabled state was masking a second EXECUTE-level bug underneath), and restores the Link/Revoke Dual API Key INFO previews removed in an earlier round for lack of a confirmed name — now confirmed and reconnected. A full re-scan of every on-chain call this package's `codex-ouronet` makes now resolves cleanly against mainnet. `codex-ouronet` release only (`codex-ui`/`arweave-core`/`codex-arweave` unchanged).
 
 **v0.13.0** — A full wiring audit of every Ouronet execute flow, prompted by a real reported failure: a signed action on a locked codex hung forever on "Processing…" with no visible way to unlock. Fixed the root cause (a global password-prompt modal could render invisibly behind an already-open ZBOM action modal — affecting all 12 signed-action flows at once) plus 4 more modal-specific bugs (2 permanently-disabled execute buttons, 2 silently-wrong cost estimates), and added the first-ever direct unit test coverage for every Ouronet Pact-code builder. `codex-ouronet` + `codex-ui` release (`arweave-core`/`codex-arweave` unchanged).
 
@@ -79,7 +79,7 @@ Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.3.0` |
 | `@ancientpantheon/codex-ui` | `0.7.0` |
-| `@ancientpantheon/codex-ouronet` | `0.13.1` |
+| `@ancientpantheon/codex-ouronet` | `0.13.2` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

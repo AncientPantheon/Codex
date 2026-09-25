@@ -11,20 +11,22 @@
  * package previously sent only 3, one short of the declared arity; `executor`
  * is the NEW first arg, args 2–3 auto-filled from the two picked Apollo
  * halves, arg 4 is the user-typed consumer lane):
- *   EXECUTE  (ouronet-ns.TS01-C4.PYTHIA|C_Link            executor standard-apollo smart-apollo consumer-lane)
- *   INFO     (ouronet-ns.PYTHIA.INFO_PYTHIA|LinkDualApiKey executor standard-apollo smart-apollo consumer-lane)  — UNVERIFIED, see linkDualApiKeyModal.tsx
+ *   EXECUTE  (ouronet-ns.TS01-C4.PYTHIA|C_Link  executor standard-apollo smart-apollo consumer-lane)
+ *   INFO     (ouronet-ns.PYTHIA.INFO_PYTHIA|Link                 standard-apollo smart-apollo consumer-lane)
  *
- * `executor` VALUE — NOT independently chain-verified (arity/typecheck can't
- * catch a wrong-but-same-typed account swapped in): the handoff that flagged
- * this bug explicitly could not resolve `C_Link`'s exact on-chain signature
- * beyond its declared param COUNT + first-param NAME ("executor, not
- * patron — the one deliberately free operation in the system"). This build
- * passes the Standard half's DALOS owner (`standardOwner`, already a prop on
- * `LinkDualApiKeyModal` and consistently treated as the "first"/canonical
- * half elsewhere in this file family — e.g. `DUAL_LINK_BAR`'s own "Standard
- * comes FIRST" convention in `deployApiKey.ts`) as the best-justified
- * candidate. VERIFY against the actual Pact contract source before this
- * executes a real mainnet transaction.
+ * Both CONFIRMED 2026-09-26 via `describe-module "ouronet-ns.TS01-C4"` /
+ * `"ouronet-ns.PYTHIA"` against mainnet (full module source, chain 0):
+ *   - EXECUTE's `executor` value: `PythiaV5.C_LinkDualApiKey`'s own doc
+ *     comment says it "is bound by UEV_ExecutorIsHalfOwner inside
+ *     PYTHIA|C>LINK-DUAL" — a DISJUNCTION over EITHER half-owner, so the
+ *     Standard half's DALOS owner (`standardOwner`, this build's choice) is
+ *     a confirmed-valid executor, not a guess.
+ *   - INFO's real name is `INFO_PYTHIA|Link`, a 3-arg
+ *     `(standard-apollo smart-apollo consumer-lane)` read — NEITHER of the
+ *     two previously-tried names (`INFO_PYTHIA|LinkDualApiKey`,
+ *     `PYTHIA|INFO_LinkDualApiKey`) exist on chain ("no such member" on
+ *     both, confirmed live); this was the SAME 3 args already being sent,
+ *     just under the wrong function name.
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
@@ -38,8 +40,8 @@ function pactStr(s: string): string {
 }
 
 export interface LinkDualApiKeyParams {
-  /** The account whose ownership authorizes this call (see module doc — value
-   *  choice UNVERIFIED against the contract source). */
+  /** The account whose ownership authorizes this call — either half-owner is
+   *  valid (`UEV_ExecutorIsHalfOwner` disjunction, see module doc). */
   executor: string;
   /** The Standard ₱. half (auto-filled from the picked Standard half). */
   standardApollo: string;
@@ -55,14 +57,14 @@ export function buildLinkDualApiKeyPactCode(p: LinkDualApiKeyParams): string {
   return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_Link ${pactStr(p.executor)} ${pactStr(p.standardApollo)} ${pactStr(p.smartApollo)} ${pactStr(p.consumerLane)})`;
 }
 
-/** INFO read — `PYTHIA.PYTHIA|INFO_LinkDualApiKey` → `object{OuronetInfoV1.ClientInfo}`
+/** INFO read — `PYTHIA.INFO_PYTHIA|Link` → `object{OuronetInfoV2.ClientInfo}`
  *  (the no-cost ClientInfo the FunctionInfoZone renders). Returns null on any
  *  failure / missing args. `consumerLane` may be empty for a live preview. */
 export async function getLinkDualApiKeyInfo(p: LinkDualApiKeyParams): Promise<any | null> {
   const { standardApollo, smartApollo, consumerLane } = p;
   if (!standardApollo || !smartApollo) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_LinkDualApiKey ${pactStr(standardApollo)} ${pactStr(smartApollo)} ${pactStr(consumerLane)})`;
+    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|Link ${pactStr(standardApollo)} ${pactStr(smartApollo)} ${pactStr(consumerLane)})`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;

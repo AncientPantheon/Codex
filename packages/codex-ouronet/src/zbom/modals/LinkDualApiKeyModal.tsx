@@ -20,6 +20,14 @@
  * entire patron / payment-key / STOA-cost / coin.TRANSFER machinery. Gas is
  * covered by the Ouronet gas station (GAS_PAYER on the auto-selected caps key).
  * HARD RULE: no seed leaves the Codex.
+ *
+ * INFO read RESTORED 2026-09-26: the real name is `INFO_PYTHIA|Link` (same
+ * 3-arg shape already sent), confirmed via `describe-module
+ * "ouronet-ns.PYTHIA"` against mainnet — see `getLinkDualApiKeyInfo`'s own
+ * doc comment in `../pythia/linkDualApiKey.js`. Purely informational here
+ * (Link has no fee); NOT wired into `blockerReason` — a stuck read
+ * previously left the Link button permanently disabled, so guard-readiness
+ * alone still gates execute.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -36,13 +44,14 @@ import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
+import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { Zone2Wrapper } from "../cfm/Zone2Wrapper.js";
 import { SigningZone } from "../cfm/SigningZone.js";
 import { StringEntryInput } from "../cfm/inputs.js";
 import { useWallet } from "../cfm/seam.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
-import { buildLinkDualApiKeyPactCode } from "../pythia/linkDualApiKey.js";
+import { buildLinkDualApiKeyPactCode, getLinkDualApiKeyInfo } from "../pythia/linkDualApiKey.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -126,17 +135,6 @@ export default function LinkDualApiKeyModal({
   // Standard guard when the owner is the same account).
   const effectiveSmtGuard: Guard = sameOwner ? stdGuard : smtGuard;
 
-  // ── INFO fetch (debounced) — the no-cost ClientInfo preview. ──
-  // REMOVED (chain-symbol handoff, 2026-09-25): `PYTHIA.PYTHIA|INFO_LinkDualApiKey`
-  // does not resolve on mainnet, and neither does the renamed candidate
-  // `PYTHIA.INFO_PYTHIA|LinkDualApiKey` — verified to have never worked. This
-  // was WORSE than a wasted read: `info` never resolving away from `null` kept
-  // `blockerReason` permanently stuck on "Loading function info…", so the
-  // Link button could never actually become clickable in production. Removed
-  // entirely rather than renamed — `getLinkDualApiKeyInfo` in
-  // `../pythia/linkDualApiKey.js` is kept, unused, for if a real on-chain
-  // equivalent is ever confirmed.
-
   // ── Guard analysis: which owner keys the Codex holds vs must be provided. ──
   const codexPubs = useMemo(
     () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
@@ -187,9 +185,9 @@ export default function LinkDualApiKeyModal({
     const _tx = txPending("Link Dual API Key");
     try {
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
-      // `executor` — see `linkDualApiKey.ts`'s own doc comment: value choice
-      // UNVERIFIED against the contract source (the Standard half's DALOS
-      // owner, the best-justified candidate available from this modal).
+      // `executor` — see `linkDualApiKey.ts`'s own doc comment: CONFIRMED
+      // valid (the Standard half's DALOS owner — `UEV_ExecutorIsHalfOwner`
+      // accepts either half-owner as a disjunction).
       const pactCode = buildLinkDualApiKeyPactCode({
         executor: standardOwner,
         standardApollo: standardAccount.address,
@@ -338,9 +336,20 @@ export default function LinkDualApiKeyModal({
           processingContent: (<><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Processing…</>),
         }}
       >
-        {/* ── Zone 0 — Function Info (no-cost ClientInfo) ──
-            REMOVED (chain-symbol handoff, 2026-09-25) — see the removed
-            useEffect's comment above for why. */}
+        {/* ── Zone 0 — Function Info (no-cost ClientInfo) — RESTORED 2026-09-26,
+            see the INFO-fetch effect's own comment above. ── */}
+        <FunctionInfoZone
+          key={standardAccount.address + smartAccount.address + consumerLane}
+          readId="INFO_Link"
+          label="PYTHIA.INFO_PYTHIA|Link"
+          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|Link "${standardAccount.address.slice(0, 12)}…" "${smartAccount.address.slice(0, 12)}…" "${consumerLane}")`}
+          fetcher={async () => getLinkDualApiKeyInfo({
+            executor: standardOwner,
+            standardApollo: standardAccount.address,
+            smartApollo: smartAccount.address,
+            consumerLane,
+          })}
+        />
 
         {/* ── Zone 2 — Inputs (args 1–2 autonomous, arg 3 user-typed) ── */}
         <Zone2Wrapper

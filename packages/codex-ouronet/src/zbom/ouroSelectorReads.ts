@@ -2,11 +2,24 @@
  * ouroSelectorReads — LOCAL overrides for `@ouronet/ouronet-core` read
  * functions confirmed broken at that package's latest published version
  * (4.6.0), each byte-for-byte the same implementation with only the Pact
- * call's module/function name corrected. Two unrelated bug classes live
+ * call's module/function name corrected. Several unrelated bug classes live
  * here (see each function's own doc comment for which): the DPL-UR archival
- * migration (`*Live` selector functions, → `O-UI-SEVEN`), and a separate,
+ * migration (`*Live` selector functions, → `O-UI-SEVEN`), a separate,
  * never-fixed rename in `getRegisterStoicTagInfo` (→
- * `getRegisterStoicTagInfoLive`). Delete each function here (re-pointing
+ * `getRegisterStoicTagInfoLive`), the Activate Standard/Smart INFO-ZERO→
+ * INFO-ONE move, and — added 2026-09-26, found chasing the SAME owner
+ * report that led to the StoicTag execute-arity fix — the 2026-09-22
+ * "patron/executor canon" rehaul's fallout on three more reads:
+ * `getWrapperPaymentKey` (`DALOS.UR_AccountKadena`, RETIRED — confirmed
+ * "no such member" on mainnet — renamed `DALOS.UR_AccountStoa`, same 1-arg
+ * signature, confirmed live via a real "no value found in table" response
+ * instead of a resolution error), and `getRotateGuardInfo`/
+ * `getRotateKadenaInfo` (both still calling the `INFO-ZERO` tombstone —
+ * that module's own on-chain doc comment says so explicitly: "OBSOLETE
+ * TOMBSTONE... DALOS-INFO previews moved to INFO-ONE" — replacements
+ * confirmed present via `describe-module "ouronet-ns.INFO-ONE"`:
+ * `INFO_DALOS|RotateGuard` / `INFO_DALOS|RotateStoa`, same 2-arg
+ * `(patron account)` signature). Delete each function here (re-pointing
  * its one caller back to `@ouronet/ouronet-core`) independently, the day
  * that package fixes the corresponding bug.
  *
@@ -265,6 +278,59 @@ export async function getDeploySmartAccountInfoOnlyLive(account: string): Promis
   try {
     const pactCode = `(${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|DeploySmartAccount "${account}")`;
     const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") return response.result.data ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolves an Ouronet account's Stoa Chain payment key — reads the CORRECT
+ *  `DALOS.UR_AccountStoa` (the external `getWrapperPaymentKey` still calls
+ *  the retired `DALOS.UR_AccountKadena`, confirmed "no such member" on
+ *  mainnet). Same signature/behavior/failure shape as the original — drop-in
+ *  replacement. Used by RegisterStoicTagModal, RenameDualLaneModal, and
+ *  ActivateApolloPythiaKeyModal's patron payment-key lookup. */
+export async function getWrapperPaymentKeyLive(wrapper: string): Promise<string | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.DALOS.UR_AccountStoa "${wrapper}")`;
+    const response = await pactRead(pactCode, { tier: "T5" });
+    if (response?.result?.status === "success") return String(response.result.data);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** RotateGuard INFO preview — reads the CORRECT `INFO-ONE.INFO_DALOS|RotateGuard`
+ *  (the external `getRotateGuardInfo` still calls the tombstoned
+ *  `INFO-ZERO.DALOS-INFO|URC_RotateGuard`). Same `(patron account)` 2-arg
+ *  signature — drop-in replacement. Used by RotateGuardModal, whose Execute
+ *  button was PERMANENTLY DISABLED by this (gates on `infoData !== null`,
+ *  which never resolved). */
+export async function getRotateGuardInfoLive(patron: string, account: string): Promise<any | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateGuard "${patron}" "${account}")`;
+    const response = await pactRead(pactCode, { tier: "T7" });
+    if (response?.result?.status === "success") return response.result.data ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** RotateStoa (payment key) INFO preview — reads the CORRECT
+ *  `INFO-ONE.INFO_DALOS|RotateStoa` (the external `getRotateKadenaInfo`
+ *  still calls the tombstoned `INFO-ZERO.DALOS-INFO|URC_RotateKadena`).
+ *  Same `(patron account)` 2-arg signature — drop-in replacement. Used by
+ *  RotatePaymentKeyModal, whose Execute button was PERMANENTLY DISABLED by
+ *  this (gates on `infoData !== null`, which never resolved) — which had
+ *  been masking the EXECUTE call's own `C_RotateKadena` → `C_RotateStoa`
+ *  rename (see `rotatePaymentKeyLive.ts`). */
+export async function getRotateStoaChainInfoLive(patron: string, account: string): Promise<any | null> {
+  try {
+    const pactCode = `(${KADENA_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateStoa "${patron}" "${account}")`;
+    const response = await pactRead(pactCode, { tier: "T7" });
     if (response?.result?.status === "success") return response.result.data ?? null;
     return null;
   } catch {
