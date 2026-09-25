@@ -41,6 +41,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useUiSetting } from "./seam.js";
 import type { FunctionMetaProp } from "./functionAnnotation.js";
+import ExecutionTooltip from "./ExecutionTooltip.js";
 
 const COLOR = "#cd7f32";
 const BD = "#cd7f3270";
@@ -93,9 +94,18 @@ export function Zone2Wrapper({ functionName, children, collapsedContent }: Zone2
           Zone 2 — INPUTS
         </span>
         {functionName && (
-          <span style={{ fontSize: "9px", fontFamily: "'Courier New','Lucida Console',monospace", color: `${COLOR}80` }}>
-            ({functionName})
-          </span>
+          // Signature-only tooltip (see ExecutionTooltip.tsx's own doc comment):
+          // every Zone2Wrapper caller already passes `functionName`, so this is
+          // universal, zero-per-modal-cost coverage of the FIRST of the
+          // tooltip's three checks — "does this function exist on chain,
+          // with what parameters" — even where a modal hasn't wired the
+          // fuller args+INFO tooltip itself. `args: []` and no `info`: no
+          // live read fires from here, only the static manifest lookup.
+          <ExecutionTooltip spec={{ exec: functionName, args: [] }}>
+            <span style={{ fontSize: "9px", fontFamily: "'Courier New','Lucida Console',monospace", color: `${COLOR}80` }}>
+              ({functionName})
+            </span>
+          </ExecutionTooltip>
         )}
       </button>
 

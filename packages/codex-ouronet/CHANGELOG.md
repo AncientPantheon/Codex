@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.14.0 — 2026-09-26
+
+**MINOR — cross-checked an incoming "16 of 20 chain calls are broken" handoff against
+the 0.13.2 fixes (all 16 already fixed; one item in the handoff was itself factually
+wrong, corrected with evidence below), then ported the handoff's own suggested
+verification tooling: a Pact signature manifest generated from source, a live hover
+`ExecutionTooltip` built on it, and an offline `dist/`-scanning checker. New capability,
+no breaking changes.**
+
+### Handoff cross-check
+
+- Re-verified all 20 chain calls the handoff listed. All 16 it flagged as broken were
+  already fixed in 0.13.2 (StoicTag INFO segment inversion, `INFO-ZERO`→`INFO-ONE`
+  moves, `UR_AccountKadena`→`UR_AccountStoa`, `DPL-UR`→`P-UI-ONE`, the
+  patron/executor write-call arity fixes, Release StoicTag's `executor` argument) —
+  confirmed by grep (only doc-comment mentions of the old names remain, describing
+  what was fixed) and by a live `describe-module` sweep (0 unresolved symbols).
+- **One correction to the handoff itself**: it claimed
+  `PYTHIA|INFO_LinkDualApiKey`/`PYTHIA|INFO_UnlinkDualApiKey` "have no counterpart
+  under either naming... do not invent a name." Direct evidence says otherwise —
+  `describe-module "ouronet-ns.PYTHIA"` (confirmed twice, once via live `/local` call
+  and once by parsing the actual `.pact` source, see below) shows the real names are
+  the SHORTER `INFO_PYTHIA|Link` (3-arg) and `INFO_PYTHIA|RevokeLink` (2-arg) —
+  already restored in 0.13.2. Kept as-is; this changelog entry is the record of why.
+
+### New: signature-manifest-driven execution verification (ported from `daimons/OuronetUI`)
+
+- **`scripts/generate-pact-signatures.py`** — parses every `.pact` source file's
+  `defun` parameter list directly (not a live network call), emitting two artifacts:
+  `scripts/pact-signatures.full.json` (~5,600 signatures, not bundled — the offline
+  checker) and `src/constants/pactSignatures.generated.ts` (850 signatures trimmed to
+  `|C_`/`INFO_` entries — the bundled tooltip manifest). Repointed at this workspace's
+  own sibling-repo layout; every fact this script produces was independently
+  cross-checked against this round's own live `describe-module` findings and matches
+  exactly.
+- **`ExecutionTooltip.tsx`** (`zbom/cfm/`) — hover a button, see what it will actually
+  execute: the function + parameter list from the manifest (a dead name shows "not on
+  chain" instead of failing on click), the arguments positionally aligned against
+  those parameters (catches two same-typed args swapped — the one class no static
+  arity check sees), and a live INFO preview run against the real values. Desktop
+  only (`useIsMobile`); built on this package's own `ActionTooltip` (Radix
+  `Tooltip.Root`/`Portal`) rather than hand-rolled hover positioning, so it inherits
+  the same clipping/z-index handling every other hover explainer here already has.
+  New `infoArgs` field (not present in the OuronetUI original) handles the case —
+  common in this package — where EXEC and INFO calls have different arity/order for
+  the same operation (e.g. Release StoicTag: EXEC is `(patron executor tag-name)`,
+  INFO is `(patron tag-name)`).
+- **Wired in two places**: `Zone2Wrapper`'s existing `functionName` label (universal —
+  every ZBOM modal already passes this, so every modal gets a baseline "does this
+  function exist" hover check for free) and a new optional `executionSpec` prop on
+  `ZbomLayout`'s `executeButton` (full args-aligned + live-INFO tooltip on the actual
+  Execute button), wired into `ReleaseStoicTagModal` and `RegisterStoicTagModal` as
+  the flagship demonstration — the two modals the original bug report and this
+  session's whole audit thread started from.
+- **`scripts/check-call-sites.py`** — offline, scans `dist/` (not `src/`, per the
+  handoff's own instruction: a bundled package ships calls as built output) plus
+  `node_modules/@ouronet/ouronet-core/dist` against the full signature manifest.
+  Confirms zero missing symbols in this package's own `dist/`; the 97 findings in the
+  external dependency are all for DEX/collectables/movie-booster/kpay features this
+  package's UI never calls into.
+- New tests: `tests/pact-signatures.test.ts` (regression lock for every fact this
+  round confirmed, plus a drift guard that regenerates and diffs against committed
+  output — skips gracefully when the sibling `.pact` source tree isn't on disk) and
+  `tests/execution-tooltip.test.tsx` (renders `ExecutionTooltipCard` against a mocked
+  reader, covering the dead-function/missing-argument/differing-INFO-arity/
+  chain-refusal cases). `tests/ouronet-execute-wiring.test.ts` extended with the
+  `stoicTagExecOps.ts`/`rotatePaymentKeyLive.ts`/restored-INFO-read coverage the
+  0.13.2 round hadn't gotten to yet.
+
 ## 0.13.2 — 2026-09-26
 
 **PATCH — the "complete rehaul of all Ouronet code" round. Owner report:

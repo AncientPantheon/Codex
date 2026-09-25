@@ -5,7 +5,8 @@
  * executed on Ouronet and test them if their wiring are firing correctly."
  * Direct unit coverage for every package-LOCAL Pact-code builder/reader
  * this session's chain-symbol audits touched — `deployApiKey.ts`,
- * `dualLinkOps.ts`, `linkDualApiKey.ts`, `ouroSelectorReads.ts` — asserting
+ * `dualLinkOps.ts`, `linkDualApiKey.ts`, `ouroSelectorReads.ts`,
+ * `stoicTagExecOps.ts` (2026-09-26) — asserting
  * the EXACT function name and argument order each one emits, so a future
  * edit that silently reintroduces a wrong name or a dropped argument fails
  * a test instead of hanging/disabling a button in production undetected
@@ -31,8 +32,9 @@ import {
   buildRenameDualLanePactCode,
   buildRevokeDualLinkPactCode,
   getRenameDualLaneInfoOnly,
+  getRevokeDualLinkInfoOnly,
 } from "../src/zbom/pythia/dualLinkOps.js";
-import { buildLinkDualApiKeyPactCode } from "../src/zbom/pythia/linkDualApiKey.js";
+import { buildLinkDualApiKeyPactCode, getLinkDualApiKeyInfo } from "../src/zbom/pythia/linkDualApiKey.js";
 import {
   getAccountSelectorDataLive,
   getStoicTagSelectorDataLive,
@@ -43,7 +45,14 @@ import {
   getDeployStandardAccountInfoOnlyLive,
   getDeploySmartAccountInfoLive,
   getDeploySmartAccountInfoOnlyLive,
+  getWrapperPaymentKeyLive,
+  getRotateGuardInfoLive,
+  getRotateStoaChainInfoLive,
 } from "../src/zbom/ouroSelectorReads.js";
+import {
+  buildReleaseStoicTagPactCodeLive,
+  buildRegisterStoicTagPactCodeLive,
+} from "../src/zbom/stoicTagExecOps.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -195,5 +204,73 @@ describe("ouroSelectorReads.ts — RegisterStoicTag / Activate INFO overrides (a
     const reader2 = mockReader({ result: { status: "success", data: null } });
     await getDeploySmartAccountInfoOnlyLive("Σ.ACCOUNT");
     expect(reader2.mock.calls[0][0]).toBe(`(ouronet-ns.INFO-ONE.INFO_DALOS|DeploySmartAccount "Σ.ACCOUNT")`);
+  });
+});
+
+// ─── stoicTagExecOps.ts — the "complete rehaul" round's own bug: the ────────
+// ─── StoicTag EXECUTE calls themselves, confirmed via describe-module ──────
+
+describe("stoicTagExecOps.ts — Pact call wiring (2026-09-22 patron/executor canon rehaul)", () => {
+  it("buildReleaseStoicTagPactCodeLive: C_ReleaseStoicTag, 3 args in order (patron, executor, tagName) — chain now REJECTS the old 2-arg shape", () => {
+    const code = buildReleaseStoicTagPactCodeLive({
+      patron: "Ѻ.PATRON", executor: "Ѻ.ACCOUNT", tagName: "MyTag",
+    });
+    expect(code).toBe(`(ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag "Ѻ.PATRON" "Ѻ.ACCOUNT" "MyTag")`);
+  });
+
+  it("buildRegisterStoicTagPactCodeLive: C_RegisterStoicTag, 3 args in order (patron, executor, tagName) — executor is 2nd, NOT last", () => {
+    const code = buildRegisterStoicTagPactCodeLive({
+      patron: "Ѻ.PATRON", executor: "Ѻ.ACCOUNT", tagName: "MyTag",
+    });
+    expect(code).toBe(`(ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag "Ѻ.PATRON" "Ѻ.ACCOUNT" "MyTag")`);
+    // Load-bearing: executor (the account) is the 2nd arg, BEFORE tag-name —
+    // the external builder's old shape put it LAST, which the chain now
+    // validates as an invalid tag-name string instead of an account.
+    expect(code.indexOf('"Ѻ.ACCOUNT"')).toBeLessThan(code.indexOf('"MyTag"'));
+  });
+});
+
+// ─── ouroSelectorReads.ts — the "complete rehaul" round's 3 more reads ─────
+
+describe("ouroSelectorReads.ts — getWrapperPaymentKeyLive / RotateGuard / RotateStoa INFO overrides (2026-09-26)", () => {
+  it("getWrapperPaymentKeyLive: DALOS.UR_AccountStoa, not the retired DALOS.UR_AccountKadena", async () => {
+    const reader = mockReader({ result: { status: "success", data: "k:PAYMENTKEY" } });
+    await getWrapperPaymentKeyLive("Ѻ.WRAPPER");
+    const [code] = reader.mock.calls[0];
+    expect(code).toBe(`(ouronet-ns.DALOS.UR_AccountStoa "Ѻ.WRAPPER")`);
+  });
+
+  it("getRotateGuardInfoLive: INFO-ONE.INFO_DALOS|RotateGuard, not the tombstoned INFO-ZERO.DALOS-INFO|URC_RotateGuard", async () => {
+    const reader = mockReader();
+    await getRotateGuardInfoLive("Ѻ.PATRON", "Ѻ.ACCOUNT");
+    const [code] = reader.mock.calls[0];
+    expect(code).toBe(`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateGuard "Ѻ.PATRON" "Ѻ.ACCOUNT")`);
+  });
+
+  it("getRotateStoaChainInfoLive: INFO-ONE.INFO_DALOS|RotateStoa, not the tombstoned INFO-ZERO.DALOS-INFO|URC_RotateKadena", async () => {
+    const reader = mockReader();
+    await getRotateStoaChainInfoLive("Ѻ.PATRON", "Ѻ.ACCOUNT");
+    const [code] = reader.mock.calls[0];
+    expect(code).toBe(`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateStoa "Ѻ.PATRON" "Ѻ.ACCOUNT")`);
+  });
+});
+
+// ─── dualLinkOps.ts / linkDualApiKey.ts — INFO reads restored (2026-09-26) ──
+
+describe("dualLinkOps.ts / linkDualApiKey.ts — Link/Revoke INFO reads restored (real names confirmed, not the guessed ones removed in 0.12.1)", () => {
+  it("getRevokeDualLinkInfoOnly: PYTHIA.INFO_PYTHIA|RevokeLink, not PYTHIA|INFO_UnlinkDualApiKey (confirmed never existed)", async () => {
+    const reader = mockReader();
+    await getRevokeDualLinkInfoOnly({ patron: "Ѻ.PATRON", dualLinkKey: "₱.A|Π.B" });
+    const [code] = reader.mock.calls[0];
+    expect(code).toBe(`(ouronet-ns.PYTHIA.INFO_PYTHIA|RevokeLink "Ѻ.PATRON" "₱.A|Π.B")`);
+  });
+
+  it("getLinkDualApiKeyInfo: PYTHIA.INFO_PYTHIA|Link, not PYTHIA|INFO_LinkDualApiKey (confirmed never existed)", async () => {
+    const reader = mockReader();
+    await getLinkDualApiKeyInfo({ executor: "Ѻ.EXEC", standardApollo: "₱.A", smartApollo: "Π.B", consumerLane: "Explorer" });
+    const [code] = reader.mock.calls[0];
+    expect(code).toBe(`(ouronet-ns.PYTHIA.INFO_PYTHIA|Link "₱.A" "Π.B" "Explorer")`);
+    // INFO_PYTHIA|Link does NOT take `executor` — only EXECUTE (C_Link) does.
+    expect(code).not.toContain("Ѻ.EXEC");
   });
 });

@@ -490,6 +490,15 @@ export default function RegisterStoicTagModal({
             ? (<><Tag className="inline h-4 w-4 mr-1.5 align-text-bottom" />Register StoicTag</>)
             : (blockerReason ?? "Register StoicTag"),
           processingContent: (<><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Processing…</>),
+          executionSpec: {
+            exec: "ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag",
+            info: "ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag",
+            args: [JSON.stringify(patronAccount?.address ?? ""), JSON.stringify(account.address), JSON.stringify(tagName)],
+            // INFO_CODEX|RegisterStoicTag's own arg ORDER differs from the EXEC
+            // call's — (patron, tag-name, account-address), not (patron,
+            // executor, tag-name) — confirmed via describe-module.
+            infoArgs: [JSON.stringify(patronAccount?.address ?? ""), JSON.stringify(tagName), JSON.stringify(account.address)],
+          },
         }}
       >
         {/* ── Zone 0 — Function Info ── */}

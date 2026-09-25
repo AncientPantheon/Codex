@@ -2,6 +2,25 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.14.0 — 2026-09-26
+
+**MINOR — cross-checked an incoming "16 of 20 chain calls are broken" handoff against
+`codex-ouronet`'s 0.13.2 fixes (all 16 already fixed; one handoff claim was itself
+wrong, corrected with live-chain evidence), then ported the handoff's own suggested
+verification tooling into `codex-ouronet`: a Pact signature manifest generated
+straight from the `.pact` sources, a live hover `ExecutionTooltip` built on it (shows
+a button's real on-chain function + parameters + live cost preview before it's
+pressed — desktop only), and an offline `dist/`-scanning checker. New capability, no
+breaking changes. `codex-ouronet` release only (`codex-ui`/`arweave-core`/
+`codex-arweave` unchanged). See `@ancientpantheon/codex-ouronet`'s own CHANGELOG for
+the full technical account.**
+
+- `ExecutionTooltip` wired into `Zone2Wrapper` (universal baseline coverage across
+  every ZBOM modal) and, with full argument-alignment + live preview, into Release
+  and Register StoicTag's Execute buttons as the flagship demonstration.
+- `scripts/generate-pact-signatures.py` / `scripts/check-call-sites.py` — new
+  developer tooling, not part of the runtime bundle.
+
 ## 0.13.2 — 2026-09-26
 
 **PATCH — the "complete rehaul of all Ouronet code" round: confirmed AND

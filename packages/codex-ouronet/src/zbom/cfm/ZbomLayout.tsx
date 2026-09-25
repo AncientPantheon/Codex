@@ -40,6 +40,7 @@ import { useUiSetting } from "./seam.js";
 import { CfmScrollArea } from "../ui/CfmScrollArea.js";
 import { ZbomDebouncer } from "../debouncer/ZbomDebouncer.js";
 import type { PactQueryTier } from "../debouncer/pactQueryTiers.js";
+import ExecutionTooltip, { type ExecutionSpec } from "./ExecutionTooltip.js";
 
 export interface ZbomExecuteButtonProps {
   canExecute: boolean;
@@ -53,6 +54,17 @@ export interface ZbomExecuteButtonProps {
   content: ReactNode;
   /** Button content when processing (spinner + text) */
   processingContent?: ReactNode;
+  /**
+   * Optional — when provided, hovering the button (desktop only) shows
+   * `ExecutionTooltip`'s live verification card: the execution function +
+   * parameter list from the contract, the actual argument VALUES this
+   * click would send (positionally aligned — the one class no static check
+   * catches, two same-typed args swapped), and the live INFO preview. Pass
+   * the SAME args the real execute call will use, computed fresh on every
+   * render (not memoized to stale state) so hovering right before a click
+   * shows exactly what that click will send.
+   */
+  executionSpec?: ExecutionSpec;
 }
 
 interface ZbomLayoutProps {
@@ -79,23 +91,29 @@ function ExecuteZone({ btn }: { btn: ZbomExecuteButtonProps }) {
     <><span className="inline-block h-4 w-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />Processing…</>
   );
 
+  const button = (
+    <button
+      type="button"
+      className="w-full py-2 px-4 rounded-lg text-sm font-bold transition-colors btn-aura-tx"
+      style={{
+        backgroundColor: btn.bgColor,
+        color: btn.textColor,
+        cursor: btn.canExecute ? "pointer" : "not-allowed",
+      }}
+      onClick={btn.canExecute ? btn.onClick : undefined}
+      disabled={!btn.canExecute || btn.isProcessing}
+    >
+      {btn.isProcessing
+        ? (btn.processingContent ?? defaultProcessing)
+        : btn.content}
+    </button>
+  );
+
   return (
     <div className="py-1.5 flex-shrink-0">
-      <button
-        type="button"
-        className="w-full py-2 px-4 rounded-lg text-sm font-bold transition-colors btn-aura-tx"
-        style={{
-          backgroundColor: btn.bgColor,
-          color: btn.textColor,
-          cursor: btn.canExecute ? "pointer" : "not-allowed",
-        }}
-        onClick={btn.canExecute ? btn.onClick : undefined}
-        disabled={!btn.canExecute || btn.isProcessing}
-      >
-        {btn.isProcessing
-          ? (btn.processingContent ?? defaultProcessing)
-          : btn.content}
-      </button>
+      {btn.executionSpec ? (
+        <ExecutionTooltip spec={btn.executionSpec}>{button}</ExecutionTooltip>
+      ) : button}
     </div>
   );
 }

@@ -413,6 +413,12 @@ export default function ReleaseStoicTagModal({
             ? (<><Unlink className="inline h-4 w-4 mr-1.5 align-text-bottom" />Release StoicTag</>)
             : (blockerReason ?? "Release StoicTag"),
           processingContent: (<><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Processing…</>),
+          executionSpec: {
+            exec: "ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag",
+            info: "ouronet-ns.CODEX.INFO_CODEX|ReleaseStoicTag",
+            args: [JSON.stringify(patronAccount?.address ?? ""), JSON.stringify(account.address), JSON.stringify(tagName)],
+            infoArgs: [JSON.stringify(patronAccount?.address ?? ""), JSON.stringify(tagName)],
+          },
         }}
       >
 
