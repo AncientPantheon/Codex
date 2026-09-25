@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.13.1 — 2026-09-25
+
+**PATCH — fixes a second, previously-masked bug in the same execute flow the
+0.13.0 z-index fix unblocked. Owner report: "i clicked Release Stoic tag
+execution button, program encountered an unhandled error, can you check,
+seems its still not working" — a NEW failure mode (a crash, not a hang),
+surfacing only once 0.13.0 let the flow actually reach the signing step.**
+
+### Fixed — unresolved keyset-ref guards crashed `CodexSigningStrategy.execute()`
+
+- **Root cause**: both `ReleaseStoicTagModal` and `RegisterStoicTagModal`
+  read `patronAccount.guard` / `account.guard` directly off the codex and
+  passed them straight into the signing `guards:` array. But that value is
+  an UNRESOLVED keyset-ref object, not a plain keyset — confirmed via
+  `OuronetAccountsTab.tsx`'s `hydrate()`, which overwrites `account.guard`
+  with the live, untyped chain `ouronet-account-guard` field whenever chain
+  data is present. `CodexSigningStrategy.execute()`
+  (`@stoachain/stoa-core/dist/signing/codexStrategy.js`) assumes every
+  element of `guards:` already satisfies `IKeyset` — a required, non-optional
+  `.keys: string[]` plus `.pred` — and performs no keyset-ref resolution of
+  its own; a raw unresolved guard crashes inside its guard-analysis step
+  with an unhandled error. `ReleaseStoicTagModal` additionally only resolved
+  the ACCOUNT guard (not the patron guard) and only for Smart accounts, for
+  `AuthPathZone`'s display purposes — never for the actual signing path, and
+  never for Standard accounts at all. `RegisterStoicTagModal` had the
+  identical pattern.
+- **Fix**: both modals now resolve BOTH the patron's and the account's guard
+  via `getStoaChainAccountGuard(address)` — the same proven pattern already
+  used correctly by `RevokeDualLinkModal`, `RenameDualLaneModal`, and
+  `LinkDualApiKeyModal` — for every patron mode and both Standard and Smart
+  account types, and `canExecute` now gates on both resolved guards being
+  loaded and non-empty before allowing a sign. Confirmed via
+  `codexStrategy.js`'s source that the strategy already dedupes guards
+  internally by pubkey, ruling out "same guard passed twice" as a
+  contributing factor — this was purely an unresolved-shape bug.
+- Deliberately NOT extended to `RotateGuardModal`/`RotatePaymentKeyModal`,
+  which read `account.guard`/`patronAccount.guard` the same raw way but
+  delegate their actual execute logic to external `@ouronet/ouronet-core`
+  functions whose internal guard handling is unverified — extending the fix
+  there without evidence would be a guess, not a confirmed finding.
+
 ## 0.13.0 — 2026-09-25
 
 **MINOR — a full wiring audit of every Ouronet execute (write) flow, prompted

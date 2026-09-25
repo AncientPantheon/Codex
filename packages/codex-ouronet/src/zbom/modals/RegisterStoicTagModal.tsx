@@ -22,6 +22,20 @@
  * `blockerReason` gates on `info !== null`, "Register StoicTag" was
  * PERMANENTLY DISABLED. The EXECUTE call above (`buildRegisterStoicTagPactCode`,
  * still external) is unaffected — neither chain-symbol audit flagged it.
+ *
+ * Second bug, found 2026-09-25 while chasing an owner-reported "unhandled
+ * error" on Release StoicTag's execute (same bug class hit here too): both
+ * `patronAccount.guard` and `account.guard`, as stored on the codex, are
+ * UNRESOLVED keyset-ref objects — `getStoaChainAccountGuard` resolves them
+ * to a plain `{pred, keys}` IKeyset. Previously the account-guard resolution
+ * only ran for Smart accounts (AuthPathZone display only) and the patron
+ * guard was never resolved at all — both raw, unresolved objects were passed
+ * straight into `CodexSigningStrategy.execute()`'s `guards:` array, which
+ * assumes every guard already has `.keys`/`.pred` and does no keyset-ref
+ * resolution itself, crashing with an unhandled error. Fixed by resolving
+ * both the patron and account guards via `getStoaChainAccountGuard` for
+ * every mode/account type, and gating `canExecute` on both being loaded and
+ * non-empty before allowing signing.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -99,6 +113,16 @@ export default function RegisterStoicTagModal({
   const [selectedCustomAccount, setSelectedCustomAccount] = useState<IOuroAccount | null>(null);
   const [patronIgnisBalance, setPatronIgnisBalance] = useState<number | null>(null);
 
+  // ── Resolved patron guard (for SIGNING — both Standard and Smart patrons).
+  //    patronAccount.guard is an UNRESOLVED keyset-ref object straight off the
+  //    codex; getStoaChainAccountGuard resolves it to a plain {pred,keys}
+  //    IKeyset that CodexSigningStrategy.execute() can actually sign with —
+  //    it assumes every guard in `guards:` already has `.keys`/`.pred` and
+  //    does no keyset-ref resolution itself. Passing the raw unresolved
+  //    object crashed execute() with an unhandled error. ──
+  const [resolvedPatronGuard, setResolvedPatronGuard] = useState<IKeyset | null>(null);
+  const [patronGuardLoaded, setPatronGuardLoaded] = useState(false);
+
   const [tagName, setTagName] = useState("");
 
   const [paymentKeyAddr, setPaymentKeyAddr] = useState<string | null>(null);
@@ -163,6 +187,21 @@ export default function RegisterStoicTagModal({
       .catch(() => setPatronIgnisBalance(0));
   }, [open, patronAccount?.address]);
 
+  // ── Patron guard resolution (for SIGNING) — mirrors RevokeDualLinkModal's
+  //    proven getStoaChainAccountGuard pattern. Runs for every patron mode
+  //    (prime/resident/custom), Standard or Smart. ──
+  useEffect(() => {
+    if (!open || !patronAccount?.address) { setResolvedPatronGuard(null); setPatronGuardLoaded(false); return; }
+    setResolvedPatronGuard(null);
+    setPatronGuardLoaded(false);
+    let aborted = false;
+    getStoaChainAccountGuard(patronAccount.address)
+      .then((g) => { if (!aborted) setResolvedPatronGuard(((g as unknown) as IKeyset) ?? null); })
+      .catch(() => { if (!aborted) setResolvedPatronGuard(null); })
+      .finally(() => { if (!aborted) setPatronGuardLoaded(true); });
+    return () => { aborted = true; };
+  }, [open, patronAccount?.address]);
+
   // ── INFO fetch (debounced) — cost + split receivers ──
   useEffect(() => {
     if (!open || !patronAccount?.address || !tagName) { setFullInfo(null); return; }
@@ -179,17 +218,20 @@ export default function RegisterStoicTagModal({
   }, [open, patronAccount?.address, tagName, account.address]);
 
   // ── Account guard resolution — the stored account.guard is an UNRESOLVED
-  //    keyset-ref object, which classifies as non-key-based. getStoaChainAccountGuard
-  //    resolves it to a plain keyset so the Account-Guard branch is signable.
-  //    Standard accounts don't use AuthPathZone, so leave inert. ──
+  //    keyset-ref object straight off the codex (Standard accounts too — see
+  //    OuronetAccountsTab.hydrate(), which overwrites account.guard with the
+  //    live, untyped chain `ouronet-account-guard` value). getStoaChainAccountGuard
+  //    resolves it to a plain {pred,keys} keyset. Previously this only ran for
+  //    Smart accounts (AuthPathZone display only) while Standard accounts'
+  //    SIGNING guards array used the raw, unresolved account.guard directly —
+  //    CodexSigningStrategy.execute() assumes every guard already has
+  //    .keys/.pred and does no keyset-ref resolution itself, so a Standard
+  //    account's execute() crashed with an unhandled error. Now resolves for
+  //    both account types. ──
   useEffect(() => {
     if (!open) return;
     setResolvedAccountGuard(null);
     setAccountGuardLoaded(false);
-    if (!isSmart) {
-      setAccountGuardLoaded(true);
-      return;
-    }
     let aborted = false;
     getStoaChainAccountGuard(account.address)
       .then((g) => { if (!aborted) setResolvedAccountGuard(g); })
@@ -240,6 +282,8 @@ export default function RegisterStoicTagModal({
     setLoadingInfo(false);
     setResolvedManualKeys({});
     setIsProcessing(false);
+    setResolvedPatronGuard(null);
+    setPatronGuardLoaded(false);
     setResolvedAccountGuard(null);
     setAccountGuardLoaded(false);
     setSovereignGuard(null);
@@ -296,6 +340,8 @@ export default function RegisterStoicTagModal({
     if (glyphCount === 0)                               return "Enter a StoicTag";
     if (loadingInfo || info === null)                   return "Loading function info…";
     if (!patronAccount)                                 return "Pick a patron";
+    if (!patronGuardLoaded)                              return "Resolving patron guard…";
+    if (!resolvedPatronGuard?.keys?.length)              return "Patron guard unavailable";
     if (loadingPK)                                      return "Loading payment key…";
     if (!paymentKeyIsK)                                 return "Payment key not a k: account";
     if (!paymentKeyInCodex)                             return "Payment key not in Codex";
@@ -310,16 +356,19 @@ export default function RegisterStoicTagModal({
       if (authSelection.impossibleViaZbom) return "No key-based auth path — use Execute Code";
       if (!authSelection.chosenKeyset)     return "Pick an auth path";
       if (!authSelection.satisfied)        return "Auth path needs more keys";
+    } else {
+      if (!accountGuardLoaded)                          return "Resolving account guard…";
+      if (!(resolvedAccountGuard as IKeyset | null)?.keys?.length) return "Account guard unavailable";
     }
     return null;
   })();
   const canExecute = blockerReason === null && !isProcessing;
 
-  const patronGuard = useMemo<IKeyset | null>(() => ((patronAccount?.guard as any) ?? null), [patronAccount]);
-  const accountGuard = (account.guard as any) ?? null;
+  const accountGuard = resolvedAccountGuard as IKeyset | null;
 
   async function handleExecute() {
-    if (!canExecute || !patronAccount || !paymentKeyAddr || !patronGuard) return;
+    if (!canExecute || !patronAccount || !paymentKeyAddr || !resolvedPatronGuard) return;
+    const finalPatronGuard: IKeyset = resolvedPatronGuard;
     // Smart accounts resolve their OR-of-3 in the AuthPathZone; without a
     // chosen key-based branch there is nothing to sign with.
     if (isSmart && !authSelection.chosenKeyset) return;
@@ -350,8 +399,8 @@ export default function RegisterStoicTagModal({
       });
 
       // Smart accounts (Σ.) pass the AuthPathZone-resolved branch keyset;
-      // Standard accounts (Ѻ.) pass their own guard directly — unchanged.
-      const accountAuthGuard = isSmart ? authSelection.chosenKeyset : accountGuard;
+      // Standard accounts (Ѻ.) pass their own resolved guard directly.
+      const accountAuthGuard: IKeyset = (isSmart ? authSelection.chosenKeyset : accountGuard) as IKeyset;
 
       const { requestKey } = await execute({
         build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }: { gasLimit: number; capsKeyPub: string; guardPubs: string[]; gasPrice: number; creationTime: number }) => {
@@ -380,7 +429,7 @@ export default function RegisterStoicTagModal({
         },
         // Tagged account's guard proves ownership; patron alongside. For
         // Smart accounts this is the chosen enforce-one branch keyset.
-        guards: [patronGuard, accountAuthGuard],
+        guards: [finalPatronGuard, accountAuthGuard],
         paymentKey: paymentKP.publicKey,
         resolvedForeignKeys: resolvedManualKeys,
         extraSigners: [paymentKP],
@@ -556,7 +605,7 @@ export default function RegisterStoicTagModal({
         {/* ── Auth Path — Smart Account key-based branch picker (Σ. only) ── */}
         {isSmart && (
           <AuthPathZone
-            accountGuard={isSmart ? resolvedAccountGuard : account.guard}
+            accountGuard={resolvedAccountGuard}
             sovereignGuard={sovereignGuard}
             sovereignLoaded={sovereignLoaded}
             onChange={handleAuthPathChange}

@@ -2,6 +2,22 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.13.1 — 2026-09-25
+
+**PATCH — fixes a second bug in the Release/Register StoicTag execute flow
+that the 0.13.0 z-index fix had been masking: an owner-reported "unhandled
+error" once the codex-unlock step could actually be reached. Root cause was
+an unresolved keyset-ref guard object passed directly into the signing
+step. `codex-ouronet` release only (`codex-ui`/`arweave-core`/`codex-arweave`
+unchanged). See `@ancientpantheon/codex-ouronet`'s own CHANGELOG for the
+full technical account.**
+
+- `ReleaseStoicTagModal` and `RegisterStoicTagModal` now resolve both the
+  patron's and the account's guard via `getStoaChainAccountGuard` before
+  signing (previously only the account guard was resolved, only for Smart
+  accounts, and only for display) — the same pattern already proven correct
+  in `RevokeDualLinkModal`/`RenameDualLaneModal`/`LinkDualApiKeyModal`.
+
 ## 0.13.0 — 2026-09-25
 
 **MINOR — a full wiring audit of every Ouronet execute flow, prompted by a
