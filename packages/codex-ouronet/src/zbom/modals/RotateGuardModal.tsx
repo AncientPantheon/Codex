@@ -262,8 +262,8 @@ export default function RotateGuardModal({
         <FunctionInfoZone
           key={patronAccount?.address}
           readId="INFO_RotateGuard"
-          label="DALOS-INFO|URC_RotateGuard"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGuard "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|RotateGuard"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateGuard "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
           fetcher={() => getRotateGuardInfo(patronAccount?.address ?? "", account.address)}
         />
 

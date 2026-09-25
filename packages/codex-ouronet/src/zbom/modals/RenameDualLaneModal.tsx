@@ -288,7 +288,10 @@ export default function RenameDualLaneModal({
         seedType: (raw as any).seedType, encryptedSecretKey: (raw as any).encryptedSecretKey, password: (raw as any).password,
       };
 
-      const pactCode = buildRenameDualLanePactCode({ patron: patronAccount.address, dualLinkKey, newName: newName.trim() });
+      // `executor` — see `dualLinkOps.ts`'s own doc comment: value choice
+      // UNVERIFIED against the contract source (the Standard half's DALOS
+      // owner, the best-justified candidate available from this modal).
+      const pactCode = buildRenameDualLanePactCode({ patron: patronAccount.address, executor: standardOwner, dualLinkKey, newName: newName.trim() });
       // Signers: patron payment guard + BOTH owner guards. Payment signer carries
       // the coin.TRANSFER split caps.
       const guards = [patronPaymentGuard, ...ownerGuards].filter(Boolean) as IKeyset[];
@@ -408,8 +411,8 @@ export default function RenameDualLaneModal({
         <FunctionInfoZone
           key={(patronAccount?.address ?? "") + newName}
           readId="INFO_UpdateDualConsumerLane"
-          label="PYTHIA.PYTHIA|INFO_UpdateDualConsumerLane"
-          pactCall={`(ouronet-ns.PYTHIA.PYTHIA|INFO_UpdateDualConsumerLane "${(patronAccount?.address ?? "").slice(0, 12)}…" "${dualLinkKey.slice(0, 12)}…" "${newName}")`}
+          label="PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane"
+          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane "${(patronAccount?.address ?? "").slice(0, 12)}…" "${dualLinkKey.slice(0, 12)}…" "${newName}")`}
           fetcher={async () => await getRenameDualLaneInfoOnly(renameArgs)}
         />
 

@@ -36,14 +36,13 @@ import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import type { IOuroAccount } from "../../types/entities.js";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
-import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
 import { Zone2Wrapper } from "../cfm/Zone2Wrapper.js";
 import { SigningZone } from "../cfm/SigningZone.js";
 import { StringEntryInput } from "../cfm/inputs.js";
 import { useWallet } from "../cfm/seam.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
-import { getLinkDualApiKeyInfo, buildLinkDualApiKeyPactCode } from "../pythia/linkDualApiKey.js";
+import { buildLinkDualApiKeyPactCode } from "../pythia/linkDualApiKey.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -76,17 +75,10 @@ export default function LinkDualApiKeyModal({
   const [stdGuardLoaded, setStdGuardLoaded] = useState(false);
   const [smtGuardLoaded, setSmtGuardLoaded] = useState(false);
   const [resolvedManualKeys, setResolvedManualKeys] = useState<Record<string, string>>({});
-  const [info, setInfo] = useState<any | null>(null);
-  const [loadingInfo, setLoadingInfo] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Both halves MAY share one DALOS owner (common) or have DIFFERENT owners.
   const sameOwner = !!standardOwner && standardOwner === smartOwner;
-
-  const args = useMemo(
-    () => ({ standardApollo: standardAccount.address, smartApollo: smartAccount.address, consumerLane }),
-    [standardAccount.address, smartAccount.address, consumerLane],
-  );
 
   const handleResolveKey = useCallback((pub: string, priv: string) => {
     setResolvedManualKeys((prev) => ({ ...prev, [pub]: priv }));
@@ -99,7 +91,7 @@ export default function LinkDualApiKeyModal({
     setStdGuard(null); setSmtGuard(null);
     setStdGuardLoaded(false); setSmtGuardLoaded(false);
     setResolvedManualKeys({});
-    setInfo(null); setLoadingInfo(false); setIsProcessing(false);
+    setIsProcessing(false);
   }, [open]);
 
   // ── Resolve the STANDARD half-owner's on-chain guard (stored guard is often an
@@ -135,18 +127,15 @@ export default function LinkDualApiKeyModal({
   const effectiveSmtGuard: Guard = sameOwner ? stdGuard : smtGuard;
 
   // ── INFO fetch (debounced) — the no-cost ClientInfo preview. ──
-  useEffect(() => {
-    if (!open) { setInfo(null); return; }
-    setLoadingInfo(true);
-    let aborted = false;
-    const t = setTimeout(() => {
-      getLinkDualApiKeyInfo(args)
-        .then((r) => { if (!aborted) setInfo(r); })
-        .catch(() => { if (!aborted) setInfo(null); })
-        .finally(() => { if (!aborted) setLoadingInfo(false); });
-    }, 400);
-    return () => { aborted = true; clearTimeout(t); };
-  }, [open, args]);
+  // REMOVED (chain-symbol handoff, 2026-09-25): `PYTHIA.PYTHIA|INFO_LinkDualApiKey`
+  // does not resolve on mainnet, and neither does the renamed candidate
+  // `PYTHIA.INFO_PYTHIA|LinkDualApiKey` — verified to have never worked. This
+  // was WORSE than a wasted read: `info` never resolving away from `null` kept
+  // `blockerReason` permanently stuck on "Loading function info…", so the
+  // Link button could never actually become clickable in production. Removed
+  // entirely rather than renamed — `getLinkDualApiKeyInfo` in
+  // `../pythia/linkDualApiKey.js` is kept, unused, for if a real on-chain
+  // equivalent is ever confirmed.
 
   // ── Guard analysis: which owner keys the Codex holds vs must be provided. ──
   const codexPubs = useMemo(
@@ -183,7 +172,6 @@ export default function LinkDualApiKeyModal({
   const blockerReason = (() => {
     if (isProcessing) return null;
     if (!consumerLane.trim()) return "Enter a consumer lane";
-    if (loadingInfo || info === null) return "Loading function info…";
     if (!guardsLoaded) return "Resolving owner guards…";
     if (!stdGuard?.keys?.length) return "Standard owner guard unavailable";
     if (!sameOwner && !effectiveSmtGuard?.keys?.length) return "Smart owner guard unavailable";
@@ -199,7 +187,11 @@ export default function LinkDualApiKeyModal({
     const _tx = txPending("Link Dual API Key");
     try {
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
+      // `executor` — see `linkDualApiKey.ts`'s own doc comment: value choice
+      // UNVERIFIED against the contract source (the Standard half's DALOS
+      // owner, the best-justified candidate available from this modal).
       const pactCode = buildLinkDualApiKeyPactCode({
+        executor: standardOwner,
         standardApollo: standardAccount.address,
         smartApollo: smartAccount.address,
         consumerLane: consumerLane.trim(),
@@ -346,14 +338,9 @@ export default function LinkDualApiKeyModal({
           processingContent: (<><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Processing…</>),
         }}
       >
-        {/* ── Zone 0 — Function Info (no-cost ClientInfo) ── */}
-        <FunctionInfoZone
-          key={consumerLane}
-          readId="INFO_LinkDualApiKey"
-          label="PYTHIA.PYTHIA|INFO_LinkDualApiKey"
-          pactCall={`(ouronet-ns.PYTHIA.PYTHIA|INFO_LinkDualApiKey "${standardAccount.address.slice(0, 12)}…" "${smartAccount.address.slice(0, 12)}…" "${consumerLane}")`}
-          fetcher={async () => await getLinkDualApiKeyInfo(args)}
-        />
+        {/* ── Zone 0 — Function Info (no-cost ClientInfo) ──
+            REMOVED (chain-symbol handoff, 2026-09-25) — see the removed
+            useEffect's comment above for why. */}
 
         {/* ── Zone 2 — Inputs (args 1–2 autonomous, arg 3 user-typed) ── */}
         <Zone2Wrapper

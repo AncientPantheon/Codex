@@ -5,17 +5,29 @@
  * pair, both authorized by BOTH half-owners (`P|TS`), both in the `TS01-C4` /
  * `PYTHIA` modules. Mirrors the local `deployApiKey.ts` seam.
  *
- *   RENAME  (ouronet-ns.TS01-C4.PYTHIA|C_UpdateDualConsumerLane patron dual-link-key new-name)
- *           INFO (ouronet-ns.PYTHIA.PYTHIA|INFO_UpdateDualConsumerLane patron dual-link-key new-name)
+ *   RENAME  (ouronet-ns.TS01-C4.PYTHIA|C_UpdateDualConsumerLane patron executor dual-link-key new-name)
+ *           INFO (ouronet-ns.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane patron dual-link-key new-name)  — verified, 3-arg, UNCHANGED
  *           → 100 STOA (UNDISCOUNTED), a 4-way split (same shape as account
  *             activation): `info.kadena["kadena-targets"]` (4 accounts) +
  *             `["kadena-split"]` (4 amounts) resolved to k:/c: receivers via
- *             `DALOS.UR_AccountKadena` — costs + receivers come from the chain, so
+ *             `DALOS.UR_AccountStoa` — costs + receivers come from the chain, so
  *             they never drift when the on-chain price/targets change.
  *
- *   REVOKE  (ouronet-ns.TS01-C4.PYTHIA|C_RevokeLink patron dual-link-key)
- *           INFO (ouronet-ns.PYTHIA.PYTHIA|INFO_UnlinkDualApiKey patron dual-link-key)
+ *   REVOKE  (ouronet-ns.TS01-C4.PYTHIA|C_RevokeLink patron executor dual-link-key)
+ *           INFO — REMOVED entirely, see RevokeDualLinkModal.tsx (neither
+ *           `PYTHIA.PYTHIA|INFO_UnlinkDualApiKey` nor the renamed candidate
+ *           `PYTHIA.INFO_PYTHIA|UnlinkDualApiKey` resolves on chain).
  *           → IGNIS-only (1 unit, or 0 when virtual gas is zero); no STOA split.
+ *
+ * `executor` (chain-symbol handoff, 2026-09-25) — both EXECUTE calls above
+ * were one argument short of their declared arity (`patron, executor,
+ * dual-link-key[, new-name]` per StoicSyntax-Prefixes.md §2.2). Arity/type
+ * tooling cannot verify WHICH account belongs in the new `executor` slot
+ * (only that one is now present) — this build passes the Standard half's
+ * DALOS owner (`standardOwner`, threaded in from each modal's own props),
+ * the same best-justified choice `linkDualApiKey.ts` documents for `C_Link`.
+ * VERIFY against the actual Pact contract source before this executes a
+ * real mainnet transaction.
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
@@ -38,7 +50,7 @@ export interface RenameDualLaneFullInfo {
   receivers: string[];
 }
 
-/** Full INFO for the rename — reads `PYTHIA|INFO_UpdateDualConsumerLane` AND
+/** Full INFO for the rename — reads `INFO_PYTHIA|UpdateDualConsumerLane` AND
  *  resolves the STOA-split target accounts to their k:/c: payment addresses in one
  *  `let*` (mirror of `getDeployApiKeyInfo`). */
 export async function getRenameDualLaneInfo(
@@ -49,8 +61,8 @@ export async function getRenameDualLaneInfo(
   try {
     const pactCode =
       `(let*` +
-      `  ((info (${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)}))` +
-      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountKadena) (at "kadena-targets" (at "kadena" info)))))` +
+      `  ((info (${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)}))` +
+      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
       `  { "info": info, "receivers": receivers })`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
@@ -68,7 +80,7 @@ export async function getRenameDualLaneInfoOnly(p: RenameDualLaneParams): Promis
   const { patron, dualLinkKey, newName } = p;
   if (!patron || !dualLinkKey || !newName) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)})`;
+    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)})`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;
@@ -79,9 +91,12 @@ export async function getRenameDualLaneInfoOnly(p: RenameDualLaneParams): Promis
   }
 }
 
-/** The rename EXECUTE Pact code. */
-export function buildRenameDualLanePactCode(p: RenameDualLaneParams): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_UpdateDualConsumerLane ${S(p.patron)} ${S(p.dualLinkKey)} ${S(p.newName)})`;
+/** The rename EXECUTE Pact code. `executor` — see module doc comment (value
+ *  choice UNVERIFIED against the contract source); a SEPARATE param from the
+ *  3-arg `RenameDualLaneParams` the (unchanged) INFO reads above use, since
+ *  only the EXECUTE call's declared arity grew. */
+export function buildRenameDualLanePactCode(p: RenameDualLaneParams & { executor: string }): string {
+  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_UpdateDualConsumerLane ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)} ${S(p.newName)})`;
 }
 
 // ── Revoke (kill-switch) — patron pays 1 IGNIS, no STOA split ────────────────
@@ -108,7 +123,8 @@ export async function getRevokeDualLinkInfoOnly(p: RevokeDualLinkParams): Promis
   }
 }
 
-/** The revoke EXECUTE Pact code. */
-export function buildRevokeDualLinkPactCode(p: RevokeDualLinkParams): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_RevokeLink ${S(p.patron)} ${S(p.dualLinkKey)})`;
+/** The revoke EXECUTE Pact code. `executor` — see module doc comment (value
+ *  choice UNVERIFIED against the contract source). */
+export function buildRevokeDualLinkPactCode(p: RevokeDualLinkParams & { executor: string }): string {
+  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_RevokeLink ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)})`;
 }

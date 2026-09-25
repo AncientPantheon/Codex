@@ -9,7 +9,7 @@
  * tagged account's guard also signs (ownership).
  *
  * Pact functions:
- *   INFO    — (ouronet-ns.CODEX.CODEX|INFO_RegisterStoicTag patron tag-name account)
+ *   INFO    — (ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag patron tag-name account)
  *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_RegisterStoicTag patron tag-name account)
  */
 
@@ -421,8 +421,8 @@ export default function RegisterStoicTagModal({
         <FunctionInfoZone
           key={(patronAccount?.address ?? "") + tagName}
           readId="INFO_RegisterStoicTag"
-          label="CODEX.CODEX|INFO_RegisterStoicTag"
-          pactCall={`(ouronet-ns.CODEX.CODEX|INFO_RegisterStoicTag "${(patronAccount?.address ?? "").slice(0, 16)}…" "§${tagName.slice(0, 12)}${tagName.length > 12 ? "…" : ""}" "${account.address.slice(0, 16)}…")`}
+          label="CODEX.INFO_CODEX|RegisterStoicTag"
+          pactCall={`(ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag "${(patronAccount?.address ?? "").slice(0, 16)}…" "§${tagName.slice(0, 12)}${tagName.length > 12 ? "…" : ""}" "${account.address.slice(0, 16)}…")`}
           fetcher={async () => (tagName ? (await getRegisterStoicTagInfo(patronAccount?.address ?? "", tagName, account.address))?.info ?? null : null)}
         />
 

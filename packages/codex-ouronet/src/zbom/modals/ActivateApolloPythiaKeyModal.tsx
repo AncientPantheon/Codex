@@ -511,8 +511,8 @@ export default function ActivateApolloPythiaKeyModal({
         <FunctionInfoZone
           key={patronAccount?.address ?? ""}
           readId="INFO_DeployApiKey"
-          label="PYTHIA.PYTHIA|INFO_DeployApiKey"
-          pactCall={`(ouronet-ns.PYTHIA.PYTHIA|INFO_DeployApiKey "${(patronAccount?.address ?? "").slice(0, 14)}…" "${(ownerAccount?.address ?? "").slice(0, 14)}…" "${account.address.slice(0, 14)}…" "${account.publicKey.slice(0, 12)}…")`}
+          label="PYTHIA.INFO_PYTHIA|DeployApiKey"
+          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|DeployApiKey "${(patronAccount?.address ?? "").slice(0, 14)}…" "${(ownerAccount?.address ?? "").slice(0, 14)}…" "${account.address.slice(0, 14)}…" "${account.publicKey.slice(0, 12)}…")`}
           fetcher={async () => await getDeployApiKeyInfoOnly(deployArgs)}
         />
 

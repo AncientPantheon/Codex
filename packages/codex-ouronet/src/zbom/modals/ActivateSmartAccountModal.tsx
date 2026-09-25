@@ -414,8 +414,8 @@ export default function ActivateSmartAccountModal({
         <FunctionInfoZone
           key={ouroAccount.address}
           readId="INFO_DeploySmartAccount"
-          label="DALOS-INFO|URC_DeploySmartAccount"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_DeploySmartAccount "${ouroAccount.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|DeploySmartAccount"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|DeploySmartAccount "${ouroAccount.address.slice(0, 20)}…")`}
           fetcher={() => getDeploySmartAccountInfoOnly(ouroAccount.address)}
         />
 

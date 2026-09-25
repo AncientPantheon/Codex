@@ -256,8 +256,8 @@ export default function RotatePaymentKeyModal({
         <FunctionInfoZone
           key={patronAccount?.address}
           readId="INFO_RotateStoaChain"
-          label="DALOS-INFO|URC_RotateStoaChain"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateStoaChain "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|RotateStoa"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateStoa "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
           fetcher={() => getRotateStoaChainInfo(patronAccount?.address ?? "", account.address)}
         />
 
@@ -279,7 +279,7 @@ export default function RotatePaymentKeyModal({
 
         {/* ── Zone 2 — Function Inputs ── */}
         <Zone2Wrapper
-          functionName="ouronet-ns.TS01-C1.DALOS|C_RotateStoaChain"
+          functionName="ouronet-ns.TS01-C1.DALOS|C_RotateStoa"
           functionMeta={{
             locations:      ["Settings -> Ouronet Account -> Rotate Payment Key"],
             name:           "Rotate Payment Key",

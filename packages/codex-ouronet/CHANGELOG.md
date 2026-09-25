@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.12.1 — 2026-09-25
+
+**PATCH — critical on-chain call-site fixes: several ZBOM reads/writes were
+calling functions that no longer exist (or never existed) on mainnet. Found
+via an external chain-symbol audit against mainnet (measured 2026-09-25,
+against package v0.11.0). No public API shape changes.**
+
+- **`INFO_` cost-preview reads had their two name segments swapped**
+  (`MODULE|INFO_Action` sent; chain wants `INFO_MODULE|Action`) — fixed for
+  `CODEX|INFO_RegisterStoicTag`, `CODEX|INFO_ReleaseStoicTag`,
+  `PYTHIA|INFO_DeployApiKey`, `PYTHIA|INFO_UpdateDualConsumerLane` (both the
+  live executed reads where this package builds the Pact string itself, and
+  the display-only `pactCall=`/`label=` strings shown in each ZBOM modal's
+  Function Info panel, everywhere both occur).
+- **Kadena→Stoa renames + a retired module**: `DALOS.UR_AccountKadena` /
+  `DALOS.UR_AccountStoaChain` → `DALOS.UR_AccountStoa`;
+  `TS01-C1.DALOS|C_RotateStoaChain` → `TS01-C1.DALOS|C_RotateStoa`; every
+  `INFO-ZERO.DALOS-INFO|URC_*` cost preview (DeploySmartAccount,
+  DeployStandardAccount, RotateGovernor, RotateGuard, RotateSovereign,
+  RotateStoaChain) → the corresponding `INFO-ONE.INFO_DALOS|*` function —
+  `INFO-ZERO` is deployed but now defines nothing else.
+- **Three EXECUTE (write) calls were one argument short of their declared
+  arity** (`patron, executor, executee` per `StoicSyntax-Prefixes.md` §2.2):
+  `PYTHIA|C_RevokeLink`, `PYTHIA|C_UpdateDualConsumerLane` (missing
+  `executor`, 2nd position), and `PYTHIA|C_Link` (missing `executor`, 1st
+  position — its one deliberately fee-free operation, not patron-paid).
+  These failed closed (`CAP_EnforceAccountOwnership` finding no account in
+  the missing slot) rather than executing with wrong authorization — but
+  they never executed at all. **The exact account passed as `executor` is a
+  best-justified placeholder (the Standard half's DALOS owner), NOT
+  independently chain-verified** — arity tooling can confirm the argument
+  COUNT is now right but not that the VALUE is; verify against the actual
+  Pact contract source before this executes a real mainnet transaction. See
+  the doc comments on `buildLinkDualApiKeyPactCode`, `buildRenameDualLanePactCode`,
+  and `buildRevokeDualLinkPactCode`.
+- **Two INFO reads could not be verified to exist under ANY name**
+  (`PYTHIA|INFO_LinkDualApiKey`, `PYTHIA|INFO_UnlinkDualApiKey`) — removed
+  entirely (the audit's own guidance: delete rather than guess-rename).
+  Removing the Link preview also fixed an independent, more severe bug it
+  was silently causing: `LinkDualApiKeyModal`'s "Link halves" button gated
+  on `info !== null`, and since that read always failed, the button could
+  **never become clickable at all** in production — not a fallback/display
+  issue, a fully non-functional feature.
+- **Not changed in this pass**: the seven `DPL-UR.URC_00*` selector/pricing
+  reads work today only because a HOST-installed transport shim
+  (OuronetUI's own) rewrites them to their `O-UI-SEVEN`/AppReads
+  replacements — fragile in any OTHER host, but not itself broken, and out
+  of scope here. Anything delegated to the external `@ouronet/ouronet-core`
+  package (e.g. the real EXECUTE+INFO for Rotate Payment Key, Rotate Guard,
+  Activate Standard/Smart, Register/Release StoicTag) is outside this
+  repo — only their display-only strings shown to the user were fixed here;
+  the actual on-chain call construction for those lives upstream.
+
 ## 0.12.0 — 2026-09-24
 
 **MINOR — Pantheonic-mobile compliance for every packaged tab/modal, plus a

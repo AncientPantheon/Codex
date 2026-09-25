@@ -9,7 +9,7 @@
  * FINALIZED on-chain surface (4 args — no consumer-lane; ONE ungated function
  * for both Standard ₱. and Smart Π.; the curve is encoded in the apollo account):
  *   EXECUTE  (ouronet-ns.TS01-C4.PYTHIA|C_DeployApiKey  patron owner-account apollo-account public)
- *   INFO     (ouronet-ns.PYTHIA.PYTHIA|INFO_DeployApiKey patron owner-account apollo-account public)
+ *   INFO     (ouronet-ns.PYTHIA.INFO_PYTHIA|DeployApiKey patron owner-account apollo-account public)
  *
  * Arg semantics: `patron` pays (standard patron procedure — patron ownership);
  * `owner-account` = the selected Ouronet account (its ownership signs);
@@ -39,7 +39,7 @@ export interface DeployApiKeyFullInfo {
 }
 
 /**
- * Full INFO for a Pythia deploy — reads `PYTHIA|INFO_DeployApiKey` AND resolves
+ * Full INFO for a Pythia deploy — reads `INFO_PYTHIA|DeployApiKey` AND resolves
  * the STOA-split target accounts (`kadena.kadena-targets`) to their k:/c:
  * payment addresses in one `let*` read (mirror of `getRegisterStoicTagInfo`).
  * `info.kadena.kadena-split` = amounts; used for the patron's `coin.TRANSFER`.
@@ -52,8 +52,8 @@ export async function getDeployApiKeyInfo(
   try {
     const pactCode =
       `(let*` +
-      `  ((info (${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}"))` +
-      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountKadena) (at "kadena-targets" (at "kadena" info)))))` +
+      `  ((info (${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}"))` +
+      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
       `  { "info": info, "receivers": receivers })`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
@@ -73,7 +73,7 @@ export async function getDeployApiKeyInfoOnly(
   const { patron, ownerAccount, apolloAccount, publicKey } = p;
   if (!patron || !ownerAccount || !apolloAccount || !publicKey) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.PYTHIA|INFO_DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}")`;
+    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}")`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;

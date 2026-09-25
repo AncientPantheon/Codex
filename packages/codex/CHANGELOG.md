@@ -2,6 +2,41 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.12.1 — 2026-09-25
+
+**PATCH — critical on-chain call-site fixes in `codex-ouronet`. Several ZBOM
+reads/writes were calling functions that no longer exist (or never existed)
+on mainnet, found via an external chain-symbol audit against mainnet
+(measured 2026-09-25, against package v0.11.0). No public API shape
+changes. `codex`-only release (`arweave-core` unchanged).**
+
+- **`INFO_` cost-preview reads had their two name segments swapped**
+  (`MODULE|INFO_Action` sent, chain wants `INFO_MODULE|Action`) — fixed for
+  RegisterStoicTag, ReleaseStoicTag, DeployApiKey, and UpdateDualConsumerLane's
+  cost previews.
+- **Kadena→Stoa renames + a retired module**: `UR_AccountKadena`/
+  `UR_AccountStoaChain` → `UR_AccountStoa`, `C_RotateStoaChain` →
+  `C_RotateStoa`, and every `INFO-ZERO`-hosted cost preview (Deploy Smart/
+  Standard Account, Rotate Governor/Guard/Sovereign/Payment Key) moved to
+  `INFO-ONE` — `INFO-ZERO` no longer defines them.
+- **Three write calls were one argument short of their declared arity**
+  (Revoke Dual API Key, Rename Dual Consumer Lane, Link Dual API Key) — all
+  three failed closed rather than executing with wrong authorization, but
+  none executed at all. Fixed with a best-justified `executor` argument that
+  is **not independently chain-verified** — see `@ancientpantheon/codex-ouronet`'s
+  own CHANGELOG for the full caveat before shipping a mainnet transaction
+  through these three flows.
+- **Removed** two cost-preview reads that could not be verified to exist
+  under any name (Link/Unlink Dual API Key) rather than guess-renaming them.
+  Removing the Link preview also fixed an independent bug: the "Link
+  halves" button could never become clickable at all in production, since
+  it waited on that same always-failing read.
+- Everything delegated to the external `@ouronet/ouronet-core` package
+  (Rotate Payment Key, Rotate Guard, Activate Standard/Smart Account,
+  Register/Release StoicTag's actual on-chain execute+info calls) is outside
+  this repo and unchanged here — only the display-only strings shown to the
+  user for those were corrected.
+
 ## 0.12.0 — 2026-09-24
 
 **MINOR — full Pantheonic-mobile compliance across the whole packaged UI

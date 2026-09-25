@@ -408,8 +408,8 @@ export default function ActivateStandardAccountModal({
         <FunctionInfoZone
           key={ouroAccount.address}
           readId="INFO_DeployStandardAccount"
-          label="DALOS-INFO|URC_DeployStandardAccount"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_DeployStandardAccount "${ouroAccount.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|DeployStandardAccount"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|DeployStandardAccount "${ouroAccount.address.slice(0, 20)}…")`}
           fetcher={() => getDeployStandardAccountInfoOnly(ouroAccount.address)}
         />
 

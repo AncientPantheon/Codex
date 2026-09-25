@@ -9,7 +9,7 @@
  * pipeline with `[patronGuard, chosenAccountBranchKeyset]`.
  *
  * Pact functions:
- *   INFO    — (ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateSovereign patron account)
+ *   INFO    — (ouronet-ns.INFO-ONE.INFO_DALOS|RotateSovereign patron account)
  *   EXECUTE — (ouronet-ns.TS01-C1.DALOS|C_RotateSovereign patron account new-sovereign)
  *
  * Zones:
@@ -223,14 +223,14 @@ export default function RotateSovereignModal({
     return () => { aborted = true; };
   }, [open, patronAccount?.address]);
 
-  // ── INFO fetch (URC_RotateSovereign — same shape as INFO-ZERO functions) ──
+  // ── INFO fetch (INFO_DALOS|RotateSovereign — same shape as INFO-ONE functions) ──
   useEffect(() => {
     if (!open || !patronAccount?.address || !account?.address) return;
     setLoadingInfo(true);
     setInfoData(null);
     let aborted = false;
     pactRead(
-      `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount.address}" "${account.address}")`,
+      `(${STOACHAIN_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateSovereign "${patronAccount.address}" "${account.address}")`,
       { tier: "T7" },
     )
       .then((res: any) => {
@@ -467,11 +467,11 @@ export default function RotateSovereignModal({
         <FunctionInfoZone
           key={patronAccount?.address}
           readId="INFO_RotateSovereign"
-          label="DALOS-INFO|URC_RotateSovereign"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|RotateSovereign"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateSovereign "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
           fetcher={async () => {
             const res = await pactRead(
-              `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateSovereign "${patronAccount?.address ?? ""}" "${account.address}")`,
+              `(${STOACHAIN_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateSovereign "${patronAccount?.address ?? ""}" "${account.address}")`,
               { tier: "T7" },
             );
             return (res as any)?.result?.data ?? null;

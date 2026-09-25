@@ -15,7 +15,7 @@
  * the governor branch is for direct on-chain operations and is dropped here.
  *
  * Pact functions:
- *   INFO    — (ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGovernor patron account)
+ *   INFO    — (ouronet-ns.INFO-ONE.INFO_DALOS|RotateGovernor patron account)
  *   EXECUTE — (ouronet-ns.TS01-C1.DALOS|C_RotateGovernor patron account governor-expr)
  *
  * Zones:
@@ -153,14 +153,14 @@ export default function RotateGovernorModal({
     return () => { aborted = true; };
   }, [open, patronAccount?.address]);
 
-  // ── INFO fetch (URC_RotateGovernor — same shape as INFO-ZERO functions) ──
+  // ── INFO fetch (INFO_DALOS|RotateGovernor — same shape as INFO-ONE functions) ──
   useEffect(() => {
     if (!open || !patronAccount?.address || !account?.address) return;
     setLoadingInfo(true);
     setInfoData(null);
     let aborted = false;
     pactRead(
-      `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateGovernor "${patronAccount.address}" "${account.address}")`,
+      `(${STOACHAIN_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateGovernor "${patronAccount.address}" "${account.address}")`,
       { tier: "T7" },
     )
       .then((res: any) => {
@@ -392,11 +392,11 @@ export default function RotateGovernorModal({
         <FunctionInfoZone
           key={patronAccount?.address}
           readId="INFO_RotateGovernor"
-          label="DALOS-INFO|URC_RotateGovernor"
-          pactCall={`(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGovernor "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
+          label="INFO_DALOS|RotateGovernor"
+          pactCall={`(ouronet-ns.INFO-ONE.INFO_DALOS|RotateGovernor "${(patronAccount?.address ?? "").slice(0, 20)}…" "${account.address.slice(0, 20)}…")`}
           fetcher={async () => {
             const res = await pactRead(
-              `(${STOACHAIN_NAMESPACE}.INFO-ZERO.DALOS-INFO|URC_RotateGovernor "${patronAccount?.address ?? ""}" "${account.address}")`,
+              `(${STOACHAIN_NAMESPACE}.INFO-ONE.INFO_DALOS|RotateGovernor "${patronAccount?.address ?? ""}" "${account.address}")`,
               { tier: "T7" },
             );
             return (res as any)?.result?.data ?? null;

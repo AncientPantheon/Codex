@@ -131,8 +131,8 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
     kind: "guard",
   },
   {
-    id: "UR_AccountStoaChain",
-    canonical: "ouronet-ns.DALOS.UR_AccountStoaChain",
+    id: "UR_AccountStoa",
+    canonical: "ouronet-ns.DALOS.UR_AccountStoa",
     helper: "getKadenaAccountOwner",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T5",
@@ -154,7 +154,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   // ── ZBOM operation cost (INFO) reads (T2, keystroke-debounced preview) ────────
   {
     id: "INFO_DeployStandardAccount",
-    canonical: "ouronet-ns.INFO-ZERO.DALOS-INFO|URC_DeployStandardAccount",
+    canonical: "ouronet-ns.INFO-ONE.INFO_DALOS|DeployStandardAccount",
     helper: "getDeployStandardAccountInfo",
     subpath: "@ouronet/ouronet-core/interactions/activateFunctions",
     tier: "T2",
@@ -163,7 +163,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_RegisterStoicTag",
-    canonical: "ouronet-ns.CODEX.CODEX|INFO_RegisterStoicTag",
+    canonical: "ouronet-ns.CODEX.INFO_CODEX|RegisterStoicTag",
     helper: "getRegisterStoicTagInfo",
     subpath: "@ouronet/ouronet-core/interactions/ouroAccountFunctions",
     tier: "T2",
@@ -172,7 +172,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_ReleaseStoicTag",
-    canonical: "ouronet-ns.CODEX.CODEX|INFO_ReleaseStoicTag",
+    canonical: "ouronet-ns.CODEX.INFO_CODEX|ReleaseStoicTag",
     helper: "(inline pactRead)",
     subpath: "@stoachain/stoa-core/reads",
     tier: "T2",
@@ -181,7 +181,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_RotateGovernor",
-    canonical: "ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGovernor",
+    canonical: "ouronet-ns.INFO-ONE.INFO_DALOS|RotateGovernor",
     helper: "(inline pactRead)",
     subpath: "@stoachain/stoa-core/reads",
     tier: "T2",
@@ -190,7 +190,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_RotateSovereign",
-    canonical: "ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateSovereign",
+    canonical: "ouronet-ns.INFO-ONE.INFO_DALOS|RotateSovereign",
     helper: "(inline pactRead)",
     subpath: "@stoachain/stoa-core/reads",
     tier: "T2",
@@ -199,7 +199,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_RotateGuard",
-    canonical: "ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGuard",
+    canonical: "ouronet-ns.INFO-ONE.INFO_DALOS|RotateGuard",
     helper: "(inline pactRead)",
     subpath: "@stoachain/stoa-core/reads",
     tier: "T2",
@@ -208,7 +208,7 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "INFO_RotateStoaChain",
-    canonical: "ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateStoaChain",
+    canonical: "ouronet-ns.INFO-ONE.INFO_DALOS|RotateStoa",
     helper: "(inline pactRead)",
     subpath: "@stoachain/stoa-core/reads",
     tier: "T2",

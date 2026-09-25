@@ -7,7 +7,7 @@
  * guard. `tag-name` is sent BARE (no § sigil — the sigil is a UI marker).
  *
  * Pact functions:
- *   INFO    — (ouronet-ns.CODEX.CODEX|INFO_ReleaseStoicTag patron tag-name)
+ *   INFO    — (ouronet-ns.CODEX.INFO_CODEX|ReleaseStoicTag patron tag-name)
  *   EXECUTE — (ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag patron tag-name)
  *
  * Cost: IGNIS only — 1 per glyph of the tag (surfaced by INFO).
@@ -142,7 +142,7 @@ export default function ReleaseStoicTagModal({
     setInfoData(null);
     let aborted = false;
     pactRead(
-      `(${STOACHAIN_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount.address}" "${tagName}")`,
+      `(${STOACHAIN_NAMESPACE}.CODEX.INFO_CODEX|ReleaseStoicTag "${patronAccount.address}" "${tagName}")`,
       { tier: "T7" },
     )
       .then((res: any) => { if (!aborted) setInfoData(res?.result?.data ?? null); })
@@ -355,11 +355,11 @@ export default function ReleaseStoicTagModal({
         <FunctionInfoZone
           key={patronAccount?.address}
           readId="INFO_ReleaseStoicTag"
-          label="CODEX.CODEX|INFO_ReleaseStoicTag"
-          pactCall={`(ouronet-ns.CODEX.CODEX|INFO_ReleaseStoicTag "${(patronAccount?.address ?? "").slice(0, 20)}…" "§${tagName.slice(0, 16)}${tagName.length > 16 ? "…" : ""}")`}
+          label="CODEX.INFO_CODEX|ReleaseStoicTag"
+          pactCall={`(ouronet-ns.CODEX.INFO_CODEX|ReleaseStoicTag "${(patronAccount?.address ?? "").slice(0, 20)}…" "§${tagName.slice(0, 16)}${tagName.length > 16 ? "…" : ""}")`}
           fetcher={async () => {
             const res = await pactRead(
-              `(${STOACHAIN_NAMESPACE}.CODEX.CODEX|INFO_ReleaseStoicTag "${patronAccount?.address ?? ""}" "${tagName}")`,
+              `(${STOACHAIN_NAMESPACE}.CODEX.INFO_CODEX|ReleaseStoicTag "${patronAccount?.address ?? ""}" "${tagName}")`,
               { tier: "T7" },
             );
             return (res as any)?.result?.data ?? null;

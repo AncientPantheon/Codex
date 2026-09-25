@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.12.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.12.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.12.1** — Critical on-chain call-site fixes in `codex-ouronet`, found via an external chain-symbol audit against mainnet. Several ZBOM cost-preview reads had their `INFO_` name segments swapped (`MODULE|INFO_Action` sent, chain wants `INFO_MODULE|Action`); several others referenced retired Kadena-named/`INFO-ZERO`-hosted functions that have since moved to their Stoa-named/`INFO-ONE` equivalents; three write calls (Revoke/Rename/Link Dual API Key) were one argument short of their declared arity and failed closed instead of executing at all — fixed with a best-justified `executor` argument that is **not independently chain-verified** (see `codex-ouronet`'s own CHANGELOG before shipping a mainnet transaction through these three flows); two cost-preview reads that couldn't be verified to exist under any name were removed rather than guess-renamed, which also fixed an independent bug where the Link Dual API Key button could never become clickable at all. No public API shape changes. `codex`-only release (`arweave-core` unchanged).
 
 **v0.12.0** — Full Pantheonic-mobile compliance across the whole packaged UI surface (`codex-ui` + `codex-ouronet`'s UI + `codex-arweave`'s panel), so the whole thing degrades correctly when embedded in a host that only hands it a portion of the screen (e.g. OuronetUI), not just when running full-viewport standalone. New shared mobile primitives in `codex-ui` (container-relative `useIsMobile`, `SwipeDeck`, the Controls riser/drawer pattern, `EdgeRail`, and `CodexModalShell`'s full-screen-on-mobile flip). Every packaged tab (Seed Words, Pure Keypairs, Ouronet Accounts, Address Book on the Chainweb side; Pure Keys, Seeds, Accounts on the Arweave side) got mobile-specific layouts, and — the headline pattern — tapping a row now opens its detail as a genuine full-screen page instead of an inline expand bounded to a small on-screen zone. ZBOM action modals (Rotate/Activate/etc.) now stack correctly on top of that full-screen view and go edge-to-edge full-screen on mobile too. Stoa Dalos and Arweave seeds can now persist a separately-encrypted `wordsSecret` so a seed created from typed/generated words shows those same words back on later reveal. The header debouncer gained the "What is this?" full-screen explainer present in the original OuronetUI implementation (a labeled pill, not an easy-to-miss icon), and its per-tier hover tooltip no longer clips when mounted inside a bounded host rectangle. Also adds Send AR's Super Max (a riskier full-wallet-sweep mode using the exact live fee, no buffer). No breaking changes. `codex`-only release (`arweave-core` unchanged).
 
@@ -67,7 +69,7 @@ Version `0.12.0` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.3.0` |
 | `@ancientpantheon/codex-ui` | `0.6.0` |
-| `@ancientpantheon/codex-ouronet` | `0.12.0` |
+| `@ancientpantheon/codex-ouronet` | `0.12.1` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

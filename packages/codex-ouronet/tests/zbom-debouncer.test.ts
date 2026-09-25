@@ -67,7 +67,7 @@ describe("parseIgnisInfo", () => {
 });
 
 describe("useZbomInfoRead", () => {
-  const CODE = '(ouronet-ns.INFO-ZERO.DALOS-INFO|URC_RotateGuard "Ѻ.A" "Ѻ.A")';
+  const CODE = '(ouronet-ns.INFO-ONE.INFO_DALOS|RotateGuard "Ѻ.A" "Ѻ.A")';
 
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
