@@ -103,13 +103,12 @@ export const CODEX_READ_REGISTRY: readonly CodexReadFn[] = [
   },
   {
     id: "URC_0031",
-    // CONFIRMED BROKEN on mainnet (DPL-UR archived) — the replacement name
-    // IS now known (follow-up handoff, 2026-09-25): `P-UI-ONE.URC_01|ApiKeys`.
-    // NOT switched yet — it ships in `PureV2/19`, not yet deployed as of this
-    // audit; the handoff is explicit: "do not switch the last three until
-    // the owner confirms it is deployed." See deployApiKey.ts's own doc
-    // comment on `getApiKeySelectorData` for the flip-the-switch TODO.
-    canonical: "ouronet-ns.DPL-UR.URC_0031",
+    // DPL-UR archived; switched to the confirmed-deployed `P-UI-ONE.URC_01|
+    // ApiKeys` (follow-up handoff, 2026-09-25 — PureV2/19 now confirmed
+    // live: a real Apollo account returns `is-registered: true` with its
+    // actual row). See deployApiKey.ts's own doc comment on
+    // `getApiKeySelectorData`.
+    canonical: "ouronet-ns.P-UI-ONE.URC_01|ApiKeys",
     helper: "getApiKeySelectorData",
     subpath: "codex-ouronet/zbom/pythia/deployApiKey (interim; upstream to ouronet-core)",
     tier: "T5",

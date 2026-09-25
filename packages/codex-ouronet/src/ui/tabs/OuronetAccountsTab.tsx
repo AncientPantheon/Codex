@@ -443,9 +443,10 @@ function AccountRow({
    *  (StandardCodexID/SmartCodexID + original), locked + non-deletable. */
   primeName?: string;
   /** The Pythia registration row for this Apollo, from the tab-level batch read
-   *  (DPL-UR.URC_0031 — CONFIRMED BROKEN on mainnet, DPL-UR archived, no
-   *  confirmed O-UI-SEVEN replacement; see `deployApiKey.ts`'s doc comment
-   *  on `getApiKeySelectorData`). `null` = observational; undefined until loaded. */
+   *  (`P-UI-ONE.URC_01|ApiKeys` — DPL-UR chain-symbol audit, 2026-09-25:
+   *  switched from the archived `DPL-UR.URC_0031`; see `deployApiKey.ts`'s
+   *  doc comment on `getApiKeySelectorData`). `null` = observational;
+   *  undefined until loaded. */
   apiKeyRow?: ApiKeyRow | null;
   apiKeyLoaded?: boolean;
   /**
@@ -1159,11 +1160,11 @@ export function OuronetAccountsTab({ className, paginationRiserTarget, swipeIndi
   // manual reload. useAccountChainData wires the same nonce for URC_0027.
   const txNonce = usePostTxRefresh();
 
-  // Batch Pythia registration read (DPL-UR.URC_0031 — CONFIRMED BROKEN, see
-  // `deployApiKey.ts`'s doc comment on `getApiKeySelectorData`) — ONE chain
-  // call for ALL Apollo accounts, index-aligned. Builds apolloAddress → row
-  // so each row shows registered vs observational without its own per-row
-  // read.
+  // Batch Pythia registration read (`P-UI-ONE.URC_01|ApiKeys` — switched
+  // from the archived `DPL-UR.URC_0031`, see `deployApiKey.ts`'s doc
+  // comment on `getApiKeySelectorData`) — ONE chain call for ALL Apollo
+  // accounts, index-aligned. Builds apolloAddress → row so each row shows
+  // registered vs observational without its own per-row read.
   const apolloAddrs = useMemo(
     () => accounts.filter((a) => detectOriginCurve(a) === "apollo").map((a) => a.address),
     [accounts],

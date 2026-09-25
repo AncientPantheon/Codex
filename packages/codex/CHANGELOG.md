@@ -2,6 +2,22 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.12.4 — 2026-09-25
+
+**PATCH — the last 3 `DPL-UR.URC_00*` reads in `codex-ouronet` switched to
+their `P-UI-ONE` replacements, now confirmed deployed on mainnet. Fixes the
+Single API / Dual API tabs, which were silently rendering the archived
+read's failure as "not deployed" / "0" against real on-chain data (live
+mainnet evidence: twelve registered keys and six active dual links). `codex`
+-only release (`arweave-core` unchanged).**
+
+- `getApiKeySelectorData`, `getDualApiKeySelectorData`, `getPythiaPrices`
+  now read `P-UI-ONE.URC_01|ApiKeys` / `URC_02|DualLinks` / `URC_03|Prices`
+  directly — same shape as before, only the module/function name changed.
+- `getPythiaPrices` keeps a separate, still-unconfirmed caveat: an
+  owner-side pricing-table init gap may still make it fail even with the
+  correct name. See `@ancientpantheon/codex-ouronet`'s own CHANGELOG.
+
 ## 0.12.3 — 2026-09-25
 
 **PATCH — genuine functional fix in `codex-ouronet`: 4 of the 7

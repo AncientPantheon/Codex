@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.12.4 — 2026-09-25
+
+**PATCH — the last 3 `DPL-UR.URC_00*` reads switched to their `P-UI-ONE`
+replacements, now that deployment is confirmed. Owner follow-up handoff:
+"v0.12.3 standalone is calling a function that was deleted" — live mainnet
+evidence: `ouronet-ns.P-UI-ONE.URC_01|ApiKeys […]` returns real registered
+rows while the old `DPL-UR.URC_0031` errors with "no such member," and the
+standalone UI was rendering that failure as `0 deployed` / `Dual API (0)`
+against twelve live keys and six live links.**
+
+- **`getApiKeySelectorData`** (`DPL-UR.URC_0031` → `P-UI-ONE.URC_01|ApiKeys`),
+  **`getDualApiKeySelectorData`** (`DPL-UR.URC_0033_DualApiKeyMapper` →
+  `P-UI-ONE.URC_02|DualLinks`), **`getPythiaPrices`**
+  (`DPL-UR.URC_0034_PythiaPrices` → `P-UI-ONE.URC_03|Prices`) — all three in
+  `zbom/pythia/deployApiKey.ts` — now read the confirmed-deployed
+  `P-UI-ONE` module directly. Same arg-list/key-shape as before ("change
+  the name, change nothing else"); no type changes needed. This is the
+  actual fix for the Single API / Dual API tabs, which were silently
+  rendering the archived read's failure as "not deployed" / "0" against
+  real on-chain data.
+- **`getPythiaPrices` keeps a separate caveat**: `DALOS|PricesTable` had no
+  `stoa|price` row as of the original audit (an owner-side init gap
+  `PYTHIA::UR_DeployPrice` depends on) — this rename does not by itself fix
+  that; there is no independent confirmation the gap has closed.
+- **Re-verified**: the `INFO_` name-order swaps, Kadena→Stoa renames,
+  `INFO-ZERO`→`INFO-ONE` moves, the two removed unresolvable INFO reads,
+  and the three arity-fixed write calls from 0.12.1 are all still correctly
+  in place — this handoff's "also broken in the same build" section
+  restated them, but none had regressed.
+
 ## 0.12.3 — 2026-09-25
 
 **PATCH — genuine functional fix: 4 of the 7 `DPL-UR.URC_00*` reads are now

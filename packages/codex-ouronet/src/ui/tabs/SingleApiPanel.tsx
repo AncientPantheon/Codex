@@ -4,13 +4,12 @@
  * Two columns of the codex's own Apollo halves — Standard (₱., left) and Smart
  * (Π., right) — each with its own search + pagination. Each half shows its
  * on-chain API-key status (not deployed / UNLINKED / LINKED) from the shared
- * `DPL-UR.URC_0031` batch read (`ApiKeyRow.counterpart === "BAR"` ⇒ unlinked).
- * CONFIRMED BROKEN (DPL-UR chain-symbol audit, 2026-09-25) — DPL-UR is
- * archived and this read no longer resolves on mainnet. Replacement now
- * NAMED (follow-up handoff, 2026-09-25) — `P-UI-ONE.URC_01|ApiKeys` — but
- * NOT switched yet (ships in `PureV2/19`, not confirmed deployed); see
- * `deployApiKey.ts`'s own doc comment on `getApiKeySelectorData` for the
- * flip-the-switch TODO.
+ * `P-UI-ONE.URC_01|ApiKeys` batch read (`ApiKeyRow.counterpart === "BAR"` ⇒
+ * unlinked). DPL-UR chain-symbol audit (2026-09-25, confirmed-deployed
+ * follow-up): the archived `DPL-UR.URC_0031` no longer resolves on mainnet
+ * — switched to `P-UI-ONE.URC_01|ApiKeys` (`PureV2/19`, now confirmed
+ * deployed); see `deployApiKey.ts`'s own doc comment on
+ * `getApiKeySelectorData`.
  *
  * The user picks ONE unlinked Standard + ONE unlinked Smart (click a selected
  * half again to deselect); a selection bar then surfaces the pending composite

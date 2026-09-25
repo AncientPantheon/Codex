@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.12.3` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.12.4` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.12.4** — The last 3 `DPL-UR.URC_00*` reads in `codex-ouronet` switched to their `P-UI-ONE` replacements, now confirmed deployed on mainnet. Fixes the Single API / Dual API tabs, which were silently rendering the archived read's failure as "not deployed" / "0" against real on-chain data. `codex`-only release (`arweave-core` unchanged).
 
 **v0.12.3** — Genuine functional fix in `codex-ouronet`: 4 of the 7 `DPL-UR.URC_00*` reads are now read LIVE from `O-UI-SEVEN` directly (new package-local interim implementations), bypassing the still-unpatched external `@ouronet/ouronet-core` dependency. Ouronet Accounts tab hydration, the Stoa Accounts balance summary, and Address Book StoicTag status resolution all read live chain data again. The remaining 3 (Pythia registration/dual-link/pricing) are now named but deliberately not switched — they ship in a not-yet-confirmed-deployed chain release. `codex`-only release (`arweave-core` unchanged).
 
@@ -73,7 +75,7 @@ Version `0.12.3` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.3.0` |
 | `@ancientpantheon/codex-ui` | `0.6.0` |
-| `@ancientpantheon/codex-ouronet` | `0.12.3` |
+| `@ancientpantheon/codex-ouronet` | `0.12.4` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

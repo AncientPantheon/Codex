@@ -4,15 +4,14 @@
  * Lists the codex's mutually-linked dual API keys — a registered Standard (₱.)
  * half whose `counterpart` points at a Smart (Π.) half. Each such pair forms the
  * composite `<standard>|<smart>` (standard first, the on-chain `PYTHIA|T|DualLinks`
- * key), read via `DPL-UR.URC_0033_DualApiKeyMapper` (→ per-key
+ * key), read via `P-UI-ONE.URC_02|DualLinks` (→ per-key
  * `PYTHIA.UR_DualLinkRowOrNull`). The Pythia deploy/rename STOA prices come from
- * `DPL-UR.URC_0034_PythiaPrices`. CONFIRMED BROKEN (DPL-UR chain-symbol
- * audit, 2026-09-25) — DPL-UR is archived and neither call resolves on
- * mainnet. Replacements are now NAMED (follow-up handoff, 2026-09-25) —
- * `P-UI-ONE.URC_02|DualLinks` / `URC_03|Prices` — but NOT switched yet
- * (ships in `PureV2/19`, not confirmed deployed); see `deployApiKey.ts`'s
- * own doc comments on `getDualApiKeySelectorData` / `getPythiaPrices` for
- * the flip-the-switch TODOs.
+ * `P-UI-ONE.URC_03|Prices`. DPL-UR chain-symbol audit (2026-09-25,
+ * confirmed-deployed follow-up): the archived `DPL-UR.URC_0033_DualApiKeyMapper`
+ * / `URC_0034_PythiaPrices` no longer resolve on mainnet — switched to
+ * `P-UI-ONE` (`PureV2/19`, now confirmed deployed); see `deployApiKey.ts`'s
+ * own doc comments on `getDualApiKeySelectorData` / `getPythiaPrices`
+ * (pricing has a SEPARATE, not-yet-confirmed-fixed init-gap caveat).
  *
  * ITERATION 1: the dual-link row is rendered DEFENSIVELY — the documented fields
  * (standard-apollo / smart-apollo / consumer-lane / iz-active) are labelled, and
