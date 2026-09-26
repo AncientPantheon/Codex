@@ -214,10 +214,16 @@ export function CodexSettingsSection({
       cards: (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <ConsumerSettingsCard consumerName={consumerName} />
+          {/* Was "Experimental Curves" / "observational" (warning-colored) —
+              retired 2026-09-26, owner ruling: Apollo (₱./Π.) has graduated
+              from experimental to always-on, representing both Pythia API
+              keys and Codex halves. Relabeled + recolored so this section
+              stops implying a live, user-controllable gate that no longer
+              exists — see ExperimentalCurvesCard's own doc comment. */}
           <div
             style={{
               borderRadius: "var(--codex-radius)",
-              border: "1px solid var(--codex-warning)",
+              border: "1px solid var(--codex-success)",
               padding: "16px",
             }}
           >
@@ -235,21 +241,21 @@ export function CodexSettingsSection({
                   fontWeight: 700,
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
-                  color: "var(--codex-warning)",
+                  color: "var(--codex-success)",
                 }}
               >
-                Experimental Curves
+                Apollo Curve
               </span>
               <span
                 style={{
                   fontSize: "10px",
                   padding: "1px 8px",
                   borderRadius: "999px",
-                  color: "var(--codex-warning)",
-                  border: "1px solid var(--codex-warning)",
+                  color: "var(--codex-success)",
+                  border: "1px solid var(--codex-success)",
                 }}
               >
-                observational
+                graduated
               </span>
             </div>
             <ExperimentalCurvesCard />

@@ -2,6 +2,21 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.14.1 — 2026-09-26
+
+**PATCH — the Advanced settings page's Apollo Curve section retired as a
+misleading toggle. Owner ruling: Apollo (₱./Π.) has graduated from
+experimental to always-on — it represents both Pythia API keys and Codex
+halves — so the settings page must stop presenting it as something the
+user can enable/disable. `ExperimentalCurvesCard` (`codex-ui`) is now a
+static "Graduated · Always On" status display instead of a live toggle
+button; the Advanced tab's wrapping section (`codex-ouronet`) relabeled
+from "Experimental Curves"/"observational" to "Apollo Curve"/"graduated".
+No behavior change to account creation itself — Apollo was already
+unconditionally offered in Spawn Account before this release, only the
+settings-page COPY was still implying otherwise. `codex-ui` +
+`codex-ouronet` release (`arweave-core`/`codex-arweave` unchanged).**
+
 ## 0.14.0 — 2026-09-26
 
 **MINOR — cross-checked an incoming "16 of 20 chain calls are broken" handoff against

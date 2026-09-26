@@ -187,6 +187,7 @@ export const PACT_SIGNATURES: Readonly<Record<string, readonly string[]>> = {
   "INFO-ONE.INFO_DPTF|BulkTransfer": ["patron", "id", "sender", "receiver-lst", "transfer-amount-lst"],
   "INFO-ONE.INFO_DPTF|Burn": ["patron", "id", "account", "amount"],
   "INFO-ONE.INFO_DPTF|ClearDispo": ["patron", "account"],
+  "INFO-ONE.INFO_DPTF|ClearDispoForeign": ["patron", "executor", "executee"],
   "INFO-ONE.INFO_DPTF|Control": ["patron", "id"],
   "INFO-ONE.INFO_DPTF|DeployAccount": ["patron", "id", "account"],
   "INFO-ONE.INFO_DPTF|DonateFees": ["patron", "id"],

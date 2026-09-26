@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.1 — 2026-09-26
+
+**PATCH — `ExperimentalCurvesCard` retired as a toggle. Owner ruling: "the
+Apollo Curve is always on because it represents both Pythia APIs and Codex
+halves. so its graduated from experimental to in use. so the page at
+advanced must reflect this."**
+
+- The card's own copy already said Apollo was unconditionally available
+  regardless of the toggle, but it still rendered a clickable "Enable/Disable
+  Experimental Curves" button wired to `uiSettings.experimentalCurvesEnabled`
+  — actively misleading, since clicking it flipped a flag nothing reads
+  anymore and implied a control the user does not actually have.
+- Now a static status display: a "Graduated · Always On" badge (success
+  color) plus explanatory copy — no button, no store read/write. The
+  underlying `uiSettings.experimentalCurvesEnabled` flag and its `false`
+  default are untouched (`@ancientpantheon/codex-ouronet`'s `types/entities.ts`)
+  — still reserved as an inert seam for a genuinely future experimental
+  curve, per the original design; only this card's presentation changed.
+
 ## 0.7.0 — 2026-09-25
 
 **MINOR — `CodexModalShell` gained an optional `zIndex` override prop

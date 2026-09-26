@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.14.1 — 2026-09-26
+
+**PATCH — the Advanced settings page's "Experimental Curves" section
+relabeled to reflect Apollo's graduation. Owner ruling: "the Apollo Curve
+is always on because it represents both Pythia APIs and Codex halves. so
+its graduated from experimental to in use. so the page at advanced must
+reflect this."**
+
+- `CodexSettingsSection.tsx`'s Advanced tab wrapped `ExperimentalCurvesCard`
+  in a warning-colored box labeled "Experimental Curves" / "observational" —
+  now "Apollo Curve" / "graduated" (success-colored), matching the card's
+  own new static-status presentation (see `@ancientpantheon/codex-ui`'s own
+  CHANGELOG, v0.7.1, for that half of the change).
+- Fixed a stale, directly-contradictory doc comment in `SpawnAccountModal.tsx`
+  that still said "APOLLO gated on the experimental-curves toggle" — the
+  actual render logic a few lines below it already unconditionally offers
+  both curves (confirmed unchanged this round; this was a comment-only fix).
+- Regenerated `scripts/pact-signatures.full.json` /
+  `src/constants/pactSignatures.generated.ts` — the drift guard
+  (`tests/pact-signatures.test.ts`, new in 0.14.0) caught the committed
+  manifest one function behind the live `.pact` source tree
+  (`INFO-ONE.INFO_DPTF|ClearDispoForeign`, unrelated to this round's own
+  change) and this is the regeneration that resolves it.
+
 ## 0.14.0 — 2026-09-26
 
 **MINOR — cross-checked an incoming "16 of 20 chain calls are broken" handoff against

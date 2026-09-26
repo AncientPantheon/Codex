@@ -4,8 +4,12 @@
  *
  * EncryptionCard derives V1/V2 status from the codex secrets (read-only via
  * stoa-core's allEncryptedV2) and delegates the upgrade to a consumer seam.
- * ExperimentalCurvesCard reads/writes uiSettings.experimentalCurvesEnabled
- * through the store's updateUiSettings action. Phase-14 harness throughout.
+ *
+ * ExperimentalCurvesCard — RETIRED AS A TOGGLE (owner ruling, 2026-09-26):
+ * Apollo has graduated from experimental to always-on, so the card no
+ * longer reads or writes `uiSettings.experimentalCurvesEnabled` — it is a
+ * static status display now, no button, no store interaction. Phase-14
+ * harness throughout.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -127,35 +131,23 @@ describe("<EncryptionCard>", () => {
 });
 
 describe("<ExperimentalCurvesCard>", () => {
-  it("reads the disabled state from uiSettings and enables it on toggle (writes experimentalCurvesEnabled)", async () => {
+  it("shows a static 'Graduated · Always On' status — no toggle button at all", async () => {
     await renderUnder(<ExperimentalCurvesCard />);
-    // Default uiSettings.experimentalCurvesEnabled is false.
-    expect(screen.getByText(/disabled/i)).toBeTruthy();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /enable experimental curves/i }),
-    );
-
-    // The toggle writes through updateUiSettings → the store slice flips,
-    // which re-renders the badge to "Enabled".
-    expect(await screen.findByText(/^enabled$/i)).toBeTruthy();
-    await waitFor(() =>
-      expect(
-        capturedStore!.getState().uiSettings.experimentalCurvesEnabled,
-      ).toBe(true),
-    );
+    expect(screen.getByText("Graduated · Always On")).toBeTruthy();
+    // The old Enable/Disable Experimental Curves button is gone entirely —
+    // there is nothing left on this card to click.
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("reflects an already-enabled state from persisted uiSettings", async () => {
+  it("does not read or write uiSettings.experimentalCurvesEnabled — its display is identical regardless of the flag's value", async () => {
     await renderUnder(<ExperimentalCurvesCard />);
+    const before = screen.getByText("Graduated · Always On").textContent;
     await act(async () => {
       await capturedStore!
         .getState()
         .actions.updateUiSettings({ experimentalCurvesEnabled: true });
     });
-    expect(await screen.findByText(/^enabled$/i)).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /disable experimental curves/i }),
-    ).toBeTruthy();
+    // Flipping the (now purely reserved) flag changes nothing on screen.
+    expect(screen.getByText("Graduated · Always On").textContent).toBe(before);
   });
 });

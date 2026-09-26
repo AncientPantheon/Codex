@@ -13242,6 +13242,11 @@
 "patron",
 "account"
 ],
+"INFO-ONE.INFO_DPTF|ClearDispoForeign": [
+"patron",
+"executor",
+"executee"
+],
 "INFO-ONE.INFO_DPTF|Control": [
 "patron",
 "id"

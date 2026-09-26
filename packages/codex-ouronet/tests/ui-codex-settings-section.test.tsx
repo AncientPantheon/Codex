@@ -67,11 +67,10 @@ describe("<CodexSettingsSection>", () => {
     expect(screen.getByText("Download Codex")).toBeTruthy();
     expect(screen.getByText("Codex Info")).toBeTruthy();
 
-    // Advanced tab — experimental curves + consumer settings.
+    // Advanced tab — Apollo Curve (graduated status) + consumer settings.
     goTab("Advanced");
-    expect(
-      screen.getByRole("button", { name: /enable experimental curves/i }),
-    ).toBeTruthy();
+    expect(screen.getByText("Apollo Curve")).toBeTruthy();
+    expect(screen.getByText("Graduated · Always On")).toBeTruthy();
   });
 
   it("opens a chosen tab via the initialTab prop", async () => {

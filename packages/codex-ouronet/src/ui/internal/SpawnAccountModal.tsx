@@ -1,8 +1,10 @@
 /**
  * SpawnAccountModal — Redux-free port of OuronetUI's CreateOuroAccount. Spawns a
  * Standard (Ѻ./₱.) or Smart (Σ./Π.) Ouronet account into the codex store. Full
- * option surface: DALOS Genesis / APOLLO curve select (APOLLO gated on the
- * experimental-curves toggle), seven key-derivation modes (Chainweaver-12 /
+ * option surface: DALOS Genesis / APOLLO curve select (APOLLO graduated from
+ * experimental to always-on — owner ruling, 2026-09-26 — always selectable,
+ * not gated by the retired experimental-curves toggle), seven key-derivation
+ * modes (Chainweaver-12 /
  * DALOS-Custom / Koala-24 seed words + Bitmap / BitString / Base-10 / Base-49
  * direct key input), a live derived-address preview, name + password, and
  * encrypted-at-rest account creation.

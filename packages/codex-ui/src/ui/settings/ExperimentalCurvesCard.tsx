@@ -2,16 +2,23 @@
  * ExperimentalCurvesCard — token-styled port of OuronetUI's
  * ExperimentalCurvesCardContent.
  *
- * Toggle-based gate for the APOLLO experimental primitive. Reads the current
- * flag from `useCodex().uiSettings.experimentalCurvesEnabled` and writes it
- * via the store's `updateUiSettings` action (reached through useCodexStore —
- * the same internal-store seam the per-entity hooks use). No Redux. Styled
- * via `--codex-*` tokens.
+ * RETIRED AS A TOGGLE (owner ruling, 2026-09-26): "the Apollo Curve is
+ * always on because it represents both Pythia APIs and Codex halves. so
+ * its graduated from experimental to in use." Apollo (₱./Π.) is no longer
+ * an opt-in primitive — `SpawnAccountModal` already renders it
+ * unconditionally alongside DALOS Genesis, regardless of
+ * `uiSettings.experimentalCurvesEnabled`. Presenting an "Enable/Disable
+ * Experimental Curves" BUTTON here was actively misleading: clicking it
+ * flipped a flag nothing reads anymore, implying a control the user does
+ * not actually have. This card is now a static status display — no
+ * read/write of `experimentalCurvesEnabled`, no click target.
+ *
+ * The flag itself (`uiSettings.experimentalCurvesEnabled`,
+ * `types/entities.ts`) is UNTOUCHED — still declared, still defaulted to
+ * `false` — reserved as an inert seam for a genuinely future experimental
+ * curve, per the original design. Only THIS PAGE's presentation changes:
+ * it must stop implying Apollo is conditional when it is not.
  */
-
-import { useCallback } from "react";
-import { useCodex } from "../../hooks/useCodex.js";
-import { useCodexStore } from "../../provider/index.js";
 
 export interface ExperimentalCurvesCardProps {
   className?: string;
@@ -20,16 +27,6 @@ export interface ExperimentalCurvesCardProps {
 export function ExperimentalCurvesCard({
   className,
 }: ExperimentalCurvesCardProps) {
-  const { uiSettings } = useCodex();
-  const store = useCodexStore();
-  const enabled = uiSettings.experimentalCurvesEnabled === true;
-
-  const toggle = useCallback(() => {
-    void store
-      .getState()
-      .actions.updateUiSettings({ experimentalCurvesEnabled: !enabled });
-  }, [store, enabled]);
-
   return (
     <div
       className={className}
@@ -55,13 +52,11 @@ export function ExperimentalCurvesCard({
             fontWeight: 500,
             padding: "2px 10px",
             borderRadius: "999px",
-            color: enabled ? "var(--codex-warning)" : "var(--codex-text-dim)",
-            border: `1px solid ${
-              enabled ? "var(--codex-warning)" : "var(--codex-border)"
-            }`,
+            color: "var(--codex-success)",
+            border: "1px solid var(--codex-success)",
           }}
         >
-          {enabled ? "Enabled" : "Disabled"}
+          Graduated · Always On
         </span>
       </div>
 
@@ -75,38 +70,16 @@ export function ExperimentalCurvesCard({
           padding: "8px",
         }}
       >
-        <strong style={{ color: "var(--codex-warning)" }}>
-          No experimental curves are currently gated.
-        </strong>{" "}
         The{" "}
-        <strong style={{ color: "var(--codex-warning)" }}>APOLLO 1024-bit</strong>{" "}
-        curve has graduated from experimental — it is now a first-class{" "}
-        <strong style={{ color: "var(--codex-warning)" }}>Pythia API-key</strong>{" "}
-        account, always available in Spawn Account and able to activate + sign,
-        regardless of this toggle. This control is retained as an inert seam for
-        any future experimental curve.
+        <strong style={{ color: "var(--codex-success)" }}>APOLLO 1024-bit</strong>{" "}
+        curve has graduated from experimental to in-use: it represents both{" "}
+        <strong style={{ color: "var(--codex-success)" }}>Pythia API keys</strong>{" "}
+        and{" "}
+        <strong style={{ color: "var(--codex-success)" }}>Codex halves</strong>,
+        so it is always available in Spawn Account, able to activate and
+        sign unconditionally. There is nothing left to toggle here — no
+        experimental curve is currently gated by anything on this page.
       </p>
-
-      <button
-        type="button"
-        onClick={toggle}
-        style={{
-          width: "100%",
-          padding: "8px 16px",
-          borderRadius: "var(--codex-radius)",
-          fontWeight: 600,
-          cursor: "pointer",
-          backgroundColor: enabled
-            ? "var(--codex-surface)"
-            : "var(--codex-warning)",
-          color: enabled ? "var(--codex-text)" : "var(--codex-bg)",
-          border: enabled ? "1px solid var(--codex-warning)" : "none",
-        }}
-      >
-        {enabled
-          ? "Disable Experimental Curves"
-          : "Enable Experimental Curves"}
-      </button>
     </div>
   );
 }
