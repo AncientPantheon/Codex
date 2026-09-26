@@ -76,8 +76,10 @@ import {
   resolveNetworkModel,
   STOACHAIN_CHAIN_ID,
   ARWEAVE_CHAIN_ID,
+  KADENA_CHAIN_ID,
   type NetworkSettings,
 } from "./networkSettings";
+import { setActiveKadenaNodeUrl } from "@ancientpantheon/codex-ouronet/connection";
 // The mobile testing scaffold (see that file's own doc comment): mimics
 // OuronetUI's real mobile shell (7-icon bottom tab bar), only the "Codex" tab
 // wired, so the mobile view is exercised EMBEDDED (a constrained rectangle),
@@ -233,6 +235,16 @@ function DashboardBody({
       });
   }, [isReady, network.stoaChainNodeUrl, store]);
 
+  // Push the Kadena node URL into kadenaReads.ts's own module-level global
+  // (2026-09-26) — mirrors the StoaChain effect above, but a SEPARATE
+  // mechanism entirely: Kadena reads bypass stoa-core/uiSettings completely
+  // (see `kadenaReads.ts`'s own doc comment for why). No `isReady` gate
+  // needed — `setActiveKadenaNodeUrl` is a plain in-memory setter, not an
+  // adapter-backed persist.
+  useEffect(() => {
+    setActiveKadenaNodeUrl(network.kadenaNodeUrl);
+  }, [network.kadenaNodeUrl]);
+
   // Build the per-chain NetworkSettingsModel off the surfaced state (async
   // resolve — the resolver probes coverage; standalone has no global so it
   // resolves both chains local without a network round-trip).
@@ -251,6 +263,7 @@ function DashboardBody({
     setNetwork((prev) => {
       if (chainId === STOACHAIN_CHAIN_ID) return { ...prev, stoaChainNodeUrl: url };
       if (chainId === ARWEAVE_CHAIN_ID) return { ...prev, arweaveGatewayUrl: url };
+      if (chainId === KADENA_CHAIN_ID) return { ...prev, kadenaNodeUrl: url };
       return prev;
     });
   }, []);
@@ -473,6 +486,7 @@ function DashboardBody({
                           urls: {
                             [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
                             [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
+                            [KADENA_CHAIN_ID]: network.kadenaNodeUrl,
                           },
                           onSetChainUrl: setChainUrl,
                           pythiaUrl: network.pythiaUrl,
@@ -585,6 +599,7 @@ function DashboardBody({
                           urls: {
                             [STOACHAIN_CHAIN_ID]: network.stoaChainNodeUrl,
                             [ARWEAVE_CHAIN_ID]: network.arweaveGatewayUrl,
+                            [KADENA_CHAIN_ID]: network.kadenaNodeUrl,
                           },
                           onSetChainUrl: setChainUrl,
                           pythiaUrl: network.pythiaUrl,

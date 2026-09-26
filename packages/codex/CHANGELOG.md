@@ -2,6 +2,31 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.16.0 — 2026-09-26
+
+**MINOR — the Kadena switch + read functions. Owner directive: "how do i
+switch to kadena when i have chainweb as selected blockchain?... lets wire
+first the kadena switch, and read functions." A new "Network: Stoa | Kadena"
+control on the Blockchain Accounts panel switches the Accounts balance data
+source to REAL Kadena mainnet, read via hand-built Pact constructors
+(`coin.get-balance`/`coin.details`) that bypass `@stoachain/stoa-core`'s
+`pactRead` entirely — confirmed that package hardcodes every transaction's
+Pact `networkId` to `"stoa"` with no override seam, which a real Kadena
+mainnet node would reject regardless of host. Signing/writes against Kadena
+are explicit, separate future work — this round is reads only. New
+capability, no breaking changes. `codex-ouronet` release only (`codex-ui`/
+`codex-core`/`arweave-core`/`codex-arweave` unchanged). See
+`@ancientpantheon/codex-ouronet`'s own CHANGELOG for the full technical
+account.**
+
+- New `kadena/kadenaReads.ts`, `connection/createKadenaConnection.ts`.
+- `ChainwebPanel` gained the Network switch; `StoaAccountsTab` gained an
+  `activeNetwork` prop that swaps the balance source, morphs the Stoa/UrStoa
+  pill to Kadena naming (disabling UrStoa, which has no Kadena equivalent),
+  and hides the not-yet-wired Send action in Kadena mode.
+- The Network settings tab gained a third row for the Kadena node URL,
+  defaulting to the real public `https://api.chainweb.com`.
+
 ## 0.15.0 — 2026-09-26
 
 **MINOR — the Codex Info panel gained a "Codex Form" product version

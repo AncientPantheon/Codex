@@ -30,6 +30,7 @@ import { usePureKeypairs } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
 import { IconCopyBtn, IconStoaExplorerBtn, IconDeleteBtn } from "../internal/IconButtons.js";
 import { useStoaChainBalances, type StoaAccountBalances } from "../internal/useStoaChainBalances.js";
+import { useKadenaBalances } from "../internal/useKadenaBalances.js";
 import { useUrStoaBalances, type UrStoaAccountBalances } from "../internal/useUrStoaBalances.js";
 import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { StoaAddressHighlight } from "../internal/StoaAddressHighlight.js";
@@ -467,6 +468,26 @@ export interface StoaAccountsTabProps {
   balanceMode?: BalanceMode;
   onBalanceModeChange?: (mode: BalanceMode) => void;
   /**
+   * Controlled active blockchain for the read side of this tab (2026-09-26,
+   * owner directive: "how do i switch to kadena when i have chainweb as
+   * selected blockchain... lets wire first the kadena switch, and read
+   * functions"). `"stoa"` (the default) is unchanged behavior. `"kadena"`
+   * swaps the balance DATA SOURCE from `useStoaChainBalances` to
+   * `useKadenaBalances` (real Kadena mainnet, raw Pact constructors — see
+   * that hook's own doc comment) and disables the UrStoa side of the
+   * Stoa/UrStoa pill — UrStoa (the DALOS-wrapped vault token) does not exist
+   * on real Kadena mainnet, so there is nothing for that segment to show;
+   * its label morphs from "Stoa" to "Kadena" instead (owner's own words:
+   * "make the selector Stoa/Urstoa disabled and morphed to Kadena in
+   * naming"). Write actions (Send/Stake/Unstake/Collect) stay disabled in
+   * Kadena mode — signing against real Kadena mainnet is explicit, separate,
+   * not-yet-wired future work ("when doing transfer for kadena wed need to
+   * wire other functions"). Plain (not controlled/fallback like `subTab`/
+   * `balanceMode`) — this component never shows a switch UI for it, only
+   * reacts to it; `ChainwebPanel` owns rendering + state for the actual
+   * switch control. Omitted defaults to `"stoa"` — unchanged behavior. */
+  activeNetwork?: "stoa" | "kadena";
+  /**
    * Reports the individual Codex/Watched counts — owner correction
    * (design.md §8, the "further optimize round 8"): "it must contain the
    * exact designation as before, you shortened them" — the medallion
@@ -519,12 +540,20 @@ export interface StoaAccountsTabProps {
 /* ─────────────── Address row ─────────────── */
 function AddressRow({
   entry, bal, urBal, mode, loading, onRemove, onRelabel, onActionSuccess, selected, onSelect, onExpand, seedBadge,
+  activeNetwork = "stoa",
 }: {
   entry: AddrEntry;
   bal: StoaAccountBalances | undefined;
   urBal: UrStoaAccountBalances | undefined;
   mode: BalanceMode;
   loading: boolean;
+  /** 2026-09-26: hides the "Send STOA" action while viewing Kadena-mode
+   *  balances — signing/submitting against real Kadena mainnet isn't wired
+   *  yet (see `StoaAccountsTab`'s own `activeNetwork` prop doc comment).
+   *  UrStoa's own Transfer/Stake/Unstake/Collect actions need no separate
+   *  gate here: they only ever show when `mode === "urstoa"`, which the
+   *  parent tab already prevents while `activeNetwork === "kadena"`. */
+  activeNetwork?: "stoa" | "kadena";
   onRemove?: () => void;
   onRelabel?: (label: string) => void;
   /** Called after ANY of this row's action modals (Transfer/Stake/Unstake/
@@ -742,7 +771,7 @@ function AddressRow({
           {/* One mode-dependent slot: "Send" (native Stoa) in Stoa mode,
              "Transfer" (UrStoa) in UrStoa mode — same position, same chrome,
              just a different modal/icon/tooltip depending on the toggle. */}
-          {publicKey && (
+          {publicKey && (mode === "urstoa" || activeNetwork === "stoa") && (
             <ActionTooltip
               content={
                 mode === "urstoa"
@@ -1064,6 +1093,7 @@ export function StoaAccountsTab({
   className, onTotalChange, onRefreshHandleChange, fullScreenPortalTarget, zone3AnchorTarget,
   subTab: subTabProp, onSubTabChange, balanceMode: balanceModeProp, onBalanceModeChange,
   onSubTabCountsChange, onAccountsBreakdownChange, onPaginationHandleChange,
+  activeNetwork = "stoa",
 }: StoaAccountsTabProps) {
   const isMobile = useIsMobile();
   const { seeds } = useStoaChainSeeds();
@@ -1077,6 +1107,17 @@ export function StoaAccountsTab({
   const [localBalanceMode, setLocalBalanceMode] = useState<BalanceMode>("stoa");
   const balanceMode = balanceModeProp ?? localBalanceMode;
   const setBalanceMode = onBalanceModeChange ?? setLocalBalanceMode;
+  // 2026-09-26: UrStoa has no Kadena-mainnet equivalent (see the
+  // `activeNetwork` prop's own doc comment) — if the pill was already on
+  // "urstoa" from BEFORE the user switched networks, force it back to
+  // "stoa" (now displaying as "Kadena") the moment `activeNetwork` becomes
+  // "kadena", rather than leaving a stale, disabled-but-still-selected
+  // UrStoa view on screen. The pill's own onClick already prevents
+  // SELECTING "urstoa" while in Kadena mode — this covers the one path that
+  // doesn't go through that click handler.
+  useEffect(() => {
+    if (activeNetwork === "kadena" && balanceMode === "urstoa") setBalanceMode("stoa");
+  }, [activeNetwork, balanceMode, setBalanceMode]);
   // MOBILE ONLY (design.md §8, the "further optimize round 2") — the
   // currently SELECTED entry (medallion lit, shared action row tied to it),
   // the entry currently shown FULL SCREEN (a second tap on an already-
@@ -1351,6 +1392,7 @@ export function StoaAccountsTab({
             bal={byAddress[row.entry.address]}
             urBal={urByAddress[row.entry.address]}
             mode={balanceMode}
+            activeNetwork={activeNetwork}
             loading={rowLoading(row.entry.address)}
             onActionSuccess={activeRefresh}
             selected={selectedAddress === row.entry.address}
@@ -1376,6 +1418,7 @@ export function StoaAccountsTab({
           bal={byAddress[w.address]}
           urBal={urByAddress[w.address]}
           mode={balanceMode}
+          activeNetwork={activeNetwork}
           loading={rowLoading(w.address)}
           onRemove={() => void deleteEntry(w.id)}
           onRelabel={(label) => void addEntry({ ...w, label })}
@@ -1409,19 +1452,48 @@ export function StoaAccountsTab({
   const stoaChainConnected =
     ui.selectedNode !== "custom" || String(ui.customNodeUrl ?? "").trim().length > 0;
 
-  const { byAddress, loading, error, refresh } = useStoaChainBalances(
+  const {
+    byAddress: stoaByAddress,
+    loading: stoaLoading,
+    error: stoaError,
+    refresh: stoaRefresh,
+  } = useStoaChainBalances(
     allAddresses,
     codexAddresses,
-    stoaChainConnected,
+    stoaChainConnected && activeNetwork === "stoa",
   );
+  // Kadena mode (2026-09-26): real Kadena mainnet balances, raw Pact
+  // constructors — see `useKadenaBalances`'s own doc comment. Only issued
+  // while `activeNetwork` is actually "kadena", mirroring the UrStoa read's
+  // own "don't pay for a read nobody's looking at" gating below.
+  const {
+    byAddress: kadenaByAddress,
+    loading: kadenaLoading,
+    error: kadenaError,
+    refresh: kadenaRefresh,
+  } = useKadenaBalances(allAddresses, activeNetwork === "kadena");
+  // The "stoa slot" balance bundle, picked between Stoa and Kadena by
+  // `activeNetwork` — every existing `byAddress[...]` read site below (and
+  // `activeLoading`/`activeError`/`activeRefresh`/`rowLoading`'s own
+  // `balanceMode === "urstoa" ? ur... : ...` branch immediately below)
+  // reads THIS name, so Kadena mode is a drop-in swap with zero changes to
+  // any render site.
+  const byAddress = activeNetwork === "kadena" ? kadenaByAddress : stoaByAddress;
+  const loading = activeNetwork === "kadena" ? kadenaLoading : stoaLoading;
+  const error = activeNetwork === "kadena" ? kadenaError : stoaError;
+  const refresh = activeNetwork === "kadena" ? kadenaRefresh : stoaRefresh;
   // Only issue the UrStoa batched read while the toggle is actually on
-  // UrStoa — no point paying for a chain "0" read nobody's looking at.
+  // UrStoa AND still in Stoa mode — UrStoa does not exist on Kadena mainnet
+  // (see `activeNetwork` prop's own doc comment), and the pill itself is
+  // disabled out of "urstoa" whenever `activeNetwork === "kadena"` (see the
+  // two pill render sites below), so this condition is a belt-and-braces
+  // guard against ever paying for a UrStoa read in Kadena mode.
   const {
     byAddress: urByAddress,
     loading: urLoading,
     error: urError,
     refresh: urRefresh,
-  } = useUrStoaBalances(allAddresses, stoaChainConnected && balanceMode === "urstoa");
+  } = useUrStoaBalances(allAddresses, stoaChainConnected && activeNetwork === "stoa" && balanceMode === "urstoa");
 
   const activeLoading = balanceMode === "urstoa" ? urLoading : loading;
   const activeError = balanceMode === "urstoa" ? urError : error;
@@ -1538,12 +1610,22 @@ export function StoaAccountsTab({
         })}
       </div>
       <div style={{ display: "flex", flex: 1, borderRadius: 8, border: "1px solid #262626", overflow: "hidden" }}>
-        {(["stoa", "urstoa"] as const).map((m) => (
-          <button key={m} type="button" aria-pressed={balanceMode === m} onClick={() => setBalanceMode(m)}
-            style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "3px 9px", fontSize: 10, fontWeight: 600, border: "none", cursor: "pointer", backgroundColor: balanceMode === m ? "#ceac5f" : "transparent", color: balanceMode === m ? "#0a0a0a" : "#888" }}>
-            {m === "stoa" ? "Stoa" : "UrStoa"}
-          </button>
-        ))}
+        {(["stoa", "urstoa"] as const).map((m) => {
+          // Kadena mode (2026-09-26): "UrStoa" doesn't exist on real Kadena
+          // mainnet (see the `activeNetwork` prop's own doc comment) — its
+          // segment is disabled, and "Stoa" morphs into "Kadena" naming,
+          // exactly per owner directive ("make the selector Stoa/Urstoa
+          // disabled and morphed to Kadena in naming").
+          const disabled = activeNetwork === "kadena" && m === "urstoa";
+          const label = activeNetwork === "kadena" && m === "stoa" ? "Kadena" : m === "stoa" ? "Stoa" : "UrStoa";
+          return (
+            <button key={m} type="button" aria-pressed={balanceMode === m} disabled={disabled}
+              onClick={() => { if (!disabled) setBalanceMode(m); }}
+              style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "3px 9px", fontSize: 10, fontWeight: 600, border: "none", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1, backgroundColor: balanceMode === m ? "#ceac5f" : "transparent", color: balanceMode === m ? "#0a0a0a" : "#888" }}>
+              {label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -1567,7 +1649,11 @@ export function StoaAccountsTab({
   // same "tied to the SELECTED entry" gating. Nothing renders at all when
   // there's no entry to act on.
   const noSelection = !selectedEntry;
-  const showSendSlot = !noSelection && !!selectedPublicKey;
+  // 2026-09-26: hidden in Kadena mode — signing/submitting against real
+  // Kadena mainnet isn't wired yet (see `activeNetwork` prop's own doc
+  // comment). Mirrors `AddressRow`'s own identical gate on its per-row
+  // "Send STOA" button.
+  const showSendSlot = !noSelection && !!selectedPublicKey && activeNetwork === "stoa";
   const showVaultSlots = showSendSlot && balanceMode === "urstoa";
   const edgeStackYPosition: React.CSSProperties = zone3AnchorTarget
     ? { bottom: 0, transform: "translateY(50%)" }
@@ -1647,19 +1733,26 @@ export function StoaAccountsTab({
               <div style={{ fontSize: 22, fontWeight: 700, color: "#d2d3d4" }}>{totalCodex + watchAddrs.length}</div>
             </div>
             <div style={{ flex: 1 }} />
-            {/* Stoa / UrStoa balance-source toggle */}
+            {/* Stoa / UrStoa balance-source toggle — morphs to Kadena-only
+                when activeNetwork==="kadena" (see the prop's own doc
+                comment: UrStoa has no Kadena-mainnet equivalent). */}
             <div style={{ display: "inline-flex", borderRadius: 8, border: "1px solid #262626", overflow: "hidden" }}>
-              {(["stoa", "urstoa"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  aria-pressed={balanceMode === m}
-                  onClick={() => setBalanceMode(m)}
-                  style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", backgroundColor: balanceMode === m ? "#ceac5f" : "transparent", color: balanceMode === m ? "#0a0a0a" : "#888" }}
-                >
-                  {m === "stoa" ? "Stoa" : "UrStoa"}
-                </button>
-              ))}
+              {(["stoa", "urstoa"] as const).map((m) => {
+                const disabled = activeNetwork === "kadena" && m === "urstoa";
+                const label = activeNetwork === "kadena" && m === "stoa" ? "Kadena" : m === "stoa" ? "Stoa" : "UrStoa";
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={balanceMode === m}
+                    disabled={disabled}
+                    onClick={() => { if (!disabled) setBalanceMode(m); }}
+                    style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1, backgroundColor: balanceMode === m ? "#ceac5f" : "transparent", color: balanceMode === m ? "#0a0a0a" : "#888" }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
             {/* Live-chain status */}
             {activeLoading ? (
@@ -1852,6 +1945,7 @@ export function StoaAccountsTab({
                     bal={byAddress[e.address]}
                     urBal={urByAddress[e.address]}
                     mode={balanceMode}
+                    activeNetwork={activeNetwork}
                     loading={rowLoading(e.address)}
                     onActionSuccess={activeRefresh}
                     selected={selectedAddress === e.address}
@@ -1888,6 +1982,7 @@ export function StoaAccountsTab({
                 bal={byAddress[w.address]}
                 urBal={urByAddress[w.address]}
                 mode={balanceMode}
+                activeNetwork={activeNetwork}
                 loading={rowLoading(w.address)}
                 onRemove={() => void deleteEntry(w.id)}
                 onRelabel={(label) => void addEntry({ ...w, label })}

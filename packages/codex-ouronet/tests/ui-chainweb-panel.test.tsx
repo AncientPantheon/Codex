@@ -26,9 +26,20 @@ import { ChainwebPanel } from "@ancientpantheon/codex-ouronet/ui";
 import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
 
+// 2026-09-26 — Kadena mode's reads bypass `pactRead` entirely (see
+// `kadenaReads.ts`'s own doc comment); mock its `createClient` seam the
+// same way `kadena-reads.test.ts`/`ui-stoa-accounts-tab.test.tsx` do so a
+// click into Kadena mode never attempts a real network call here.
+const { kadenaDirtyRead } = vi.hoisted(() => ({ kadenaDirtyRead: vi.fn() }));
+vi.mock("@stoachain/kadena-stoic-legacy/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stoachain/kadena-stoic-legacy/client")>();
+  return { ...actual, createClient: () => ({ dirtyRead: kadenaDirtyRead }) };
+});
+
 // Stub the read seam so StoaAccountsTab's live-balance effect never hits network.
 beforeEach(() => {
   setPactReader(async () => ({ result: { data: [] } }) as never);
+  kadenaDirtyRead.mockReset().mockResolvedValue({ result: { status: "success", data: [] } });
 });
 
 afterEach(() => {
@@ -787,5 +798,62 @@ describe("<ChainwebPanel> — mobile: the shared 'standard pagination controls z
 
       document.body.removeChild(railTarget);
     });
+  });
+});
+
+describe("ChainwebPanel — the Network switch (2026-09-26, owner: 'how do i switch to kadena when i have chainweb as selected blockchain')", () => {
+  /** Scopes to THIS panel's own Network switch specifically — StoaAccountsTab
+   *  mounts its OWN, separate "Stoa"/"Kadena"(-morphed) pill at the same
+   *  time, so a bare `screen.getByRole("button", {name: "Stoa"})` matches
+   *  both. The switch is the one preceded by the "Network" label text. */
+  function getNetworkSwitch() {
+    const label = screen.getByText("Network");
+    return within(label.parentElement as HTMLElement);
+  }
+
+  it("shows a Stoa/Kadena network switch on the landing Accounts category, defaulting to Stoa", async () => {
+    await renderPanel();
+    const netSwitch = getNetworkSwitch();
+    expect(netSwitch.getByRole("button", { name: "Stoa" })).toBeTruthy();
+    expect(netSwitch.getByRole("button", { name: "Kadena" })).toBeTruthy();
+    expect(netSwitch.getByRole("button", { name: "Stoa" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("clicking Kadena flips the switch and morphs StoaAccountsTab's own Stoa/UrStoa pill", async () => {
+    await renderPanel();
+    fireEvent.click(getNetworkSwitch().getByRole("button", { name: "Kadena" }));
+
+    await waitFor(() =>
+      expect(getNetworkSwitch().getByRole("button", { name: "Kadena" }).getAttribute("aria-pressed")).toBe("true"),
+    );
+    // StoaAccountsTab's OWN balance-source pill (a separate control) morphs
+    // its "Stoa" segment to "Kadena" naming too — see that component's own
+    // `activeNetwork` prop doc comment. Two "Kadena" buttons now exist:
+    // this panel's own switch, plus the morphed pill.
+    const kadenaButtons = screen.getAllByRole("button", { name: "Kadena" });
+    expect(kadenaButtons.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("switching to Kadena issues reads through kadenaReads' own client, never stoa-core's pactRead", async () => {
+    // useKadenaBalances (like useStoaChainBalances) short-circuits to no
+    // network call at all for an empty address list — seed one account so
+    // there's something to actually read.
+    const adapter = new MemoryCodexAdapter("dev");
+    render(
+      <CodexProvider adapter={adapter}>
+        <ReadyGate />
+        <Seeder
+          seeds={[{
+            id: "s1", name: "My Seed", seedType: "koala", version: "1.0.0", index: 0, secret: "enc",
+            main: "k:" + "0".repeat(64), createdAt: "2026-05-25T10:00:00.000Z",
+            accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }],
+          }]}
+        />
+        <ChainwebPanel id="chainweb" ctx={{ opaque: true }} />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
+    fireEvent.click(getNetworkSwitch().getByRole("button", { name: "Kadena" }));
+    await waitFor(() => expect(kadenaDirtyRead).toHaveBeenCalled());
   });
 });

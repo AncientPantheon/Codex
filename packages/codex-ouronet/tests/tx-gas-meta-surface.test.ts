@@ -1,6 +1,6 @@
 /**
  * tx-gas-meta-surface.test.ts — SHAPE/invariant lock for every signed-and-submitted
- * transaction-building site in this package.
+ * (or, as of 2026-09-26, dirty-read-only) transaction-building site in this package.
  *
  * WHY THIS EXISTS
  * Chainweb rejects (or silently under-prices) a command whose `meta.gasPrice` is
@@ -50,6 +50,18 @@
  * `src/`). It still satisfies (a)-(c) — inventoried, `gasPrice` +
  * `creationTime` ARE on the wire — but is correctly exempt from (d)-(e), which
  * assume the `build(ctx)` shape only sites going through `execute()` have.
+ *
+ * `kadena/kadenaReads.ts` (added 2026-09-26, READ_ONLY_TX_SITES below) is
+ * categorically DIFFERENT from every other site here: it is a DIRTY READ
+ * (`createClient(url).dirtyRead(tx)`, `preflight: false, signatureVerification:
+ * false`) against real Kadena mainnet — never signed, never submitted, never
+ * touches consensus. This test's whole reason for existing ("Chainweb rejects
+ * ... a command whose `meta.gasPrice` is below the live Yin Engine floor")
+ * does not apply to a transaction that is never charged or network-validated
+ * for its price — so unlike every other site, this one is exempt from BOTH
+ * the (b)/(c) gasPrice+creationTime checks AND the (d)/(e) ctx-injection
+ * checks. It is inventoried (a) purely so a future NEW `.setMeta(` site in
+ * this file doesn't get silently miscategorized here by copy-paste.
  */
 
 import { describe, it, expect } from "vitest";
@@ -60,12 +72,14 @@ import { join, relative, resolve } from "node:path";
 // package's vitest transform does not hand these specs a file: URL.
 const SRC = resolve(__dirname, "../src");
 
-/** The 15 confirmed signed/submitted transaction-building sites. Three operations
+/** The 16 confirmed transaction-building sites. Three operations
  *  (RotateSovereign, RotateGuard, RotatePaymentKey) exist as TWO independent copies
  *  across `components/` and `zbom/modals/` — they share no code, so both copies are
  *  listed and both must satisfy the gas contract. The 15th,
  *  `zbom/rotatePaymentKeyLive.ts`, is the self-contained delegate the ZBOM
- *  `RotatePaymentKeyModal.tsx` calls — see `SELF_CONTAINED_TX_SITES` below. */
+ *  `RotatePaymentKeyModal.tsx` calls — see `SELF_CONTAINED_TX_SITES` below. The
+ *  16th, `kadena/kadenaReads.ts`, is a dirty-read-only site — see
+ *  `READ_ONLY_TX_SITES` below. */
 const EXPECTED_TX_SITES = [
   "components/RotateGuardModal.tsx",
   "components/RotatePaymentKeyModal.tsx",
@@ -82,6 +96,7 @@ const EXPECTED_TX_SITES = [
   "zbom/modals/RotateSovereignModal.tsx",
   "ui/internal/SendStoaModal.tsx",
   "zbom/rotatePaymentKeyLive.ts",
+  "kadena/kadenaReads.ts",
 ].sort();
 
 /** Self-contained delegate implementations (mirror an external package's OWN
@@ -89,6 +104,12 @@ const EXPECTED_TX_SITES = [
  *  contract) — inventoried and checked for (b)/(c), but exempt from (d)/(e)'s
  *  ctx-shape assertions. See the module doc comment above. */
 const SELF_CONTAINED_TX_SITES = new Set(["zbom/rotatePaymentKeyLive.ts"]);
+
+/** Dirty-read-only sites — never signed, never submitted, so the gasPrice/
+ *  creationTime contract this whole file exists to enforce genuinely does
+ *  not apply. Exempt from (b)-(e) entirely; see the module doc comment
+ *  above for the full reasoning. */
+const READ_ONLY_TX_SITES = new Set(["kadena/kadenaReads.ts"]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -135,7 +156,7 @@ describe("transaction gas-meta surface", () => {
     expect(txSites).toEqual(EXPECTED_TX_SITES);
   });
 
-  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel)))(
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel)))(
     "%s passes gasPrice + creationTime into setMeta",
     (rel) => {
       const source = readFileSync(join(SRC, rel), "utf8");
@@ -169,7 +190,7 @@ describe("transaction gas-meta surface", () => {
     },
   );
 
-  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel)))(
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel)))(
     "%s takes gas fields from the injected ctx, not a local clock read",
     (rel) => {
       const source = readFileSync(join(SRC, rel), "utf8");
@@ -198,6 +219,17 @@ describe("transaction gas-meta surface", () => {
       // the canonical single-read helper, not a hand-rolled substitute.
       expect(source, `${rel}: expected a single stoaGasMeta(safeCreationTime()) read`)
         .toMatch(/stoaGasMeta\s*\(\s*safeCreationTime\s*\(\s*\)\s*\)/);
+    },
+  );
+
+  it.each([...READ_ONLY_TX_SITES])(
+    "%s (read-only) never signs or submits — dirtyRead only, so the gasPrice contract genuinely does not apply",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
+      expect(source, `${rel}: expected a dirtyRead call — this category's whole exemption rests on never submitting`)
+        .toMatch(/\bdirtyRead\s*\(/);
+      expect(source, `${rel}: a read-only site must never call submit/send — that would make it a real tx-building site subject to the full (b)-(e) contract`)
+        .not.toMatch(/\.(submit|send)\s*\(/);
     },
   );
 });

@@ -67,9 +67,21 @@ vi.mock("../src/ui/internal/SendStoaModal", () => ({
     ) : null,
 }));
 
+// 2026-09-26 — Kadena mode's reads go through `kadenaReads.ts`'s own
+// `createClient(url).dirtyRead(tx)` call, entirely independent of the
+// `setPactReader` stub above (which only intercepts stoa-core's `pactRead`).
+// Mocked here the same way `kadena-reads.test.ts` does, so the Kadena-mode
+// describe block below stays hermetic.
+const { kadenaDirtyRead } = vi.hoisted(() => ({ kadenaDirtyRead: vi.fn() }));
+vi.mock("@stoachain/kadena-stoic-legacy/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stoachain/kadena-stoic-legacy/client")>();
+  return { ...actual, createClient: () => ({ dirtyRead: kadenaDirtyRead }) };
+});
+
 // Stub the read seam so the tab's live-balance effect never touches the network.
 beforeEach(() => {
   setPactReader(async () => ({ result: { data: [] } }) as never);
+  kadenaDirtyRead.mockReset().mockResolvedValue({ result: { status: "success", data: [] } });
 });
 
 const seedFx = (over: Partial<IStoaChainSeed> = {}): IStoaChainSeed => ({
@@ -1584,5 +1596,63 @@ describe("<StoaAccountsTab> — mobile: bottom-bar action button groups (design.
 
     document.body.removeChild(zone3);
     document.body.removeChild(fullScreen);
+  });
+});
+
+describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets wire first the kadena switch, and read functions'", () => {
+  async function renderTabNetwork(activeNetwork: "stoa" | "kadena", seeds: IStoaChainSeed[] = []) {
+    const adapter = new MemoryCodexAdapter("dev");
+    const utils = render(
+      <CodexProvider adapter={adapter}>
+        <Seeder seeds={seeds} pairs={[]} />
+        <StoaAccountsTab activeNetwork={activeNetwork} />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(screen.getByText(/Total Addresses/i)).toBeTruthy());
+    return utils;
+  }
+
+  it("defaults to Stoa mode — the Stoa/UrStoa pill is unchanged when activeNetwork is omitted", async () => {
+    await renderTab([], []);
+    expect(screen.getByRole("button", { name: "Stoa" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "UrStoa" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("Kadena mode morphs the pill: 'Stoa' becomes 'Kadena', 'UrStoa' is disabled — owner: 'make the selector Stoa/Urstoa disabled and morphed to Kadena in naming'", async () => {
+    await renderTabNetwork("kadena");
+    expect(screen.getByRole("button", { name: "Kadena" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stoa" })).toBeNull();
+    expect((screen.getByRole("button", { name: "UrStoa" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("Kadena mode hides the 'Send STOA' action — signing against real Kadena mainnet isn't wired yet", async () => {
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    expect(screen.queryByTitle("Send STOA")).toBeNull();
+  });
+
+  it("Stoa mode still shows 'Send STOA' — unaffected by the new prop's default", async () => {
+    await renderTabNetwork(
+      "stoa",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    expect(await screen.findByTitle("Send STOA")).toBeTruthy();
+  });
+
+  it("Kadena mode reads balances through kadenaReads' own client, not stoa-core's pactRead", async () => {
+    kadenaDirtyRead.mockResolvedValue({
+      result: { status: "success", data: [{ account: `k:${"a".repeat(64)}`, balance: 7.5, exists: true }] },
+    });
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await waitFor(() => expect(kadenaDirtyRead).toHaveBeenCalled());
+    // 20 Kadena chains, one batched call each (KADENA_CHAINS, not STOA_CHAINS' 10).
+    expect(kadenaDirtyRead.mock.calls.length).toBeGreaterThanOrEqual(20);
   });
 });

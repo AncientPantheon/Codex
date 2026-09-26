@@ -361,6 +361,16 @@ export function ChainwebPanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pan
   // three medallions.
   const [accountsSubTab, setAccountsSubTab] = useState<"codex" | "watch">("codex");
   const [accountsBalanceMode, setAccountsBalanceMode] = useState<"stoa" | "urstoa">("stoa");
+  // The blockchain-read switch (2026-09-26, owner directive: "how do i
+  // switch to kadena when i have chainweb as selected blockchain... lets
+  // wire first the kadena switch, and read functions"). Owned HERE (not
+  // inside `StoaAccountsTab`) — this panel is the "Stoa-Chainweb" rail
+  // entry itself, so the network it reads is this panel's own concern, the
+  // same way it already owns the Codex/Watched + Stoa/UrStoa medallions
+  // below. Threaded into `StoaAccountsTab` as a plain (not controlled/
+  // fallback) prop — see that prop's own doc comment for the full read-swap
+  // + pill-morph + write-action-disable behavior it drives.
+  const [activeNetwork, setActiveNetwork] = useState<"stoa" | "kadena">("stoa");
   // Owner correction (design.md §8, the "further optimize round 8"): "it
   // must contain the exact designation as before, you shortened them" —
   // the medallion needs the SAME "Codex N"/"Watched N" designation the
@@ -407,7 +417,41 @@ export function ChainwebPanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pan
       )}
       {active === "pure-keys" && <PureKeypairsTab onPaginationHandleChange={setPureKeysPaginationHandle} />}
       {active === "accounts" && (
-        <StoaAccountsTab
+        <>
+          {/* The blockchain-read switch (2026-09-26) — a plain, always-
+              visible segmented control, deliberately NOT built on
+              `SplitSeamMedallion` (that seam-straddling system already
+              carries the Codex/Watched + Stoa/UrStoa pair plus the
+              pagination medallion on mobile — a third entry there risks
+              the exact pixel-perfect positioning invariants those took many
+              rounds to land; this control instead renders as an ordinary
+              inline row, safe on both mobile and desktop). Seeds/Pure Keys
+              need no equivalent — the SAME keys are valid on both networks
+              (same curve), only which chain's BALANCE is read changes. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexShrink: 0 }}>
+            <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", color: "#555" }}>
+              Network
+            </span>
+            <div style={{ display: "inline-flex", borderRadius: 8, border: "1px solid #262626", overflow: "hidden" }}>
+              {(["stoa", "kadena"] as const).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  aria-pressed={activeNetwork === n}
+                  onClick={() => setActiveNetwork(n)}
+                  title={n === "stoa" ? "Stoa-Chainweb (current default)" : "Kadena mainnet (real KDA balances, reads only)"}
+                  style={{
+                    padding: "4px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer",
+                    backgroundColor: activeNetwork === n ? "#ceac5f" : "transparent",
+                    color: activeNetwork === n ? "#0a0a0a" : "#888",
+                  }}
+                >
+                  {n === "stoa" ? "Stoa" : "Kadena"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <StoaAccountsTab
           onTotalChange={setAccountsTotal}
           onRefreshHandleChange={setRefreshHandle}
           fullScreenPortalTarget={fullScreenPortalTarget}
@@ -416,10 +460,12 @@ export function ChainwebPanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pan
           onSubTabChange={setAccountsSubTab}
           balanceMode={accountsBalanceMode}
           onBalanceModeChange={setAccountsBalanceMode}
+          activeNetwork={activeNetwork}
           onSubTabCountsChange={setAccountsCounts}
           onAccountsBreakdownChange={setAccountsBreakdown}
           onPaginationHandleChange={setAccountsPaginationHandle}
-        />
+          />
+        </>
       )}
     </div>
   );

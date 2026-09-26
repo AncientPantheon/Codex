@@ -34,6 +34,8 @@ Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired t
 
 ## Version history
 
+**v0.16.0** — The Kadena switch + read functions: a new "Network: Stoa | Kadena" control on the Blockchain Accounts panel switches the Accounts balance data source to REAL Kadena mainnet, read via hand-built Pact constructors (`coin.get-balance`/`coin.details`) that bypass `@stoachain/stoa-core`'s `pactRead` entirely (that package hardcodes every transaction's Pact `networkId` to `"stoa"` with no override seam, which a real Kadena mainnet node would reject). The Network settings tab gained a third row for the Kadena node URL; the Stoa/UrStoa balance-mode pill morphs to Kadena naming (UrStoa disabled — no Kadena-mainnet equivalent) and the not-yet-wired Send action hides while in Kadena mode. Signing/writes against Kadena are explicit, separate future work — this round is reads only. New capability, no breaking changes. `codex-ouronet` release only (`codex-ui`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
+
 **v0.15.0** — The Codex Info panel gained a "Codex Form" product version ("1.0.0", deliberately separate from the at-rest schema-migration counter) and a "Blockchains Supported" breakdown (Arweave, Stoa-Chainweb, Kadena-Chainweb); the Chainweb rail tab now displays as "Stoa-Chainweb" via a new backward-compatible `chainLabels` override on `ForeignChainsTab`. Kadena-Chainweb is listed as a supported chain-identity now (the same seeds/accounts are already cryptographically Kadena-compatible); the actual chain-switcher mechanics are explicit future work. New capability, no breaking changes. `codex-core` + `codex-ui` + `codex-ouronet` release (`arweave-core`/`codex-arweave` unchanged).
 
 **v0.14.1** — The Advanced settings page's Apollo Curve section retired as a misleading toggle. Owner ruling: Apollo (₱./Π.) has graduated from experimental to always-on — it represents both Pythia API keys and Codex halves — so the page must stop presenting it as something the user can enable/disable. `ExperimentalCurvesCard` is now a static "Graduated · Always On" status display instead of a live toggle button; the Advanced tab's wrapping section relabeled from "Experimental Curves"/"observational" to "Apollo Curve"/"graduated". No behavior change to account creation — Apollo was already unconditionally offered in Spawn Account, only the settings-page copy was still implying otherwise. `codex-ui` + `codex-ouronet` release (`arweave-core`/`codex-arweave` unchanged).
@@ -85,7 +87,7 @@ Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.4.0` |
 | `@ancientpantheon/codex-ui` | `0.8.0` |
-| `@ancientpantheon/codex-ouronet` | `0.15.0` |
+| `@ancientpantheon/codex-ouronet` | `0.16.0` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->

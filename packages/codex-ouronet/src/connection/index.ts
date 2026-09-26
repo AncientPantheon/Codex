@@ -20,3 +20,25 @@ export {
   type StoaChainSigningOptions,
   type CreateStoaChainConnectionOptions,
 } from "./createStoaChainConnection.js";
+
+/**
+ * The Kadena-mainnet side (2026-09-26): a `ChainConnection` for the Network
+ * tab's third row, entirely independent of stoa-core's StoaChain global —
+ * see `createKadenaConnection.ts`'s own doc comment for why it's simpler
+ * than the StoaChain helper (no signing seam this round; reads bypass
+ * stoa-core entirely, see `../kadena/kadenaReads.ts`).
+ */
+export {
+  createKadenaConnection,
+  KADENA_CONNECTION_CHAIN_ID,
+  KADENA_MAINNET_DEFAULT_NODE_URL,
+  type CreateKadenaConnectionOptions,
+} from "./createKadenaConnection.js";
+
+/**
+ * Re-exported so a consumer wiring the Network tab's Kadena row can push an
+ * edited node URL into the module-level global every `kadenaReads.ts` read
+ * defaults to, without a second import path — mirrors how `setNodeConfig`
+ * (StoaChain's own equivalent lever) is consumed from this same barrel.
+ */
+export { setActiveKadenaNodeUrl, getActiveKadenaNodeUrl } from "../kadena/kadenaReads.js";

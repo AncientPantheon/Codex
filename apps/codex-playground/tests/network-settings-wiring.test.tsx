@@ -22,7 +22,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
-import { STOACHAIN_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
+import { STOACHAIN_DEFAULT_NODE_URL, KADENA_MAINNET_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
 
 import { Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
@@ -35,6 +35,7 @@ import {
   resolveNetworkModel,
   STOACHAIN_CHAIN_ID,
   ARWEAVE_CHAIN_ID,
+  KADENA_CHAIN_ID,
 } from "../src/networkSettings";
 
 afterEach(() => {
@@ -67,6 +68,7 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
       pythiaUrl: "",
       stoaChainNodeUrl: "https://my-node.example:8080",
       arweaveGatewayUrl: "http://localhost:1984",
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
     const raw = window.localStorage.getItem(NETWORK_SETTINGS_STORAGE_KEY);
     expect(raw).not.toBeNull();
@@ -131,6 +133,7 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
       arweaveMode: "real",
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
     const reloaded = loadNetworkSettings();
     expect(reloaded.arweaveMode).toBe("real");
@@ -151,26 +154,30 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
       arweaveMode: "mock",
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
     const reloaded = loadNetworkSettings();
     expect(reloaded.arweaveMode).toBe("mock");
   });
 });
 
-describe("networkSettings — resolveNetworkModel (standalone unlocked two-tier)", () => {
-  it("builds an UNLOCKED two-row model — stoachain + arweave, both live-local + editable (no global)", async () => {
+describe("networkSettings — resolveNetworkModel (standalone unlocked three-tier)", () => {
+  it("builds an UNLOCKED three-row model — stoachain + arweave + kadena, all live-local + editable (no global) — 2026-09-26, owner: 'we also need an entry here for the kadena connection'", async () => {
     const model = await resolveNetworkModel({
       pythiaUrl: "",
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
 
-    // Standalone: no operator global, both chains are surfaced as LOCAL — so
-    // both rows are editable (manualFieldEnabled) and status is live-local.
+    // Standalone: no operator global, all three chains are surfaced as
+    // LOCAL — so every row is editable (manualFieldEnabled) and status is
+    // live-local.
     expect(model.locked).toBe(false);
     expect(model.chains.map((c) => c.chainId)).toEqual([
       STOACHAIN_CHAIN_ID,
       ARWEAVE_CHAIN_ID,
+      KADENA_CHAIN_ID,
     ]);
     for (const row of model.chains) {
       expect(row.status).toBe("live-local");
@@ -199,7 +206,7 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     await screen.findByTestId(`network-url-${STOACHAIN_CHAIN_ID}`);
   }
 
-  it("renders the Network tab with the real node2.stoachain.com StoaChain default + the Arweave mainnet gateway", async () => {
+  it("renders the Network tab with the real node2.stoachain.com StoaChain default + the Arweave mainnet gateway + the Kadena mainnet default (2026-09-26)", async () => {
     await mountDashboard();
 
     const stoaUrl = (await screen.findByTestId(
@@ -208,12 +215,30 @@ describe("Network card in the dashboard shell (CL-13)", () => {
     const arweaveUrl = screen.getByTestId(
       `network-url-${ARWEAVE_CHAIN_ID}`,
     ) as HTMLInputElement;
+    const kadenaUrl = screen.getByTestId(
+      `network-url-${KADENA_CHAIN_ID}`,
+    ) as HTMLInputElement;
 
     // Standalone now ships wired to the real node2 gateway (still editable);
     // the Arweave gateway now ships wired to the real mainnet gateway too.
     expect(stoaUrl.value).toBe(STOACHAIN_DEFAULT_NODE_URL);
     expect(arweaveUrl.value).toBe(DEFAULT_GATEWAY_URL);
     expect(arweaveUrl.value).toContain("arweave.net");
+    // The third row (owner directive: "we also need an entry here for the
+    // kadena connection") ships wired to the real, public Kadena mainnet
+    // node — still editable, same convention as the other two.
+    expect(kadenaUrl.value).toBe(KADENA_MAINNET_DEFAULT_NODE_URL);
+  });
+
+  it("persists an edited Kadena node URL so the dashboard's Kadena-mode reads follow it — the actual switch mechanism, not just a display field", async () => {
+    await mountDashboard();
+
+    const kadenaUrl = (await screen.findByTestId(
+      `network-url-${KADENA_CHAIN_ID}`,
+    )) as HTMLInputElement;
+    fireEvent.change(kadenaUrl, { target: { value: "https://my-own-kadena-node.example" } });
+
+    expect(loadNetworkSettings().kadenaNodeUrl).toBe("https://my-own-kadena-node.example");
   });
 
   it("persists an edited StoaChain node URL so the dashboard reads against the surfaced state", async () => {
@@ -247,6 +272,7 @@ describe("networkSettings — Pythia promoted to GLOBAL (two-tier global⊕local
       pythiaUrl: "https://pythia.example",
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
 
     const stoa = model.chains.find((c) => c.chainId === STOACHAIN_CHAIN_ID)!;
@@ -265,6 +291,7 @@ describe("networkSettings — Pythia promoted to GLOBAL (two-tier global⊕local
       pythiaUrl: "https://pythia.down",
       stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
       arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+      kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
     });
     for (const row of model.chains) {
       expect(row.status).toBe("live-local");

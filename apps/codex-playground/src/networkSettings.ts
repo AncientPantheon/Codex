@@ -30,6 +30,9 @@ import {
 import {
   createStoaChainConnection,
   STOACHAIN_DEFAULT_NODE_URL,
+  createKadenaConnection,
+  KADENA_CONNECTION_CHAIN_ID,
+  KADENA_MAINNET_DEFAULT_NODE_URL,
 } from "@ancientpantheon/codex-ouronet/connection";
 import { createArweaveConnection } from "@ancientpantheon/codex-arweave/connection";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
@@ -45,6 +48,10 @@ import {
 export const STOACHAIN_CHAIN_ID = "stoachain" as const;
 /** Re-exported so the wiring + tests key rows uniformly. */
 export { ARWEAVE_CHAIN_ID };
+/** The Kadena-mainnet connection chain id (2026-09-26, owner directive: "we
+ *  also need an entry here for the kadena connection"). Re-exported from
+ *  `createKadenaConnection.ts` so this row keys uniformly with the other two. */
+export const KADENA_CHAIN_ID = KADENA_CONNECTION_CHAIN_ID;
 
 /** The persisted, editable connection config. */
 export interface NetworkSettings {
@@ -56,6 +63,10 @@ export interface NetworkSettings {
   stoaChainNodeUrl: string;
   /** The Arweave gateway URL the Arweave panel reads/broadcasts against (LOCAL). */
   arweaveGatewayUrl: string;
+  /** The Kadena-mainnet node URL (2026-09-26) — reads only this round (see
+   *  `kadenaReads.ts`'s own doc comment); no signing/broadcast happens
+   *  against it yet. Defaults to the real, public mainnet node. */
+  kadenaNodeUrl: string;
   /** The Arweave mock<->real wiring mode. OPTIONAL (unlike the other fields)
    *  since `resolveNetworkModel` and its own callers never needed it before
    *  this field existed. Defaults to REAL (owner directive, updated): a
@@ -89,6 +100,7 @@ export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
   arweaveMode: ARWEAVE_WIRING_MODE_REAL,
+  kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
 };
 
 /**
@@ -127,6 +139,10 @@ export function loadNetworkSettings(): NetworkSettings {
         parsed.arweaveMode === ARWEAVE_WIRING_MODE_MOCK
           ? parsed.arweaveMode
           : DEFAULT_NETWORK_SETTINGS.arweaveMode,
+      kadenaNodeUrl:
+        typeof parsed.kadenaNodeUrl === "string" && parsed.kadenaNodeUrl.length > 0
+          ? parsed.kadenaNodeUrl
+          : DEFAULT_NETWORK_SETTINGS.kadenaNodeUrl,
     };
   } catch {
     return { ...DEFAULT_NETWORK_SETTINGS };
@@ -158,7 +174,7 @@ export function resolveNetworkModel(
 ): Promise<NetworkSettingsModel> {
   const pythiaUrl = settings.pythiaUrl.trim();
   const resolver = createConnectionResolver({
-    supportedChains: [STOACHAIN_CHAIN_ID, ARWEAVE_CHAIN_ID],
+    supportedChains: [STOACHAIN_CHAIN_ID, ARWEAVE_CHAIN_ID, KADENA_CHAIN_ID],
     // The global connection routes by the chain it's covering; Pythia is
     // StoaChain-only today, so target the StoaChain route (coverage is still read
     // dynamically from health() — an unreachable Pythia advertises nothing and
@@ -175,6 +191,12 @@ export function resolveNetworkModel(
         : undefined,
       [ARWEAVE_CHAIN_ID]: settings.arweaveGatewayUrl.trim()
         ? createArweaveConnection({ gatewayUrl: settings.arweaveGatewayUrl })
+        : undefined,
+      // Kadena mainnet (2026-09-26) — reads-only this round; no signing seam
+      // (see `createKadenaConnection.ts`'s own doc comment for why this row
+      // is simpler than StoaChain's).
+      [KADENA_CHAIN_ID]: settings.kadenaNodeUrl.trim()
+        ? createKadenaConnection({ nodeUrl: settings.kadenaNodeUrl })
         : undefined,
     },
     locked: false,

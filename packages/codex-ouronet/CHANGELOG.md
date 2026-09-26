@@ -1,5 +1,104 @@
 # Changelog
 
+## 0.16.0 — 2026-09-26
+
+**MINOR — the Kadena switch + read functions. Owner directive: "how do i
+swtich to kadena when i have chainweb as selected blockchain? we also need
+an entry here for the kadena connection... lets wire first the kadena
+switch, and read functions. for this we need directly pact constructors,
+there arent any modules we can call the reading functions from."**
+
+### The mechanism — why this bypasses `@stoachain/stoa-core`'s `pactRead` entirely
+
+- Confirmed by reading `@stoachain/stoa-core`'s own source
+  (`dist/network/nodeFailover.js`, `dist/constants/kadena.js`,
+  `dist/reads/rawCalibratedRead.js`): every transaction `pactRead` builds is
+  stamped `.setNetworkId("stoa")` — hardcoded, with NO override seam (no
+  setter, no per-call option, no env var). A transaction built this way and
+  sent to real Kadena mainnet would be rejected node-side as a network-id
+  mismatch, regardless of host. The owner's own instinct — "we need directly
+  pact constructors, there arent any modules we can call the reading
+  functions from" — was independently confirmed: real Kadena mainnet has
+  none of Ouronet's custom deployed contracts (DALOS/CODEX/PYTHIA/etc,
+  Stoa-only), only the standard `coin` module every Chainweb-family chain
+  ships with.
+
+### New: `kadena/kadenaReads.ts` — raw Pact-constructor reads
+
+- `getKadenaBalance`, `getKadenaAccountDetails`, `checkKadenaAccountExists`,
+  `getKadenaBalancesBatch` — hand-built `coin.get-balance`/`coin.details`
+  Pact code, sent via `createClient(url).dirtyRead(tx)` from
+  `@stoachain/kadena-stoic-legacy/client` — the SAME low-level primitive
+  stoa-core's own failover client is built on internally, just with Kadena's
+  own host + `networkId: "mainnet01"` instead of stoa-core's hardcoded ones.
+- `setActiveKadenaNodeUrl`/`getActiveKadenaNodeUrl` — a module-level global
+  (mirroring stoa-core's own `setNodeConfig`/`getActiveHost` pattern) the
+  Network tab's new Kadena row pushes into, so every deeply-nested Kadena
+  read picks up the configured node with no prop-drilling needed through
+  `ForeignChainsTab` → `ChainwebPanel` → `StoaAccountsTab`.
+- `KADENA_CHAINS`/`KADENA_CHAIN_COUNT` — 20 chains (0-19), Kadena mainnet's
+  real topology since the 2020 chain-expansion, vs. StoaChain's 10
+  (`STOA_CHAINS`).
+
+### New: `connection/createKadenaConnection.ts` — the Network tab's third row
+
+- A `ChainConnection` for health/status display, simpler than
+  `createStoaChainConnection`'s own shape: no signing seam this round (reads
+  bypass stoa-core entirely, so there's no global to redirect via
+  `applyNodeConfig`).
+
+### New: the actual switch — `ChainwebPanel`'s "Network: Stoa | Kadena" control
+
+- A plain, always-visible segmented control on the Accounts category
+  (deliberately NOT built on the existing `SplitSeamMedallion` seam-
+  straddling system — that already carries the Codex/Watched + Stoa/UrStoa
+  pair plus mobile pagination; a third entry there risked the exact
+  pixel-perfect positioning invariants those took many rounds to land).
+- Threaded into `StoaAccountsTab` as a new `activeNetwork` prop: swaps the
+  balance DATA SOURCE from `useStoaChainBalances` to the new
+  `useKadenaBalances` (real Kadena mainnet), morphs the Stoa/UrStoa pill's
+  "Stoa" label to "Kadena" and disables its "UrStoa" side (UrStoa — the
+  DALOS-wrapped vault token — has no Kadena-mainnet equivalent), and hides
+  the "Send STOA" action — owner: "when doing transfer for kadena wed need
+  to wire other functions" — signing/submitting against real Kadena mainnet
+  is explicit, separate, not-yet-wired future work.
+
+### New: the Network tab's third row
+
+- `apps/codex-playground`'s `networkSettings.ts`/`App.tsx`: a new
+  `kadenaNodeUrl` field (persisted, defaulting to the real public
+  `https://api.chainweb.com`), a third `supportedChains` entry, and an
+  effect pushing edits into `setActiveKadenaNodeUrl`.
+
+### Deliberately NOT done this round (explicit scope, owner's own words)
+
+- Signing/submitting against real Kadena mainnet ("when doing transfer for
+  kadena wed need to wire other functions").
+- Keeping Kadena's own SEPARATE data vs. reusing Stoa's (the "should we keep
+  its own data" design question) — the owner's own answer ("keep the same
+  data... switching... would simply switch the read point") describes THIS
+  round's actual shape already: same seeds/accounts, only the balance
+  read-point changes. Fully morphing the Stoa/UrStoa selector's data-sharing
+  behavior beyond the pill-label/disable treatment already done here is the
+  owner's own explicitly-named "next round of refinement."
+- The per-chain expanded-detail grid (`STOA_CHAINS.map(...)` in both the
+  desktop `AddressRow` and `MobileAddressFullScreen`) still iterates only
+  10 chains — Kadena-mode balances on chains 10-19 are correctly READ
+  (`useKadenaBalances` populates all 20) but not yet shown in that specific
+  expanded view. A minor, documented completeness gap, not a correctness
+  bug (chains 0-9 show accurate Kadena data).
+
+New tests: `tests/kadena-reads.test.ts` (14 tests — the exact Pact-code
+string + `networkId: "mainnet01"` every function builds, the active-URL
+global, failure/empty-list handling), `src/connection/createKadenaConnection.test.ts`
+(5 tests), plus new coverage in `ui-stoa-accounts-tab.test.tsx` (pill
+morph/disable, Send-action hiding, Kadena-mode reads) and
+`ui-chainweb-panel.test.tsx` (the switch control itself). Extended
+`tx-gas-meta-surface.test.ts` with a `READ_ONLY_TX_SITES` category —
+`kadenaReads.ts` builds a `.setMeta(...)` transaction but never signs or
+submits it, so the gasPrice/creationTime contract that test file exists to
+enforce genuinely does not apply.
+
 ## 0.15.0 — 2026-09-26
 
 **MINOR — `CodexInfoCard` ("Identity & Backup" → Codex Info) gained a
