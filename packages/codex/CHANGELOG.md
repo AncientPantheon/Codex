@@ -2,6 +2,29 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.15.0 — 2026-09-26
+
+**MINOR — the Codex Info panel gained a "Codex Form" product version
+("1.0.0") and a "Blockchains Supported" breakdown (Arweave, Stoa-Chainweb,
+Kadena-Chainweb); the Chainweb rail tab now displays as "Stoa-Chainweb".
+Owner ruling: "schema version reads 0, now that we settled the form with
+foreign blockchain integration on arweave, id say lets name it version
+1.0.0... i think the info needs now a breakdown on blockchains." New
+capability, no breaking changes. `codex-core` + `codex-ui` + `codex-ouronet`
+release (`arweave-core`/`codex-arweave` unchanged). See each member
+package's own CHANGELOG for the full technical account.**
+
+- `codex-core`: new `CODEX_FORM_VERSION` export ("1.0.0") — deliberately
+  separate from the at-rest schema-migration counter, not a repurposing of
+  it.
+- `codex-ui`: `ForeignChainsTab` gained an optional `chainLabels` prop (id →
+  display-label override), fully backward compatible.
+- `codex-ouronet`: `CodexInfoCard` shows the new "Codex Form" row + the
+  3-chain breakdown; `CodexTabs` threads the new `chainLabels` prop through
+  to relabel the Chainweb rail as "Stoa-Chainweb" (the underlying rail id
+  is unchanged). Kadena-Chainweb is listed as a supported chain-identity
+  now; the actual chain-switcher mechanics are explicit future work.
+
 ## 0.14.1 — 2026-09-26
 
 **PATCH — the Advanced settings page's Apollo Curve section retired as a

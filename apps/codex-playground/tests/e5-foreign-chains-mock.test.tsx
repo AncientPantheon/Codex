@@ -41,7 +41,7 @@ import { DEFAULT_GATEWAY_URL } from "../src/ArweaveModeToggle";
 // The not-yet-existing GREEN wiring (T15.4). Importing it is what makes this
 // file RED until T15.4 lands. `ForeignChainsWiring` mounts the generic
 // ForeignChainsTab wired with the mock Arweave adapter + the fake panel context.
-import { ForeignChainsWiring } from "../src/ForeignChainsWiring";
+import { ForeignChainsWiring, CHAINWEB_RAIL_LABEL } from "../src/ForeignChainsWiring";
 
 /** The chain rail renders ids Capitalised for display ("arweave" -> "Arweave"),
  *  so match the id case-insensitively rather than hardcoding the display form —
@@ -161,7 +161,7 @@ describe("PG-01 — the Class 2 rail carries BOTH blockchains (Chainweb + Arweav
     // are unreachable in the playground and Class 2 is half-mounted.
     const { user } = await renderWiring();
 
-    await user.click(await screen.findByRole("tab", { name: railName("chainweb") }));
+    await user.click(await screen.findByRole("tab", { name: railName(CHAINWEB_RAIL_LABEL) }));
 
     const panel = await screen.findByTestId("chainweb-panel");
     // The Class IA spine: Seeds · Pure Keys · Accounts, from the panel itself.

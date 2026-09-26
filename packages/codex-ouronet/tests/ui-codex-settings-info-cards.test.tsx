@@ -109,6 +109,25 @@ describe("<CodexInfoCard>", () => {
     // MemoryCodexAdapter("dev") → lastUpdatedDevice is "dev".
     expect(screen.getByTestId("info-device").textContent).toBe("dev");
   });
+
+  it("shows the Codex Form product version, SEPARATE from the raw Schema Version counter (owner ruling, 2026-09-26)", async () => {
+    await renderUnder(<CodexInfoCard />);
+    // "Codex Form" is CODEX_FORM_VERSION (a new, cosmetic, additive
+    // constant) — NOT a repurposing of schemaVersion, which stays whatever
+    // the adapter's real migration counter says (0 for a fresh
+    // MemoryCodexAdapter codex — see state/migrations.ts's own doc comment
+    // for why these two rows are deliberately different fields).
+    expect(screen.getByTestId("info-form-version").textContent).toBe("1.0.0");
+    expect(screen.getByTestId("info-schema").textContent).toBe("0");
+  });
+
+  it("breaks down the 3 supported blockchains (owner ruling, 2026-09-26: Arweave, Stoa-Chainweb, Kadena-Chainweb)", async () => {
+    await renderUnder(<CodexInfoCard />);
+    expect(screen.getByTestId("info-chains-count").textContent).toBe("3");
+    expect(screen.getByTestId("info-chain-arweave").textContent).toBe("Supported");
+    expect(screen.getByTestId("info-chain-stoa-chainweb").textContent).toBe("Supported");
+    expect(screen.getByTestId("info-chain-kadena-chainweb").textContent).toBe("Supported");
+  });
 });
 
 describe("<ChangePasswordCard>", () => {

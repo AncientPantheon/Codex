@@ -11,6 +11,11 @@
  * barrel (`./adapters`, `./chains`, `./vault`); this root barrel aggregates them.
  */
 
+// ----- product-facing form version (NOT the at-rest migration counter —
+// ----- see codexFormVersion.ts's own doc comment for why these are separate) -----
+
+export { CODEX_FORM_VERSION } from "./codexFormVersion.js";
+
 // ----- codec envelope (D2) -----
 
 export {

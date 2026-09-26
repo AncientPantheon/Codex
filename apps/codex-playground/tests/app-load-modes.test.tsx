@@ -29,7 +29,7 @@ import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 
 import { App, Dashboard } from "../src/App";
-import { CHAINWEB_RAIL_ID } from "../src/ForeignChainsWiring";
+import { CHAINWEB_RAIL_LABEL } from "../src/ForeignChainsWiring";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
 import {
   backupJson,
@@ -68,7 +68,7 @@ async function openChainwebSeeds(
   );
   const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
   await user.click(
-    await within(rail).findByRole("tab", { name: railName(CHAINWEB_RAIL_ID) }),
+    await within(rail).findByRole("tab", { name: railName(CHAINWEB_RAIL_LABEL) }),
   );
   const panel = await screen.findByTestId("chainweb-panel");
   // ChainwebPanel lands on `accounts`, so Seeds must be selected explicitly.
@@ -388,7 +388,7 @@ describe("Dashboard — Class 2 is wired into the REAL shell (not a second, para
 
     const rail = await screen.findByRole("tablist", { name: /foreign chains/i });
     expect(
-      within(rail).getByRole("tab", { name: railName(CHAINWEB_RAIL_ID) }),
+      within(rail).getByRole("tab", { name: railName(CHAINWEB_RAIL_LABEL) }),
     ).toBeInTheDocument();
     expect(
       within(rail).getByRole("tab", { name: railName(ARWEAVE_CHAIN_ID) }),

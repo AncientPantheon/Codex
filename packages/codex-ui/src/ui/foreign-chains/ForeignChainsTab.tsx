@@ -129,6 +129,17 @@ export interface ForeignChainsTabProps {
    *  (see `PanelProps`'s own doc comment) — this shell has no seam-straddling
    *  badges of its own to anchor here itself. */
   zone3AnchorTarget?: Element | null;
+  /**
+   * OPTIONAL id → display-label overrides. The shell stays id-blind — it
+   * never branches on WHAT a label means — but a bare id-derived label
+   * (`chainLabel`) only title-cases the first character, which is wrong for
+   * a hyphenated id (`"stoa-chainweb"` → `"Stoa-chainweb"`, not
+   * `"Stoa-Chainweb"`). A consumer with an id whose correct display form
+   * isn't "capitalize the first letter" supplies it here instead of the
+   * shell guessing. Ids absent from this map keep the default
+   * auto-capitalize behavior — fully backward compatible, added 2026-09-26.
+   */
+  chainLabels?: Record<string, string>;
 }
 
 /** The rail search field renders only when the injected list is LONGER than
@@ -147,10 +158,13 @@ const RAIL_ICON_SLOT = 22;
 /** Floor so a one-word chain name still reads as a menu, not a chip. */
 const RAIL_MIN_WIDTH = 150;
 
-/** Display label for a rail id. Capitalised for presentation only — the shell
- *  stays id-blind (no per-chain map, no branching on the value). */
-function chainLabel(id: string): string {
-  return id.charAt(0).toUpperCase() + id.slice(1);
+/** Display label for a rail id. An explicit `overrides` entry wins outright;
+ *  otherwise falls back to capitalizing just the first character (the
+ *  original, still-default behavior) — the shell stays id-blind either way,
+ *  it never branches on what a label MEANS, only on whether the consumer
+ *  supplied one. */
+function chainLabel(id: string, overrides?: Record<string, string>): string {
+  return overrides?.[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 export function ForeignChainsTab({
@@ -161,6 +175,7 @@ export function ForeignChainsTab({
   fullScreenPortalTarget,
   edgeRailAnchorTarget,
   zone3AnchorTarget,
+  chainLabels,
 }: ForeignChainsTabProps): React.ReactElement {
   const firstId = foreignChains[0] ?? "";
   const [selectedId, setSelectedId] = useState<string>(firstId);
@@ -201,7 +216,7 @@ export function ForeignChainsTab({
       <button
         type="button"
         onClick={() => setPickerOpen(true)}
-        aria-label={`Select blockchain — currently ${chainLabel(activeId)}`}
+        aria-label={`Select blockchain — currently ${chainLabel(activeId, chainLabels)}`}
         style={{
           display: "flex", alignItems: "center", gap: 4,
           height: 18, padding: "0 8px", border: "1px solid #262626", borderBottom: "none",
@@ -210,7 +225,7 @@ export function ForeignChainsTab({
         }}
       >
         <Boxes size={11} strokeWidth={1.5} />
-        {chainLabel(activeId)}
+        {chainLabel(activeId, chainLabels)}
         <ChevronDown size={11} strokeWidth={1.5} />
       </button>
     );
@@ -257,7 +272,7 @@ export function ForeignChainsTab({
                   data-testid={`chain-icon-slot-${id}`}
                   style={{ flex: `0 0 ${RAIL_ICON_SLOT}px`, width: RAIL_ICON_SLOT, height: RAIL_ICON_SLOT, borderRadius: 6, border: `1px solid ${selected ? `${ACCENT}55` : "#2f2f2f"}`, backgroundColor: selected ? `${ACCENT}20` : "#121212" }}
                 />
-                <span style={{ flex: 1, minWidth: 0 }}>{chainLabel(id)}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>{chainLabel(id, chainLabels)}</span>
                 {selected && <Check size={16} style={{ flexShrink: 0 }} />}
               </button>
             );
@@ -378,7 +393,7 @@ export function ForeignChainsTab({
                     backgroundColor: selected ? "rgba(10,10,10,0.12)" : "#121212",
                   }}
                 />
-                {chainLabel(id)}
+                {chainLabel(id, chainLabels)}
               </button>
             );
           })}

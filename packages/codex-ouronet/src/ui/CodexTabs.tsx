@@ -60,6 +60,10 @@ export interface CodexTabsProps {
   /** Class 2's id → panel-component slot map. Chains contribute their panel UP
    *  into this aggregator; it never reaches DOWN into a concrete chain package. */
   foreignChainPanels?: ForeignChainPanels;
+  /** Forwarded straight through to `ForeignChainsTab`'s own `chainLabels` —
+   *  see that prop's own doc comment. Optional id → display-label overrides
+   *  for the rail; omitted ids keep the default auto-capitalize behavior. */
+  chainLabels?: Record<string, string>;
   /**
    * Where the mobile Address Book stripe's TRIGGER BUTTON should mount, via
    * `createPortal` — a DOM node flush against a host's OWN bottom tab bar
@@ -142,6 +146,7 @@ export function CodexTabs({
   defaultTab = "ouronet-accounts",
   foreignChains = [],
   foreignChainPanels = {},
+  chainLabels,
   addressBookRiserTarget,
   paginationRiserTarget,
   swipeIndicatorRiserTarget,
@@ -173,6 +178,7 @@ export function CodexTabs({
         <ForeignChainsTab
           foreignChains={foreignChains}
           foreignChainPanels={foreignChainPanels}
+          chainLabels={chainLabels}
           chainPickerRiserTarget={paginationRiserTarget}
           fullScreenPortalTarget={fullScreenPortalTarget}
           edgeRailAnchorTarget={edgeRailAnchorTarget}
@@ -287,6 +293,7 @@ export function CodexTabs({
             <ForeignChainsTab
               foreignChains={foreignChains}
               foreignChainPanels={foreignChainPanels}
+              chainLabels={chainLabels}
               chainPickerRiserTarget={paginationRiserTarget}
               fullScreenPortalTarget={fullScreenPortalTarget}
               edgeRailAnchorTarget={edgeRailAnchorTarget}

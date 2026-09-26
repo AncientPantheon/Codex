@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.7.1 — 2026-09-26
+## 0.8.0 — 2026-09-26
+
+**MINOR — `ForeignChainsTab` gained an optional `chainLabels` prop. Owner
+ruling: "Chainweb that we are supporting now, is basically Stoa-Chainweb,
+but it isnt named as such, so it should be named, Stoa-Chainweb."**
+
+- The shell's own auto-derived rail label (`chainLabel()`) only title-cases
+  the FIRST character of an id — correct for a single word ("arweave" →
+  "Arweave"), wrong for a hyphenated one ("stoa-chainweb" would render
+  "Stoa-chainweb", lowercase second word). Renaming the underlying rail id
+  itself was rejected as unnecessarily risky for a cosmetic ask (ids are
+  referenced by tests/persisted state); `chainLabels?: Record<string, string>`
+  lets a consumer override the DISPLAYED text for specific ids while every
+  id absent from the map keeps the original auto-capitalize behavior —
+  fully backward compatible, the shell stays id-blind either way (it never
+  branches on what an override MEANS, only on whether one was supplied).
 
 **PATCH — `ExperimentalCurvesCard` retired as a toggle. Owner ruling: "the
 Apollo Curve is always on because it represents both Pythia APIs and Codex

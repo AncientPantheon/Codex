@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.15.0 — 2026-09-26
+
+**MINOR — `CodexInfoCard` ("Identity & Backup" → Codex Info) gained a
+"Codex Form" version row and a "Blockchains Supported" breakdown; the
+Chainweb rail now displays as "Stoa-Chainweb". Owner ruling: "schema
+version reads 0, now that we settled the form with foreign blockchain
+integration on arweave, id say lets name it version 1.0.0... i think the
+info needs now a breakdown on blockchains... Blockchain supported [3]:
+Arweave, Stoa-Chainweb, and... Kadena-Chainweb."**
+
+### "Codex Form" — a new, separate version row, not a repurposed one
+
+- The "Schema Version" row the owner was looking at (`useCodex().schemaVersion`)
+  is `CURRENT_SCHEMA_VERSION` (`state/migrations.ts`) — a plain integer
+  migration-step counter the runner, the adapter interface, and ~40 tests
+  do numeric arithmetic against. Converting it to a string like `"1.0.0"`
+  would break that machinery for zero functional gain, and there are two
+  OTHER unrelated fields already named "schema version" in this codebase
+  (the foreign-keys wire block, each consumer's own settings) that make
+  "just repurpose the existing field" actively risky to reason about.
+- Instead: a new `CODEX_FORM_VERSION = "1.0.0"` constant
+  (`@ancientpantheon/codex-core`, see that package's own CHANGELOG) shown as
+  a NEW "Codex Form" row, alongside (not replacing) "Schema Version". Marks
+  the milestone the owner is pointing at — the codex snapshot shape
+  "settled" once Arweave (foreign-blockchain) integration landed alongside
+  the native Ouronet/StoaChain side. A versioning policy for future bumps
+  is documented on the constant itself: MINOR for additive capability
+  (optional, coalesced-on-read fields only — never breaking an older
+  reader), MAJOR reserved for a genuinely breaking shape change.
+
+### "Blockchains Supported" breakdown (3: Arweave, Stoa-Chainweb, Kadena-Chainweb)
+
+- New rows listing every blockchain this Codex build supports, by name.
+  "Stoa-Chainweb" replaces the previously-unqualified "Chainweb" naming —
+  it's specifically Stoa's chainweb, not upstream Kadena mainnet.
+  "Kadena-Chainweb" is listed as a third supported chain per the owner's
+  explicit ruling — a chain-IDENTITY-level claim (the same seeds/accounts
+  are already cryptographically Kadena-compatible), NOT a claim that a
+  functioning chain-switcher UI exists yet. The owner's own words: the
+  actual switcher (repointing the Chainweb read-point at Kadena mainnet,
+  morphing the Stoa/UrStoa selector to Kadena-named) is explicit FUTURE
+  work — "that would be the next round of refinement."
+- The Chainweb rail tab itself (Blockchain Accounts → the vertical rail)
+  now DISPLAYS as "Stoa-Chainweb" too, via `ForeignChainsTab`'s new
+  `chainLabels` override (see `@ancientpantheon/codex-ui`'s own CHANGELOG,
+  v0.8.0) — threaded through `CodexTabs`' own new `chainLabels` prop. The
+  underlying rail id (`"chainweb"`, `CHAINWEB_RAIL_ID` in
+  `apps/codex-playground`) is UNCHANGED — only the displayed text moved.
+
 ## 0.14.1 — 2026-09-26
 
 **PATCH — the Advanced settings page's "Experimental Curves" section

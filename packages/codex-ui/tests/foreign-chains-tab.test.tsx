@@ -180,6 +180,49 @@ describe("ForeignChainsTab — registry-driven subtab dispatch", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
     expect(screen.getByText(/no foreign chains/i)).toBeTruthy();
   });
+
+  it("uses an injected chainLabels override instead of the default auto-capitalize, for ids where that's wrong (e.g. hyphenated ids)", () => {
+    const registry = createForeignChainRegistry();
+    registry.register(stubAdapterA);
+    const panels: Record<string, React.ComponentType<PanelProps>> = {
+      "stub-a": StubPanelA,
+    };
+
+    render(
+      <ForeignChainsTab
+        foreignChains={registry.list()}
+        foreignChainPanels={panels}
+        chainLabels={{ "stub-a": "Stub-A Custom" }}
+      />,
+    );
+
+    // The override wins outright — not "Stub-a" (the default first-char-only
+    // capitalization, which is wrong for a hyphenated id).
+    expect(screen.getByRole("tab", { name: "Stub-A Custom" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Stub-a" })).toBeNull();
+  });
+
+  it("still uses the default auto-capitalize behavior for ids absent from chainLabels — fully backward compatible", () => {
+    const registry = createForeignChainRegistry();
+    registry.register(stubAdapterA);
+    registry.register(stubAdapterB);
+    const panels: Record<string, React.ComponentType<PanelProps>> = {
+      "stub-a": StubPanelA,
+      "stub-b": StubPanelB,
+    };
+
+    render(
+      <ForeignChainsTab
+        foreignChains={registry.list()}
+        foreignChainPanels={panels}
+        chainLabels={{ "stub-a": "Stub-A Custom" }}
+      />,
+    );
+
+    // stub-a is overridden; stub-b, absent from the map, keeps its default label.
+    expect(screen.getByRole("tab", { name: "Stub-A Custom" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: shown("stub-b") })).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------

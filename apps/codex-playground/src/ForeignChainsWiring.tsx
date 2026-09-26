@@ -104,6 +104,27 @@ if (!getRegisteredChains().includes(ARWEAVE_CHAIN_ID)) {
 export const CHAINWEB_RAIL_ID = "chainweb";
 
 /**
+ * Display-label override for the Chainweb rail id (owner ruling, 2026-09-26:
+ * "Chainweb that we are supporting now, is basically Stoa-Chainweb, but it
+ * isnt named as such, so it should be named, Stoa-Chainweb"). The rail id
+ * itself (`CHAINWEB_RAIL_ID`, "chainweb") is UNCHANGED — renaming the id
+ * would ripple into every test/persisted-state reference keyed on it, for a
+ * purely cosmetic ask. `ForeignChainsTab`'s `chainLabels` override exists
+ * exactly for this: fix the DISPLAYED text without touching the id. Also
+ * fixes the auto-capitalize casing bug a bare rename would hit anyway —
+ * `chainLabel()`'s fallback only title-cases the first character, so a
+ * hyphenated id like "stoa-chainweb" would otherwise render "Stoa-chainweb"
+ * (lowercase second word).
+ */
+/** The display text the Chainweb rail id renders as — exported so tests don't
+ *  hardcode the string a second time (see `CHAIN_RAIL_LABELS` below). */
+export const CHAINWEB_RAIL_LABEL = "Stoa-Chainweb";
+
+const CHAIN_RAIL_LABELS: Record<string, string> = {
+  [CHAINWEB_RAIL_ID]: CHAINWEB_RAIL_LABEL,
+};
+
+/**
  * Map the CODEX address-book slice onto the panel's `addressBook` seam.
  *
  * The Address Book tab stores an Arweave recipient as `type: "arweave"` and
@@ -1003,6 +1024,7 @@ export function ForeignChainsWiring({
         defaultTab={defaultTab}
         foreignChains={foreignChains}
         foreignChainPanels={foreignChainPanels}
+        chainLabels={CHAIN_RAIL_LABELS}
         addressBookRiserTarget={addressBookRiserTarget}
         paginationRiserTarget={paginationRiserTarget}
         swipeIndicatorRiserTarget={swipeIndicatorRiserTarget}
