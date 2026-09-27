@@ -17,8 +17,8 @@ import { KADENA_MAINNET_DEFAULT_NODE_URL } from "../kadena/kadenaReads.js";
 const CUSTOM_URL = "https://my-kadena-node.example.com";
 
 describe("createKadenaConnection", () => {
-  it("defaults to the real, public Kadena mainnet node — surfaced, not hidden", () => {
-    expect(KADENA_MAINNET_DEFAULT_NODE_URL).toBe("https://api.chainweb.com");
+  it("defaults to our own, confirmed-live Kadena mainnet node — surfaced, not hidden", () => {
+    expect(KADENA_MAINNET_DEFAULT_NODE_URL).toBe("http://bytales.duckdns.org:31849");
     const conn = createKadenaConnection();
     expect(conn.chainId).toBe(KADENA_CONNECTION_CHAIN_ID);
   });

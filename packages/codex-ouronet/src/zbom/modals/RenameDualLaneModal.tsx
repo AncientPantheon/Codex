@@ -50,7 +50,7 @@ import { useGetKeypair, useActiveWallet, useSignTransaction } from "../../hooks/
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { detectOriginCurve } from "../../ui/internal/originCurve.js";
-import { getRenameDualLaneInfo, getRenameDualLaneInfoOnly, buildRenameDualLanePactCode } from "../pythia/dualLinkOps.js";
+import { getRenameDualLaneInfo, getRenameDualLaneInfoOnly, buildRenameDualLanePactCode, buildRenameDualLanePreview } from "../pythia/dualLinkOps.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -421,7 +421,11 @@ export default function RenameDualLaneModal({
           key={(patronAccount?.address ?? "") + newName}
           readId="INFO_UpdateDualConsumerLane"
           label="PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane"
-          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane "${(patronAccount?.address ?? "").slice(0, 12)}…" "${dualLinkKey.slice(0, 12)}…" "${newName}")`}
+          pactCall={buildRenameDualLanePreview({
+            patron: `${(patronAccount?.address ?? "").slice(0, 12)}…`,
+            dualLinkKey: `${dualLinkKey.slice(0, 12)}…`,
+            newName,
+          })}
           fetcher={async () => await getRenameDualLaneInfoOnly(renameArgs)}
         />
 

@@ -45,7 +45,7 @@ import { useActiveWallet, useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { detectOriginCurve } from "../../ui/internal/originCurve.js";
-import { buildRevokeDualLinkPactCode, getRevokeDualLinkInfoOnly } from "../pythia/dualLinkOps.js";
+import { buildRevokeDualLinkPactCode, getRevokeDualLinkInfoOnly, buildRevokeDualLinkPreview } from "../pythia/dualLinkOps.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -333,7 +333,10 @@ export default function RevokeDualLinkModal({
           key={(patronAccount?.address ?? "") + dualLinkKey}
           readId="INFO_RevokeLink"
           label="PYTHIA.INFO_PYTHIA|RevokeLink"
-          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|RevokeLink "${(patronAccount?.address ?? "").slice(0, 12)}…" "${dualLinkKey.slice(0, 12)}…")`}
+          pactCall={buildRevokeDualLinkPreview({
+            patron: `${(patronAccount?.address ?? "").slice(0, 12)}…`,
+            dualLinkKey: `${dualLinkKey.slice(0, 12)}…`,
+          })}
           fetcher={async () => patronAccount?.address ? await getRevokeDualLinkInfoOnly({ patron: patronAccount.address, dualLinkKey }) : null}
         />
 

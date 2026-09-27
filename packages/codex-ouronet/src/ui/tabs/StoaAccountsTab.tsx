@@ -119,6 +119,10 @@ const fmt12 = (n: number) => n.toFixed(12);
  *  everything real. */
 const fmt3 = (n: number) => n.toFixed(3);
 const explorerUrl = (a: string) => `https://explorer.stoachain.com/accounts/${a}`;
+/** 2026-09-27: Kadena mode's own explorer — our denascan backend (also the
+ *  live REST balance source, see `kadenaBalanceSource.ts`). `encodeURIComponent`
+ *  gives exactly the `k%3A...` form the explorer's own URLs use. */
+const kadenaExplorerUrl = (a: string) => `https://denascan.ancientholdings.eu/accounts/${encodeURIComponent(a)}`;
 
 /** Bigger square action-button chrome for the mobile SHARED action row
  *  (design.md §8, the "further optimize round 2"): "instead of adding so
@@ -591,10 +595,13 @@ function AddressRow({
   const prefixColor = ADDR_COLORS[prefix] ?? "#888";
   const publicKey = publicKeyOf(entry.address);
 
+  // 2026-09-27: Kadena mode's total is real KDA, not STOA — the unit word
+  // must say so, not just the number.
+  const balanceUnit = activeNetwork === "kadena" ? "KDA" : "STOA";
   const totalLabel =
     mode === "urstoa"
       ? !urBal || !urBal.exists ? "Empty" : `${fmt12(urBal.balance)} [${fmt12(urBal.staked)}]`
-      : !bal || bal.isEmpty ? "Empty" : bal.total === 0 ? "0.0 STOA" : `${fmt12(bal.total)} STOA`;
+      : !bal || bal.isEmpty ? "Empty" : bal.total === 0 ? `0.0 ${balanceUnit}` : `${fmt12(bal.total)} ${balanceUnit}`;
   const totalColor =
     mode === "urstoa"
       // Gold whenever the account holds ANY value — liquid, staked, or
@@ -803,7 +810,11 @@ function AddressRow({
             </>
           )}
           <IconCopyBtn text={entry.address} size={28} />
-          <IconStoaExplorerBtn href={explorerUrl(entry.address)} size={28} />
+          <IconStoaExplorerBtn
+            href={activeNetwork === "kadena" ? kadenaExplorerUrl(entry.address) : explorerUrl(entry.address)}
+            network={activeNetwork === "kadena" ? "kadena" : "stoa"}
+            size={28}
+          />
           {onRemove && <IconDeleteBtn onClick={onRemove} size={28} />}
         </span>
       </div>
@@ -885,6 +896,7 @@ function AddressRow({
  */
 function MobileAddressFullScreen({
   entry, bal, urBal, mode, onClose, onRelabel, chainSort, onToggleChainSort,
+  activeNetwork = "stoa",
 }: {
   entry: AddrEntry;
   bal: StoaAccountBalances | undefined;
@@ -894,11 +906,19 @@ function MobileAddressFullScreen({
   onRelabel?: (label: string) => void;
   chainSort: "number" | "amount";
   onToggleChainSort: () => void;
+  /** 2026-09-27: only fixes the "Total Stoa Balance"/" STOA" unit label for
+   *  Kadena mode — this view's per-chain grid below still iterates
+   *  `STOA_CHAINS` (10), not `KADENA_CHAINS` (20), so a Kadena account with
+   *  balance on chain 10+ won't show that chain's row here yet. Known,
+   *  separate gap (mobile-only fullscreen view); not attempted in this pass,
+   *  which fixes the desktop-reported label/explorer-link bugs. */
+  activeNetwork?: "stoa" | "kadena";
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.sublabel);
   const prefix = entry.address.slice(0, 2);
   const prefixColor = ADDR_COLORS[prefix] ?? "#888";
+  const balanceUnit = activeNetwork === "kadena" ? "KDA" : "STOA";
 
   const chainRows = STOA_CHAINS.map((chainId: string) => ({ chainId, c: bal?.perChain[chainId] }));
   const sortedChainRows =
@@ -949,8 +969,10 @@ function MobileAddressFullScreen({
               (the SAME figure the list row's own balance already shows). */}
           {bal && !bal.isEmpty && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "8px 0", borderBottom: "1px solid #1a1a1a" }}>
-              <span style={{ fontSize: 13, color: "#888" }}>Total Stoa Balance</span>
-              <span style={{ fontFamily: MONO, fontSize: 14, color: "#d2d3d4" }}>{fmt12(bal.total)} STOA</span>
+              <span style={{ fontSize: 13, color: "#888" }}>
+                {activeNetwork === "kadena" ? "Total Kadena Balance" : "Total Stoa Balance"}
+              </span>
+              <span style={{ fontFamily: MONO, fontSize: 14, color: "#d2d3d4" }}>{fmt12(bal.total)} {balanceUnit}</span>
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -1671,7 +1693,11 @@ export function StoaAccountsTab({
         </button>
       )}
       <IconCopyBtn text={selectedEntry.address} size={30} />
-      <IconStoaExplorerBtn href={explorerUrl(selectedEntry.address)} size={30} />
+      <IconStoaExplorerBtn
+        href={activeNetwork === "kadena" ? kadenaExplorerUrl(selectedEntry.address) : explorerUrl(selectedEntry.address)}
+        network={activeNetwork === "kadena" ? "kadena" : "stoa"}
+        size={30}
+      />
       {selectedEntry.watchId && (
         <IconDeleteBtn onClick={() => { void deleteEntry(selectedEntry.watchId as string); setSelectedAddressState(null); }} size={30} />
       )}
@@ -2036,6 +2062,7 @@ export function StoaAccountsTab({
             } : undefined}
             chainSort={chainSort}
             onToggleChainSort={() => setChainSort((s) => (s === "amount" ? "number" : "amount"))}
+            activeNetwork={activeNetwork}
           />
         </MobilePortal>
       )}

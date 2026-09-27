@@ -3,28 +3,29 @@
  * addresses against REAL Kadena mainnet, used by the Stoa Accounts tab when
  * switched into Kadena mode (see `ChainwebPanel.tsx`'s `activeNetwork`).
  *
- * ONE read per Kadena chain (`KADENA_CHAINS`, 0-19), each batching a
- * `map`/`try` over every address — mirrors `useStoaChainBalances.ts`'s own
- * shape/hook contract (`byAddress`/`loading`/`error`/`refresh`) exactly, so
- * `StoaAccountsTab` can switch between the two with minimal branching. The
- * ONE real difference: there is no Stoa-equivalent "Read B" selector call
- * here (`getStoaAccountSelectorDataLive`'s `O-UI-SEVEN.URC_05|StoaAccounts`
- * is an Ouronet-custom module — confirmed absent from real Kadena mainnet,
- * see `kadenaReads.ts`'s own doc comment) — `selectorBalance` is always
- * `undefined` for a Kadena-mode read.
+ * Reads go through `kadenaBalanceSource.ts`'s pluggable seam
+ * (`getActiveKadenaBalanceSource()`), NOT a hand-built fetch here — mirrors
+ * `useStoaChainBalances.ts`'s own shape/hook contract (`byAddress`/`loading`/
+ * `error`/`refresh`) exactly, so `StoaAccountsTab` can switch between the two
+ * with minimal branching. The ONE real difference: there is no Stoa-equivalent
+ * "Read B" selector call here (`getStoaAccountSelectorDataLive`'s
+ * `O-UI-SEVEN.URC_05|StoaAccounts` is an Ouronet-custom module — confirmed
+ * absent from real Kadena mainnet) — `selectorBalance` is always `undefined`
+ * for a Kadena-mode read.
  *
- * Reads go through `kadenaReads.ts`'s `getKadenaBalancesBatch` — a raw,
- * hand-built Pact transaction against the ACTIVE Kadena node
- * (`getActiveKadenaNodeUrl()`, set by the Network tab's Kadena row — see
- * `kadenaReads.ts`'s own doc comment on why this is a module-level global
- * rather than a prop threaded through `ForeignChainsTab` → `ChainwebPanel`
- * → `StoaAccountsTab`), NEVER through `@stoachain/stoa-core`'s `pactRead`
- * (which cannot address real Kadena mainnet — its hardcoded
- * `networkId: "stoa"` would be rejected node-side).
+ * 2026-09-27: this hook used to call `kadenaReads.ts`'s `getKadenaBalancesBatch`
+ * directly, one read per chain. That is now `pactKadenaBalanceSource` — still
+ * correct, still available, just no longer hardwired here. The DEFAULT source
+ * is `restKadenaBalanceSource` (see `kadenaBalanceSource.ts`'s own doc comment
+ * for the full diagnosis of why: `api.chainweb.com` does not exist, there is no
+ * free public Kadena Pact API, and the direct node hairpin-NATs from its own
+ * LAN). Swapping the active source (`setActiveKadenaBalanceSource`) changes
+ * every read through this hook with no change needed here.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { KADENA_CHAINS, getKadenaBalancesBatch, getActiveKadenaNodeUrl } from "../../kadena/kadenaReads.js";
+import { getActiveKadenaBalanceSource } from "../../kadena/kadenaBalanceSource.js";
+import { KADENA_CHAINS } from "../../kadena/kadenaReads.js";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import type { ChainBalance, StoaAccountBalances, StoaBalancesView } from "./useStoaChainBalances.js";
 
@@ -53,38 +54,37 @@ export function useKadenaBalances(
       return;
     }
 
-    const nodeUrl = getActiveKadenaNodeUrl();
+    const source = getActiveKadenaBalanceSource();
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     (async () => {
       try {
-        const perChainResults = await Promise.all(
-          KADENA_CHAINS.map(async (chainId: string) => {
-            const rows = await codexClock.report("kadena.coin.get-balance", { chainId }, () =>
-              getKadenaBalancesBatch(addrs, { nodeUrl, chainId }),
-            );
-            return { chainId, rows };
-          }),
+        const perAddress = await codexClock.report(`kadena.balances.${source.name}`, undefined, () =>
+          source.fetchBalances(addrs),
         );
 
         if (cancelled) return;
 
         const map: Record<string, StoaAccountBalances> = {};
         for (const addr of addrs) {
+          const sourcePerChain = perAddress[addr] ?? {};
           const perChain: Record<string, ChainBalance> = {};
           let total = 0;
           let chainsWithBalance = 0;
           let anyExists = false;
-          for (const { chainId, rows } of perChainResults) {
-            const row = rows.find((x) => x.account === addr);
-            const exists = row?.exists === true;
-            const bal = exists ? (row?.balance ?? 0) : 0;
-            perChain[chainId] = { balance: bal, exists };
+          // Always cover every KADENA_CHAINS entry, even one the active source returned
+          // no data for — a chain absent from the source's map means "exists:false", the
+          // same answer it always meant, not "unknown" or a missing grid cell.
+          for (const chainId of KADENA_CHAINS) {
+            const entry = sourcePerChain[chainId];
+            const exists = entry?.exists === true;
+            const balance = exists ? (entry?.balance ?? 0) : 0;
+            perChain[chainId] = { balance, exists };
             if (exists) anyExists = true;
-            total += bal;
-            if (exists && bal > 0) chainsWithBalance++;
+            total += balance;
+            if (exists && balance > 0) chainsWithBalance++;
           }
           map[addr] = {
             perChain,

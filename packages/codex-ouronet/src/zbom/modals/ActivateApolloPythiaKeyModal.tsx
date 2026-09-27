@@ -57,6 +57,7 @@ import {
   getDeployApiKeyInfo,
   getDeployApiKeyInfoOnly,
   buildDeployApiKeyPactCode,
+  buildDeployApiKeyPreview,
 } from "../pythia/deployApiKey.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
@@ -521,7 +522,12 @@ export default function ActivateApolloPythiaKeyModal({
           key={patronAccount?.address ?? ""}
           readId="INFO_DeployApiKey"
           label="PYTHIA.INFO_PYTHIA|DeployApiKey"
-          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|DeployApiKey "${(patronAccount?.address ?? "").slice(0, 14)}…" "${(ownerAccount?.address ?? "").slice(0, 14)}…" "${account.address.slice(0, 14)}…" "${account.publicKey.slice(0, 12)}…")`}
+          pactCall={buildDeployApiKeyPreview({
+            patron: `${(patronAccount?.address ?? "").slice(0, 14)}…`,
+            ownerAccount: `${(ownerAccount?.address ?? "").slice(0, 14)}…`,
+            apolloAccount: `${account.address.slice(0, 14)}…`,
+            publicKey: `${account.publicKey.slice(0, 12)}…`,
+          })}
           fetcher={async () => await getDeployApiKeyInfoOnly(deployArgs)}
         />
 
@@ -543,6 +549,14 @@ export default function ActivateApolloPythiaKeyModal({
 
         {/* ── Zone 2 — Inputs (4 args, all autonomous — user inputs nothing) ── */}
         <Zone2Wrapper
+          // Literal, not registry-built: this string is a static inventory
+          // anchor read by an external build-time source-text scanner
+          // (OuronetUI's annotation generator — see Zone2Wrapper.tsx's doc
+          // comment), never evaluated at runtime here. A dynamic expression
+          // would still render the same value but would break that
+          // scanner's literal-string match — see
+          // docs/work/talos-registry-migration/design.md's "Out of scope"
+          // section.
           functionName="ouronet-ns.TS01-C4.PYTHIA|C_DeployApiKey"
           functionMeta={{
             locations:      ["Ouronet Account -> Apollo -> Activate as Pythia Key"],

@@ -87,6 +87,27 @@ export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
  *  as placeholder text when the persisted value is ever cleared). */
 export const STOACHAIN_NODE_PLACEHOLDER = STOACHAIN_DEFAULT_NODE_URL;
 
+/**
+ * The Kadena node default, with a local-dev escape hatch (2026-09-27 diagnosis —
+ * "hairpin NAT"): `bytales.duckdns.org` resolves to the node's PUBLIC IP, and the
+ * LAN router the node itself sits behind will not loop that traffic back to a
+ * machine on the same LAN — the request dies at the router, every time, for every
+ * dev box on that network. `bytales.duckdns.org` MUST stay the shipped/production
+ * default (the public IP is dynamic, so a fixed IP is not an option, and a
+ * localhost/LAN URL obviously isn't one for anybody off that LAN) — so a dev on
+ * that LAN needs a way to point at the node's LAN address WITHOUT editing the
+ * shipped default and risking it shipping that way.
+ *
+ * `VITE_KADENA_NODE_URL`, read once at startup, is that escape hatch: unset in
+ * production, so production gets the real default; a dev on the node's own LAN
+ * sets it in an UNCOMMITTED `.env.local` (see `.env.local.example`) to
+ * `http://localhost:31849` or `http://<node's LAN IP>:31849`. Deliberately NOT a
+ * silent runtime "try duckdns, fall back to localhost" — that would mask a real
+ * production outage as a working dev box (the same reason the timeout in
+ * `kadenaReads.ts` surfaces its error instead of quietly retrying).
+ */
+const KADENA_NODE_URL_OVERRIDE = import.meta.env.VITE_KADENA_NODE_URL;
+
 /** The surfaced defaults (owner directive, updated): no operator Pythia by
  *  default, but StoaChain now defaults to the real, public `node2.stoachain.com`
  *  gateway out of the box — a standalone Codex should be able to read/send on
@@ -100,7 +121,7 @@ export const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
   stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
   arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
   arweaveMode: ARWEAVE_WIRING_MODE_REAL,
-  kadenaNodeUrl: KADENA_MAINNET_DEFAULT_NODE_URL,
+  kadenaNodeUrl: KADENA_NODE_URL_OVERRIDE?.trim() || KADENA_MAINNET_DEFAULT_NODE_URL,
 };
 
 /**
@@ -140,7 +161,22 @@ export function loadNetworkSettings(): NetworkSettings {
           ? parsed.arweaveMode
           : DEFAULT_NETWORK_SETTINGS.arweaveMode,
       kadenaNodeUrl:
-        typeof parsed.kadenaNodeUrl === "string" && parsed.kadenaNodeUrl.length > 0
+        typeof parsed.kadenaNodeUrl === "string" &&
+        parsed.kadenaNodeUrl.length > 0 &&
+        // ONE-TIME migration, same shape as the Arweave gateway one above:
+        // "https://api.chainweb.com" was this constant's own hardcoded value
+        // before 2026-09-27, when it was replaced with our own confirmed-live
+        // Kadena node (see kadenaReads.ts's own doc comment — the public host
+        // could not be verified reachable and gave no independent way to
+        // confirm it served correct balances). Any browser that loaded the
+        // app before that change has the OLD default WRITTEN to localStorage
+        // not because anyone chose it, but because it was simply the code's
+        // default at the time. Correcting exactly this one legacy literal
+        // (never any OTHER value, including a different node someone
+        // actually typed) is what lets balances resolve correctly for a
+        // returning browser instead of silently querying a node that was
+        // never confirmed to work.
+        parsed.kadenaNodeUrl !== "https://api.chainweb.com"
           ? parsed.kadenaNodeUrl
           : DEFAULT_NETWORK_SETTINGS.kadenaNodeUrl,
     };

@@ -51,7 +51,7 @@ import { StringEntryInput } from "../cfm/inputs.js";
 import { useWallet } from "../cfm/seam.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
-import { buildLinkDualApiKeyPactCode, getLinkDualApiKeyInfo } from "../pythia/linkDualApiKey.js";
+import { buildLinkDualApiKeyPactCode, buildLinkDualApiKeyPreview, getLinkDualApiKeyInfo } from "../pythia/linkDualApiKey.js";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -342,7 +342,11 @@ export default function LinkDualApiKeyModal({
           key={standardAccount.address + smartAccount.address + consumerLane}
           readId="INFO_Link"
           label="PYTHIA.INFO_PYTHIA|Link"
-          pactCall={`(ouronet-ns.PYTHIA.INFO_PYTHIA|Link "${standardAccount.address.slice(0, 12)}…" "${smartAccount.address.slice(0, 12)}…" "${consumerLane}")`}
+          pactCall={buildLinkDualApiKeyPreview({
+            standardApollo: `${standardAccount.address.slice(0, 12)}…`,
+            smartApollo: `${smartAccount.address.slice(0, 12)}…`,
+            consumerLane,
+          })}
           fetcher={async () => getLinkDualApiKeyInfo({
             executor: standardOwner,
             standardApollo: standardAccount.address,

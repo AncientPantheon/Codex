@@ -30,14 +30,11 @@
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_NAMESPACE } from "@ouronet/ouronet-core/constants";
+import { buildCall, buildPreviewCall } from "@ouronet/talos-registry";
 
-/** Encode a JS string as a Pact string literal — escapes `"` / `\` / control
- *  chars so a user-typed consumer lane (or any Apollo id) can't break or inject
- *  into the Pact code. JSON string escaping is a valid Pact string literal. */
-function pactStr(s: string): string {
-  return JSON.stringify(s);
-}
+/** The EXECUTE entrypoint key — `TS01-C4.PYTHIA|C_Link`. Its own `.preview`
+ *  (resolved internally by `buildPreviewCall`) is `PYTHIA.INFO_PYTHIA|Link`. */
+export const LINK_DUAL_API_KEY_KEY = "TS01-C4.PYTHIA|C_Link";
 
 export interface LinkDualApiKeyParams {
   /** The account whose ownership authorizes this call — either half-owner is
@@ -54,7 +51,24 @@ export interface LinkDualApiKeyParams {
 /** The EXECUTE Pact code — `(…TS01-C4.PYTHIA|C_Link executor std smt lane)`.
  *  Authorized by both half-owners' ownership guards; no STOA/IGNIS fee. */
 export function buildLinkDualApiKeyPactCode(p: LinkDualApiKeyParams): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_Link ${pactStr(p.executor)} ${pactStr(p.standardApollo)} ${pactStr(p.smartApollo)} ${pactStr(p.consumerLane)})`;
+  return buildCall(LINK_DUAL_API_KEY_KEY, {
+    executor: p.executor,
+    "standard-apollo": p.standardApollo,
+    "smart-apollo": p.smartApollo,
+    "consumer-lane": p.consumerLane,
+  });
+}
+
+/** The preview Pact code — `(…PYTHIA.INFO_PYTHIA|Link std smt lane)`. Live-
+ *  confirmed 3-arg shape (no `executor` — that's EXEC-only, see module doc). */
+export function buildLinkDualApiKeyPreview(
+  p: Pick<LinkDualApiKeyParams, "standardApollo" | "smartApollo" | "consumerLane">,
+): string {
+  return buildPreviewCall(LINK_DUAL_API_KEY_KEY, {
+    "standard-apollo": p.standardApollo,
+    "smart-apollo": p.smartApollo,
+    "consumer-lane": p.consumerLane,
+  });
 }
 
 /** INFO read — `PYTHIA.INFO_PYTHIA|Link` → `object{OuronetInfoV2.ClientInfo}`
@@ -64,7 +78,7 @@ export async function getLinkDualApiKeyInfo(p: LinkDualApiKeyParams): Promise<an
   const { standardApollo, smartApollo, consumerLane } = p;
   if (!standardApollo || !smartApollo) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|Link ${pactStr(standardApollo)} ${pactStr(smartApollo)} ${pactStr(consumerLane)})`;
+    const pactCode = buildLinkDualApiKeyPreview({ standardApollo, smartApollo, consumerLane });
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;

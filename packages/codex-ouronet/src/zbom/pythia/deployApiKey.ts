@@ -17,7 +17,7 @@
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_NAMESPACE } from "@ouronet/ouronet-core/constants";
+import { buildCall, buildPreviewCall, namespace } from "@ouronet/talos-registry";
 
 /** The 4 args the deploy + INFO take (no consumer-lane — the contract no longer
  *  needs any user-typed input). */
@@ -38,6 +38,10 @@ export interface DeployApiKeyFullInfo {
   receivers: string[];
 }
 
+/** The registered `@ouronet/talos-registry` key for the deploy EXECUTE call —
+ *  its `.preview` resolves to `PYTHIA.INFO_PYTHIA|DeployApiKey`. */
+export const DEPLOY_API_KEY_KEY = "TS01-C4.PYTHIA|C_DeployApiKey";
+
 /**
  * Full INFO for a Pythia deploy — reads `INFO_PYTHIA|DeployApiKey` AND resolves
  * the STOA-split target accounts (`kadena.kadena-targets`) to their k:/c:
@@ -50,10 +54,13 @@ export async function getDeployApiKeyInfo(
   const { patron, ownerAccount, apolloAccount, publicKey } = p;
   if (!patron || !ownerAccount || !apolloAccount || !publicKey) return null;
   try {
+    const infoCall = buildDeployApiKeyPreview(p);
+    // DALOS.UR_AccountStoa is not a registered entrypoint (view helper, not a
+    // `C_*`/`INFO_*` call) — namespace comes from the registry's own export.
     const pactCode =
       `(let*` +
-      `  ((info (${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}"))` +
-      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
+      `  ((info ${infoCall})` +
+      `   (receivers (map (${namespace}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
       `  { "info": info, "receivers": receivers })`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
@@ -73,7 +80,7 @@ export async function getDeployApiKeyInfoOnly(
   const { patron, ownerAccount, apolloAccount, publicKey } = p;
   if (!patron || !ownerAccount || !apolloAccount || !publicKey) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|DeployApiKey "${patron}" "${ownerAccount}" "${apolloAccount}" "${publicKey}")`;
+    const pactCode = buildDeployApiKeyPreview(p);
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;
@@ -86,9 +93,35 @@ export async function getDeployApiKeyInfoOnly(
 
 /** The deploy Pact code — `(…TS01-C4.PYTHIA|C_DeployApiKey …)`. ONE ungated
  *  function for both Standard ₱. and Smart Π. (the curve rides in the apollo
- *  account). Mirror of `buildRegisterStoicTagPactCode`. */
+ *  account). Mirror of `buildRegisterStoicTagPactCode`.
+ *
+ *  Live EXEC params (confirmed via `tryGetEntrypoint`): `(patron executor
+ *  apollo-account public)` — the account slot is named `executor` on the
+ *  EXEC side, NOT `owner-account` (that's the preview's name for the same
+ *  slot, see `buildDeployApiKeyPreview`) — mapped explicitly, never
+ *  positionally, to avoid the executor/owner-account trap this migration
+ *  exists to close. */
 export function buildDeployApiKeyPactCode(p: DeployApiKeyParams): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_DeployApiKey "${p.patron}" "${p.ownerAccount}" "${p.apolloAccount}" "${p.publicKey}")`;
+  return buildCall(DEPLOY_API_KEY_KEY, {
+    patron: p.patron,
+    executor: p.ownerAccount,
+    "apollo-account": p.apolloAccount,
+    public: p.publicKey,
+  });
+}
+
+/** The deploy cost-preview Pact code — `(…PYTHIA.INFO_PYTHIA|DeployApiKey
+ *  …)`, keyed off `DEPLOY_API_KEY_KEY`'s own `.preview` (never the EXEC
+ *  key). Live preview params: `(patron owner-account apollo-account
+ *  public)` — the account slot is named `owner-account` here, distinct from
+ *  the EXEC side's `executor` (see `buildDeployApiKeyPactCode`). */
+export function buildDeployApiKeyPreview(p: DeployApiKeyParams): string {
+  return buildPreviewCall(DEPLOY_API_KEY_KEY, {
+    patron: p.patron,
+    "owner-account": p.ownerAccount,
+    "apollo-account": p.apolloAccount,
+    public: p.publicKey,
+  });
 }
 
 // ── Registration status read — the `PYTHIA|S|ApiKey` row for an Apollo half ──
@@ -112,7 +145,9 @@ export interface ApiKeyRow {
 export async function getApiKeyRow(apolloAccount: string): Promise<ApiKeyRow | null> {
   if (!apolloAccount) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.UR_ApiKeyRowOrNull "${apolloAccount}")`;
+    // Not a registered entrypoint (a view helper, not a `C_*`/`INFO_*` call) —
+    // namespace comes from the registry's own export.
+    const pactCode = `(${namespace}.PYTHIA.UR_ApiKeyRowOrNull "${apolloAccount}")`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return (response.result.data as ApiKeyRow) ?? null;
@@ -144,7 +179,9 @@ export async function getApiKeySelectorData(
   if (!apolloAccounts.length) return [];
   try {
     const list = apolloAccounts.map((a) => `"${a}"`).join(" ");
-    const pactCode = `(${KADENA_NAMESPACE}.P-UI-ONE.URC_01|ApiKeys [${list}])`;
+    // Not a registered entrypoint (a view helper, not a `C_*`/`INFO_*` call) —
+    // namespace comes from the registry's own export.
+    const pactCode = `(${namespace}.P-UI-ONE.URC_01|ApiKeys [${list}])`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return (response.result.data as Array<ApiKeyRow | null>) ?? [];
@@ -247,7 +284,9 @@ export async function getDualApiKeySelectorData(
   if (!dualKeys.length) return [];
   try {
     const list = dualKeys.map((k) => `"${k}"`).join(" ");
-    const pactCode = `(${KADENA_NAMESPACE}.P-UI-ONE.URC_02|DualLinks [${list}])`;
+    // Not a registered entrypoint (a view helper, not a `C_*`/`INFO_*` call) —
+    // namespace comes from the registry's own export.
+    const pactCode = `(${namespace}.P-UI-ONE.URC_02|DualLinks [${list}])`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return (response.result.data as Array<DualLinkRow | null>) ?? [];
@@ -284,7 +323,9 @@ export interface PythiaPrices {
  *  bug in this function — no independent confirmation this gap has closed. */
 export async function getPythiaPrices(): Promise<PythiaPrices | null> {
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.P-UI-ONE.URC_03|Prices)`;
+    // Not a registered entrypoint (a view helper, not a `C_*`/`INFO_*` call) —
+    // namespace comes from the registry's own export.
+    const pactCode = `(${namespace}.P-UI-ONE.URC_03|Prices)`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return (response.result.data as PythiaPrices) ?? null;

@@ -37,12 +37,12 @@
  */
 
 import { pactRead } from "@stoachain/stoa-core/reads";
-import { KADENA_NAMESPACE } from "@ouronet/ouronet-core/constants";
-
-/** Pact string literal — escapes `"` / `\` so a user-typed lane can't break/inject. */
-const S = (s: string): string => JSON.stringify(s);
+import { buildCall, buildPreviewCall, namespace } from "@ouronet/talos-registry";
 
 // ── Rename (consumer-lane) — patron pays 100 STOA, 4-way split ───────────────
+
+/** The rename EXECUTE entrypoint key — `TS01-C4.PYTHIA|C_UpdateDualConsumerLane`. */
+export const RENAME_DUAL_LANE_KEY = "TS01-C4.PYTHIA|C_UpdateDualConsumerLane";
 
 export interface RenameDualLaneParams {
   patron: string;
@@ -65,10 +65,16 @@ export async function getRenameDualLaneInfo(
   const { patron, dualLinkKey, newName } = p;
   if (!patron || !dualLinkKey || !newName) return null;
   try {
+    const infoCall = buildPreviewCall(RENAME_DUAL_LANE_KEY, {
+      patron,
+      "dual-link-key": dualLinkKey,
+      "new-name": newName,
+    });
     const pactCode =
       `(let*` +
-      `  ((info (${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)}))` +
-      `   (receivers (map (${KADENA_NAMESPACE}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
+      `  ((info ${infoCall})` +
+      // DALOS.UR_AccountStoa is not a registered entrypoint — view helper, no registry data describes it.
+      `   (receivers (map (${namespace}.DALOS.UR_AccountStoa) (at "kadena-targets" (at "kadena" info)))))` +
       `  { "info": info, "receivers": receivers })`;
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
@@ -86,7 +92,7 @@ export async function getRenameDualLaneInfoOnly(p: RenameDualLaneParams): Promis
   const { patron, dualLinkKey, newName } = p;
   if (!patron || !dualLinkKey || !newName) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|UpdateDualConsumerLane ${S(patron)} ${S(dualLinkKey)} ${S(newName)})`;
+    const pactCode = buildRenameDualLanePreview({ patron, dualLinkKey, newName });
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;
@@ -102,10 +108,28 @@ export async function getRenameDualLaneInfoOnly(p: RenameDualLaneParams): Promis
  *  SEPARATE param from the 3-arg `RenameDualLaneParams` the (unchanged) INFO
  *  reads above use, since only the EXECUTE call's declared arity grew. */
 export function buildRenameDualLanePactCode(p: RenameDualLaneParams & { executor: string }): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_UpdateDualConsumerLane ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)} ${S(p.newName)})`;
+  return buildCall(RENAME_DUAL_LANE_KEY, {
+    patron: p.patron,
+    executor: p.executor,
+    "dual-link-key": p.dualLinkKey,
+    "new-name": p.newName,
+  });
+}
+
+/** The rename INFO preview — `INFO_PYTHIA|UpdateDualConsumerLane`, resolved via
+ *  `RENAME_DUAL_LANE_KEY`'s own `.preview` (no `executor` on the preview side). */
+export function buildRenameDualLanePreview(p: RenameDualLaneParams): string {
+  return buildPreviewCall(RENAME_DUAL_LANE_KEY, {
+    patron: p.patron,
+    "dual-link-key": p.dualLinkKey,
+    "new-name": p.newName,
+  });
 }
 
 // ── Revoke (kill-switch) — patron pays 1 IGNIS, no STOA split ────────────────
+
+/** The revoke EXECUTE entrypoint key — `TS01-C4.PYTHIA|C_RevokeLink`. */
+export const REVOKE_DUAL_LINK_KEY = "TS01-C4.PYTHIA|C_RevokeLink";
 
 export interface RevokeDualLinkParams {
   patron: string;
@@ -118,7 +142,7 @@ export async function getRevokeDualLinkInfoOnly(p: RevokeDualLinkParams): Promis
   const { patron, dualLinkKey } = p;
   if (!patron || !dualLinkKey) return null;
   try {
-    const pactCode = `(${KADENA_NAMESPACE}.PYTHIA.INFO_PYTHIA|RevokeLink ${S(patron)} ${S(dualLinkKey)})`;
+    const pactCode = buildRevokeDualLinkPreview({ patron, dualLinkKey });
     const response = await pactRead(pactCode, { tier: "T5" });
     if (response?.result && response.result.status !== "failure") {
       return response.result.data ?? null;
@@ -132,5 +156,18 @@ export async function getRevokeDualLinkInfoOnly(p: RevokeDualLinkParams): Promis
 /** The revoke EXECUTE Pact code. `executor` — see module doc comment
  *  (CONFIRMED valid: either half-owner, per `UEV_ExecutorIsHalfOwner`). */
 export function buildRevokeDualLinkPactCode(p: RevokeDualLinkParams & { executor: string }): string {
-  return `(${KADENA_NAMESPACE}.TS01-C4.PYTHIA|C_RevokeLink ${S(p.patron)} ${S(p.executor)} ${S(p.dualLinkKey)})`;
+  return buildCall(REVOKE_DUAL_LINK_KEY, {
+    patron: p.patron,
+    executor: p.executor,
+    "dual-link-key": p.dualLinkKey,
+  });
+}
+
+/** The revoke INFO preview — `INFO_PYTHIA|RevokeLink`, resolved via
+ *  `REVOKE_DUAL_LINK_KEY`'s own `.preview` (no `executor` on the preview side). */
+export function buildRevokeDualLinkPreview(p: RevokeDualLinkParams): string {
+  return buildPreviewCall(REVOKE_DUAL_LINK_KEY, {
+    patron: p.patron,
+    "dual-link-key": p.dualLinkKey,
+  });
 }

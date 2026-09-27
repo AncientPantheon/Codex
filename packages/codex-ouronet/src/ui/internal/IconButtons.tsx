@@ -93,22 +93,47 @@ export function IconHideBtn({ onClick, size = BTN_SIZE }: IconHideBtnProps) {
 interface IconStoaExplorerBtnProps {
   href: string;
   size?: number;
+  /** 2026-09-27: Kadena mode's explorer link (denascan) gets its own green
+   *  treatment + title, so the button visibly reflects which chain it
+   *  actually points at instead of staying gold/"Stoa Chain Explorer" while
+   *  silently linking somewhere else. Defaults to the original Stoa look —
+   *  every pre-existing call site is unaffected until it opts in. */
+  network?: "stoa" | "kadena";
 }
 
-export function IconStoaExplorerBtn({ href, size = BTN_SIZE }: IconStoaExplorerBtnProps) {
+const EXPLORER_BTN_PALETTE: Record<
+  "stoa" | "kadena",
+  { backgroundColor: string; color: string; border: string; title: string }
+> = {
+  stoa: {
+    backgroundColor: "#1a1400",
+    color: "#ceac5f",
+    border: "2px solid rgba(120, 70, 10, 0.8)",
+    title: "Open in Stoa Chain Explorer",
+  },
+  kadena: {
+    backgroundColor: "#0a1a0a",
+    color: "#4ade80",
+    border: "2px solid rgba(20, 120, 50, 0.8)",
+    title: "Open in Kadena Explorer (denascan)",
+  },
+};
+
+export function IconStoaExplorerBtn({ href, size = BTN_SIZE, network = "stoa" }: IconStoaExplorerBtnProps) {
+  const palette = EXPLORER_BTN_PALETTE[network];
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      title="Open in Stoa Chain Explorer"
+      title={palette.title}
       style={{
         ...BASE_STYLE,
         width: size,
         height: size,
-        backgroundColor: "#1a1400",
-        color: "#ceac5f",
-        border: "2px solid rgba(120, 70, 10, 0.8)",
+        backgroundColor: palette.backgroundColor,
+        color: palette.color,
+        border: palette.border,
         textDecoration: "none",
       }}
     >

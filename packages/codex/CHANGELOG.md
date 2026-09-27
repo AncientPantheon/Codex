@@ -2,6 +2,34 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 0.17.0 — 2026-09-27
+
+**MINOR — real Kadena balances, made reliable, plus the first slice of the
+`@ouronet/talos-registry` migration. Kadena balance reads went from "spins
+forever, then shows empty for accounts confirmed funded" to working, via
+four distinct real bugs found and fixed in sequence (no timeout on the raw
+Pact read, exception details being discarded, a widely-cited "official"
+Kadena endpoint that turns out not to exist, and a hairpin-NAT limitation on
+our own node) — resolved by adding a pluggable balance-source seam that
+defaults to a REST gateway (HTTPS, stable DNS, CORS-open, no LAN dependency)
+while keeping the direct Pact-node path available as a selectable
+alternative. The Kadena-mode explorer link now actually points at the
+Kadena explorer (denascan) instead of silently staying on Stoa's, and
+balance totals say "KDA" instead of a hardcoded "STOA". Separately, this
+release adds `@ouronet/talos-registry` as a `^1.1.0` peer dependency and
+migrates the Pythia dual-link/link/deploy-API-key call builders onto its
+`buildCall`/`buildPreviewCall` — call construction that renders from the
+real deployed contract surface and throws loudly on any name/arity mismatch,
+closing a real bug class (3 of the 4 migrated entrypoints have a preview
+whose declared parameters differ from their execution's). **Consumers must
+add `@ouronet/talos-registry` `^1.1.0`** alongside the existing
+`@ouronet/ouronet-core`/`@ouronet/dalos-crypto`/`@stoachain/*` peers — see
+`@ancientpantheon/codex-ouronet`'s own CHANGELOG for the full technical
+account, including the two remaining topics of the talos-registry migration
+not yet shipped. New capability + bug fixes, no breaking changes beyond the
+new required peer. `codex-ouronet` release only (`codex-ui`/`codex-core`/
+`arweave-core`/`codex-arweave` unchanged).**
+
 ## 0.16.0 — 2026-09-26
 
 **MINOR — the Kadena switch + read functions. Owner directive: "how do i

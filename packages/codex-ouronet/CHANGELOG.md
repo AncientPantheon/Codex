@@ -1,5 +1,139 @@
 # Changelog
 
+## 0.17.0 — 2026-09-27
+
+**MINOR — real Kadena balances, made reliable, plus the first slice of the
+`@ouronet/talos-registry` migration. Two owner-driven threads this round: "you
+gotta read the modules with pythia with describe modules" turned into a full
+diagnosis chain on Kadena balance reads (four real, distinct bugs found and
+fixed in sequence, not one), and the talos-registry HANDOFF's Pythia
+entrypoints (Link/Revoke/Rename Dual API Key, Deploy API Key) migrated off
+hand-built Pact strings onto the registry's `buildCall`/`buildPreviewCall`.**
+
+### Kadena balances — the diagnosis chain
+
+Reported symptom: "loading the balances spins and spins and nothing is
+shown," later "empty for all addresses" even for accounts independently
+confirmed funded. Four distinct, real bugs, found and fixed in the order they
+were hit — each one masked the next until fixed:
+
+1. **No timeout on the raw Pact read.** `createClient(...).dirtyRead()` (from
+   `@stoachain/kadena-stoic-legacy/client`) has no timeout of its own —
+   confirmed by reading its source: no `timeout`/`AbortController`/`signal`
+   anywhere. A connection that hangs rather than cleanly fails (a
+   firewalled/dropped host:port) waited on the browser's own OS-level
+   connection timeout, which can run to minutes — this was the literal
+   "spins and spins" symptom. New `KADENA_READ_TIMEOUT_MS` (10s), raced
+   against every `dirtyRead` call in `kadenaReads.ts`.
+2. **Exception swallowing.** Every read's `catch { return null }` made a DNS
+   failure, a connection timeout, and a genuinely-absent account all return
+   the identical `null` — precisely why an unreachable node presented as
+   "can't talk to the node" instead of "that hostname does not exist," which
+   cost real diagnosis time. New `logKadenaReadError` (deduped per
+   function+message, so a 20-chain batch against one dead host doesn't spam
+   20 identical lines) — the null/`[]` contract for callers is unchanged,
+   only the reason now reaches the console.
+3. **`api.chainweb.com`, the widely-documented "official" Kadena mainnet
+   endpoint, does not exist.** Not unreachable, not filtered — confirmed via
+   `dig` against the authoritative AWS nameserver: NXDOMAIN, authoritative
+   answer. There is also no free public Kadena Pact service API to fall back
+   to (checked against a live node's own peer list: every public peer
+   answers the P2P `/cut` endpoint but 404s on `/pact/api/v1/local` — public
+   Kadena nodes expose P2P, the Pact service API is deliberately not open).
+   `KADENA_MAINNET_DEFAULT_NODE_URL` moved to our own confirmed-live node
+   (`bytales.duckdns.org:31849`) as an interim step.
+4. **Hairpin NAT.** That node's hostname resolves to its own public IP; a
+   machine on the SAME LAN as the node can't reach it there — the LAN router
+   won't loop traffic addressed to its own public IP back to itself. Works
+   fine from anywhere else (confirmed from an external VPS), fails
+   specifically from the node's own network. Resolved by **not depending on
+   that node as the default path at all** — see the new balance-source seam
+   below.
+
+### New: `kadena/kadenaBalanceSource.ts` — one seam, two implementations
+
+- `KadenaBalanceSource` interface + `restKadenaBalanceSource` (**default**)
+  + `pactKadenaBalanceSource` (selectable, not default).
+  `getActiveKadenaBalanceSource`/`setActiveKadenaBalanceSource` — a
+  module-level global mirroring `kadenaReads.ts`'s own `activeKadenaNodeUrl`
+  pattern.
+- **REST default**: `https://denascan.ancientholdings.eu/api/v1/accounts/
+  <address>/balances` — our own Kadena explorer backend. HTTPS (no
+  mixed-content problem), stable DNS (no dynamic-IP problem), CORS wide open
+  (`access-control-allow-origin: *`, confirmed via a live preflight),
+  verified against the direct node at the same instant (identical balance to
+  the last digit). Same 10s timeout + deduped error-logging discipline as
+  the Pact path. `chainId` arrives as a JSON number in this API, coerced to
+  the string form this package uses everywhere else.
+- **Pact path preserved, not deleted** — `pactKadenaBalanceSource` wraps the
+  existing, correct `getKadenaBalancesBatch` unchanged, just no longer
+  hardwired into `useKadenaBalances`. Kept because the REST gateway is
+  read-only and always will be — `createKadenaConnection.ts` already notes
+  signing/broadcast is separate future work only the Pact path can grow
+  into.
+- `useKadenaBalances.ts` now calls through the seam instead of hardcoding
+  either path — swapping the active source is a one-line call, no hook or UI
+  rewrite needed.
+- `apps/codex-playground` gained `VITE_KADENA_NODE_URL` (see its own
+  `.env.example`): an opt-in local-dev override for the Pact path's node URL
+  (e.g. `http://localhost:31849` from the node's own LAN), read once at
+  startup, falling back to the shipped production default when unset.
+  Deliberately NOT a silent runtime "try X, fall back to Y" — that would
+  mask a real production outage as a working dev box.
+
+### Kadena mode UI — explorer link + unit label
+
+- The per-row and mobile-fullscreen explorer-link buttons now point at
+  `https://denascan.ancientholdings.eu/accounts/<address>` (matching that
+  explorer's own URL form) and render in a distinct green palette when
+  `activeNetwork === "kadena"`, instead of staying gold and silently linking
+  to Stoa's explorer regardless of network.
+- Balance totals now say "KDA" in Kadena mode instead of a hardcoded "STOA"
+  suffix (list row total, expanded "Total \\<Chain\\> Balance").
+- Known, separate, not-attempted-here gap: `MobileAddressFullScreen`'s
+  per-chain grid still iterates `STOA_CHAINS` (10), not `KADENA_CHAINS`
+  (20) — a Kadena account with balance on chain 10+ won't show that chain's
+  row in the mobile fullscreen view yet. Flagged in that component's own doc
+  comment.
+
+### `@ouronet/talos-registry` — Pythia ops migrated (topic 1 of 3)
+
+Added `@ouronet/talos-registry` as a `^1.1.0` peer + dev dependency (per the
+HANDOFF-talos-registry-CODEX.md brief — caret, not `>=`: a major bump of that
+package means the deployed Pact contract surface changed incompatibly). This
+release migrates its first slice: the three local Pythia Pact-call
+builders — `dualLinkOps.ts`, `linkDualApiKey.ts`, `deployApiKey.ts` — off
+hand-built template literals onto `buildCall`/`buildPreviewCall`, which
+render calls from the real deployed contract surface and throw loudly on any
+name/arity mismatch instead of silently partially-applying.
+
+- Every EXEC/preview pair now sources its param names from the live registry
+  rather than a hand-maintained constant — closing the exact bug class this
+  migration exists to prevent (confirmed live: 3 of 4 entrypoints here have a
+  preview whose param names/count genuinely differ from their EXEC call —
+  e.g. `C_DeployApiKey`'s account slot is `executor` on the EXEC side,
+  `owner-account` on the preview side).
+- The four modals that display these previews (`RenameDualLaneModal`,
+  `RevokeDualLinkModal`, `LinkDualApiKeyModal`, `ActivateApolloPythiaKeyModal`)
+  now call the new `buildXPreview` exports instead of hand-writing their own
+  copy of the same call string.
+- Non-entrypoint view/selector reads (`UR_ApiKeyRowOrNull`, the `P-UI-ONE`
+  batch reads, `DALOS.UR_AccountStoa`) aren't in the registry's scope — they
+  stay hand-built but now source their namespace prefix from the registry's
+  own `namespace` export instead of the `KADENA_NAMESPACE` alias, so every
+  namespaced call in these three files traces to one source of truth.
+- Remaining two topics of this migration (StoicTag/Rotate ops, and
+  registry-surfacing/verification — `surfaceHash` + version in settings, a
+  test walking every used key through `tryGetEntrypoint`) are tracked
+  separately, not shipped in this release.
+
+**Verified**: full suite green, typecheck clean, 2-round adversarial review
+on the Pythia-ops migration with a terminal full-scope clean pass. Two real,
+pre-existing bugs surfaced during that review but confirmed untouched by the
+migration diff (a guard-loading stuck-state bug in `LinkDualApiKeyModal`,
+leftover debug `console.log` calls in `ActivateApolloPythiaKeyModal`) —
+flagged for separate follow-up, not fixed in this release.
+
 ## 0.16.0 — 2026-09-26
 
 **MINOR — the Kadena switch + read functions. Owner directive: "how do i

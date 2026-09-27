@@ -25,6 +25,11 @@ import { useCodex, useStoaChainSeeds } from "@ancientpantheon/codex-ouronet/hook
 import { ChainwebPanel } from "@ancientpantheon/codex-ouronet/ui";
 import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
+import {
+  setActiveKadenaBalanceSource,
+  pactKadenaBalanceSource,
+  restKadenaBalanceSource,
+} from "../src/kadena/kadenaBalanceSource.js";
 
 // 2026-09-26 — Kadena mode's reads bypass `pactRead` entirely (see
 // `kadenaReads.ts`'s own doc comment); mock its `createClient` seam the
@@ -37,9 +42,16 @@ vi.mock("@stoachain/kadena-stoic-legacy/client", async (importOriginal) => {
 });
 
 // Stub the read seam so StoaAccountsTab's live-balance effect never hits network.
+// 2026-09-27: Kadena mode's DEFAULT balance source is now the REST gateway
+// (`kadenaBalanceSource.ts` — api.chainweb.com does not exist, there is no free
+// public Kadena Pact API, and the direct node hairpin-NATs from its own LAN),
+// so a click into Kadena mode fetches, not dirtyReads. `kadenaDirtyRead` stays
+// mocked for the still-selectable Pact path (see the "explicitly selecting the
+// Pact source" test below).
 beforeEach(() => {
   setPactReader(async () => ({ result: { data: [] } }) as never);
   kadenaDirtyRead.mockReset().mockResolvedValue({ result: { status: "success", data: [] } });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] }));
 });
 
 afterEach(() => {
@@ -834,7 +846,7 @@ describe("ChainwebPanel — the Network switch (2026-09-26, owner: 'how do i swi
     expect(kadenaButtons.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("switching to Kadena issues reads through kadenaReads' own client, never stoa-core's pactRead", async () => {
+  it("switching to Kadena issues reads through the REST balance gateway (the default source), never stoa-core's pactRead", async () => {
     // useKadenaBalances (like useStoaChainBalances) short-circuits to no
     // network call at all for an empty address list — seed one account so
     // there's something to actually read.
@@ -854,6 +866,32 @@ describe("ChainwebPanel — the Network switch (2026-09-26, owner: 'how do i swi
     );
     await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
     fireEvent.click(getNetworkSwitch().getByRole("button", { name: "Kadena" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("denascan.ancientholdings.eu/api/v1/accounts/"),
+      expect.anything(),
+    ));
+    expect(kadenaDirtyRead).not.toHaveBeenCalled();
+  });
+
+  it("the Pact path still works correctly when explicitly selected (kept, not the default — see kadenaBalanceSource.ts)", async () => {
+    setActiveKadenaBalanceSource(pactKadenaBalanceSource);
+    const adapter = new MemoryCodexAdapter("dev");
+    render(
+      <CodexProvider adapter={adapter}>
+        <ReadyGate />
+        <Seeder
+          seeds={[{
+            id: "s1", name: "My Seed", seedType: "koala", version: "1.0.0", index: 0, secret: "enc",
+            main: "k:" + "0".repeat(64), createdAt: "2026-05-25T10:00:00.000Z",
+            accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }],
+          }]}
+        />
+        <ChainwebPanel id="chainweb" ctx={{ opaque: true }} />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
+    fireEvent.click(getNetworkSwitch().getByRole("button", { name: "Kadena" }));
     await waitFor(() => expect(kadenaDirtyRead).toHaveBeenCalled());
+    setActiveKadenaBalanceSource(restKadenaBalanceSource); // restore the default for later tests
   });
 });

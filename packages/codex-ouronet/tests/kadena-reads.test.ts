@@ -18,7 +18,7 @@
  * transaction-construction logic (`.setNetworkId`, `.setMeta`, `.createTransaction()`)
  * runs unmocked; only the network call (`dirtyRead`) is intercepted.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 const { dirtyRead, createClient } = vi.hoisted(() => {
   const dirtyRead = vi.fn();
@@ -173,6 +173,96 @@ describe("kadenaReads — raw Pact constructors (owner: 'there arent any modules
     expect(await getKadenaBalance("k:x")).toBeNull();
     expect(await getKadenaAccountDetails("k:x")).toBeNull();
     expect(await checkKadenaAccountExists("k:x")).toBeNull();
+  });
+});
+
+describe("kadenaReads — a swallowed exception is LOGGED, not discarded (2026-09-27 diagnosis)", () => {
+  // A DNS failure, a connection timeout, and a genuinely-absent account all used to return
+  // the identical `null` -- which is exactly why an unreachable node presented as "can't
+  // talk to the node" instead of "can't resolve that host" (the hairpin-NAT bug this
+  // session traced). The null/[] CONTRACT for callers stays the same; the reason now
+  // reaches the console instead of being discarded.
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  afterEach(() => warnSpy.mockClear());
+
+  it("getKadenaBalance logs the underlying error message on a rejection, still returns null", async () => {
+    dirtyRead.mockRejectedValue(new Error("getaddrinfo ENOTFOUND bytales.duckdns.org"));
+    expect(await getKadenaBalance("k:x")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("getaddrinfo ENOTFOUND bytales.duckdns.org"),
+    );
+  });
+
+  it("getKadenaAccountDetails, getKadenaBalancesBatch, checkKadenaAccountExists each log their own distinct rejection too", async () => {
+    dirtyRead.mockRejectedValue(new Error("connect ETIMEDOUT"));
+    await getKadenaAccountDetails("k:x");
+    await getKadenaBalancesBatch(["k:x"]);
+    await checkKadenaAccountExists("k:x");
+    const messages = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(messages.some((m) => m.includes("getKadenaAccountDetails") && m.includes("connect ETIMEDOUT"))).toBe(true);
+    expect(messages.some((m) => m.includes("getKadenaBalancesBatch") && m.includes("connect ETIMEDOUT"))).toBe(true);
+    expect(messages.some((m) => m.includes("checkKadenaAccountExists") && m.includes("connect ETIMEDOUT"))).toBe(true);
+  });
+
+  it("the SAME error message from the SAME function logs only once, not once per call — a 20-chain batch against one dead host does not spam 20 identical lines", async () => {
+    dirtyRead.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    await getKadenaBalance("k:a");
+    await getKadenaBalance("k:b");
+    await getKadenaBalance("k:c");
+    const matching = warnSpy.mock.calls.filter((c) => String(c[0]).includes("connect ECONNREFUSED"));
+    expect(matching.length).toBe(1);
+  });
+
+  it("a clean 'status: failure' response (a genuinely-absent account) is NOT logged as an error — only thrown exceptions are", async () => {
+    mockFailure();
+    expect(await getKadenaBalance("k:never-funded")).toBeNull();
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("kadenaReads — bounded by a timeout, never hangs forever", () => {
+  // A real, observed failure mode: a connection to a firewalled/dropped host:port can hang
+  // with NO rejection and no resolution at all -- `createClient(...).dirtyRead()` has no
+  // built-in timeout (confirmed by reading `@stoachain/kadena-stoic-legacy`'s own source: no
+  // `timeout`/`AbortController`/`signal` anywhere in its client). Without a bound of our own,
+  // a single stuck chain read spins its caller's loading state forever, which is exactly the
+  // "spins and spins and nothing is shown" symptom this test exists to prevent.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("getKadenaBalance resolves to null (not hangs) when dirtyRead never settles", async () => {
+    dirtyRead.mockReturnValue(new Promise(() => {})); // never resolves, never rejects
+    const promise = getKadenaBalance("k:x");
+    await vi.advanceTimersByTimeAsync(15000);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("getKadenaAccountDetails resolves to null (not hangs) when dirtyRead never settles", async () => {
+    dirtyRead.mockReturnValue(new Promise(() => {}));
+    const promise = getKadenaAccountDetails("k:x");
+    await vi.advanceTimersByTimeAsync(15000);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("checkKadenaAccountExists resolves to null (not hangs) when dirtyRead never settles", async () => {
+    dirtyRead.mockReturnValue(new Promise(() => {}));
+    const promise = checkKadenaAccountExists("k:x");
+    await vi.advanceTimersByTimeAsync(15000);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("getKadenaBalancesBatch resolves to [] (not hangs) when dirtyRead never settles", async () => {
+    dirtyRead.mockReturnValue(new Promise(() => {}));
+    const promise = getKadenaBalancesBatch(["k:a", "k:b"]);
+    await vi.advanceTimersByTimeAsync(15000);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it("a read that settles well within the timeout is unaffected — no false-positive timeout", async () => {
+    mockSuccess({ decimal: "3.5" });
+    const promise = getKadenaBalance("k:fast");
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(promise).resolves.toBe(3.5);
   });
 });
 

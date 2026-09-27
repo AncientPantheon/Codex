@@ -45,12 +45,39 @@ import { Pact, createClient } from "@stoachain/kadena-stoic-legacy/client";
 /** The Pact networkId real Kadena mainnet nodes expect — NOT `"stoa"`. */
 export const KADENA_MAINNET_NETWORK_ID = "mainnet01";
 
-/** The real, public Kadena mainnet node — the same default
- *  `@stoachain/kadena-stoic-legacy`'s own built-in host generator resolves
- *  `"mainnet01"` to (`dist/client/client/utils/utils.cjs`). Surfaced (not a
- *  hidden default) — fully user-editable via the Network tab's new Kadena
- *  row, mirroring `STOACHAIN_DEFAULT_NODE_URL`'s own convention. */
-export const KADENA_MAINNET_DEFAULT_NODE_URL = "https://api.chainweb.com";
+/**
+ * Our own Kadena mainnet node — mirrors `STOACHAIN_DEFAULT_NODE_URL`'s own
+ * convention (a house-operated node as the real default, not a third-party
+ * public one). Surfaced, not hidden — fully user-editable via the Network
+ * tab's Kadena row.
+ *
+ * CHANGED 2026-09-27 from `"https://api.chainweb.com"` — that host is the
+ * documented official Kadena mainnet01 endpoint (per Kadena's own docs and
+ * the `chainweb.js` bindings), but could not be reached from this session's
+ * own tooling, and gave no independent way to confirm it was actually
+ * serving balances correctly. This node is: confirmed live 2026-09-27
+ * (`kadena-ce-node`, up 4 weeks, cut height advancing correctly for 20
+ * chains @ ~30s blocks), confirmed externally reachable (tested from an
+ * off-box host, not just localhost), and confirmed to return a REAL non-zero
+ * `coin.get-balance` (see the sibling OuronetUI HANDOFF-kadena-balances.md
+ * and its committed `scripts/kadena-balance-probe.py`, the exact probe used
+ * to verify it — same node, same verification, both apps read the same
+ * Kadena mainnet). The `:31849` port is the gzip proxy — measured faster
+ * (48ms vs 187ms externally) than the direct `:31848` service API.
+ *
+ * ⚠️ HTTP, NOT HTTPS. This node has no TLS front today. A page served over
+ * plain HTTP (e.g. `codex-playground`'s own `vite` dev server, which has no
+ * `server.https` set) can read it with no issue. A page served over HTTPS
+ * would have this request blocked by the BROWSER's mixed-content policy —
+ * no application code, in this package or `@stoachain/kadena-stoic-legacy`,
+ * can work around that from page JS. If/when Codex itself is ever deployed
+ * over HTTPS, this default needs the same resolution OuronetUI's own
+ * HANDOFF-kadena-balances.md §2 describes for the identical node: put it
+ * behind TLS, or read it through a same-origin HTTPS proxy endpoint instead
+ * of directly from the browser. Not attempted here — flagging it so it
+ * isn't rediscovered as a fresh mystery later.
+ */
+export const KADENA_MAINNET_DEFAULT_NODE_URL = "http://bytales.duckdns.org:31849";
 
 /** The conventional default chain for a single-chain balance read. Real
  *  Kadena mainnet has 20 chains (0-19) — see `KADENA_CHAINS` below for the
@@ -110,6 +137,19 @@ export interface KadenaReadOptions {
 }
 
 /**
+ * Bound every read to this long, no more. `createClient(...).dirtyRead()` has no timeout of
+ * its own (confirmed by reading `@stoachain/kadena-stoic-legacy`'s own source: no `timeout`/
+ * `AbortController`/`signal` anywhere in its client) — a connection that hangs rather than
+ * rejects (a firewalled or silently-dropped host:port, which is a REAL, observed failure mode
+ * against a self-hosted node) would otherwise wait on the browser's own OS-level connection
+ * timeout, which can run to minutes. Every caller below already treats a rejection as "no
+ * data, render 0/dash" via its own try/catch — this makes a hang produce that SAME rejection
+ * instead of spinning the loading state forever, which is exactly the "spins and spins and
+ * nothing is shown" symptom this constant exists to prevent.
+ */
+export const KADENA_READ_TIMEOUT_MS = 10_000;
+
+/**
  * The shared dirty-read primitive every function below calls: hand-builds
  * an unsigned transaction with an EXPLICIT `mainnet01` networkId (never
  * `"stoa"`), then posts it via `createClient(url).dirtyRead(...)` — the
@@ -117,6 +157,9 @@ export interface KadenaReadOptions {
  * at Kadena instead of Stoa. `preflight`/`signatureVerification` are both
  * `false` (a dirty read — no gas estimation, no signature check), matching
  * every other read-only call in this package.
+ *
+ * Raced against `KADENA_READ_TIMEOUT_MS` — see that constant's own doc
+ * comment for why an unbounded read is a real bug, not a hypothetical one.
  */
 async function kadenaDirtyRead(pactCode: string, options?: KadenaReadOptions): Promise<any> {
   const nodeUrl = options?.nodeUrl ?? getActiveKadenaNodeUrl();
@@ -129,11 +172,40 @@ async function kadenaDirtyRead(pactCode: string, options?: KadenaReadOptions): P
     .createTransaction();
 
   const { dirtyRead } = createClient(kadenaPactUrl(nodeUrl, chainId));
-  return dirtyRead(transaction as any);
+
+  return Promise.race([
+    dirtyRead(transaction as any),
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`Kadena read timed out after ${KADENA_READ_TIMEOUT_MS}ms (chain ${chainId}, ${nodeUrl})`)),
+        KADENA_READ_TIMEOUT_MS,
+      );
+    }),
+  ]);
+}
+
+/**
+ * Every read below catches its own exception and returns `null`/`[]` so a caller can
+ * render "0/dash" instead of crashing — deliberate, and correct per the handoff this
+ * module follows ("a missing account is not an error"). But catching and DISCARDING the
+ * exception made a DNS failure, a connection timeout, and a genuinely-absent account all
+ * produce the exact same `null` — which is why an unreachable node presented as
+ * "can't talk to the node" instead of "can't resolve that host" (2026-09-27 diagnosis).
+ * This keeps the same null/[] contract for callers but puts the REASON on the console,
+ * once per distinct message (not once per address — a 20-chain batch hitting the same
+ * dead host would otherwise spam 20+ identical lines).
+ */
+const _warnedKadenaErrors = new Set<string>();
+export function logKadenaReadError(fn: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const key = `${fn}:${message}`;
+  if (_warnedKadenaErrors.has(key)) return;
+  _warnedKadenaErrors.add(key);
+  console.warn(`[kadenaReads.${fn}] read failed, rendering as empty/absent: ${message}`);
 }
 
 /** Pact decimals arrive as number | string | { decimal }. Coerce to number. */
-function coerce(b: unknown): number {
+export function coerce(b: unknown): number {
   if (b == null) return 0;
   if (typeof b === "number") return b;
   if (typeof b === "string") return parseFloat(b) || 0;
@@ -165,7 +237,8 @@ export async function getKadenaBalance(
     const res = await kadenaDirtyRead(code, options);
     if (res?.result?.status !== "success") return null;
     return coerce(res.result.data);
-  } catch {
+  } catch (error) {
+    logKadenaReadError("getKadenaBalance", error);
     return null;
   }
 }
@@ -190,7 +263,8 @@ export async function getKadenaAccountDetails(
       balance: coerce(data.balance),
       guard: data.guard ?? null,
     };
-  } catch {
+  } catch (error) {
+    logKadenaReadError("getKadenaAccountDetails", error);
     return null;
   }
 }
@@ -223,7 +297,8 @@ export async function getKadenaBalancesBatch(
       balance: coerce(row.balance),
       exists: row.exists === true,
     }));
-  } catch {
+  } catch (error) {
+    logKadenaReadError("getKadenaBalancesBatch", error);
     return [];
   }
 }
@@ -246,7 +321,8 @@ export async function checkKadenaAccountExists(
     const res = await kadenaDirtyRead(code, options);
     if (res?.result?.status !== "success") return null;
     return res.result.data !== false;
-  } catch {
+  } catch (error) {
+    logKadenaReadError("checkKadenaAccountExists", error);
     return null;
   }
 }

@@ -17,6 +17,11 @@ import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { useCodex, useStoaChainSeeds, usePureKeypairs, useWatchList } from "@ancientpantheon/codex-ouronet/hooks";
 import { StoaAccountsTab } from "@ancientpantheon/codex-ouronet/ui";
+import {
+  setActiveKadenaBalanceSource,
+  pactKadenaBalanceSource,
+  restKadenaBalanceSource,
+} from "../src/kadena/kadenaBalanceSource.js";
 import type { IStoaChainSeed, IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
 import { setPactReader } from "@stoachain/stoa-core/reads";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
@@ -79,9 +84,15 @@ vi.mock("@stoachain/kadena-stoic-legacy/client", async (importOriginal) => {
 });
 
 // Stub the read seam so the tab's live-balance effect never touches the network.
+// 2026-09-27: Kadena mode's DEFAULT balance source is now the REST gateway
+// (`kadenaBalanceSource.ts` — api.chainweb.com does not exist, there is no free
+// public Kadena Pact API, and the direct node hairpin-NATs from its own LAN),
+// so `fetch` is stubbed too; `kadenaDirtyRead` stays mocked for the
+// still-selectable Pact path.
 beforeEach(() => {
   setPactReader(async () => ({ result: { data: [] } }) as never);
   kadenaDirtyRead.mockReset().mockResolvedValue({ result: { status: "success", data: [] } });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] }));
 });
 
 const seedFx = (over: Partial<IStoaChainSeed> = {}): IStoaChainSeed => ({
@@ -1643,7 +1654,20 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
     expect(await screen.findByTitle("Send STOA")).toBeTruthy();
   });
 
-  it("Kadena mode reads balances through kadenaReads' own client, not stoa-core's pactRead", async () => {
+  it("Kadena mode reads balances through the REST balance gateway (the default source), not stoa-core's pactRead", async () => {
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("denascan.ancientholdings.eu/api/v1/accounts/"),
+      expect.anything(),
+    ));
+    expect(kadenaDirtyRead).not.toHaveBeenCalled();
+  });
+
+  it("the Pact path still works correctly when explicitly selected (kept, not the default — see kadenaBalanceSource.ts)", async () => {
+    setActiveKadenaBalanceSource(pactKadenaBalanceSource);
     kadenaDirtyRead.mockResolvedValue({
       result: { status: "success", data: [{ account: `k:${"a".repeat(64)}`, balance: 7.5, exists: true }] },
     });
@@ -1654,5 +1678,47 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
     await waitFor(() => expect(kadenaDirtyRead).toHaveBeenCalled());
     // 20 Kadena chains, one batched call each (KADENA_CHAINS, not STOA_CHAINS' 10).
     expect(kadenaDirtyRead.mock.calls.length).toBeGreaterThanOrEqual(20);
+    setActiveKadenaBalanceSource(restKadenaBalanceSource); // restore the default for later tests
+  });
+
+  it("2026-09-27: Kadena mode's explorer link points at denascan (not Stoa's explorer) and turns green", async () => {
+    const address = `k:${"a".repeat(64)}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{ chainId: 0, balance: 1.5, guard: {} }],
+    }));
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    const link = await screen.findByTitle("Open in Kadena Explorer (denascan)");
+    expect((link as HTMLAnchorElement).href).toBe(
+      `https://denascan.ancientholdings.eu/accounts/${encodeURIComponent(address)}`,
+    );
+    expect(screen.queryByTitle("Open in Stoa Chain Explorer")).toBeNull();
+  });
+
+  it("2026-09-27: Kadena mode's total balance shows KDA, not STOA", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{ chainId: 0, balance: 1.5, guard: {} }],
+    }));
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await waitFor(() => expect(screen.getByText(/1\.5.*KDA/)).toBeTruthy());
+    expect(screen.queryByText(/1\.5.*STOA/)).toBeNull();
+  });
+
+  it("Stoa mode's explorer link is unchanged — still Stoa's explorer, still gold", async () => {
+    await renderTabNetwork(
+      "stoa",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    const link = await screen.findByTitle("Open in Stoa Chain Explorer");
+    expect((link as HTMLAnchorElement).href).toBe(`https://explorer.stoachain.com/accounts/k:${"a".repeat(64)}`);
   });
 });

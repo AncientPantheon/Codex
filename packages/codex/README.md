@@ -30,9 +30,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `0.17.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v0.17.0** — Real Kadena balances, made reliable. Four distinct real bugs found and fixed in sequence: no timeout on the raw Pact read (the literal "spins forever" symptom), exception details being discarded (a DNS failure and a genuinely-absent account looked identical), the widely-cited "official" `api.chainweb.com` Kadena endpoint confirmed to not exist at all (NXDOMAIN against the authoritative nameserver, not merely unreachable), and a hairpin-NAT limitation on our own node (works from anywhere except its own LAN). Resolved with a new pluggable balance-source seam defaulting to a REST gateway (HTTPS, stable DNS, CORS-open, no LAN dependency) while keeping the direct Pact-node path available as a selectable alternative. Kadena mode's explorer link now correctly points at the Kadena explorer instead of silently staying on Stoa's, and balance totals say "KDA" instead of a hardcoded "STOA". Also adds `@ouronet/talos-registry` as a new `^1.1.0` peer dependency and migrates the Pythia dual-link/link/deploy-API-key call builders onto its `buildCall`/`buildPreviewCall` (call construction sourced from the real deployed contract surface, throwing loudly on any name/arity mismatch instead of silently mis-calling — closes a real bug class: 3 of the 4 migrated entrypoints have a preview whose declared parameters differ from their execution's). **Consumers must add the new `@ouronet/talos-registry` `^1.1.0` peer.** New capability + bug fixes. `codex-ouronet` release only (`codex-ui`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
 
 **v0.16.0** — The Kadena switch + read functions: a new "Network: Stoa | Kadena" control on the Blockchain Accounts panel switches the Accounts balance data source to REAL Kadena mainnet, read via hand-built Pact constructors (`coin.get-balance`/`coin.details`) that bypass `@stoachain/stoa-core`'s `pactRead` entirely (that package hardcodes every transaction's Pact `networkId` to `"stoa"` with no override seam, which a real Kadena mainnet node would reject). The Network settings tab gained a third row for the Kadena node URL; the Stoa/UrStoa balance-mode pill morphs to Kadena naming (UrStoa disabled — no Kadena-mainnet equivalent) and the not-yet-wired Send action hides while in Kadena mode. Signing/writes against Kadena are explicit, separate future work — this round is reads only. New capability, no breaking changes. `codex-ouronet` release only (`codex-ui`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
 
@@ -87,7 +89,7 @@ Version `0.13.0` on public npmjs. The aggregate: the six subpath barrels wired t
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.4.0` |
 | `@ancientpantheon/codex-ui` | `0.8.0` |
-| `@ancientpantheon/codex-ouronet` | `0.16.0` |
+| `@ancientpantheon/codex-ouronet` | `0.17.0` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
 <!-- END member-versions -->
