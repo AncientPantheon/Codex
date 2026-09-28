@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.0 — 2026-09-27
+
+**MINOR — fix `StoaChainSeedType`/`SeedType` divergence that broke every
+headless-resolver consumer's typecheck on a "stoic" (Stoa Dalos) seed.
+Reported externally: Pythia's `keyResolver.ts:88` failed with
+`TS2322: Type '"stoic"' is not assignable to type 'StoaChainSeedType'` on
+every deploy that bumps `@ancientpantheon/codex` to `@latest`, because
+`headlessResolver.ts`'s `StoaChainSeedType` stayed a 3-member mirror of
+codex-ouronet's `SeedType` after `SeedType` gained a 4th member ("stoic")
+for Stoa Dalos seeds — its doc comment's "verbatim" claim was never
+enforced.**
+
+- `StoaChainSeedType` now carries all four members
+  (`"koala" | "chainweaver" | "eckowallet" | "stoic"`) — it is the DATA label
+  on `StoaChainSeedLike.seedType`/`SnapshotSlice`, restoring assignability
+  for any real `CodexSnapshot`.
+- New export `MnemonicSeedType` (the original 3-member list) — the
+  CAPABILITY type for the two positions that actually perform mnemonic-based
+  derivation: `HeadlessResolverDeps.deriveStoaChainKeypair`'s `seedType`
+  parameter and `ResolvedStoaChainKeypair.seedType`. Neither widened: this
+  factory never derives or resolves a "stoic" key — that's
+  `resolveStoicKeypair`'s job entirely outside codex-core (a stoic seed's
+  secret decrypts to a DALOS bitstring, not a mnemonic, and routing it
+  through `StoaChainWalletBuilder.createWalletPairFromMnemonic` would
+  silently derive the wrong key via the wrong algorithm).
+- `getKeyPairByPublicKey`'s derived-account loop now skips any
+  `seedType: "stoic"` seed before the mnemonic derivation call — a
+  compiler-enforced guard (the skip narrows `seed.seedType` to
+  `MnemonicSeedType` for the rest of the loop body), not just a doc-comment
+  promise. If a stoic account ever reaches this generic factory anyway
+  (shouldn't happen — real callers resolve stoic seeds earlier), it now
+  falls through to the existing "not found" error instead of a silent
+  wrong-key derivation.
+- New compile-time parity test in `@ancientpantheon/codex-ouronet`
+  (`tests/type-seedtype-parity.test.ts`) fails `tsc` the moment `SeedType`
+  and `StoaChainSeedType` diverge again in either direction.
+
 ## 0.4.0 — 2026-09-26
 
 **MINOR — new `CODEX_FORM_VERSION` export ("1.0.0"). Owner ruling: "schema

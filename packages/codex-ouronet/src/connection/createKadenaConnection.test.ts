@@ -11,16 +11,21 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { createKadenaConnection, KADENA_CONNECTION_CHAIN_ID } from "./index.js";
+import { createKadenaConnection, KADENA_CONNECTION_CHAIN_ID, KADENA_DIRECT_NODE_URL } from "./index.js";
 import { KADENA_MAINNET_DEFAULT_NODE_URL } from "../kadena/kadenaReads.js";
 
 const CUSTOM_URL = "https://my-kadena-node.example.com";
 
 describe("createKadenaConnection", () => {
-  it("defaults to our own, confirmed-live Kadena mainnet node — surfaced, not hidden", () => {
-    expect(KADENA_MAINNET_DEFAULT_NODE_URL).toBe("http://bytales.duckdns.org:31849");
+  it("defaults to the confirmed-live Kadena gateway (2026-09-28: a transparent passthrough at denascan.ancientholdings.eu, unblocking real signing/broadcast — the direct duckdns node is HTTP-only and hairpin-NATs from its own LAN, kept selectable via KADENA_DIRECT_NODE_URL, no longer the default) — surfaced, not hidden", () => {
+    expect(KADENA_MAINNET_DEFAULT_NODE_URL).toBe("https://denascan.ancientholdings.eu");
     const conn = createKadenaConnection();
     expect(conn.chainId).toBe(KADENA_CONNECTION_CHAIN_ID);
+  });
+
+  it("still re-exports the direct duckdns node as a selectable (non-default) option, for whoever is actually on its own LAN", () => {
+    expect(KADENA_DIRECT_NODE_URL).toBe("http://bytales.duckdns.org:31849");
+    expect(KADENA_DIRECT_NODE_URL).not.toBe(KADENA_MAINNET_DEFAULT_NODE_URL);
   });
 
   it("produces a ChainConnection whose health covers only the kadena chain over the given node URL", async () => {

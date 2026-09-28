@@ -51,33 +51,44 @@ export const KADENA_MAINNET_NETWORK_ID = "mainnet01";
  * public one). Surfaced, not hidden — fully user-editable via the Network
  * tab's Kadena row.
  *
- * CHANGED 2026-09-27 from `"https://api.chainweb.com"` — that host is the
- * documented official Kadena mainnet01 endpoint (per Kadena's own docs and
- * the `chainweb.js` bindings), but could not be reached from this session's
- * own tooling, and gave no independent way to confirm it was actually
- * serving balances correctly. This node is: confirmed live 2026-09-27
- * (`kadena-ce-node`, up 4 weeks, cut height advancing correctly for 20
- * chains @ ~30s blocks), confirmed externally reachable (tested from an
- * off-box host, not just localhost), and confirmed to return a REAL non-zero
- * `coin.get-balance` (see the sibling OuronetUI HANDOFF-kadena-balances.md
- * and its committed `scripts/kadena-balance-probe.py`, the exact probe used
- * to verify it — same node, same verification, both apps read the same
- * Kadena mainnet). The `:31849` port is the gzip proxy — measured faster
- * (48ms vs 187ms externally) than the direct `:31848` service API.
- *
- * ⚠️ HTTP, NOT HTTPS. This node has no TLS front today. A page served over
- * plain HTTP (e.g. `codex-playground`'s own `vite` dev server, which has no
- * `server.https` set) can read it with no issue. A page served over HTTPS
- * would have this request blocked by the BROWSER's mixed-content policy —
- * no application code, in this package or `@stoachain/kadena-stoic-legacy`,
- * can work around that from page JS. If/when Codex itself is ever deployed
- * over HTTPS, this default needs the same resolution OuronetUI's own
- * HANDOFF-kadena-balances.md §2 describes for the identical node: put it
- * behind TLS, or read it through a same-origin HTTPS proxy endpoint instead
- * of directly from the browser. Not attempted here — flagging it so it
- * isn't rediscovered as a fresh mystery later.
+ * HISTORY, in order:
+ *   1. `"https://api.chainweb.com"` — the documented official Kadena
+ *      mainnet01 endpoint per Kadena's own docs — turned out to be an
+ *      AUTHORITATIVE NXDOMAIN (confirmed against chainweb.com's own AWS
+ *      nameservers, `aa` flag set): the domain is real, that specific host
+ *      never existed. Dropped 2026-09-27, no fallback ever referenced it.
+ *   2. `"http://bytales.duckdns.org:31849"` — the direct Pact node,
+ *      confirmed live and correct, but PLAIN HTTP (mixed-content-blocked
+ *      from any HTTPS page) and independently confirmed to hairpin-NAT for
+ *      anyone on the node's own LAN — a live-reported "Kadena simulation
+ *      timed out after 10000ms" traced to exactly this: the node was
+ *      genuinely unreachable (confirmed via a raw TCP connect test from an
+ *      unrelated network, not a code bug) from BOTH the tester's own
+ *      machine and a completely separate sandbox. Kept below as a
+ *      SELECTABLE option, no longer the default.
+ *   3. `"https://denascan.ancientholdings.eu"` (2026-09-28, CURRENT) — a
+ *      transparent Chainweb passthrough gateway, deployed specifically to
+ *      unblock this: same `/chainweb/0.0/mainnet01/chain/<id>/pact/api/v1/
+ *      {local,send,poll,listen}` + `/pact/spv` path shape `kadenaPactUrl`
+ *      already builds (confirmed — this file's own `kadenaPactUrl` needed
+ *      NO changes, only this origin), HTTPS (no mixed-content issue), CORS
+ *      open (`access-control-allow-origin: *`), and — critically, unlike
+ *      the REST-only `kadenaBalanceSource.ts` gateway endpoints — a REAL
+ *      passthrough that also forwards `/send`, so signing and broadcasting
+ *      a real transaction works through it too, not just reads. Verified
+ *      live from inside the node's own LAN (the exact case #2 above
+ *      failed). Unauthenticated, rate-limited 100 req/min/IP by design —
+ *      answerless (not necessarily erroring) if the underlying node itself
+ *      is ever down, since the gateway only proxies, it doesn't cache.
  */
-export const KADENA_MAINNET_DEFAULT_NODE_URL = "http://bytales.duckdns.org:31849";
+export const KADENA_MAINNET_DEFAULT_NODE_URL = "https://denascan.ancientholdings.eu";
+
+/** The direct Pact node — real and correct, but plain HTTP (mixed-content
+ *  risk from an HTTPS page) and hairpin-NATs for anyone on its own LAN (see
+ *  `KADENA_MAINNET_DEFAULT_NODE_URL`'s own doc comment, history #2). Kept as
+ *  a SELECTABLE Network-tab option for whoever is actually on that LAN and
+ *  wants to bypass the gateway, never the default. */
+export const KADENA_DIRECT_NODE_URL = "http://bytales.duckdns.org:31849";
 
 /** The conventional default chain for a single-chain balance read. Real
  *  Kadena mainnet has 20 chains (0-19) — see `KADENA_CHAINS` below for the
@@ -123,8 +134,12 @@ export function setActiveKadenaNodeUrl(url: string): void {
   if (trimmed) activeKadenaNodeUrl = trimmed;
 }
 
-/** Build the chainweb Pact base path for a Kadena node origin + chain. */
-function kadenaPactUrl(nodeUrl: string, chainId: string): string {
+/** Build the chainweb Pact base path for a Kadena node origin + chain.
+ *  Exported (2026-09-28) so `SendKadenaModal.tsx`'s own sign/submit pipeline
+ *  can build the SAME URL a read already does — one canonical template, not
+ *  a second hand-duplicated copy, matching this whole project's "reuse, don't
+ *  re-derive" rule. */
+export function kadenaPactUrl(nodeUrl: string, chainId: string): string {
   const origin = nodeUrl.replace(/\/+$/, "");
   return `${origin}/chainweb/0.0/${KADENA_MAINNET_NETWORK_ID}/chain/${chainId}/pact`;
 }
@@ -150,6 +165,33 @@ export interface KadenaReadOptions {
 export const KADENA_READ_TIMEOUT_MS = 10_000;
 
 /**
+ * Races `promise` against `KADENA_READ_TIMEOUT_MS` — exported so ANY Kadena
+ * network call can get the same protection `kadenaDirtyRead` (below) gives
+ * every read, not just this file's own read-only functions.
+ * `createClient(...)`'s `dirtyRead`/`submitOne`/`getStatus` all share the
+ * identical "no built-in timeout" gap (see `KADENA_READ_TIMEOUT_MS`'s own
+ * doc comment) — `SendKadenaModal.tsx`'s own simulate/submit/poll calls
+ * (real signed-and-submitted transactions, not just reads) reuse this exact
+ * helper rather than re-deriving the same race, matching this project's
+ * "one canonical implementation" rule (the same rule `kadenaPactUrl`'s own
+ * export exists for). Without this, a hang on the same documented-flaky
+ * node (`KADENA_MAINNET_DEFAULT_NODE_URL`) during a real submit would leave
+ * a caller's `await` — and any `submitting`-style UI state gating it —
+ * stuck forever instead of producing a catchable rejection.
+ */
+export function withKadenaTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${KADENA_READ_TIMEOUT_MS}ms`)),
+        KADENA_READ_TIMEOUT_MS,
+      );
+    }),
+  ]);
+}
+
+/**
  * The shared dirty-read primitive every function below calls: hand-builds
  * an unsigned transaction with an EXPLICIT `mainnet01` networkId (never
  * `"stoa"`), then posts it via `createClient(url).dirtyRead(...)` — the
@@ -158,8 +200,9 @@ export const KADENA_READ_TIMEOUT_MS = 10_000;
  * `false` (a dirty read — no gas estimation, no signature check), matching
  * every other read-only call in this package.
  *
- * Raced against `KADENA_READ_TIMEOUT_MS` — see that constant's own doc
- * comment for why an unbounded read is a real bug, not a hypothetical one.
+ * Raced against `KADENA_READ_TIMEOUT_MS` (via `withKadenaTimeout`) — see
+ * that constant's own doc comment for why an unbounded read is a real bug,
+ * not a hypothetical one.
  */
 async function kadenaDirtyRead(pactCode: string, options?: KadenaReadOptions): Promise<any> {
   const nodeUrl = options?.nodeUrl ?? getActiveKadenaNodeUrl();
@@ -173,15 +216,7 @@ async function kadenaDirtyRead(pactCode: string, options?: KadenaReadOptions): P
 
   const { dirtyRead } = createClient(kadenaPactUrl(nodeUrl, chainId));
 
-  return Promise.race([
-    dirtyRead(transaction as any),
-    new Promise<never>((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`Kadena read timed out after ${KADENA_READ_TIMEOUT_MS}ms (chain ${chainId}, ${nodeUrl})`)),
-        KADENA_READ_TIMEOUT_MS,
-      );
-    }),
-  ]);
+  return withKadenaTimeout(dirtyRead(transaction as any), `Kadena read (chain ${chainId}, ${nodeUrl})`);
 }
 
 /**
@@ -235,7 +270,16 @@ export async function getKadenaBalance(
     // funded" should call `checkKadenaAccountExists` instead.
     const code = `(try 0.0 (coin.get-balance "${account}"))`;
     const res = await kadenaDirtyRead(code, options);
-    if (res?.result?.status !== "success") return null;
+    if (res?.result?.status !== "success") {
+      // A non-success ENVELOPE here (as opposed to the thrown-exception
+      // catch below) used to return null silently — indistinguishable from
+      // a dead host or a timeout, which is documented (2026-09-28 handoff)
+      // as the actual reason a real node-reachability problem presented as
+      // "can't talk to the node" for so long. Logged the same way the catch
+      // branch already does, so the REASON is never swallowed either way.
+      logKadenaReadError("getKadenaBalance", new Error(res?.result?.error?.message ?? "non-success response envelope"));
+      return null;
+    }
     return coerce(res.result.data);
   } catch (error) {
     logKadenaReadError("getKadenaBalance", error);
@@ -255,7 +299,13 @@ export async function getKadenaAccountDetails(
   try {
     const code = `(coin.details "${account}")`;
     const res = await kadenaDirtyRead(code, options);
-    if (res?.result?.status !== "success") return null;
+    if (res?.result?.status !== "success") {
+      // See getKadenaBalance's own comment on this exact shape — a
+      // non-success envelope used to return null silently, indistinguishable
+      // from a dead host/timeout.
+      logKadenaReadError("getKadenaAccountDetails", new Error(res?.result?.error?.message ?? "non-success response envelope"));
+      return null;
+    }
     const data = res.result.data as { account?: string; balance?: unknown; guard?: unknown } | null;
     if (!data) return null;
     return {
@@ -289,7 +339,11 @@ export async function getKadenaBalancesBatch(
       `(map (lambda (a) (try { "account": a, "balance": 0.0, "exists": false } ` +
       `{ "account": a, "balance": (coin.get-balance a), "exists": true })) [${list}])`;
     const res = await kadenaDirtyRead(code, options);
-    if (res?.result?.status !== "success") return [];
+    if (res?.result?.status !== "success") {
+      // See getKadenaBalance's own comment on this exact shape.
+      logKadenaReadError("getKadenaBalancesBatch", new Error(res?.result?.error?.message ?? "non-success response envelope"));
+      return [];
+    }
     const data = res.result.data;
     if (!Array.isArray(data)) return [];
     return (data as Array<{ account?: string; balance?: unknown; exists?: boolean }>).map((row) => ({
@@ -319,7 +373,11 @@ export async function checkKadenaAccountExists(
   try {
     const code = `(try false (coin.get-balance "${account}"))`;
     const res = await kadenaDirtyRead(code, options);
-    if (res?.result?.status !== "success") return null;
+    if (res?.result?.status !== "success") {
+      // See getKadenaBalance's own comment on this exact shape.
+      logKadenaReadError("checkKadenaAccountExists", new Error(res?.result?.error?.message ?? "non-success response envelope"));
+      return null;
+    }
     return res.result.data !== false;
   } catch (error) {
     logKadenaReadError("checkKadenaAccountExists", error);

@@ -62,6 +62,17 @@
  * the (b)/(c) gasPrice+creationTime checks AND the (d)/(e) ctx-injection
  * checks. It is inventoried (a) purely so a future NEW `.setMeta(` site in
  * this file doesn't get silently miscategorized here by copy-paste.
+ *
+ * `ui/internal/SendKadenaModal.tsx` (added 2026-09-28, FIXED_GAS_PRICE_TX_SITES
+ * below) is self-contained like `rotatePaymentKeyLive.ts` (no `execute()` ctx —
+ * real Kadena mainnet has no Ouronet gas station to route through), but its gas
+ * price is a FIXED literal (`KADENA_GAS_PRICE = 10000`, the owner's own explicit
+ * figure for real Kadena mainnet), never `stoaGasMeta()`'s derived StoaChain
+ * value — that formula computes a DIFFERENT chain's own rising floor, which
+ * happens to start at the same digits but would silently drift Kadena's price
+ * over time if used here. Exempt from (d)/(e) like the self-contained category
+ * (no injected ctx to destructure), but checked by its own dedicated assertions
+ * instead of the `stoaGasMeta(safeCreationTime())` shape that category requires.
  */
 
 import { describe, it, expect } from "vitest";
@@ -72,14 +83,16 @@ import { join, relative, resolve } from "node:path";
 // package's vitest transform does not hand these specs a file: URL.
 const SRC = resolve(__dirname, "../src");
 
-/** The 16 confirmed transaction-building sites. Three operations
+/** The 17 confirmed transaction-building sites. Three operations
  *  (RotateSovereign, RotateGuard, RotatePaymentKey) exist as TWO independent copies
  *  across `components/` and `zbom/modals/` — they share no code, so both copies are
  *  listed and both must satisfy the gas contract. The 15th,
  *  `zbom/rotatePaymentKeyLive.ts`, is the self-contained delegate the ZBOM
  *  `RotatePaymentKeyModal.tsx` calls — see `SELF_CONTAINED_TX_SITES` below. The
  *  16th, `kadena/kadenaReads.ts`, is a dirty-read-only site — see
- *  `READ_ONLY_TX_SITES` below. */
+ *  `READ_ONLY_TX_SITES` below. The 17th, `ui/internal/SendKadenaModal.tsx`
+ *  (added 2026-09-28), is a FIXED gas-price site — see
+ *  `FIXED_GAS_PRICE_TX_SITES` below. */
 const EXPECTED_TX_SITES = [
   "components/RotateGuardModal.tsx",
   "components/RotatePaymentKeyModal.tsx",
@@ -95,6 +108,7 @@ const EXPECTED_TX_SITES = [
   "zbom/modals/RotateGovernorModal.tsx",
   "zbom/modals/RotateSovereignModal.tsx",
   "ui/internal/SendStoaModal.tsx",
+  "ui/internal/SendKadenaModal.tsx",
   "zbom/rotatePaymentKeyLive.ts",
   "kadena/kadenaReads.ts",
 ].sort();
@@ -110,6 +124,18 @@ const SELF_CONTAINED_TX_SITES = new Set(["zbom/rotatePaymentKeyLive.ts"]);
  *  not apply. Exempt from (b)-(e) entirely; see the module doc comment
  *  above for the full reasoning. */
 const READ_ONLY_TX_SITES = new Set(["kadena/kadenaReads.ts"]);
+
+/** Self-contained (no injected `execute()` ctx, same as `SELF_CONTAINED_TX_SITES`)
+ *  but does NOT spread `stoaGasMeta(...)` — real Kadena mainnet's gas price is a
+ *  FIXED floor (`KADENA_GAS_PRICE = 10000`), not StoaChain's own rising Yin
+ *  Engine formula, which happens to start at the same digits but is an
+ *  architecturally different, StoaChain-specific number. Neither existing
+ *  category fits: not ctx-injected (no `execute()` anywhere in this file), and
+ *  not `SELF_CONTAINED_TX_SITES`'s own `stoaGasMeta(safeCreationTime())` shape
+ *  (there is no rising floor to derive here). Still fully subject to (a)-(c) —
+ *  inventoried, `gasPrice`/`creationTime` genuinely on the wire — just sourced
+ *  differently, checked by this category's own dedicated assertions below. */
+const FIXED_GAS_PRICE_TX_SITES = new Set(["ui/internal/SendKadenaModal.tsx"]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -156,7 +182,7 @@ describe("transaction gas-meta surface", () => {
     expect(txSites).toEqual(EXPECTED_TX_SITES);
   });
 
-  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel)))(
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel) && !FIXED_GAS_PRICE_TX_SITES.has(rel)))(
     "%s passes gasPrice + creationTime into setMeta",
     (rel) => {
       const source = readFileSync(join(SRC, rel), "utf8");
@@ -190,7 +216,7 @@ describe("transaction gas-meta surface", () => {
     },
   );
 
-  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel)))(
+  it.each(EXPECTED_TX_SITES.filter((rel) => !SELF_CONTAINED_TX_SITES.has(rel) && !READ_ONLY_TX_SITES.has(rel) && !FIXED_GAS_PRICE_TX_SITES.has(rel)))(
     "%s takes gas fields from the injected ctx, not a local clock read",
     (rel) => {
       const source = readFileSync(join(SRC, rel), "utf8");
@@ -219,6 +245,41 @@ describe("transaction gas-meta surface", () => {
       // the canonical single-read helper, not a hand-rolled substitute.
       expect(source, `${rel}: expected a single stoaGasMeta(safeCreationTime()) read`)
         .toMatch(/stoaGasMeta\s*\(\s*safeCreationTime\s*\(\s*\)\s*\)/);
+    },
+  );
+
+  it.each([...FIXED_GAS_PRICE_TX_SITES])(
+    "%s (fixed gas price) passes gasPrice + creationTime into setMeta, same as (b)/(c)",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
+      const bodies = setMetaBodies(source);
+      expect(bodies.length).toBeGreaterThan(0);
+      for (const body of bodies) {
+        expect(body, `${rel}: setMeta omits gasPrice`).toMatch(/\bgasPrice\b/);
+        expect(body, `${rel}: setMeta omits creationTime`).toMatch(/\bcreationTime\b/);
+      }
+    },
+  );
+
+  it.each([...FIXED_GAS_PRICE_TX_SITES])(
+    "%s (fixed gas price) reads the clock itself via safeCreationTime() alone — legitimate for a self-contained site — but does NOT derive its price via stoaGasMeta(), and names its fixed price with a real constant",
+    (rel) => {
+      const source = readFileSync(join(SRC, rel), "utf8");
+      // Self-contained (no execute() ctx to take creationTime from), so a
+      // real clock read here is correct — the opposite of (d)'s rule for the
+      // default ctx-injected category.
+      expect(source, `${rel}: expected a real safeCreationTime() read — this site is self-contained, not ctx-injected`)
+        .toMatch(/\bsafeCreationTime\s*\(\s*\)/);
+      // The one thing this category must NOT do: derive its price via
+      // StoaChain's own rising Yin Engine formula. That would silently drift
+      // Kadena's price away from the fixed value this project specifies.
+      expect(source, `${rel}: must not derive gasPrice via stoaGasMeta() — Kadena's floor is a fixed literal, not StoaChain's rising floor`)
+        .not.toMatch(/\bstoaGasMeta\s*\(/);
+      // A bare, unexplained numeric literal could be mistaken for a
+      // StoaChain-style derived number — a named constant makes the "this is
+      // fixed, not derived" distinction visible at the call site.
+      expect(source, `${rel}: expected a named KADENA_GAS_PRICE constant, not a bare unexplained literal`)
+        .toMatch(/\bKADENA_GAS_PRICE\b/);
     },
   );
 

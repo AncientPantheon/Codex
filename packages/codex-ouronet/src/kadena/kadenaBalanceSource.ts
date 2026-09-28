@@ -48,6 +48,7 @@ import {
   KADENA_READ_TIMEOUT_MS,
   getActiveKadenaNodeUrl,
   getKadenaBalancesBatch,
+  checkKadenaAccountExists,
   coerce,
   logKadenaReadError,
 } from "./kadenaReads.js";
@@ -70,6 +71,22 @@ export interface KadenaBalanceSource {
    *  absent address comes back with an empty (or partial) per-chain map, exactly like
    *  every other read in this package's Kadena surface. */
   fetchBalances(addresses: string[]): Promise<KadenaPerAddressBalances>;
+  /**
+   * Does this account exist ON THIS SPECIFIC CHAIN — a genuine 3-way answer,
+   * UNLIKE `fetchBalances`: `true`/`false` is a confident answer (a clean
+   * "yes, real data" or "no, cleanly confirmed absent" — a 404 from the REST
+   * gateway, or a successful Pact read returning `false`), `null` means the
+   * check itself failed (network/timeout/parse/non-404 HTTP error) and the
+   * caller must NOT treat that as "does not exist" — this is the live bug
+   * this method exists to fix: a caller gating whether to submit a real
+   * transaction (e.g. `SendKadenaModal.tsx`'s own receiver check) that
+   * conflated "the read timed out" with "this account doesn't exist" would
+   * either wrongly refuse a valid receiver or wrongly attempt a
+   * `transfer-create` against an account that already exists.
+   * `fetchBalances`'s own "empty map either way" contract is fine for a
+   * passive balance DISPLAY (show 0/dash on failure) but not here.
+   */
+  checkAccountExists(account: string, chainId: string): Promise<boolean | null>;
 }
 
 // ── REST gateway (default) ──────────────────────────────────────────────────
@@ -137,6 +154,43 @@ async function fetchOneAddressRest(
   }
 }
 
+/**
+ * `checkAccountExists`'s REST implementation. Reuses the SAME
+ * `/api/v1/accounts/<address>/balances` endpoint `fetchOneAddressRest`
+ * already calls, but — unlike that function, which collapses "cleanly no
+ * data" and "the fetch itself failed" into the same `{}` (fine for a
+ * passive balance display) — this preserves the distinction: a clean 404
+ * means "genuinely no rows for this address, on any chain" (`false`, a
+ * chain-id absent from a real response also means "no row on THIS chain",
+ * same `false`); any other outcome (non-404 HTTP error, network failure,
+ * JSON parse failure, timeout) returns `null`, the honest "could not check"
+ * answer this interface method exists to make possible.
+ */
+async function checkAccountExistsRest(
+  account: string,
+  chainId: string,
+  baseUrl: string,
+): Promise<boolean | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), KADENA_READ_TIMEOUT_MS);
+  try {
+    const url = `${baseUrl.replace(/\/+$/, "")}/api/v1/accounts/${encodeURIComponent(account)}/balances`;
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      if (res.status === 404) return false; // confidently absent, everywhere
+      logKadenaReadError("restKadenaBalanceSource.checkAccountExists", new Error(`HTTP ${res.status} for ${account}`));
+      return null;
+    }
+    const rows = (await res.json()) as KadenaRestBalanceRow[];
+    return rows.some((row) => String(row.chainId) === chainId);
+  } catch (error) {
+    logKadenaReadError("restKadenaBalanceSource.checkAccountExists", error);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const restKadenaBalanceSource: KadenaBalanceSource = {
   name: "rest",
   async fetchBalances(addresses) {
@@ -146,6 +200,9 @@ export const restKadenaBalanceSource: KadenaBalanceSource = {
       addresses.map(async (addr) => [addr, await fetchOneAddressRest(addr, baseUrl)] as const),
     );
     return Object.fromEntries(entries);
+  },
+  checkAccountExists(account, chainId) {
+    return checkAccountExistsRest(account, chainId, getActiveKadenaRestGatewayUrl());
   },
 };
 
@@ -177,6 +234,13 @@ export const pactKadenaBalanceSource: KadenaBalanceSource = {
     }
     return result;
   },
+  checkAccountExists(account, chainId) {
+    // Delegates straight to `kadenaReads.ts`'s own, already fully-tested
+    // `checkKadenaAccountExists` — same node URL lever (`getActiveKadenaNodeUrl`),
+    // same true/false/null contract, unchanged behavior for anyone who
+    // explicitly selects the Pact source.
+    return checkKadenaAccountExists(account, { chainId, nodeUrl: getActiveKadenaNodeUrl() });
+  },
 };
 
 // ── Active source selector ──────────────────────────────────────────────────
@@ -196,4 +260,24 @@ export function getActiveKadenaBalanceSource(): KadenaBalanceSource {
  *  whenever it happens, is a call to this function, not a rewrite of the hook. */
 export function setActiveKadenaBalanceSource(source: KadenaBalanceSource): void {
   activeKadenaBalanceSource = source;
+}
+
+/**
+ * Live bug fix: `SendKadenaModal.tsx`'s receiver-existence gate used to call
+ * `kadenaReads.ts`'s `checkKadenaAccountExists` directly, which ALWAYS hits
+ * the direct Pact node (`bytales.duckdns.org:31849`) regardless of the
+ * active balance source — the exact node this file's own doc comment
+ * documents as hairpin-NATting from its own LAN and (being plain HTTP, not
+ * HTTPS) a mixed-content-block risk from a browser. A live-reported failure
+ * ("Could not verify the receiver account") on a same-chain send matched
+ * this exactly: chain forwarding was correct, the node itself was simply
+ * unreachable from the browser. Routing through the ACTIVE source (REST by
+ * default — the one already proven to work from a browser, per this file's
+ * own doc comment) fixes it the same way `useKadenaBalances` was already
+ * fixed; `setActiveKadenaBalanceSource(pactKadenaBalanceSource)` still
+ * makes this follow that explicit choice, exactly like `fetchBalances`
+ * already does.
+ */
+export function checkKadenaAccountExistsActive(account: string, chainId: string): Promise<boolean | null> {
+  return activeKadenaBalanceSource.checkAccountExists(account, chainId);
 }

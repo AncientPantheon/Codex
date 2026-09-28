@@ -10,12 +10,20 @@
  *
  * The zone defaults already live in DEFAULT_UI_SETTINGS, so the reads carry the
  * same `?? fallback` the original used for resilience against partial state.
+ *
+ * The "Pre-ZBOM Tooltip" row below is the ONE exception to the data-layer
+ * swap above: it is bound to `usePreZbomTooltipSetting()` (the per-consumer
+ * settings registry), not `useCodex().uiSettings`/`updateUiSettings` (the
+ * shared UI-settings slice every other row here writes to) — it persists
+ * under `consumerSettings["Codex"]` specifically so the preference can differ
+ * per app embedding this package, not the shared slice.
  */
 
 import { useCallback } from "react";
 import { useCodex } from "../../hooks/index.js";
 import { useCodexStore } from "../../provider/index.js";
 import { detectProfile, getZbomExpansion } from "../../zbom/zbomProfiles.js";
+import { usePreZbomTooltipSetting } from "../../zbom/cfm/usePreZbomTooltipSetting.js";
 import type { PatronSelectionMode, ZbomProfile } from "../../types/entities.js";
 
 export interface ZbomSettingsCardProps {
@@ -25,6 +33,8 @@ export interface ZbomSettingsCardProps {
 export function ZbomSettingsCard({ className }: ZbomSettingsCardProps) {
   const { uiSettings } = useCodex();
   const store = useCodexStore();
+  const { enabled: preZbomTooltipEnabled, setEnabled: setPreZbomTooltipEnabled } =
+    usePreZbomTooltipSetting();
 
   const patronSelectionMode = (uiSettings.patronSelectionMode ?? "wealthiest") as PatronSelectionMode;
   const zbomProfile = (uiSettings.zbomProfile ?? "basic") as ZbomProfile;
@@ -59,6 +69,27 @@ export function ZbomSettingsCard({ className }: ZbomSettingsCardProps) {
       <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: "#ceac5f" }}>
         ZBOM
       </h3>
+
+      {/* ── Pre-ZBOM Tooltip ── */}
+      <div className="p-3 rounded-lg border space-y-2" style={{ borderColor: "#262626", backgroundColor: "#111" }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium" style={{ color: "#d2d3d4" }}>Pre-ZBOM Tooltip</p>
+            <p className="text-xs" style={{ color: "#555" }}>
+              Hover a button that opens a ZBOM to see the function it will call, its declared
+              parameters, and a live cost preview — before the modal opens.
+            </p>
+          </div>
+          <button
+            data-testid="prezbom-tooltip-toggle"
+            aria-pressed={preZbomTooltipEnabled}
+            onClick={() => void setPreZbomTooltipEnabled(!preZbomTooltipEnabled)}
+            className={`relative inline-flex h-4 w-7 flex-shrink-0 items-center rounded-full transition-colors ${preZbomTooltipEnabled ? "bg-yellow-600" : "bg-gray-700"}`}
+          >
+            <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white transition ${preZbomTooltipEnabled ? "translate-x-3.5" : "translate-x-0.5"}`} />
+          </button>
+        </div>
+      </div>
 
       {/* ── Patron Selection ── */}
       <div className="p-3 rounded-lg border space-y-3" style={{ borderColor: "#262626", backgroundColor: "#111" }}>

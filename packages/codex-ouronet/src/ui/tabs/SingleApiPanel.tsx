@@ -23,6 +23,9 @@
 import { useState, useMemo } from "react";
 import { KeyRound, Link2, Search } from "lucide-react";
 import type { IOuroAccount } from "../../types/entities.js";
+import { LINK_DUAL_API_KEY_KEY } from "../../zbom/pythia/linkDualApiKey.js";
+import PreZbomHint from "../../zbom/cfm/PreZbomHint.js";
+import { ouronetAccountFillValues } from "../../zbom/cfm/preZbomFillMap.js";
 import {
   type ApiKeyRow,
   isApiKeyRegistered,
@@ -206,12 +209,35 @@ export function SingleApiPanel({ standardApollo, smartApollo, apiKeyMap, account
             : `Select ${selStd ? "" : "a Standard ₱. half"}${!selStd && !selSmt ? " and " : ""}${selSmt ? "" : "a Smart Π. half"}…`}
         </div>
         {pairReady && <IconCopyBtn text={composite} size={26} />}
-        <button type="button" disabled={!pairReady}
-          onClick={() => { if (pairReady) setLinkOpen(true); }}
-          title={pairReady ? "Link the pair into a dual API key" : "Pick both halves first"}
-          style={actionBtn(pairReady, "#a78bfa")}>
-          <Link2 style={{ width: 14, height: 14 }} /> Link
-        </button>
+        <PreZbomHint
+          entrypoint={LINK_DUAL_API_KEY_KEY}
+          values={{
+            ...(selStd ? { "standard-apollo": selStd } : {}),
+            ...(selSmt ? { "smart-apollo": selSmt } : {}),
+            // Canon rule 7: `executor` is a real, launcher-time-knowable
+            // "ouronet-account"-roled exec param — `linkDualApiKey.ts`'s own
+            // doc comment confirms `executor: standardOwner` is the correct
+            // fill (the Standard half's DALOS owner), the SAME resolution
+            // `stdOwner` already computes above for this exact purpose.
+            // `ouronetAccountFillValues` (the ONE shared fill map, see
+            // `preZbomFillMap.ts`) fills it, plus the other confirmed
+            // aliases (harmless extras: `C_Link` declares neither
+            // `account`/`owner-account`/`apollo-account`, so they are simply
+            // ignored). No `patron` slot exists for `C_Link` at all — this
+            // launcher genuinely has nothing more to fill. Genuinely
+            // unfillable (left as the registry's own honest placeholder)
+            // until a Standard half is selected.
+            ...(stdOwner ? ouronetAccountFillValues(stdOwner) : {}),
+            "consumer-lane": "NewLane",
+          }}
+        >
+          <button type="button" disabled={!pairReady}
+            onClick={() => { if (pairReady) setLinkOpen(true); }}
+            title={pairReady ? "Link the pair into a dual API key" : "Pick both halves first"}
+            style={actionBtn(pairReady, "#a78bfa")}>
+            <Link2 style={{ width: 14, height: 14 }} /> Link
+          </button>
+        </PreZbomHint>
       </div>
 
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>

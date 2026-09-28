@@ -19,4 +19,5 @@ export {
   useCodexStoreOptional,
   useSigningClientOverride,
   useResolverProvider,
+  useConsumerName,
 } from "@ancientpantheon/codex-ui/provider";

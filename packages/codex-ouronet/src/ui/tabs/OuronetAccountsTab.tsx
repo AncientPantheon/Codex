@@ -52,7 +52,10 @@ import {
 import { useOuroAccounts } from "../../hooks/index.js";
 import { useStoaChainSeeds } from "../../hooks/index.js";
 import { useActiveWallet } from "../../hooks/index.js";
-import { getApiKeySelectorData, isApiKeyRegistered, isApiKeyLinked, type ApiKeyRow } from "../../zbom/pythia/deployApiKey.js";
+import { getApiKeySelectorData, isApiKeyRegistered, isApiKeyLinked, DEPLOY_API_KEY_KEY, type ApiKeyRow } from "../../zbom/pythia/deployApiKey.js";
+import PreZbomHint from "../../zbom/cfm/PreZbomHint.js";
+import { ouronetAccountFillValues, resolvePatronFillValue } from "../../zbom/cfm/preZbomFillMap.js";
+import { usePatronSelectionDefaults } from "../../zbom/patron/usePatronSelectionDefaults.js";
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
@@ -498,6 +501,19 @@ function AccountRow({
   const isCodexIdPrime = !!primeName;
   const locked = isFirst || isCodexIdPrime;
   const displayName = primeName ?? (isFirst ? "CodexPrime" : account.name || `Account #${index + 1}`);
+
+  // Pre-ZBOM tooltip canon rule 7 ("fill every parameter you can, and prove
+  // it") — ONE fill map (preZbomFillMap.ts), not hand-rolled per button.
+  // `accountFillValues` covers every confirmed "this account" alias
+  // (`executor`/`account`/`owner-account`/`apollo-account`); `patronFillValue`
+  // mirrors the SAME resident-vs-prime resolution every ZBOM modal's own
+  // `usePatronSelectionDefaults` + `accounts[0]` seed already uses at mount,
+  // so the hover tooltip shows the SAME patron the modal is about to open
+  // with, not a guess.
+  const { initialPatronMode } = usePatronSelectionDefaults();
+  const accountFillValues = ouronetAccountFillValues(account.address);
+  const patronFillValue = resolvePatronFillValue(initialPatronMode, account.address, accounts[0]?.address);
+  const withPatron = patronFillValue ? { ...accountFillValues, patron: patronFillValue } : accountFillValues;
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(displayName);
   const commitRename = () => {
@@ -710,7 +726,9 @@ function AccountRow({
                   </span>
                 )}
                 <div style={{ flex: 1 }} />
-                <GoldenBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Payment Key" onClick={() => setActiveOpId("rotate-payment-key")} />
+                <PreZbomHint entrypoint="TS01-C1.DALOS|C_RotateStoa" values={withPatron}>
+                  <GoldenBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Payment Key" onClick={() => setActiveOpId("rotate-payment-key")} />
+                </PreZbomHint>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                 <code style={{ fontFamily: MONO, fontSize: 14, fontWeight: 700, wordBreak: "break-all", flex: 1, color: addrColor(account.stoaChainLedger) }}>{account.stoaChainLedger}</code>
@@ -733,7 +751,9 @@ function AccountRow({
             <div style={sectionBox}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <span style={sectionLabel}>Guard</span><div style={{ flex: 1 }} />
-                <GoldenBtn icon={<Shield style={{ width: 14, height: 14 }} />} label="Rotate Guard" onClick={() => setActiveOpId("rotate-guard")} />
+                <PreZbomHint entrypoint="TS01-C1.DALOS|C_RotateGuard" values={withPatron}>
+                  <GoldenBtn icon={<Shield style={{ width: 14, height: 14 }} />} label="Rotate Guard" onClick={() => setActiveOpId("rotate-guard")} />
+                </PreZbomHint>
               </div>
               <GuardTree guard={account.guard} identifyKeySource={(k) => identifyKeySource(k, seeds, pureKeypairs)} />
             </div>
@@ -745,8 +765,15 @@ function AccountRow({
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <span style={sectionLabel}>StoicTag</span><div style={{ flex: 1 }} />
                 {stoicTag
-                  ? <GreenBtn icon={<Unlink style={{ width: 14, height: 14 }} />} label="Release StoicTag" onClick={() => setActiveOpId("release-stoic-tag")} />
-                  : <GreenBtn icon={<Tag style={{ width: 14, height: 14 }} />} label="Add StoicTag" onClick={() => setActiveOpId("register-stoic-tag")} />}
+                  ? <PreZbomHint entrypoint="TS01-C4.CODEX|C_ReleaseStoicTag" values={{ ...withPatron, "tag-name": stoicTag }}>
+                      <GreenBtn icon={<Unlink style={{ width: 14, height: 14 }} />} label="Release StoicTag" onClick={() => setActiveOpId("release-stoic-tag")} />
+                    </PreZbomHint>
+                  : <PreZbomHint
+                      entrypoint="TS01-C4.CODEX|C_RegisterStoicTag"
+                      values={{ ...withPatron, "tag-name": "NewTag", "account-address": account.address }}
+                    >
+                      <GreenBtn icon={<Tag style={{ width: 14, height: 14 }} />} label="Add StoicTag" onClick={() => setActiveOpId("register-stoic-tag")} />
+                    </PreZbomHint>}
               </div>
               {stoicTag ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -768,7 +795,9 @@ function AccountRow({
                 <span style={sectionLabel}>Sovereign</span>
                 <span style={pillStyle("#8b5cf620", "#a78bfa")}>Ѻ. standard account</span>
                 <div style={{ flex: 1 }} />
-                <VioletBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Sovereign" onClick={() => setActiveOpId("rotate-sovereign")} />
+                <PreZbomHint entrypoint="TS01-C1.DALOS|C_RotateSovereign" values={withPatron}>
+                  <VioletBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Sovereign" onClick={() => setActiveOpId("rotate-sovereign")} />
+                </PreZbomHint>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                 {account.sovereign
@@ -783,7 +812,9 @@ function AccountRow({
             <div style={{ ...sectionBox, border: "1px solid #8b5cf630" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <span style={sectionLabel}>Governor</span><div style={{ flex: 1 }} />
-                <VioletBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Governor" onClick={() => setActiveOpId("rotate-governor")} />
+                <PreZbomHint entrypoint="TS01-C1.DALOS|C_RotateGovernor" values={withPatron}>
+                  <VioletBtn icon={<RotateCw style={{ width: 14, height: 14 }} />} label="Rotate Governor" onClick={() => setActiveOpId("rotate-governor")} />
+                </PreZbomHint>
               </div>
               {account.governor != null
                 ? <GuardTree guard={account.governor} identifyKeySource={(k) => identifyKeySource(k, seeds, pureKeypairs)} />
@@ -876,14 +907,21 @@ function AccountRow({
               <IconRenameBtnRect onClick={() => { setDraftName(displayName); setRenaming(true); }} />
             ))}
             {!account.isActive && !isApollo && (
-              <button type="button" onClick={() => setActiveOpId(account.isSmart ? "activate-smart" : "activate-standard")} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: "#ceac5f", color: "#0a0a0a", border: "1px solid transparent", cursor: "pointer" }}>
-                <Zap style={{ width: 14, height: 14 }} /> Activate
-              </button>
+              <PreZbomHint
+                entrypoint={account.isSmart ? "TS01-C1.DALOS|C_DeploySmartAccount" : "TS01-C1.DALOS|C_DeployStandardAccount"}
+                values={accountFillValues}
+              >
+                <button type="button" onClick={() => setActiveOpId(account.isSmart ? "activate-smart" : "activate-standard")} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: "#ceac5f", color: "#0a0a0a", border: "1px solid transparent", cursor: "pointer" }}>
+                  <Zap style={{ width: 14, height: 14 }} /> Activate
+                </button>
+              </PreZbomHint>
             )}
             {!account.isActive && isApollo && !isCodexIdPrime && !isRegistered && apiKeyLoaded && (
-              <button type="button" onClick={() => setActiveOpId("activate-apollo-pythia")} title={`Deploy this Apollo public key on-chain as a ${account.isSmart ? "Smart" : "Standard"} Pythia key (charges STOA; pairing is a later Pythia-mediated step).`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: apolloAccent, color: "#0a0a0a", border: "1px solid transparent", cursor: "pointer" }}>
-                <Zap style={{ width: 14, height: 14 }} /> Activate as {account.isSmart ? "Smart" : "Standard"} Pythia Key
-              </button>
+              <PreZbomHint entrypoint={DEPLOY_API_KEY_KEY} values={withPatron}>
+                <button type="button" onClick={() => setActiveOpId("activate-apollo-pythia")} title={`Deploy this Apollo public key on-chain as a ${account.isSmart ? "Smart" : "Standard"} Pythia key (charges STOA; pairing is a later Pythia-mediated step).`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 6, backgroundColor: apolloAccent, color: "#0a0a0a", border: "1px solid transparent", cursor: "pointer" }}>
+                  <Zap style={{ width: 14, height: 14 }} /> Activate as {account.isSmart ? "Smart" : "Standard"} Pythia Key
+                </button>
+              </PreZbomHint>
             )}
             <div style={{ flex: 1 }} />
             {locked

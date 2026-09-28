@@ -28,6 +28,7 @@ import {
   useCodexStore,
   useSigningClientOverride,
   useResolverProvider,
+  useConsumerName,
 } from "../src/provider/index.js";
 import type { CodexStore } from "../src/provider/index.js";
 
@@ -150,6 +151,37 @@ describe("CodexProvider — injected store-factory seam", () => {
     expect(() => renderHook(() => useCodexStore())).toThrow(
       /missing <CodexProvider>/
     );
+  });
+});
+
+describe("CodexProvider — consumerName context seam", () => {
+  it("useConsumerName defaults to \"Codex\" when no consumerName prop is supplied", () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <CodexProvider createStore={asCreateStore(makeFakeStore("x"))} adapter={fakeAdapter}>
+        {children}
+      </CodexProvider>
+    );
+    const { result } = renderHook(() => useConsumerName(), { wrapper });
+    expect(result.current).toBe("Codex");
+  });
+
+  it("useConsumerName returns the supplied consumerName prop", () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <CodexProvider
+        createStore={asCreateStore(makeFakeStore("x"))}
+        adapter={fakeAdapter}
+        consumerName="MyApp"
+      >
+        {children}
+      </CodexProvider>
+    );
+    const { result } = renderHook(() => useConsumerName(), { wrapper });
+    expect(result.current).toBe("MyApp");
+  });
+
+  it("useConsumerName returns the default \"Codex\" outside any provider (no throw)", () => {
+    const { result } = renderHook(() => useConsumerName());
+    expect(result.current).toBe("Codex");
   });
 });
 

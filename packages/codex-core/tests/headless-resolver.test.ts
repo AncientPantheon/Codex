@@ -296,6 +296,62 @@ describe("getKeyPairByPublicKey — DERIVED-ACCOUNT path (InternalCodexResolver 
   });
 });
 
+describe("getKeyPairByPublicKey — STOIC SEED GUARD (silent-wrong-derivation prevention)", () => {
+  // "stoic" (Stoa Dalos) seeds are NOT mnemonic-based — a real caller resolves
+  // them via `resolveStoicKeypair` BEFORE ever reaching this factory (see
+  // packages/codex-ouronet/src/resolver/headlessKadenaDeps.ts). If a stoic
+  // seed's account ever reaches THIS factory anyway (corrupt state, a future
+  // direct caller, a reordering bug upstream), it must refuse rather than feed
+  // a DALOS bitstring to the mnemonic-only `deriveStoaChainKeypair` seam — that
+  // would silently derive the WRONG key via the wrong algorithm.
+  const STOIC_SEED: StoaChainSeedLike = {
+    secret: "enc-seed-secret",
+    seedType: "stoic",
+    accounts: [{ publicKey: DERIVED_PUB, index: 0 }],
+  };
+
+  it("a 'stoic'-tagged seed's matching account is SKIPPED, never reaching decryptSecret/deriveStoaChainKeypair — falls through to CodexKeyMissingError", async () => {
+    const deps = makeFakeDeps();
+    const resolver = createHeadlessCodexResolver(deps);
+
+    await expect(
+      resolver.getKeyPairByPublicKey(
+        snapshot({ kadenaSeeds: [STOIC_SEED] }),
+        DERIVED_PUB,
+        PASSWORD
+      )
+    ).rejects.toBeInstanceOf(CodexKeyMissingError);
+
+    // Proves this is a deliberate refusal BEFORE any mnemonic-path crypto runs,
+    // not "derive, then happen to fail downstream".
+    expect(deps.decryptSecret).not.toHaveBeenCalled();
+    expect(deps.deriveStoaChainKeypair).not.toHaveBeenCalled();
+  });
+
+  it("a 'stoic' seed alongside a real koala seed: the koala account still resolves normally (the guard doesn't disturb sibling seeds)", async () => {
+    const deps = makeFakeDeps();
+    const resolver = createHeadlessCodexResolver(deps);
+
+    const result = await resolver.getKeyPairByPublicKey(
+      snapshot({ kadenaSeeds: [STOIC_SEED, KOALA_SEED] }),
+      DERIVED_PUB,
+      PASSWORD
+    );
+
+    expect(result.publicKey).toBe(DERIVED_PUB);
+    expect(deps.deriveStoaChainKeypair).toHaveBeenCalledWith(
+      PASSWORD,
+      MNEMONIC_SENTINEL,
+      0,
+      "koala"
+    );
+    // The koala seed's own account matched DERIVED_PUB, not the stoic one —
+    // decryptSecret ran exactly once, for the koala seed's secret.
+    expect(deps.decryptSecret).toHaveBeenCalledTimes(1);
+    expect(deps.decryptSecret).toHaveBeenCalledWith(KOALA_SEED.secret, PASSWORD);
+  });
+});
+
 describe("getKeyPairByPublicKey — BRANCH PRECEDENCE (funds-critical, L135-164 early-return)", () => {
   it("pure-keypair path WINS when the same pub is in BOTH pureKeypairs and a seed account (derived path never runs)", async () => {
     const deps = makeFakeDeps();

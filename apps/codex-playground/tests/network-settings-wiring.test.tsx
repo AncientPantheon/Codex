@@ -22,7 +22,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
-import { STOACHAIN_DEFAULT_NODE_URL, KADENA_MAINNET_DEFAULT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
+import { STOACHAIN_DEFAULT_NODE_URL, KADENA_MAINNET_DEFAULT_NODE_URL, KADENA_DIRECT_NODE_URL } from "@ancientpantheon/codex-ouronet/connection";
 
 import { Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
@@ -114,6 +114,59 @@ describe("networkSettings — surfaced editable defaults (N-03/N-04)", () => {
     );
     const settings = loadNetworkSettings();
     expect(settings.arweaveGatewayUrl).toBe("http://localhost:1985");
+  });
+
+  it("migrates a persisted kadenaNodeUrl that is EXACTLY the documented LAN dev escape hatch (http://localhost:31849) back to the real mainnet default", () => {
+    // Live bug report: a real tester's Send KDA failed with "Failed to fetch
+    // http://localhost:31849" — nothing was running on that port. That value
+    // only ever gets persisted via the documented VITE_KADENA_NODE_URL escape
+    // hatch (this file's own doc comment above KADENA_NODE_URL_OVERRIDE) for a
+    // dev genuinely on the node's own LAN, or a deliberate Network-tab edit —
+    // but once whichever caused it stops being true (`.env.local` removed, a
+    // different tester loads the same browser profile), the value silently
+    // outlives its own reason and points every Kadena send at a node that
+    // isn't there. Same class of fix as the Arweave gateway migration above:
+    // correct EXACTLY this one literal, once.
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+        arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+        kadenaNodeUrl: "http://localhost:31849",
+      }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.kadenaNodeUrl).toBe(KADENA_MAINNET_DEFAULT_NODE_URL);
+  });
+
+  it("migrates a persisted kadenaNodeUrl that is EXACTLY the OLD default (the direct duckdns node, KADENA_DIRECT_NODE_URL) to the current gateway default — live bug report: a tester still got 'Kadena simulation timed out' after the gateway rollout, with no way to tell from that message which node was actually active", () => {
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+        arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+        kadenaNodeUrl: KADENA_DIRECT_NODE_URL,
+      }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.kadenaNodeUrl).toBe(KADENA_MAINNET_DEFAULT_NODE_URL);
+    expect(settings.kadenaNodeUrl).not.toBe(KADENA_DIRECT_NODE_URL);
+  });
+
+  it("does NOT migrate a deliberately-chosen custom Kadena node URL, even if it also happens to be a localhost address on a DIFFERENT port", () => {
+    window.localStorage.setItem(
+      NETWORK_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        pythiaUrl: "",
+        stoaChainNodeUrl: STOACHAIN_DEFAULT_NODE_URL,
+        arweaveGatewayUrl: DEFAULT_GATEWAY_URL,
+        kadenaNodeUrl: "http://localhost:31850",
+      }),
+    );
+    const settings = loadNetworkSettings();
+    expect(settings.kadenaNodeUrl).toBe("http://localhost:31850");
   });
 
   it("defaults arweaveMode to real when nothing is persisted yet (owner directive: real balances out of the box, no manual step)", () => {

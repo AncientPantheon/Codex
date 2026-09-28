@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createCodexStore } from "@ancientpantheon/codex-ouronet/state";
+import { createCodexStore, CURRENT_SCHEMA_VERSION } from "@ancientpantheon/codex-ouronet/state";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import type { CodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import {
@@ -171,6 +171,36 @@ describe("kickstartCodex v0.3 — happy paths", () => {
       r.duoPurePrime![0].publicKey,
       r.duoPurePrime![1].publicKey,
     ]);
+  });
+});
+
+describe("kickstartCodex v0.3 — schemaVersion stamping (2026-09-27 diagnosis)", () => {
+  // The migration runner's cursor advance is strict `fromVersion === current`
+  // (see state-migrations.test.ts's own "does NOT apply a 1->2 migration to a v0
+  // snapshot" lock-in test) -- there is no 0->1 step, so a freshly-kickstarted
+  // codex was never stamped with the version its data shape actually matches,
+  // and stayed at the pre-versioning sentinel 0 forever (the "Schema Version: 0"
+  // the Codex Info card showed for every wallet created on current code, even
+  // though only a codex migrated up from a legacy pre-v0.2 install ever reached
+  // CURRENT_SCHEMA_VERSION). Fixed at the kickstart site itself, not the display
+  // and not the migration ceiling -- there is genuinely no 0->1 data transform to
+  // run; a fresh codex's shape already matches CURRENT_SCHEMA_VERSION today.
+  it("stamps schemaVersion to CURRENT_SCHEMA_VERSION in-memory immediately after kickstart", async () => {
+    await kickstart(args("reuse-codexid-whole", "auto-pure-keys"));
+    expect(store.getState().schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(store.getState().schemaVersion).not.toBe(0);
+  });
+
+  it("persists schemaVersion to the adapter too, not just in-memory state", async () => {
+    await kickstart(args("reuse-codexid-whole", "auto-pure-keys"));
+    await expect(adapter.getSchemaVersion()).resolves.toBe(CURRENT_SCHEMA_VERSION);
+  });
+
+  it("a reload (init against the same adapter) still reports CURRENT_SCHEMA_VERSION, not 0", async () => {
+    await kickstart(args("reuse-codexid-whole", "auto-pure-keys"));
+    const store2 = createCodexStore();
+    await store2.getState().actions.init(adapter, "dev");
+    expect(store2.getState().schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });
 });
 

@@ -88,23 +88,31 @@ export const NETWORK_SETTINGS_STORAGE_KEY = "codex-playground:network-settings";
 export const STOACHAIN_NODE_PLACEHOLDER = STOACHAIN_DEFAULT_NODE_URL;
 
 /**
- * The Kadena node default, with a local-dev escape hatch (2026-09-27 diagnosis —
- * "hairpin NAT"): `bytales.duckdns.org` resolves to the node's PUBLIC IP, and the
- * LAN router the node itself sits behind will not loop that traffic back to a
- * machine on the same LAN — the request dies at the router, every time, for every
- * dev box on that network. `bytales.duckdns.org` MUST stay the shipped/production
- * default (the public IP is dynamic, so a fixed IP is not an option, and a
- * localhost/LAN URL obviously isn't one for anybody off that LAN) — so a dev on
- * that LAN needs a way to point at the node's LAN address WITHOUT editing the
- * shipped default and risking it shipping that way.
+ * The Kadena node default, with a local-dev escape hatch.
  *
- * `VITE_KADENA_NODE_URL`, read once at startup, is that escape hatch: unset in
- * production, so production gets the real default; a dev on the node's own LAN
- * sets it in an UNCOMMITTED `.env.local` (see `.env.local.example`) to
- * `http://localhost:31849` or `http://<node's LAN IP>:31849`. Deliberately NOT a
- * silent runtime "try duckdns, fall back to localhost" — that would mask a real
- * production outage as a working dev box (the same reason the timeout in
- * `kadenaReads.ts` surfaces its error instead of quietly retrying).
+ * CURRENT DEFAULT (2026-09-28): `KADENA_MAINNET_DEFAULT_NODE_URL` itself is
+ * now `https://denascan.ancientholdings.eu` — a transparent Chainweb
+ * passthrough GATEWAY (HTTPS, CORS-open, forwards reads AND
+ * signing/broadcast), not the direct node. See `kadenaReads.ts`'s own doc
+ * comment on that constant for the full history/why. This escape hatch is
+ * now specifically about the DIRECT node (`KADENA_DIRECT_NODE_URL`,
+ * `http://bytales.duckdns.org:31849`) — a dev who wants to bypass the
+ * gateway (or genuinely needs to, if the gateway itself is ever down) still
+ * hits the SAME "hairpin NAT" problem the gateway was built to route around
+ * in the first place: `bytales.duckdns.org` resolves to the node's PUBLIC
+ * IP, and the LAN router the node itself sits behind will not loop that
+ * traffic back to a machine on the same LAN — the request dies at the
+ * router, every time, for every dev box on that network.
+ *
+ * `VITE_KADENA_NODE_URL`, read once at startup, is that escape hatch: unset
+ * in production, so production gets the real (gateway) default; a dev on
+ * the direct node's own LAN who specifically wants IT (not the gateway)
+ * sets this in an UNCOMMITTED `.env.local` (see `.env.local.example`) to
+ * `http://localhost:31849` or `http://<node's LAN IP>:31849`. Deliberately
+ * NOT a silent runtime "try the gateway, fall back to localhost" — that
+ * would mask a real gateway outage as a working dev box (the same reason
+ * the timeout in `kadenaReads.ts` surfaces its error instead of quietly
+ * retrying).
  */
 const KADENA_NODE_URL_OVERRIDE = import.meta.env.VITE_KADENA_NODE_URL;
 
@@ -176,7 +184,55 @@ export function loadNetworkSettings(): NetworkSettings {
         // actually typed) is what lets balances resolve correctly for a
         // returning browser instead of silently querying a node that was
         // never confirmed to work.
-        parsed.kadenaNodeUrl !== "https://api.chainweb.com"
+        parsed.kadenaNodeUrl !== "https://api.chainweb.com" &&
+        // SECOND one-time migration (live bug report, this round): a dev on
+        // the node's own LAN sets `VITE_KADENA_NODE_URL=http://localhost:31849`
+        // (the documented hairpin-NAT escape hatch, this file's own doc
+        // comment above `KADENA_NODE_URL_OVERRIDE`) and that value gets
+        // WRITTEN to localStorage by `saveNetworkSettings` — exactly like the
+        // other two migrations, not because anyone chose it as a permanent
+        // setting. Unlike an ordinary typo, this one silently outlives its
+        // own cause: once `.env.local` is removed (a dev.moves machines, or
+        // a completely different tester loads the SAME browser profile —
+        // confirmed live: a real tester's "Failed to fetch" against
+        // `localhost:31849` traced straight back to this exact stale value),
+        // the override is gone but the persisted literal remains, silently
+        // pointing every read/send at a node that isn't running anymore.
+        // Correcting exactly this one literal — never any OTHER localhost/LAN
+        // URL someone deliberately typed — is safe in BOTH directions: if
+        // `VITE_KADENA_NODE_URL` is CURRENTLY set (a dev genuinely on that
+        // LAN right now), `DEFAULT_NETWORK_SETTINGS.kadenaNodeUrl` already
+        // resolves to that same override, so "correcting" to the default is
+        // a no-op; if it is NOT currently set (the common case, and the one
+        // that produced the live failure), this restores the real default
+        // (the `denascan.ancientholdings.eu` gateway, 2026-09-28 — see
+        // `KADENA_NODE_URL_OVERRIDE`'s own doc comment above) instead of
+        // silently failing forever.
+        //
+        parsed.kadenaNodeUrl !== "http://localhost:31849" &&
+        // THIRD one-time migration (2026-09-28, gateway rollout — REVISED
+        // reasoning, see below): `http://bytales.duckdns.org:31849`
+        // (`KADENA_DIRECT_NODE_URL`) was THIS constant's own shipped
+        // default before this round. This migration was originally left
+        // OUT on the theory that a returning browser with it persisted
+        // might be a dev on that LAN deliberately preferring it over the
+        // gateway — but a live re-test after the gateway rollout produced
+        // the EXACT SAME "Kadena simulation timed out after 10000ms"
+        // symptom this whole round exists to fix, with no way to tell from
+        // that generic message alone which node was actually being hit
+        // (since fixed separately — see `describeKadenaNetworkError` in
+        // `SendKadenaModal.tsx`, now names the active node in the error).
+        // The far more likely explanation, in hindsight: the tester's own
+        // browser simply still had the OLD default persisted from before
+        // this round, exactly like the OTHER two migrations' own "written
+        // because it was the default, not chosen" shape — not a deliberate
+        // LAN-specific preference. Correcting exactly this one literal
+        // (never any OTHER duckdns/LAN URL someone actually typed) is safe
+        // the same way migration two already is: a dev genuinely on that
+        // LAN who wants it can still select it explicitly in the Network
+        // tab afterward — this only stops a stale, unchosen value from
+        // silently winning forever.
+        parsed.kadenaNodeUrl !== "http://bytales.duckdns.org:31849"
           ? parsed.kadenaNodeUrl
           : DEFAULT_NETWORK_SETTINGS.kadenaNodeUrl,
     };

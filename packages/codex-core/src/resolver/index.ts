@@ -17,4 +17,5 @@ export {
   type StoaChainSeedLike,
   type PureKeypairLike,
   type StoaChainSeedType,
+  type MnemonicSeedType,
 } from "./headlessResolver.js";

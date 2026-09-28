@@ -47,6 +47,20 @@ describe("ExecutionTooltipCard", () => {
     expect(screen.getByText(/not on chain/)).toBeTruthy();
   });
 
+  it("shows only the plain signature (no argument-match block, no MISSING flags) when args is deliberately empty — Zone2Wrapper's signature-only use", () => {
+    const spec: ExecutionSpec = {
+      exec: "ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag",
+      args: [],
+    };
+    render(<ExecutionTooltipCard spec={spec} />);
+    // The plain param-name signature line still shows (function exists, with
+    // what parameters) — that's the whole point of the signature-only call.
+    expect(screen.getByText("(patron executor tag-name)")).toBeTruthy();
+    // But no per-argument comparison — an intentionally-empty args array is
+    // not "every argument is missing".
+    expect(screen.queryByText(/MISSING/)).toBeNull();
+  });
+
   it("flags a MISSING argument distinctly from a provided one — positional misalignment is the class no static check catches", () => {
     mockReader({ result: { status: "success", data: null } });
     const spec: ExecutionSpec = {

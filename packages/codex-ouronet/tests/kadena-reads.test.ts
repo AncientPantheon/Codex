@@ -43,6 +43,7 @@ import {
   KADENA_MAINNET_DEFAULT_CHAIN_ID,
   KADENA_CHAINS,
   KADENA_CHAIN_COUNT,
+  kadenaPactUrl,
 } from "../src/kadena/kadenaReads.js";
 
 afterEach(() => {
@@ -53,14 +54,26 @@ afterEach(() => {
 function mockSuccess(data: unknown) {
   dirtyRead.mockResolvedValue({ result: { status: "success", data } });
 }
-function mockFailure() {
-  dirtyRead.mockResolvedValue({ result: { status: "failure", error: { message: "refused" } } });
+function mockFailure(message = "refused") {
+  dirtyRead.mockResolvedValue({ result: { status: "failure", error: { message } } });
 }
 
 describe("kadenaReads — the mechanism (networkId + host, not stoa-core's pactRead)", () => {
   it("KADENA_MAINNET_NETWORK_ID is 'mainnet01', never 'stoa'", () => {
     expect(KADENA_MAINNET_NETWORK_ID).toBe("mainnet01");
     expect(KADENA_MAINNET_NETWORK_ID).not.toBe("stoa");
+  });
+
+  it("kadenaPactUrl builds the exact chainweb Pact base path for a node origin + chain (exported for SendKadenaModal.tsx to reuse)", () => {
+    expect(kadenaPactUrl("http://example.com", "7")).toBe(
+      "http://example.com/chainweb/0.0/mainnet01/chain/7/pact",
+    );
+  });
+
+  it("kadenaPactUrl strips a trailing slash from the node URL — no double slash before /chainweb", () => {
+    expect(kadenaPactUrl("http://example.com/", "0")).toBe(
+      "http://example.com/chainweb/0.0/mainnet01/chain/0/pact",
+    );
   });
 
   it("getKadenaBalance builds a transaction with networkId mainnet01 and posts it to the correct chainweb URL", async () => {
@@ -213,10 +226,48 @@ describe("kadenaReads — a swallowed exception is LOGGED, not discarded (2026-0
     expect(matching.length).toBe(1);
   });
 
-  it("a clean 'status: failure' response (a genuinely-absent account) is NOT logged as an error — only thrown exceptions are", async () => {
-    mockFailure();
-    expect(await getKadenaBalance("k:never-funded")).toBeNull();
-    expect(warnSpy).not.toHaveBeenCalled();
+  // CORRECTED (2026-09-28 handoff, bug #2): this test used to assert the
+  // OPPOSITE — that a "status: failure" envelope response was NOT logged,
+  // reasoning it represented "a genuinely-absent account" and therefore
+  // wasn't a real error. That premise was wrong: `getKadenaBalance`'s own
+  // Pact code already wraps the read in `(try 0.0 ...)`, so a genuinely
+  // absent account resolves via the try's fallback as a SUCCESSFUL envelope
+  // (`status: "success", data: 0.0`) — it never reaches this branch at all.
+  // A "status: failure" ENVELOPE (as opposed to the inner try-caught
+  // failure) is therefore a genuine problem (a malformed request, a node
+  // that rejected the call outright, ...) — exactly the class of failure
+  // the 2026-09-28 handoff identified as "the single reason this presented
+  // as 'can't talk to the node' for so long": it silently returned the SAME
+  // null a dead host or a timeout would, discarding the one piece of
+  // information (the actual refusal reason) that would have told a caller
+  // this was a real chain-side rejection, not a genuine absence.
+  it("a 'status: failure' envelope IS now logged (not silently discarded) — it means a real node-side rejection, since a genuinely-absent account already resolves successfully via getKadenaBalance's own (try 0.0 ...) fallback", async () => {
+    // A distinct message per test — `logKadenaReadError`'s own dedup is
+    // keyed by `${fn}:${message}` and persists at MODULE scope across every
+    // test in this file, not just within a describe block (confirmed: an
+    // earlier version of this test reused the shared "refused" default and
+    // got silently swallowed by an EARLIER, unrelated test's own
+    // `mockFailure()` call already having logged that exact key).
+    mockFailure("envelope-rejected-balance");
+    expect(await getKadenaBalance("k:x")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("envelope-rejected-balance"));
+  });
+
+  it("every OTHER read function ALSO logs its own 'status: failure' envelope, not just getKadenaBalance", async () => {
+    mockFailure("envelope-rejected-others");
+    await getKadenaAccountDetails("k:x");
+    await getKadenaBalancesBatch(["k:x"]);
+    await checkKadenaAccountExists("k:x");
+    const messages = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(messages.some((m) => m.includes("getKadenaAccountDetails") && m.includes("envelope-rejected-others"))).toBe(true);
+    expect(messages.some((m) => m.includes("getKadenaBalancesBatch") && m.includes("envelope-rejected-others"))).toBe(true);
+    expect(messages.some((m) => m.includes("checkKadenaAccountExists") && m.includes("envelope-rejected-others"))).toBe(true);
+  });
+
+  it("a 'status: failure' envelope with no error.message falls back to a generic, still-logged message rather than silently swallowing it", async () => {
+    dirtyRead.mockResolvedValue({ result: { status: "failure" } }); // no `error` field at all
+    expect(await getKadenaBalance("k:x")).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("non-success response envelope"));
   });
 });
 

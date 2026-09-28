@@ -23,8 +23,15 @@ import {
   ChevronDown, ChevronRight, Eye, RefreshCw, Loader2, Plus, Check, X, Pencil, Layers, ArrowUpDown,
 } from "lucide-react";
 import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
-import { STOA_CHAINS, KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID } from "@stoachain/stoa-core/constants";
+import { STOA_CHAINS } from "@stoachain/stoa-core/constants";
+// NOT `@stoachain/stoa-core/constants`'s own `KADENA_CHAINS` export — confirmed
+// live (`node_modules/@stoachain/stoa-core/dist/constants/kadena.js`) that
+// export is `export const KADENA_CHAINS = STOA_CHAINS;`, a stale 10-chain
+// alias from before Kadena mode existed. This package's OWN `kadenaReads.ts`
+// has the real 20-chain (0-19) array `useKadenaBalances` already reads from.
+import { KADENA_CHAINS } from "../../kadena/kadenaReads.js";
 import { ActionTooltip } from "../../zbom/ui/ActionTooltip.js";
+import PreZbomHint from "../../zbom/cfm/PreZbomHint.js";
 import { useStoaChainSeeds } from "../../hooks/index.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
@@ -39,6 +46,7 @@ import { StakeUrStoaModal } from "../internal/StakeUrStoaModal.js";
 import { UnstakeUrStoaModal } from "../internal/UnstakeUrStoaModal.js";
 import { CollectUrStoaModal } from "../internal/CollectUrStoaModal.js";
 import { SendStoaModal } from "../internal/SendStoaModal.js";
+import { SendKadenaModal } from "../internal/SendKadenaModal.js";
 import type { IStoaChainSeed } from "../../types/entities.js";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/index.js";
@@ -483,10 +491,12 @@ export interface StoaAccountsTabProps {
    * on real Kadena mainnet, so there is nothing for that segment to show;
    * its label morphs from "Stoa" to "Kadena" instead (owner's own words:
    * "make the selector Stoa/Urstoa disabled and morphed to Kadena in
-   * naming"). Write actions (Send/Stake/Unstake/Collect) stay disabled in
-   * Kadena mode — signing against real Kadena mainnet is explicit, separate,
-   * not-yet-wired future work ("when doing transfer for kadena wed need to
-   * wire other functions"). Plain (not controlled/fallback like `subTab`/
+   * naming"). Stake/Unstake/Collect (UrStoa-only, no Kadena-mainnet
+   * equivalent) stay disabled in Kadena mode. Same-chain SEND is wired
+   * (`kadena-native-transfer` topic, 2026-09-28) — `SendKadenaModal`, its own
+   * 20-chain selector, self-funded gas, no Ouronet gas station involved.
+   * Cross-chain Kadena sending is still explicit, separate, not-yet-wired
+   * future work. Plain (not controlled/fallback like `subTab`/
    * `balanceMode`) — this component never shows a switch UI for it, only
    * reacts to it; `ChainwebPanel` owns rendering + state for the actual
    * switch control. Omitted defaults to `"stoa"` — unchanged behavior. */
@@ -544,7 +554,7 @@ export interface StoaAccountsTabProps {
 /* ─────────────── Address row ─────────────── */
 function AddressRow({
   entry, bal, urBal, mode, loading, onRemove, onRelabel, onActionSuccess, selected, onSelect, onExpand, seedBadge,
-  activeNetwork = "stoa",
+  activeNetwork = "stoa", allCodexAddresses,
 }: {
   entry: AddrEntry;
   bal: StoaAccountBalances | undefined;
@@ -552,11 +562,12 @@ function AddressRow({
   mode: BalanceMode;
   loading: boolean;
   /** 2026-09-26: hides the "Send STOA" action while viewing Kadena-mode
-   *  balances — signing/submitting against real Kadena mainnet isn't wired
-   *  yet (see `StoaAccountsTab`'s own `activeNetwork` prop doc comment).
-   *  UrStoa's own Transfer/Stake/Unstake/Collect actions need no separate
-   *  gate here: they only ever show when `mode === "urstoa"`, which the
-   *  parent tab already prevents while `activeNetwork === "kadena"`. */
+   *  balances — Kadena mode gets its OWN "Send KDA" action instead (see
+   *  `StoaAccountsTab`'s own `activeNetwork` prop doc comment, updated
+   *  2026-09-28 once same-chain Kadena sending was wired). UrStoa's own
+   *  Transfer/Stake/Unstake/Collect actions need no separate gate here: they
+   *  only ever show when `mode === "urstoa"`, which the parent tab already
+   *  prevents while `activeNetwork === "kadena"`. */
   activeNetwork?: "stoa" | "kadena";
   onRemove?: () => void;
   onRelabel?: (label: string) => void;
@@ -585,15 +596,43 @@ function AddressRow({
    * or the flat Watched list, which has no groups at all), no badge shows.
    */
   seedBadge?: { name: string; color: string };
+  /**
+   * Every address currently in the codex (across all seeds/keypairs, both
+   * networks share the same `k:`-derived address space) — used ONLY to pick
+   * a real "example receiver" for this row's own Send tooltip (see
+   * `crosschainExampleValues` below). Optional and defaults to empty: a
+   * missing/undersized list just means no example receiver is offered, the
+   * same honest-gap behavior every OTHER unfillable tooltip slot in this
+   * package already falls back to — never a guessed address.
+   */
+  allCodexAddresses?: readonly string[];
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.sublabel);
-  const [activeModal, setActiveModal] = useState<null | "transfer" | "stake" | "unstake" | "collect" | "send">(null);
+  const [activeModal, setActiveModal] = useState<null | "transfer" | "stake" | "unstake" | "collect" | "send" | "send-kadena">(null);
   const isMobile = useIsMobile();
   const prefix = entry.address.slice(0, 2);
   const prefixColor = ADDR_COLORS[prefix] ?? "#888";
   const publicKey = publicKeyOf(entry.address);
+
+  // Live report: the Send launchers' cross-chain tooltip variant
+  // (`coin.C_TransferAcross`/`coin.transfer-crosschain`) showed every slot
+  // unfilled (StoaChain) or filled with the SAME ghost value for both
+  // `receiver` and `target-chain` (Kadena — both are `string`-typed, and the
+  // registry's own per-TYPE ghost fallback can't tell them apart without a
+  // real caller value). A codex always has at least the row's own account
+  // plus whatever else is seeded — a SECOND real address (any one other than
+  // this row's own) is a genuinely more useful example receiver than the
+  // registry's canned ghost, and "1" is a plausible example target chain
+  // (both chains' own chain-id argument is a plain STRING, not an integer —
+  // confirmed live in `KADENA_SIGNATURES`/this file's own `LOCAL_STOA_
+  // SIGNATURES`). Falls back to leaving `receiver` unset (an honest gap, the
+  // registry's own placeholder/ghost still applies) when this is the only
+  // address in the codex — never fabricates a second one.
+  const exampleReceiver = allCodexAddresses?.find((a) => a !== entry.address);
+  const crosschainExampleValues: Record<string, string> = { sender: entry.address, "target-chain": "1" };
+  if (exampleReceiver) crosschainExampleValues.receiver = exampleReceiver;
 
   // 2026-09-27: Kadena mode's total is real KDA, not STOA — the unit word
   // must say so, not just the number.
@@ -633,6 +672,12 @@ function AddressRow({
   // balance is ALWAYS the emblem's own grey (not the conditional gold/grey
   // `totalColor` desktop uses), regardless of whether it holds value.
   const mobileTotalColor = mode === "urstoa" ? BALANCE_EMBLEM.urstoa.color : totalColor;
+  // A bare boolean, not a re-inlined `mode === "urstoa"` — the Send/Transfer
+  // `PreZbomHint`'s `entrypoint=` ternary condition must not itself contain a
+  // quoted string literal, or `zbom-prezbom-launcher-coverage.test.ts`'s
+  // all-quoted-strings-in-braces extraction picks up "urstoa" as a bogus
+  // third entrypoint value alongside the two real branches.
+  const isUrstoaMode = mode === "urstoa";
 
   return (
     <>
@@ -777,36 +822,78 @@ function AddressRow({
         <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", gap: 6, flexShrink: 0 }}>
           {/* One mode-dependent slot: "Send" (native Stoa) in Stoa mode,
              "Transfer" (UrStoa) in UrStoa mode — same position, same chrome,
-             just a different modal/icon/tooltip depending on the toggle. */}
+             just a different modal/icon/tooltip depending on the toggle.
+             Native Stoa's own third variant, `coin.C_TransferAcross`
+             (cross-chain, the exact one `SendStoaModal.tsx` opens for a
+             chain-mismatched send — see its own `subtitle`), is absent from
+             the installed registry's `STOA_SIGNATURES` table, so it's a
+             `LOCAL_STOA_SIGNATURES` stopgap key rather than a
+             registry-resolvable one — `PreZbomTooltipCard`'s cycling now
+             mixes both kinds in one set, so this still shows up as the
+             third cycled variant rather than being silently dropped. */}
           {publicKey && (mode === "urstoa" || activeNetwork === "stoa") && (
-            <ActionTooltip
-              content={
+            <PreZbomHint
+              entrypoint={
+                isUrstoaMode
+                  ? ["coin.C_UR|Transfer", "coin.C_UR|TransferAnew"]
+                  : ["coin.C_Transfer", "coin.C_TransferAnew", "coin.C_TransferAcross"]
+              }
+              description={
                 mode === "urstoa"
                   ? "Transfer UrStoa to another account."
                   : "Send native Stoa to another account."
               }
+              values={crosschainExampleValues}
             >
               <button
                 type="button"
                 title={mode === "urstoa" ? "Transfer UrStoa" : "Send STOA"}
+                aria-label={mode === "urstoa" ? "Transfer UrStoa" : "Send STOA"}
                 onClick={() => setActiveModal(mode === "urstoa" ? "transfer" : "send")}
                 style={actionBtnStyle}
               >
                 {mode === "urstoa" ? <TransferGlyph style={actionIconStyle} /> : <SendGlyph style={actionIconStyle} />}
               </button>
-            </ActionTooltip>
+            </PreZbomHint>
+          )}
+          {/* Kadena mode's own Send action — same position/chrome as native
+             Stoa's Send slot above, mutually exclusive with it (Kadena mode
+             never shows the Stoa slot). All three variants
+             (`coin.transfer`/`coin.transfer-create`/`coin.transfer-crosschain`)
+             are already in the installed registry's `KADENA_SIGNATURES`
+             table — no local tooltip stopgap needed, unlike
+             `coin.C_TransferAcross` was. `SendKadenaModal.tsx` itself treats
+             crosschain as a real third mode (its own `isCrossChain`-gated
+             subtitle), so the launcher's tooltip must cycle through all
+             three, not just the two same-chain ones. */}
+          {publicKey && activeNetwork === "kadena" && (
+            <PreZbomHint
+              entrypoint={["coin.transfer", "coin.transfer-create", "coin.transfer-crosschain"]}
+              description="Send KDA to another account."
+              values={crosschainExampleValues}
+            >
+              <button
+                type="button"
+                title="Send KDA"
+                aria-label="Send KDA"
+                onClick={() => setActiveModal("send-kadena")}
+                style={actionBtnStyle}
+              >
+                <SendGlyph style={actionIconStyle} />
+              </button>
+            </PreZbomHint>
           )}
           {publicKey && mode === "urstoa" && (
             <>
-              <ActionTooltip content={`Stake your liquid UrStoa into the vault. ${fmt12(urBal?.balance ?? 0)} UrStoa available.`}>
-                <button type="button" title="Stake UrStoa" onClick={() => setActiveModal("stake")} style={actionBtnStyle}><StakeGlyph style={actionIconStyle} /></button>
-              </ActionTooltip>
-              <ActionTooltip content={`Unstake UrStoa from the vault. ${fmt12(urBal?.staked ?? 0)} UrStoa staked.`}>
-                <button type="button" title="Unstake UrStoa" onClick={() => setActiveModal("unstake")} style={actionBtnStyle}><UnstakeGlyph style={actionIconStyle} /></button>
-              </ActionTooltip>
-              <ActionTooltip content={`Collect ${fmt12(urBal?.earnings ?? 0)} STOA in earned vault rewards.`}>
-                <button type="button" title="Collect UrStoa earnings" onClick={() => setActiveModal("collect")} style={actionBtnStyle}><CollectGlyph style={actionIconStyle} /></button>
-              </ActionTooltip>
+              <PreZbomHint entrypoint="coin.C_URV|Stake" description={`Stake your liquid UrStoa into the vault. ${fmt12(urBal?.balance ?? 0)} UrStoa available.`} values={{ account: entry.address }}>
+                <button type="button" title="Stake UrStoa" aria-label="Stake UrStoa" onClick={() => setActiveModal("stake")} style={actionBtnStyle}><StakeGlyph style={actionIconStyle} /></button>
+              </PreZbomHint>
+              <PreZbomHint entrypoint="coin.C_URV|Unstake" description={`Unstake UrStoa from the vault. ${fmt12(urBal?.staked ?? 0)} UrStoa staked.`} values={{ account: entry.address }}>
+                <button type="button" title="Unstake UrStoa" aria-label="Unstake UrStoa" onClick={() => setActiveModal("unstake")} style={actionBtnStyle}><UnstakeGlyph style={actionIconStyle} /></button>
+              </PreZbomHint>
+              <PreZbomHint entrypoint="coin.C_URV|Collect" description={`Collect ${fmt12(urBal?.earnings ?? 0)} STOA in earned vault rewards.`} values={{ account: entry.address }}>
+                <button type="button" title="Collect UrStoa earnings" aria-label="Collect UrStoa earnings" onClick={() => setActiveModal("collect")} style={actionBtnStyle}><CollectGlyph style={actionIconStyle} /></button>
+              </PreZbomHint>
             </>
           )}
           <IconCopyBtn text={entry.address} size={28} />
@@ -847,9 +934,12 @@ function AddressRow({
             </div>
           )}
 
-          {/* Per-chain grid */}
+          {/* Per-chain grid — 10 StoaChain chains, or 20 Kadena chains
+              (bug fix: this used to always iterate STOA_CHAINS regardless of
+              activeNetwork, so a Kadena account's balance on chain 10+ never
+              rendered even though useKadenaBalances already had it). */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 24px", marginTop: 10 }}>
-            {STOA_CHAINS.map((chainId: string) => {
+            {(activeNetwork === "kadena" ? KADENA_CHAINS : STOA_CHAINS).map((chainId: string) => {
               const c = bal?.perChain[chainId];
               const val = !c || !c.exists ? "✗" : c.balance === 0 ? "0.0" : fmt12(c.balance);
               const color = !c || !c.exists ? "#c0392b" : c.balance === 0 ? "#555" : "#ceac5f";
@@ -871,7 +961,8 @@ function AddressRow({
         <StakeUrStoaModal isOpen={activeModal === "stake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
         <UnstakeUrStoaModal isOpen={activeModal === "unstake"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
         <CollectUrStoaModal isOpen={activeModal === "collect"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} onSuccess={onActionSuccess} />
-        <SendStoaModal isOpen={activeModal === "send"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} senderChainBalance={bal?.perChain[STOACHAIN_CHAIN_ID]?.balance} onSuccess={onActionSuccess} />
+        <SendStoaModal isOpen={activeModal === "send"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} senderBalanceByChain={bal?.perChain} onSuccess={onActionSuccess} />
+        <SendKadenaModal isOpen={activeModal === "send-kadena"} onClose={() => setActiveModal(null)} publicKey={publicKey} address={entry.address} senderBalanceByChain={bal?.perChain} onSuccess={onActionSuccess} />
       </>
     )}
     </>
@@ -906,12 +997,6 @@ function MobileAddressFullScreen({
   onRelabel?: (label: string) => void;
   chainSort: "number" | "amount";
   onToggleChainSort: () => void;
-  /** 2026-09-27: only fixes the "Total Stoa Balance"/" STOA" unit label for
-   *  Kadena mode — this view's per-chain grid below still iterates
-   *  `STOA_CHAINS` (10), not `KADENA_CHAINS` (20), so a Kadena account with
-   *  balance on chain 10+ won't show that chain's row here yet. Known,
-   *  separate gap (mobile-only fullscreen view); not attempted in this pass,
-   *  which fixes the desktop-reported label/explorer-link bugs. */
   activeNetwork?: "stoa" | "kadena";
 }) {
   const [editing, setEditing] = useState(false);
@@ -920,7 +1005,10 @@ function MobileAddressFullScreen({
   const prefixColor = ADDR_COLORS[prefix] ?? "#888";
   const balanceUnit = activeNetwork === "kadena" ? "KDA" : "STOA";
 
-  const chainRows = STOA_CHAINS.map((chainId: string) => ({ chainId, c: bal?.perChain[chainId] }));
+  // Bug fix (was: always STOA_CHAINS, 10 entries, even in Kadena mode — a
+  // Kadena account's balance on chain 10+ never rendered here even though
+  // useKadenaBalances already had it).
+  const chainRows = (activeNetwork === "kadena" ? KADENA_CHAINS : STOA_CHAINS).map((chainId: string) => ({ chainId, c: bal?.perChain[chainId] }));
   const sortedChainRows =
     chainSort === "amount"
       ? [...chainRows].sort((a, b) => (b.c?.exists ? b.c.balance : -1) - (a.c?.exists ? a.c.balance : -1))
@@ -1160,7 +1248,7 @@ export function StoaAccountsTab({
   const [selectedAddressState, setSelectedAddressState] = useState<string | null>(null);
   const [fullScreenAddress, setFullScreenAddress] = useState<string | null>(null);
   const [chainSort, setChainSort] = useState<"number" | "amount">("number");
-  const [mobileActiveModal, setMobileActiveModal] = useState<null | "transfer" | "stake" | "unstake" | "collect" | "send">(null);
+  const [mobileActiveModal, setMobileActiveModal] = useState<null | "transfer" | "stake" | "unstake" | "collect" | "send" | "send-kadena">(null);
 
   // Build the codex groups (one per seed + a Pure Key Pairs group).
   const groups = useMemo(() => {
@@ -1421,6 +1509,7 @@ export function StoaAccountsTab({
             onSelect={() => setSelectedAddressState(row.entry.address)}
             onExpand={() => setFullScreenAddress(row.entry.address)}
             seedBadge={{ name: row.groupName, color: row.groupColor }}
+            allCodexAddresses={codexAddresses}
           />
         </div>
       ));
@@ -1448,6 +1537,7 @@ export function StoaAccountsTab({
           selected={selectedAddress === w.address}
           onSelect={() => setSelectedAddressState(w.address)}
           onExpand={() => setFullScreenAddress(w.address)}
+          allCodexAddresses={codexAddresses}
         />
       </div>
     ));
@@ -1671,11 +1761,12 @@ export function StoaAccountsTab({
   // same "tied to the SELECTED entry" gating. Nothing renders at all when
   // there's no entry to act on.
   const noSelection = !selectedEntry;
-  // 2026-09-26: hidden in Kadena mode — signing/submitting against real
-  // Kadena mainnet isn't wired yet (see `activeNetwork` prop's own doc
-  // comment). Mirrors `AddressRow`'s own identical gate on its per-row
-  // "Send STOA" button.
+  // 2026-09-28: same-chain Kadena sending IS wired now (kadena-native-transfer
+  // topic) — this slot shows the Stoa/UrStoa Send-or-Transfer toggle in Stoa
+  // mode; Kadena mode gets its own separate "Send KDA" slot below instead
+  // (mirrors `AddressRow`'s own identical split on its per-row action).
   const showSendSlot = !noSelection && !!selectedPublicKey && activeNetwork === "stoa";
+  const showSendKadenaSlot = !noSelection && !!selectedPublicKey && activeNetwork === "kadena";
   const showVaultSlots = showSendSlot && balanceMode === "urstoa";
   const edgeStackYPosition: React.CSSProperties = zone3AnchorTarget
     ? { bottom: 0, transform: "translateY(50%)" }
@@ -1686,10 +1777,22 @@ export function StoaAccountsTab({
         <button
           type="button"
           title={balanceMode === "urstoa" ? "Transfer UrStoa" : "Send STOA"}
+          aria-label={balanceMode === "urstoa" ? "Transfer UrStoa" : "Send STOA"}
           onClick={() => setMobileActiveModal(balanceMode === "urstoa" ? "transfer" : "send")}
           style={sharedActionBtnStyle(false)}
         >
           {balanceMode === "urstoa" ? <TransferGlyph style={sharedActionIconStyle} /> : <SendGlyph style={sharedActionIconStyle} />}
+        </button>
+      )}
+      {showSendKadenaSlot && (
+        <button
+          type="button"
+          title="Send KDA"
+          aria-label="Send KDA"
+          onClick={() => setMobileActiveModal("send-kadena")}
+          style={sharedActionBtnStyle(false)}
+        >
+          <SendGlyph style={sharedActionIconStyle} />
         </button>
       )}
       <IconCopyBtn text={selectedEntry.address} size={30} />
@@ -1706,13 +1809,13 @@ export function StoaAccountsTab({
   const leftEdgeStack = showVaultSlots && (
     <div style={{ position: "absolute", left: 6, ...edgeStackYPosition, display: "flex", flexDirection: "row", gap: 8, zIndex: 5, pointerEvents: "auto" }}>
       <ActionTooltip content={`Collect ${fmt12(selectedUrBal?.earnings ?? 0)} STOA in earned vault rewards.`}>
-        <button type="button" title="Collect UrStoa earnings" onClick={() => setMobileActiveModal("collect")} style={sharedActionBtnStyle(false)}><CollectGlyph style={sharedActionIconStyle} /></button>
+        <button type="button" title="Collect UrStoa earnings" aria-label="Collect UrStoa earnings" onClick={() => setMobileActiveModal("collect")} style={sharedActionBtnStyle(false)}><CollectGlyph style={sharedActionIconStyle} /></button>
       </ActionTooltip>
       <ActionTooltip content={`Stake your liquid UrStoa into the vault. ${fmt12(selectedUrBal?.balance ?? 0)} UrStoa available.`}>
-        <button type="button" title="Stake UrStoa" onClick={() => setMobileActiveModal("stake")} style={sharedActionBtnStyle(false)}><StakeGlyph style={sharedActionIconStyle} /></button>
+        <button type="button" title="Stake UrStoa" aria-label="Stake UrStoa" onClick={() => setMobileActiveModal("stake")} style={sharedActionBtnStyle(false)}><StakeGlyph style={sharedActionIconStyle} /></button>
       </ActionTooltip>
       <ActionTooltip content={`Unstake UrStoa from the vault. ${fmt12(selectedUrBal?.staked ?? 0)} UrStoa staked.`}>
-        <button type="button" title="Unstake UrStoa" onClick={() => setMobileActiveModal("unstake")} style={sharedActionBtnStyle(false)}><UnstakeGlyph style={sharedActionIconStyle} /></button>
+        <button type="button" title="Unstake UrStoa" aria-label="Unstake UrStoa" onClick={() => setMobileActiveModal("unstake")} style={sharedActionBtnStyle(false)}><UnstakeGlyph style={sharedActionIconStyle} /></button>
       </ActionTooltip>
     </div>
   );
@@ -1977,6 +2080,7 @@ export function StoaAccountsTab({
                     selected={selectedAddress === e.address}
                     onSelect={() => setSelectedAddressState(e.address)}
                     onExpand={() => setFullScreenAddress(e.address)}
+                    allCodexAddresses={codexAddresses}
                   />
                 ))}
               </GroupRow>
@@ -2016,6 +2120,7 @@ export function StoaAccountsTab({
                 selected={selectedAddress === w.address}
                 onSelect={() => setSelectedAddressState(w.address)}
                 onExpand={() => setFullScreenAddress(w.address)}
+                allCodexAddresses={codexAddresses}
               />
             ))
           )}
@@ -2042,7 +2147,8 @@ export function StoaAccountsTab({
           <StakeUrStoaModal isOpen={mobileActiveModal === "stake"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
           <UnstakeUrStoaModal isOpen={mobileActiveModal === "unstake"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
           <CollectUrStoaModal isOpen={mobileActiveModal === "collect"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
-          <SendStoaModal isOpen={mobileActiveModal === "send"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} senderChainBalance={selectedBal?.perChain[STOACHAIN_CHAIN_ID]?.balance} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
+          <SendStoaModal isOpen={mobileActiveModal === "send"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} senderBalanceByChain={selectedBal?.perChain} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
+          <SendKadenaModal isOpen={mobileActiveModal === "send-kadena"} onClose={() => setMobileActiveModal(null)} publicKey={selectedPublicKey} address={selectedEntry.address} senderBalanceByChain={selectedBal?.perChain} onSuccess={activeRefresh} fullScreenPortalTarget={fullScreenPortalTarget} />
         </>
       )}
 

@@ -69,6 +69,15 @@ export interface CodexProviderProps {
    */
   signingClient?: PactClient;
 
+  /**
+   * App identity for the per-consumer settings registry (`IConsumerSettings`,
+   * `useConsumerSettings`/`useConsumerName`). A feature that persists a
+   * preference under this name (e.g. the pre-ZBOM-tooltip toggle) keeps it
+   * separate from any OTHER app embedding this same Codex package. Defaults
+   * to `"Codex"`.
+   */
+  consumerName?: string;
+
   children: ReactNode;
 }
 
@@ -94,6 +103,7 @@ export function CodexProvider({
   initialUiSettings,
   onCodexDirty,
   signingClient,
+  consumerName,
   children,
 }: CodexProviderProps): React.JSX.Element {
   return (
@@ -107,6 +117,7 @@ export function CodexProvider({
       signingClient={signingClient}
       resolverFactory={createOuronetResolverProvider}
       zbomToast={<MultiStepToastContainer />}
+      consumerName={consumerName}
     >
       {children}
     </GenericCodexProvider>

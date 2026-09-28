@@ -107,6 +107,7 @@ export type {
   StoaChainSeedLike,
   PureKeypairLike,
   StoaChainSeedType,
+  MnemonicSeedType,
 } from "./resolver/index.js";
 
 // ----- headless connection layer (Phase 1: CL-01..CL-05, N-01) -----

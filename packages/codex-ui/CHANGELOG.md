@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 — 2026-09-27
+
+**MINOR — `CodexProvider` gains an optional `consumerName` prop (default
+`"Codex"`), exposed via a new `useConsumerName()` hook. Built for the
+pre-ZBOM tooltip feature (see `@ancientpantheon/codex-ouronet`'s changelog),
+but generally useful: any app embedding this provider can now identify
+itself to the per-consumer settings registry (`IConsumerSettings`,
+`useConsumerSettings`) without a second app colliding on the same settings
+slot the moment it shows up. Threaded through as a new React context,
+alongside the existing store/signing-client/resolver contexts.**
+
 ## 0.8.0 — 2026-09-26
 
 **MINOR — `ForeignChainsTab` gained an optional `chainLabels` prop. Owner

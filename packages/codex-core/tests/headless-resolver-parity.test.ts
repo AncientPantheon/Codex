@@ -189,8 +189,14 @@ async function transcribedBrowserResolve(
     return { publicKey, privateKey, seedType: "foreign" };
   }
 
-  // 2. Derived-account lookup (InternalCodexResolver.ts:163-198).
+  // 2. Derived-account lookup (InternalCodexResolver.ts:163-198). "stoic" seeds
+  // are resolved by InternalCodexResolver.ts's earlier `resolveStoicKeypair`
+  // pre-check (L89-95, outside this transcription's L124-198 scope) and never
+  // reach this loop in the real resolver — mirrored here with the same
+  // skip-guard core's own factory now carries, so this transcription stays an
+  // honest parity anchor for the real resolver's CURRENT behavior.
   for (const seed of kadenaSeeds) {
+    if (seed.seedType === "stoic") continue;
     const account = (seed.accounts ?? []).find((a) => a.publicKey === publicKey);
     if (!account) continue;
 

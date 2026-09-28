@@ -148,10 +148,26 @@ export interface CodexProviderProps {
    */
   zbomToast?: ReactNode;
 
+  /**
+   * App identity for the per-consumer settings registry (`IConsumerSettings`,
+   * `useConsumerSettings`/`useConsumerName`). A feature that persists a
+   * preference under this name (e.g. the pre-ZBOM-tooltip toggle) keeps it
+   * separate from any OTHER app embedding this same Codex package — "on in
+   * one app, off in the other, one codex" only holds if each embedding app
+   * has its own name. Defaults to `"Codex"` so today's only consumer needs no
+   * change; a future second embedding app should pass its own name here
+   * rather than colliding on the default.
+   */
+  consumerName?: string;
+
   children: ReactNode;
 }
 
 const CodexStoreContext = createContext<CodexStore | null>(null);
+
+/** Per-app identity for the consumer-settings registry. Defaults to `"Codex"`
+ *  — see `CodexProviderProps.consumerName`'s doc comment. */
+const ConsumerNameContext = createContext<string>("Codex");
 
 /** Optional signing-client override context. Separate from the store so the
  *  signing hook can fall back to its default path when no override is given. */
@@ -172,6 +188,7 @@ export function CodexProvider({
   signingClient,
   resolverFactory,
   zbomToast,
+  consumerName = "Codex",
   children,
 }: CodexProviderProps): React.JSX.Element {
   const storeRef = useRef<CodexStore | null>(null);
@@ -261,16 +278,18 @@ export function CodexProvider({
   );
 
   return (
-    <CodexStoreContext.Provider value={storeValue}>
-      <SigningClientContext.Provider value={clientValue}>
-        <ResolverProviderContext.Provider value={resolverValue}>
-          {children}
-          {/* Injected transaction-status toast host. Browser-only — the
-              provider is SSR-safe and the host may need document. */}
-          {isBrowser && zbomToast}
-        </ResolverProviderContext.Provider>
-      </SigningClientContext.Provider>
-    </CodexStoreContext.Provider>
+    <ConsumerNameContext.Provider value={consumerName}>
+      <CodexStoreContext.Provider value={storeValue}>
+        <SigningClientContext.Provider value={clientValue}>
+          <ResolverProviderContext.Provider value={resolverValue}>
+            {children}
+            {/* Injected transaction-status toast host. Browser-only — the
+                provider is SSR-safe and the host may need document. */}
+            {isBrowser && zbomToast}
+          </ResolverProviderContext.Provider>
+        </SigningClientContext.Provider>
+      </CodexStoreContext.Provider>
+    </ConsumerNameContext.Provider>
   );
 }
 
@@ -317,4 +336,16 @@ export function useSigningClientOverride(): PactClient | null {
  */
 export function useResolverProvider(): CodexResolverProvider | null {
   return useContext(ResolverProviderContext);
+}
+
+/**
+ * Returns the current app's `consumerName` (per `CodexProviderProps.consumerName`'s
+ * doc comment) — the key a feature persists per-consumer settings under via
+ * `useConsumerSettings`. Returns the default `"Codex"` outside any provider
+ * (does NOT throw) so a hook built on top of this degrades to the default
+ * rather than crashing when rendered with no ancestor provider, mirroring
+ * `useCodexStoreOptional`'s precedent.
+ */
+export function useConsumerName(): string {
+  return useContext(ConsumerNameContext);
 }

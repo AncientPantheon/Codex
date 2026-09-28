@@ -38,6 +38,7 @@ import {
   setActiveKadenaBalanceSource,
   getActiveKadenaRestGatewayUrl,
   setActiveKadenaRestGatewayUrl,
+  checkKadenaAccountExistsActive,
   KADENA_REST_GATEWAY_DEFAULT_URL,
 } from "../src/kadena/kadenaBalanceSource.js";
 import { KADENA_MAINNET_DEFAULT_NODE_URL } from "../src/kadena/kadenaReads.js";
@@ -210,5 +211,106 @@ describe("pactKadenaBalanceSource — the existing, correct Pact path, preserved
     const result = await pactKadenaBalanceSource.fetchBalances([]);
     expect(result).toEqual({});
     expect(dirtyRead).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `checkAccountExists` — the live bug fix. `SendKadenaModal.tsx`'s receiver
+ * gate used to call `kadenaReads.ts`'s `checkKadenaAccountExists` directly,
+ * ALWAYS hitting the direct Pact node regardless of the active source. A
+ * live-reported "Could not verify the receiver account" failure on a
+ * same-chain send (chain forwarding confirmed correct) matched the node's
+ * own documented unreliability exactly. This method — and the
+ * `checkKadenaAccountExistsActive` convenience wrapper — route through
+ * whichever source is ACTIVE (REST by default, the one confirmed to work
+ * from a browser), same as `fetchBalances` already does.
+ */
+describe("checkAccountExists — routes through the ACTIVE source, true/false/null preserved (never collapses 'check failed' into 'does not exist')", () => {
+  function stubFetch(impl: (url: string) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>) {
+    vi.stubGlobal("fetch", vi.fn(impl));
+  }
+
+  describe("restKadenaBalanceSource.checkAccountExists", () => {
+    it("a row for the requested chainId in a 200 response resolves true", async () => {
+      stubFetch(async (url) => {
+        expect(url).toBe(`${KADENA_REST_GATEWAY_DEFAULT_URL}/api/v1/accounts/k%3Areal/balances`);
+        return { ok: true, status: 200, json: async () => [{ chainId: 2, balance: 1.41, guard: {} }] };
+      });
+      await expect(restKadenaBalanceSource.checkAccountExists("k:real", "2")).resolves.toBe(true);
+    });
+
+    it("a 200 response with rows for OTHER chains but not the requested chainId resolves false — existence is genuinely PER-CHAIN", async () => {
+      stubFetch(async () => ({ ok: true, status: 200, json: async () => [{ chainId: 0, balance: 1, guard: {} }] }));
+      await expect(restKadenaBalanceSource.checkAccountExists("k:real", "2")).resolves.toBe(false);
+    });
+
+    it("a clean 404 (genuinely no rows anywhere) resolves false, not null — a confident answer, not a failure", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      stubFetch(async () => ({ ok: false, status: 404, json: async () => ({}) }));
+      await expect(restKadenaBalanceSource.checkAccountExists("k:never-funded", "2")).resolves.toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it("a non-404 HTTP error resolves null (NOT false) — 'the check failed' must never be reported as 'account does not exist'", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      stubFetch(async () => ({ ok: false, status: 502, json: async () => ({}) }));
+      await expect(restKadenaBalanceSource.checkAccountExists("k:x", "2")).resolves.toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("502"));
+      warnSpy.mockRestore();
+    });
+
+    it("a network-level rejection resolves null, matching fetchBalances' own resilience but WITHOUT collapsing into a false-exists answer", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+      await expect(restKadenaBalanceSource.checkAccountExists("k:x", "2")).resolves.toBeNull();
+    });
+
+    it("a hung fetch is bounded by the same timeout as fetchBalances — resolves null, not a hang", async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_url: string, options?: { signal?: AbortSignal }) => {
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+          });
+        }),
+      );
+      const promise = restKadenaBalanceSource.checkAccountExists("k:x", "2");
+      await vi.advanceTimersByTimeAsync(15000);
+      await expect(promise).resolves.toBeNull();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("pactKadenaBalanceSource.checkAccountExists", () => {
+    beforeEach(() => setActiveKadenaBalanceSource(pactKadenaBalanceSource));
+
+    it("delegates to the real Pact dirtyRead, true/false/null preserved, using the active node URL and the given chainId", async () => {
+      dirtyRead.mockResolvedValue({ result: { status: "success", data: true } });
+      await expect(pactKadenaBalanceSource.checkAccountExists("k:real", "2")).resolves.toBe(true);
+      const [tx] = dirtyRead.mock.calls[0];
+      const cmd = JSON.parse(tx.cmd);
+      expect(cmd.payload.exec.code).toContain("coin.get-balance");
+      expect(cmd.meta.chainId).toBe("2");
+      expect(createClient).toHaveBeenCalledWith(expect.stringContaining(KADENA_MAINNET_DEFAULT_NODE_URL));
+    });
+
+    it("a failed Pact read resolves null (the existing, already-tested contract), not false", async () => {
+      dirtyRead.mockRejectedValue(new Error("connect ETIMEDOUT"));
+      await expect(pactKadenaBalanceSource.checkAccountExists("k:x", "0")).resolves.toBeNull();
+    });
+  });
+
+  describe("checkKadenaAccountExistsActive — the convenience wrapper SendKadenaModal.tsx actually calls", () => {
+    it("follows the active source (REST by default)", async () => {
+      stubFetch(async () => ({ ok: true, status: 200, json: async () => [{ chainId: 2, balance: 1, guard: {} }] }));
+      await expect(checkKadenaAccountExistsActive("k:real", "2")).resolves.toBe(true);
+    });
+
+    it("follows an explicitly-selected Pact source too, not hardcoded to REST", async () => {
+      setActiveKadenaBalanceSource(pactKadenaBalanceSource);
+      dirtyRead.mockResolvedValue({ result: { status: "success", data: false } });
+      await expect(checkKadenaAccountExistsActive("k:x", "0")).resolves.toBe(false);
+    });
   });
 });

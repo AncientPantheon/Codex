@@ -23,7 +23,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, within, cleanup, act } from "@testing-library/react";
-import { txPending, toastStore, onTxConfirmed, DISMISS_MS } from "../src/zbom/toast/toastManager";
+import { txPending, toastStore, onTxConfirmed, DISMISS_MS, createMultiStepToast } from "../src/zbom/toast/toastManager";
 import { MultiStepToastContainer } from "../src/zbom/toast/MultiStepToastContainer";
 
 afterEach(() => {
@@ -64,6 +64,32 @@ describe("txPending — .submitted() chain-aware confirmation", () => {
     expect(entry.steps[0].requestKey).toBe("arweave-tx-id-123");
   });
 
+  it("kadena WITH a pollFn: stays 'Confirming…' until pollFn resolves 'confirmed' — same injected-callback mechanism as arweave, generalized (proves the _pollArweaveConfirmation -> _pollViaInjectedFn rename didn't change arweave's own behavior, tested right alongside it)", async () => {
+    vi.useFakeTimers();
+    try {
+      const pollFn = vi.fn<(id: string) => Promise<"pending" | "confirmed" | "give-up">>();
+      pollFn.mockResolvedValueOnce("pending").mockResolvedValueOnce("confirmed");
+      const ctrl = txPending("Send KDA", { chain: "kadena", pollFn });
+      ctrl.submitted("kadena-req-key-1");
+
+      expect(toastStore.getAll()[0].steps[0].status).toBe("active");
+      expect(pollFn).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      expect(toastStore.getAll()[0].steps[0].status).toBe("active");
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(pollFn).toHaveBeenCalledTimes(2);
+      const [entry] = toastStore.getAll();
+      expect(entry.steps[0].status).toBe("done");
+      expect(entry.steps[0].label).toBe("Confirmed");
+      expect(entry.steps[0].requestKey).toBe("kadena-req-key-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("arweave WITH a pollFn: stays 'Confirming…' until pollFn resolves 'confirmed', polling at 15s intervals", async () => {
     vi.useFakeTimers();
     try {
@@ -87,6 +113,23 @@ describe("txPending — .submitted() chain-aware confirmation", () => {
       expect(entry.steps[0].status).toBe("done");
       expect(entry.steps[0].label).toBe("Confirmed");
       expect(entry.steps[0].requestKey).toBe("tx-id-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("kadena WITH a pollFn that returns 'failed': goes to the 'error' state (Failed), distinct from 'give-up''s ambiguous Submitted — a real on-chain execution failure must never look like a success", async () => {
+    vi.useFakeTimers();
+    try {
+      const pollFn = vi.fn<(id: string) => Promise<"pending" | "confirmed" | "give-up" | "failed">>();
+      pollFn.mockResolvedValueOnce("failed");
+      const ctrl = txPending("Send KDA", { chain: "kadena", pollFn });
+      ctrl.submitted("kadena-req-fail");
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const [entry] = toastStore.getAll();
+      expect(entry.steps[0].status).toBe("error");
+      expect(entry.steps[0].label).toBe("Failed");
     } finally {
       vi.useRealTimers();
     }
@@ -252,6 +295,43 @@ describe("MultiStepToastContainer — chain-aware explorer link + accent", () =>
     }
   });
 
+  it("a kadena toast's explorer link points at THIS project's own denascan backend (the same one kadenaExplorerUrl's account links already use), not a generic public explorer, StoaChain's, or Arweave's", async () => {
+    render(<MultiStepToastContainer />);
+    const ctrl = txPending("Send KDA", { chain: "kadena" });
+    ctrl.submitted("kadena-req-key-2");
+
+    const card = await screen.findByText("Send KDA");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    const link = within(container).getByTitle("View on Explorer");
+    expect(link.getAttribute("href")).toBe(
+      "https://denascan.ancientholdings.eu/transactions/kadena-req-key-2",
+    );
+    expect(link.getAttribute("href")).not.toContain("explorer.chainweb.com");
+  });
+
+  it("an active (in-flight) kadena toast uses a distinct green accent, different from both StoaChain gold and Arweave violet", async () => {
+    render(<MultiStepToastContainer />);
+    txPending("Send KDA", { chain: "kadena" }).start();
+
+    const card = await screen.findByText("Send KDA");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    const dot = container.querySelector('div[style*="border-radius: 50%"]') as HTMLElement;
+    expect(dot).toBeTruthy();
+    expect(dot.style.backgroundColor).toBe("rgb(34, 197, 94)"); // #22c55e
+  });
+
+  it("a kadena toast never shows the arweave-only explorer-lag caption", () => {
+    render(<MultiStepToastContainer />);
+    act(() => {
+      txPending("Send KDA", { chain: "kadena" }).done({ label: "Confirmed", requestKey: "req-1" });
+    });
+
+    const card = screen.getByText("Send KDA");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    expect(within(container).queryByText(/confirmed on-chain/i)).toBeNull();
+    expect(within(container).queryByText(/broadcast succeeded/i)).toBeNull();
+  });
+
   it("a stoachain toast never shows the explorer-lag caption (StoaChain's own explorer is first-party, no such lag)", () => {
     render(<MultiStepToastContainer />);
     act(() => {
@@ -262,5 +342,64 @@ describe("MultiStepToastContainer — chain-aware explorer link + accent", () =>
     const container = card.closest("[data-toast-id]") as HTMLElement;
     expect(within(container).queryByText(/confirmed on-chain/i)).toBeNull();
     expect(within(container).queryByText(/broadcast succeeded/i)).toBeNull();
+  });
+});
+
+describe("MultiStepToastContainer — a DONE step is visually prominent (live UX report: a completed step used to be as quiet as a pending one, easy to miss once it's no longer the active/spinning step)", () => {
+  it("a done step's circle is SOLID green (filled background), not just a thin outline like every other status", () => {
+    render(<MultiStepToastContainer />);
+    let ctrl!: ReturnType<typeof createMultiStepToast>;
+    act(() => {
+      ctrl = createMultiStepToast({
+        title: "Send STOA (cross-chain)",
+        steps: [{ label: "Confirming on source chain" }, { label: "Waiting for cross-chain proof" }, { label: "Completing on target chain" }],
+        chain: "stoachain",
+      });
+      ctrl.updateStep(0, "done", { requestKey: "req-init" });
+    });
+
+    const card = screen.getByText("Send STOA (cross-chain)");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    const doneLabel = within(container).getByText("Confirming on source chain");
+    const doneCircle = doneLabel.previousElementSibling as HTMLElement;
+    expect(doneCircle.style.backgroundColor).toBe("rgb(74, 222, 128)"); // #4ade80, SOLID fill
+
+    // The still-pending step's own circle stays the ORIGINAL outline-only
+    // treatment — this enhancement targets DONE specifically, not every step.
+    const pendingLabel = within(container).getByText("Waiting for cross-chain proof");
+    const pendingCircle = pendingLabel.previousElementSibling as HTMLElement;
+    expect(pendingCircle.style.backgroundColor).toBe("rgb(10, 10, 15)"); // #0a0a0f, unfilled
+  });
+
+  it("a done step's LABEL switches from the flat gray every other status uses to green + bold — never disappears into the background once it's no longer active", () => {
+    render(<MultiStepToastContainer />);
+    act(() => {
+      const ctrl = createMultiStepToast({
+        title: "Send KDA (cross-chain)",
+        steps: [{ label: "Confirming on source chain" }, { label: "Waiting for cross-chain proof" }, { label: "Completing on target chain" }],
+        chain: "kadena",
+      });
+      ctrl.updateStep(0, "done", { requestKey: "req-init" });
+    });
+
+    const card = screen.getByText("Send KDA (cross-chain)");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    const doneLabel = within(container).getByText("Confirming on source chain");
+    expect(doneLabel.style.color).toBe("rgb(74, 222, 128)"); // #4ade80, not the flat #888 gray
+    expect(doneLabel.style.fontWeight).toBe("700");
+
+    const activeLabel = within(container).getByText("Waiting for cross-chain proof");
+    expect(activeLabel.style.color).toBe("rgb(136, 136, 136)"); // #888, unchanged for a non-done step
+    expect(activeLabel.style.fontWeight).toBe("400");
+  });
+
+  it("still renders the SAME single-step spinner card unchanged (this enhancement only touches the multi-step branch)", () => {
+    render(<MultiStepToastContainer />);
+    act(() => {
+      txPending("Send Stoa").start();
+    });
+    const card = screen.getByText("Send Stoa");
+    const container = card.closest("[data-toast-id]") as HTMLElement;
+    expect(within(container).getByText("Processing...")).toBeTruthy();
   });
 });

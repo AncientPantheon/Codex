@@ -26,11 +26,39 @@
 import { CodexKeyMissingError } from "../codex/errors.js";
 
 /**
- * The seed types a StoaChain seed can carry. Mirrors `@stoachain`'s
- * `SeedType = "koala" | "chainweaver" | "eckowallet"` verbatim; `"koala"` is the
- * default/most-common type. Kept local so codex-core imports no Ouronet types.
+ * Every seed label a codex can honestly carry on a StoaChain seed — the DATA
+ * type. Kept in parity with codex-ouronet's `SeedType`
+ * (`packages/codex-ouronet/src/types/entities.ts`) by a compile-time test
+ * (`packages/codex-ouronet/tests/type-seedtype-parity.test.ts`), NOT by this
+ * comment — a comment claiming "verbatim mirror" is not enforcement, and this
+ * type drifted out of parity with `SeedType` once before ("stoic" was added
+ * there and not here) with no build failure to catch it.
+ *
+ * Kept local (not imported from codex-ouronet) so codex-core imports no
+ * Ouronet types — see this module's own doc comment.
+ *
+ * NOT every member here is derivable by THIS factory's mnemonic-only
+ * `deriveStoaChainKeypair` seam — see `MnemonicSeedType` below for that
+ * narrower, capability-scoped subset.
  */
-export type StoaChainSeedType = "koala" | "chainweaver" | "eckowallet";
+export type StoaChainSeedType = "koala" | "chainweaver" | "eckowallet" | "stoic";
+
+/**
+ * The subset of `StoaChainSeedType` this factory can actually derive a key
+ * from via the mnemonic-based `HeadlessResolverDeps.deriveStoaChainKeypair`
+ * seam (bound to `StoaChainWalletBuilder.createWalletPairFromMnemonic`).
+ * Mirrors `@stoachain/stoa-core/wallet`'s own `SeedType` verbatim (that
+ * external type is unrelated to and independent of `StoaChainSeedType` above).
+ *
+ * `"stoic"` (Stoa Dalos) is deliberately EXCLUDED: a stoic seed's `secret`
+ * decrypts to a 1600-bit DALOS bitstring, not a mnemonic, so feeding it to
+ * this seam would derive the wrong key via the wrong algorithm. Stoic seeds
+ * are resolved entirely outside this factory, before it ever runs — see the
+ * skip-guard in `getKeyPairByPublicKey`'s derived-account loop below, and
+ * `packages/codex-ouronet/src/resolver/headlessKadenaDeps.ts`'s
+ * `resolveStoicKeypair` doc for the full reasoning.
+ */
+export type MnemonicSeedType = "koala" | "chainweaver" | "eckowallet";
 
 /**
  * A pure (directly-imported) keypair entry. Minimal structural mirror of the
@@ -68,15 +96,18 @@ export interface SnapshotSlice {
 /**
  * A signing-ready resolved keypair. Structurally identical to
  * `@stoachain/stoa-core/signing`'s `IStoaChainKeypair` (the byte-mirror is
- * deliberate — D5 asserts assignability at the binding site). `seedType` is the
- * COMPLETE string-literal union (never bare `string`, never a truncated subset
- * that drops the default `"koala"`); `encryptedSecretKey` is the opaque
- * `@kadena/hd-wallet` EncryptedString object (`unknown`), never a hex string.
+ * deliberate — D5 asserts assignability at the binding site). `seedType` is
+ * `MnemonicSeedType`, not the wider `StoaChainSeedType`: this factory only
+ * ever RESOLVES a mnemonic-derived keypair (never drops the default `"koala"`)
+ * — a `"stoic"` resolution is `resolveStoicKeypair`'s job entirely outside
+ * this factory, returning its own distinct shape, never this one.
+ * `encryptedSecretKey` is the opaque `@kadena/hd-wallet` EncryptedString
+ * object (`unknown`), never a hex string.
  */
 export interface ResolvedStoaChainKeypair {
   publicKey: string;
   privateKey: string;
-  seedType?: StoaChainSeedType | "foreign";
+  seedType?: MnemonicSeedType | "foreign";
   encryptedSecretKey?: unknown;
   password?: string;
 }
@@ -89,12 +120,16 @@ export interface ResolvedStoaChainKeypair {
 export interface HeadlessResolverDeps {
   /** Binds `smartDecrypt` — decrypts BOTH `encryptedPrivateKey` and `seed.secret`. */
   decryptSecret(ciphertext: string, password: string): Promise<string>;
-  /** Binds `StoaChainWalletBuilder.createWalletPairFromMnemonic`. `secretKey` is opaque. */
+  /** Binds `StoaChainWalletBuilder.createWalletPairFromMnemonic`. `secretKey` is opaque.
+   *  `seedType` is `MnemonicSeedType`, not `StoaChainSeedType` — this seam is
+   *  mnemonic-only and must never be asked to derive a `"stoic"` key (see
+   *  `MnemonicSeedType`'s doc comment). The derived-account loop below narrows
+   *  to this type via its stoic skip-guard before calling this. */
   deriveStoaChainKeypair(
     password: string,
     mnemonic: string,
     index: number,
-    seedType: StoaChainSeedType,
+    seedType: MnemonicSeedType,
   ): Promise<{ publicKey: string; secretKey: unknown }>;
   /** Binds `kadenaDecrypt`. `encryptedSecretKey` is the opaque wallet secret. */
   decryptWalletSecret(password: string, encryptedSecretKey: unknown): Promise<Uint8Array>;
@@ -163,6 +198,19 @@ export function createHeadlessCodexResolver(deps: HeadlessResolverDeps): Headles
 
     // 2. Derived-account lookup across all StoaChain seeds.
     for (const seed of kadenaSeeds) {
+      // "stoic" (Stoa Dalos) seeds are NOT mnemonic-based — a real caller
+      // resolves them via `resolveStoicKeypair` BEFORE this factory ever runs
+      // (see packages/codex-ouronet/src/resolver/headlessKadenaDeps.ts). If one
+      // reaches here anyway (corrupt state, a future direct caller, a
+      // reordering bug upstream), skip it rather than feed a DALOS bitstring to
+      // the mnemonic-only `deriveStoaChainKeypair` seam below — that would
+      // silently derive the WRONG key via the wrong algorithm. Falling through
+      // to the ordinary not-found error is the safe outcome. This line also
+      // narrows `seed.seedType` from `StoaChainSeedType` to `MnemonicSeedType`
+      // for the rest of the loop body, so the `deriveStoaChainKeypair` call
+      // below type-checks with no cast.
+      if (seed.seedType === "stoic") continue;
+
       const account = (seed.accounts ?? []).find((a) => a.publicKey === publicKey);
       if (!account) continue;
 

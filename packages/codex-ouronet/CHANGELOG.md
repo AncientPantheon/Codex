@@ -1,5 +1,215 @@
 # Changelog
 
+## 1.0.0 — 2026-09-28
+
+**MAJOR — real Kadena mainnet sends, working end to end, for the first
+time: same-chain and cross-chain, from a launcher whose tooltip now
+correctly shows all three transfer variants. Fixes a critical, previously
+undetected StoaChain signing bug (every native Send would have failed
+on-chain), a silent no-op in the cross-chain progress toast, and the
+Kadena node's own reachability, plus the Rule 7/8 tooltip canon upgrade.
+Ships alongside `@ancientpantheon/codex@1.0.0`.**
+
+- **Critical fix: StoaChain native Send (`SendStoaModal.tsx`) was
+  building every transaction with its own signer UNSCOPED — no
+  `clist` at all.** On the mistaken theory (now corrected) that an
+  unscoped guard signer auto-authorizes any capability a call requests.
+  That holds for a plain `enforce-guard` check, not for a Pact `@managed`
+  capability: `coin.TRANSFER`/`coin.TRANSFER_XCHAIN` must be explicitly
+  declared by some signer, confirmed against the deployed `coin` contract
+  directly and cross-checked against OuronetUI's own working
+  implementation. Every same-chain and chain-0 cross-chain Send would
+  have failed on-chain with `"Managed capability coin.TRANSFER was not
+  installed"` — found via live testing, root-caused, and fixed;
+  `buildGasStationTransaction`'s own signature now requires a
+  `guardCapabilities` builder from every caller so this can't silently
+  regress.
+- Kadena same-chain sends were unreachable for any chain other than the
+  default: the source/target chain pickers mutually excluded each
+  other's current value (inherited from an OuronetUI cross-chain-only
+  ancestor, where that made sense — same-chain didn't). Same-chain is
+  now selectable on every chain pair, for both StoaChain and Kadena.
+- The native Send launcher's hover tooltip only ever cycled through the
+  two same-chain variants, silently omitting cross-chain — for Kadena a
+  plain oversight (the registry already described
+  `coin.transfer-crosschain`); for StoaChain, `coin.C_TransferAcross`
+  isn't in the upstream registry at all, so the tooltip's cycling engine
+  gained real support for mixing a registry-resolved variant and a
+  local-stopgap variant in ONE cycle (previously only single-key). Both
+  launchers now correctly cycle all three variants, and the cross-chain
+  variant's own example values are real (a genuine second account as
+  receiver, a real chain id as target) instead of the registry's generic
+  ghost data, which for Kadena had been showing the SAME value for
+  receiver and target-chain.
+- Kadena reads/writes now default to a real, reachable HTTPS gateway
+  (`https://denascan.ancientholdings.eu`, a transparent Chainweb
+  passthrough forwarding `local`/`send`/`poll`/`listen`/`spv`) instead of
+  a direct HTTP-only node that hairpin-NATs from its own LAN and trips
+  browser mixed-content blocks. The old direct node stays available as a
+  selectable option (`KADENA_DIRECT_NODE_URL`), never the default. Every
+  network/timeout error a Kadena send can hit now names the node it was
+  actually talking to, and 4 read functions that used to silently return
+  `null`/`[]` on a chain-side envelope failure (indistinguishable from a
+  dead host) now log the real reason first.
+- The Kadena receiver-existence check now routes through the same
+  pluggable "active balance source" seam reads already use (REST by
+  default) instead of unconditionally hitting the direct node — closes a
+  live-reported "Could not verify the receiver account" failure that had
+  nothing to do with the receiver.
+- Both chains' cross-chain send toast used to show NO progress at all
+  during the two longest waits (initiate confirmation, ~100s; SPV proof,
+  ~100-150s) — the toast only ever appeared at the very end or on hard
+  failure. Both now drive a real 3-step progress toast from the moment
+  the send starts, with the real request key attached to each step as
+  soon as it exists; a completed step is now visually distinct (solid
+  fill + bold label) instead of fading to the same quiet gray as a
+  pending one.
+- Tooltip canon upgraded to `@ouronet/talos-registry@2.2.0`: Rule 7
+  (`unfilledFillable`) closed 8 silently-no-op account-management
+  launchers that were filling a tooltip's preview-only `account` field
+  instead of the real `patron`/`executor` execution parameters; Rule 8
+  classifies a live-read "no row for this key" refusal as a friendly,
+  non-alarming message (the raw chain text stays on hover) instead of
+  rendering it identically to a genuinely broken contract call.
+
+## 0.19.0 — 2026-09-27
+
+**MINOR — the pre-ZBOM tooltip: hover any button that opens a ZBOM and see
+the function it will call, the PREVIEW's own declared parameters (not the
+execution's — the two routinely differ), and a live cost preview, before
+the modal ever mounts. Talos-registry-native throughout — no hand-built
+Pact string anywhere in this feature. Also covers Codex's 5 native STOA
+(`coin.*`) launchers, previously untouched by any tooltip at all, with a
+distinct gold-bordered card and no fabricated cost preview; and a launcher
+that fronts a runtime choice between several possible calls (Send, Transfer
+UrStoa) now cycles through each one instead of naming only one.**
+
+- New `PreZbomHint`/`PreZbomTooltipCard` component tree
+  (`zbom/cfm/PreZbomHint.tsx`) — a new talos-registry-native tooltip,
+  deliberately NOT a reuse of the existing `ExecutionTooltip.tsx`. Per the
+  owner's ruling that the pre-open tooltip belongs on the LAUNCHER, never a
+  ZBOM's own execute surface: live testing surfaced that `ZbomLayout.tsx`'s
+  execute button had been wired to `ExecutionTooltip` all along (via an
+  `executionSpec` prop, used by exactly 2 modals), drawing a hover card over
+  the modal it annotated — removed entirely (not deprecated), guarded by a
+  new class-wide test (`zbom-execute-button-no-tooltip.test.ts`) asserting
+  the pattern can't silently reappear anywhere in `src`. `ExecutionTooltip.tsx`
+  itself stays, used only by `Zone2Wrapper.tsx`'s signature-only header label.
+  Resolves an
+  `entrypoint` key live via `tryGetEntrypoint`/`getPreview`, merges preview
+  values by the PREVIEW's own param names (caller values → the entrypoint's
+  ghost example data → a type-aware placeholder), and renders the live read
+  via `buildPreviewCall` — the same registry primitive the talos-registry
+  migration already established elsewhere in this package.
+- All 11 ZBOM-opening launcher call-sites across `OuronetAccountsTab.tsx`,
+  `SingleApiPanel.tsx`, and `DualApiPanel.tsx` now wrapped — 4 using their
+  already-exported registry-key constants (the Pythia dual-API-key
+  launchers), 8 using a literal key string (verified live against the
+  registry; exporting constants for these is a separate, already-tracked
+  migration topic). Enforced by two new class-wide tests: one proves every
+  known launcher is wrapped with its EXACT expected entrypoint (not just
+  "some `<PreZbomHint>` region" — catches a swapped/mispaired entrypoint
+  between two adjacent wraps), one proves every entrypoint used resolves
+  against the live installed registry.
+- New "Pre-ZBOM Tooltip" toggle in the ZBOM settings tab, default ON.
+  Persisted via the existing per-consumer settings registry
+  (`useConsumerSettings`) under `consumerName` (new `CodexProvider` prop,
+  default `"Codex"` — see `@ancientpantheon/codex-ui`'s changelog), not the
+  shared `uiSettings` slice — the separation is the point: this preference
+  can differ per app embedding this package, from one codex. Off means off:
+  the live read structurally never mounts, not just a hidden UI element.
+- Extracted `readablePreview`/`Preview`/style constants (previously
+  duplicated between this new tooltip and `ExecutionTooltip.tsx`, and
+  already silently drifted on a `decimal: 0` edge case — one copy rendered
+  a genuine zero-IGNIS cost as `[object Object]`) into a shared
+  `zbom/cfm/previewFormatting.ts`, fixing that drift for both call sites at
+  once and locking it with a dedicated regression test.
+- Long preview values (an Ouronet account is a 162-glyph string) are now
+  middle-elided (`shorten()`, new in `previewFormatting.ts`) — keeping head
+  AND tail, quotes preserved outside the elision — instead of running the
+  card off the edge of the screen; the full value stays reachable via a
+  `title` attribute on hover. `ExecutionTooltipCard`'s own per-argument
+  MISSING/too-many-argument checks are now skipped for a deliberately-empty
+  `args` (Zone2Wrapper's signature-only use) instead of flagging every
+  parameter red, a side effect of the execute-button wiring's removal above
+  leaving that as `ExecutionTooltipCard`'s only remaining caller.
+- Fixed a second live-reported bug: hovering a launcher built on this
+  package's own `GoldenBtn`/`VioletBtn`/`GreenBtn` (`ui/internal/
+  accountFields.tsx` — Rotate Payment Key/Guard/Sovereign/Governor,
+  Release/Register StoicTag) showed no tooltip at all. Those three
+  components are plain functions with a fixed prop signature and no
+  `...rest` spread, so Radix's `Tooltip.Trigger asChild` (which clones its
+  child and injects the ref + hover handlers directly onto it) had its
+  injected props silently dropped before ever reaching the real `<button>`.
+  `PreZbomHint` now wraps its `children` in a plain `<span>` before handing
+  off to `ActionTooltip`, guaranteeing Radix always has a real host element
+  to attach to — fixed once for every launcher, without touching the three
+  shared button components (used throughout the app, not just here).
+- Upgraded to `@ouronet/talos-registry@1.2.0` and corrected the numbered
+  argument list back to the PREVIEW's own declared parameters — never the
+  execution's — after a live complaint had briefly been mis-fixed the other
+  way: previews differ from their executions in name, order, and arity for
+  410 of 423 entrypoints, and binding by the exec's own names/positions is
+  the exact bug class this feature exists to prevent. Also respects the
+  registry's new per-parameter `ghost.use` tags (`display`/`tooltip`, 6 of
+  423 entrypoints, all guard-typed — a restricted param now renders the
+  registry's own authoritative string instead of a hand-derived guess, or
+  is hidden from the tooltip entirely per the registry's own contract), and
+  detects a ghost value that IS the literal sentinel string `"example"` as
+  a placeholder rather than real data. The live-read gate now blocks on ANY
+  placeholder argument, not only when every argument is one.
+- Added native STOA (`coin.*`) tooltip support. `coin` is StoaChain's own
+  root-namespace contract, never in the Talos registry by design (the
+  registry describes deployed `ouronet-ns` modules only) — a new,
+  hand-authored `zbom/cfm/nativeStoaSpecs.ts` (7 entrypoints, each verified
+  line-for-line against the deployed `coin` contract by a dedicated test
+  that fails loudly on drift and skips visibly, not silently, when the
+  sibling Pact checkout is absent from a machine) backs a distinct
+  gold-bordered "STOA NATIVE" card: no cost preview, no IGNIS line, an
+  explicit "paid by the signer directly" footer instead. Wires the 5
+  previously-uncovered Send/Transfer/Stake/Unstake/Collect UrStoa launchers
+  in `StoaAccountsTab.tsx`, each now showing its correct hand-verified
+  signature where it previously showed nothing at all.
+- `PreZbomHint`'s `entrypoint` prop now also accepts an array of entrypoint
+  keys, for a launcher that fronts a runtime choice between several
+  possible calls — Send and Transfer UrStoa each pick between a plain
+  transfer and an "Anew" variant depending on whether the receiver account
+  already exists, unknowable at hover time. Given several keys, the
+  tooltip cycles through them one at a time (a 10-second window each, with
+  a depletion bar and one dot per variant), always restarting at the first
+  variant on a fresh hover.
+
+## 0.18.0 — 2026-09-27
+
+**MINOR — fix a Codex-internal type divergence that broke every headless-
+resolver consumer's typecheck (Pythia, Khronoton) whenever a codex held a
+"stoic" (Stoa Dalos) seed. Root-caused after Pythia's own agent reported
+`keyResolver.ts:88` failing to compile on every deploy that bumps
+`@ancientpantheon/codex` to `@latest`.**
+
+- `@ancientpantheon/codex-core@0.5.0`'s `StoaChainSeedType` was a hand-kept,
+  3-member local mirror of this package's own `SeedType`
+  (`src/types/entities.ts`) — its doc comment claimed a "verbatim" mirror,
+  but `SeedType` gained a 4th member ("stoic") when Stoa Dalos seeds shipped
+  and the mirror was never updated. Since `StoaChainSeedType` feeds
+  `SnapshotSlice`, the parameter type of this package's own
+  `createHeadlessKadenaResolver` (built for headless automaton consumers),
+  a real `CodexSnapshot` carrying a stoic seed stopped being assignable —
+  breaking the typecheck for every downstream consumer, not just this
+  package's own build.
+- Fixed in `codex-core` (see its own changelog for the full type-split
+  reasoning: `StoaChainSeedType` now 4-member as a pure data label,
+  `MnemonicSeedType` new-and-3-member as the actual derivation-capable
+  subset, plus a compiler-enforced skip-guard so a "stoic" seed can never
+  silently reach the mnemonic-only derivation seam).
+- New compile-time parity test here (`tests/type-seedtype-parity.test.ts`)
+  proves this package's `SeedType` and codex-core's `StoaChainSeedType` stay
+  in lockstep — a future member added to one without the other now fails
+  `tsc` instead of shipping a silent drift.
+- No behavior change for existing koala/chainweaver/eckowallet/pure-foreign
+  resolution in `InternalCodexResolver` or `createHeadlessKadenaResolver`;
+  `resolveStoicKeypair`'s Stoa Dalos derivation path is untouched.
+
 ## 0.17.0 — 2026-09-27
 
 **MINOR — real Kadena balances, made reliable, plus the first slice of the

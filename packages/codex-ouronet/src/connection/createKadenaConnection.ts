@@ -35,6 +35,7 @@ import {
 import {
   KADENA_MAINNET_NETWORK_ID,
   KADENA_MAINNET_DEFAULT_NODE_URL,
+  KADENA_DIRECT_NODE_URL,
   KADENA_MAINNET_DEFAULT_CHAIN_ID,
 } from "../kadena/kadenaReads.js";
 
@@ -43,8 +44,9 @@ import {
 export const KADENA_CONNECTION_CHAIN_ID = "kadena";
 
 /** Re-exported so a consumer wiring the Network tab doesn't need a second
- *  import just for the default node URL. */
-export { KADENA_MAINNET_DEFAULT_NODE_URL };
+ *  import just for the default node URL — or for the selectable direct-node
+ *  fallback, e.g. as Network-tab placeholder/hint text. */
+export { KADENA_MAINNET_DEFAULT_NODE_URL, KADENA_DIRECT_NODE_URL };
 
 /** Build the chainweb Pact base path for a Kadena node origin + chain —
  *  mirrors `createStoaChainConnection.ts`'s own `pactBaseUrl`, with

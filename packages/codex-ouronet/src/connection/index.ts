@@ -32,6 +32,7 @@ export {
   createKadenaConnection,
   KADENA_CONNECTION_CHAIN_ID,
   KADENA_MAINNET_DEFAULT_NODE_URL,
+  KADENA_DIRECT_NODE_URL,
   type CreateKadenaConnectionOptions,
 } from "./createKadenaConnection.js";
 

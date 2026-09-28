@@ -2,6 +2,48 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.0.0 — 2026-09-28
+
+**MAJOR — first stable release. Real Kadena mainnet sends now work end to
+end (same-chain and cross-chain), a critical StoaChain signing bug that
+would have failed every native Send on-chain is fixed, and both chains'
+cross-chain flows now show real progress instead of going silent for
+minutes at a time. See `@ancientpantheon/codex-ouronet`'s own changelog
+for the full root-cause detail on each fix — `codex-ouronet` release
+only (`codex-ui`/`codex-core`/`arweave-core`/`codex-arweave`
+unchanged).**
+
+## 0.19.0 — 2026-09-27
+
+**MINOR — the pre-ZBOM tooltip: hover any button that opens a ZBOM to see
+the function it will call, its live-registry-resolved preview parameters,
+and a real cost preview, before the modal opens. Also covers the 5 native
+STOA (`coin.*`) launchers with a distinct gold-bordered card (no fabricated
+cost preview — natives are never priced by the registry), and a cycling
+tooltip for a launcher that fronts a runtime choice between several
+possible calls (Send, Transfer UrStoa), instead of naming only one. Plus a
+new optional `consumerName` prop on `CodexProvider` (default `"Codex"`) so
+an embedding app can identify itself to the per-consumer settings registry.
+See `@ancientpantheon/codex-ouronet`'s and `@ancientpantheon/codex-ui`'s
+own changelogs for the full detail — no hand-built Pact string anywhere in
+this feature, talos-registry-native throughout except where `coin` itself
+is root-namespace and was never in the registry to begin with.**
+
+## 0.18.0 — 2026-09-27
+
+**MINOR — fixes a bug that broke every Pythia (and any other headless
+automaton) deploy consuming `@ancientpantheon/codex@latest` whenever the
+codex held a Stoa Dalos ("stoic") seed: a stale internal type mirror
+(`StoaChainSeedType`) hadn't been updated when this package's `SeedType`
+gained the "stoic" member, so a real snapshot with a stoic seed failed to
+typecheck against the headless resolver's own advertised input type. See
+`@ancientpantheon/codex-ouronet`'s and `@ancientpantheon/codex-core`'s own
+changelogs for the full root-cause and fix. No behavior change for any
+existing seed type or resolver path — this closes a compile-time gap, with
+a compiler-enforced guard against the wrong-key-derivation failure mode a
+naive fix would have risked, plus a new test that fails the build if the
+two seed-type unions ever diverge again.**
+
 ## 0.17.0 — 2026-09-27
 
 **MINOR — real Kadena balances, made reliable, plus the first slice of the

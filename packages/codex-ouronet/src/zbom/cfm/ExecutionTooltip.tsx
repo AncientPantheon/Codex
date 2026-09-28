@@ -51,6 +51,7 @@ import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 import { pactRead } from "@stoachain/stoa-core/reads";
 import { ActionTooltip } from "../ui/ActionTooltip.js";
 import { signatureOf } from "../../constants/pactSignatures.generated.js";
+import { readablePreview, mono, previewCardStyle, type Preview } from "./previewFormatting.js";
 
 export type ExecutionSpec = {
   /** Fully qualified execution, e.g. "ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag". */
@@ -71,12 +72,6 @@ export type ExecutionSpec = {
   infoArgs?: string[];
 };
 
-type Preview =
-  | { state: "idle" }
-  | { state: "loading" }
-  | { state: "ok"; text: string; ignis: string | null }
-  | { state: "error"; message: string };
-
 const cache = new Map<string, Preview>();
 
 /** `ouronet-ns.TS01-C4.CODEX|C_ReleaseStoicTag` -> `TS01-C4.CODEX|C_ReleaseStoicTag`, the key
@@ -96,24 +91,6 @@ const unqualified = (s: string) => s.replace(/^ouronet-ns\./, "");
  * button -- which is the failure mode this component exists to prevent, so the shape is read
  * off a live call rather than assumed.
  */
-function readablePreview(data: any): { text: string; ignis: string | null } {
-  if (data === null || data === undefined) return { text: "(no data)", ignis: null };
-  if (typeof data === "string") return { text: data, ignis: null };
-
-  const pre = data["pre-text"];
-  const text = Array.isArray(pre) && pre.length
-    ? pre.join("\n")
-    : JSON.stringify(data).slice(0, 300);
-
-  const costs = data["ignis"];
-  const need = costs?.["ignis-need"];
-  const ignis = need === undefined || need === null
-    ? null
-    : typeof need === "object" && need?.decimal ? String(need.decimal) : String(need);
-
-  return { text: String(text), ignis };
-}
-
 export function useExecutionPreview(spec: ExecutionSpec | null, active: boolean): Preview {
   const [preview, setPreview] = useState<Preview>({ state: "idle" });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,19 +137,9 @@ export function useExecutionPreview(spec: ExecutionSpec | null, active: boolean)
 export function ExecutionTooltipCard({ spec }: { spec: ExecutionSpec }) {
   const params = signatureOf(unqualified(spec.exec));
   const preview = useExecutionPreview(spec, true);
-  const mono = { fontFamily: "monospace", fontSize: "10px" } as const;
 
   return (
-    <div
-      className="rounded-lg border"
-      style={{
-        backgroundColor: "#0b0b0b",
-        borderColor: "#2a2a2a",
-        padding: "10px 12px",
-        maxWidth: "440px",
-        boxShadow: "0 8px 24px #000a",
-      }}
-    >
+    <div className="rounded-lg border" style={previewCardStyle}>
       <div style={{ ...mono, color: "#ceac5f" }}>{spec.exec}</div>
       {params === null ? (
         <div style={{ ...mono, color: "#8b1a1a", marginTop: 4 }}>
@@ -182,7 +149,14 @@ export function ExecutionTooltipCard({ spec }: { spec: ExecutionSpec }) {
         <div style={{ ...mono, color: "#6a6a6a", marginTop: 2 }}>({params.join(" ")})</div>
       )}
 
-      {params && (
+      {/* The per-argument comparison only makes sense when the caller actually
+          supplies args to check — an empty `args` is Zone2Wrapper's deliberate
+          signature-only mode (exec exists, with what parameters), not "every
+          argument is missing". Gating on `spec.args.length > 0` (not just
+          `params` resolving) keeps the MISSING/too-many checks meaningful for
+          a real args-populated spec while not misrepresenting the
+          zero-arg case as an error. */}
+      {params && spec.args.length > 0 && (
         <div style={{ marginTop: 6 }}>
           {params.map((p, i) => (
             <div key={p + i} style={{ ...mono, color: spec.args[i] ? "#9a9a9a" : "#8b1a1a" }}>

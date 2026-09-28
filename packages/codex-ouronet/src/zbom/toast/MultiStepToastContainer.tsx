@@ -40,6 +40,39 @@ const CHAIN_THEME: Record<ToastChain, { accent: string; explorerTx: (id: string)
     accent: "#a78bfa",
     explorerTx: (id) => `https://viewblock.io/arweave/tx/${id}`,
   },
+  /** Green matches `@ouronet/talos-registry`'s own `CHAIN_PALETTE.kadena` —
+   *  the tooltip canon and the toast now agree on "green means Kadena".
+   *
+   *  Live bug report / correction (this round): this used to point at the
+   *  generic public `explorer.chainweb.com`, flagged at the time as
+   *  "unverified against a live fetch... for a future session to confirm or
+   *  correct". This IS that session. `StoaAccountsTab.tsx`'s own
+   *  `kadenaExplorerUrl` already points every Kadena ACCOUNT link at
+   *  `denascan.ancientholdings.eu/accounts/<addr>` — "our denascan backend"
+   *  per that constant's own doc comment, i.e. this project's own deployed
+   *  instance, not a generic third-party explorer — so the TRANSACTION link
+   *  belongs on the SAME backend, not a different, unrelated public one.
+   *  The `/transactions/<requestKey>` path segment itself is corroborated
+   *  (not directly fetchable — `denascan.ancientholdings.eu` is a
+   *  JS-rendered SPA with no server-rendered links, and it's a private
+   *  domain, not indexed) by TWO independent signals found via live web
+   *  search: the public upstream `denascan.com`'s own confirmed transaction
+   *  URLs (e.g. `denascan.com/transactions/mBTBQILKQvhhU40dUaTvvx_uwAKhFzuBiQV4ePZhHAI`)
+   *  use exactly this plural `/transactions/<requestKey>` shape, AND this
+   *  project's own account path is ALSO pluralized relative to that same
+   *  upstream (`/accounts/` here vs upstream's own singular `/account/`) —
+   *  the same pluralization choice applied consistently. Still an inference
+   *  from a private domain's likely-shared route convention, not a
+   *  fetch-confirmed one — same honesty `kadenaExplorerUrl` itself already
+   *  applies (its own doc comment: "gives exactly the `k%3A...` form the
+   *  explorer's own URLs use", confirmed by whoever wired it, not by this
+   *  round). `encodeURIComponent` is a no-op for a real requestKey (URL-safe
+   *  base64: `[A-Za-z0-9_-]`) but matches `kadenaExplorerUrl`'s own
+   *  defensive convention. */
+  kadena: {
+    accent: "#22c55e",
+    explorerTx: (id) => `https://denascan.ancientholdings.eu/transactions/${encodeURIComponent(id)}`,
+  },
 };
 
 function themeFor(chain: ToastChain | undefined): { accent: string; explorerTx: (id: string) => string } {
@@ -200,31 +233,51 @@ function ToastCard({ toast, onDismiss }: { toast: ToastEntry; onDismiss: () => v
         </div>
       )}
 
-      {/* Multi-step: step circles */}
+      {/* Multi-step: step circles.
+          Live UX report: a completed step used to be visually as quiet as a
+          pending one — a thin green OUTLINE circle with a gray label,
+          easy to miss once it's no longer the active/spinning step, which
+          is exactly the moment a user glancing back at a multi-minute
+          crosschain send actually looks. Deliberately more prominent than
+          OuronetUI's own default here (a done step gets a SOLID filled
+          circle, not just an outline, and its label switches from the flat
+          gray every OTHER status uses to the same green, bold) — the rest
+          of the card (pending/active/error) is untouched, still matching
+          OuronetUI exactly. */}
       {!single && (
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 0 }}>
-          {toast.steps.map((step, i) => (
-            <React.Fragment key={i}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 50 }}>
-                <div style={{
-                  width: 24, height: 24, borderRadius: "50%",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  border: `2px solid ${stepColor(step.status, theme.accent)}`, color: stepColor(step.status, theme.accent), backgroundColor: "#0a0a0f",
-                }}>
-                  {step.status === "active" && <Loader2 className="toast-spin" style={{ width: 12, height: 12 }} />}
-                  {step.status === "done" && <Check style={{ width: 12, height: 12, color: "#4ade80" }} />}
-                  {step.status === "error" && <AlertTriangle style={{ width: 12, height: 12, color: "#c0392b" }} />}
-                  {step.status === "pending" && <div style={{ width: 8, height: 8, borderRadius: "50%", border: "2px solid #555" }} />}
+          {toast.steps.map((step, i) => {
+            const isDone = step.status === "done";
+            return (
+              <React.Fragment key={i}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 50 }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: "50%",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: `2px solid ${stepColor(step.status, theme.accent)}`,
+                    color: isDone ? "#0a0a0f" : stepColor(step.status, theme.accent),
+                    backgroundColor: isDone ? "#4ade80" : "#0a0a0f",
+                  }}>
+                    {step.status === "active" && <Loader2 className="toast-spin" style={{ width: 12, height: 12 }} />}
+                    {isDone && <Check style={{ width: 12, height: 12, color: "#0a0a0f" }} />}
+                    {step.status === "error" && <AlertTriangle style={{ width: 12, height: 12, color: "#c0392b" }} />}
+                    {step.status === "pending" && <div style={{ width: 8, height: 8, borderRadius: "50%", border: "2px solid #555" }} />}
+                  </div>
+                  <span style={{
+                    fontSize: 9,
+                    color: isDone ? "#4ade80" : "#888",
+                    fontWeight: isDone ? 700 : 400,
+                    marginTop: 3, textAlign: "center", maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {step.label}
+                  </span>
                 </div>
-                <span style={{ fontSize: 9, color: "#888", marginTop: 3, textAlign: "center", maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {step.label}
-                </span>
-              </div>
-              {i < toast.steps.length - 1 && (
-                <div style={{ flex: 1, height: 2, backgroundColor: step.status === "done" ? "#4ade80" : "#262630", marginBottom: 14 }} />
-              )}
-            </React.Fragment>
-          ))}
+                {i < toast.steps.length - 1 && (
+                  <div style={{ flex: 1, height: 2, backgroundColor: step.status === "done" ? "#4ade80" : "#262630", marginBottom: 14 }} />
+                )}
+              </React.Fragment>
+            );
+          })}
         </div>
       )}
 

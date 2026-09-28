@@ -815,6 +815,19 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         ouroAccounts: nextOuroAccounts,
         activeStoaChainWalletId: nextStoaChainSeeds[0]?.id ?? null,
         activeOuroAccountId: codexPrime.id,
+        // 2026-09-27: a freshly-kickstarted codex's data shape already matches
+        // CURRENT_SCHEMA_VERSION today -- there is no 0->1 migration to run --
+        // but nothing previously stamped the counter to say so. The migration
+        // runner's cursor advance is strict `fromVersion === current` (see
+        // state-migrations.test.ts's own lock-in test), and there is no 0->1
+        // step, so a fresh codex sat at the pre-versioning sentinel 0 forever
+        // (the "Schema Version: 0" the Codex Info card showed for every wallet
+        // ever created on current code). Stamping it here, at creation, is the
+        // safe fix: CURRENT_SCHEMA_VERSION is exactly the terminal state every
+        // migrated legacy codex already converges to, so this introduces no
+        // state that init()'s own gating (`canConsumerWrite`) doesn't already
+        // accept.
+        schemaVersion: CURRENT_SCHEMA_VERSION,
       });
 
       // 12. Best-effort persistence — saveCodexIdentity LAST (F-001 ordering).
@@ -823,6 +836,10 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         await a.savePureKeypairs(nextPureKeypairs);
         await a.saveOuroAccounts(nextOuroAccounts);
         await a.saveCodexIdentity(codexIdentity);
+        // Persist the schemaVersion stamp too -- see the `set({...})` comment
+        // above. Without this, a reload would re-load the adapter's own
+        // still-0 on-disk value and silently regress the in-memory fix.
+        await a.setSchemaVersion(CURRENT_SCHEMA_VERSION);
       });
 
       // 13. Return the full v0.3 result.

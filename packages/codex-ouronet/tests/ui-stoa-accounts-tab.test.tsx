@@ -222,13 +222,13 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
     })) as HTMLElement;
     // Regression this catches: the vault-action buttons showing up regardless
     // of mode (they only make sense once UrStoa balances are the thing shown).
-    expect(within(row).queryByTitle("Transfer UrStoa")).toBeNull();
-    expect(within(row).queryByTitle("Stake UrStoa")).toBeNull();
+    expect(within(row).queryByLabelText("Transfer UrStoa")).toBeNull();
+    expect(within(row).queryByLabelText("Stake UrStoa")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "UrStoa" }));
-    await waitFor(() => expect(within(row).getByTitle("Transfer UrStoa")).toBeTruthy());
-    expect(within(row).getByTitle("Stake UrStoa")).toBeTruthy();
-    expect(within(row).getByTitle("Unstake UrStoa")).toBeTruthy();
-    expect(within(row).getByTitle("Collect UrStoa earnings")).toBeTruthy();
+    await waitFor(() => expect(within(row).getByLabelText("Transfer UrStoa")).toBeTruthy());
+    expect(within(row).getByLabelText("Stake UrStoa")).toBeTruthy();
+    expect(within(row).getByLabelText("Unstake UrStoa")).toBeTruthy();
+    expect(within(row).getByLabelText("Collect UrStoa earnings")).toBeTruthy();
   });
 
   it("shows exactly 4 action buttons (merged Send/Transfer + Stake + Unstake + Collect) in UrStoa mode, and 1 (Send) in Stoa mode", async () => {
@@ -239,19 +239,19 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
       return r;
     })) as HTMLElement;
     // Stoa mode: only the merged button, showing "Send".
-    expect(within(row).getByTitle("Send STOA")).toBeTruthy();
-    expect(within(row).queryByTitle("Transfer UrStoa")).toBeNull();
-    expect(within(row).queryByTitle("Stake UrStoa")).toBeNull();
-    expect(within(row).queryByTitle("Unstake UrStoa")).toBeNull();
-    expect(within(row).queryByTitle("Collect UrStoa earnings")).toBeNull();
+    expect(within(row).getByLabelText("Send STOA")).toBeTruthy();
+    expect(within(row).queryByLabelText("Transfer UrStoa")).toBeNull();
+    expect(within(row).queryByLabelText("Stake UrStoa")).toBeNull();
+    expect(within(row).queryByLabelText("Unstake UrStoa")).toBeNull();
+    expect(within(row).queryByLabelText("Collect UrStoa earnings")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "UrStoa" }));
     // UrStoa mode: the merged button now reads "Transfer", plus Stake/Unstake/Collect.
-    await waitFor(() => expect(within(row).getByTitle("Transfer UrStoa")).toBeTruthy());
-    expect(within(row).queryByTitle("Send STOA")).toBeNull();
-    expect(within(row).getByTitle("Stake UrStoa")).toBeTruthy();
-    expect(within(row).getByTitle("Unstake UrStoa")).toBeTruthy();
-    expect(within(row).getByTitle("Collect UrStoa earnings")).toBeTruthy();
+    await waitFor(() => expect(within(row).getByLabelText("Transfer UrStoa")).toBeTruthy());
+    expect(within(row).queryByLabelText("Send STOA")).toBeNull();
+    expect(within(row).getByLabelText("Stake UrStoa")).toBeTruthy();
+    expect(within(row).getByLabelText("Unstake UrStoa")).toBeTruthy();
+    expect(within(row).getByLabelText("Collect UrStoa earnings")).toBeTruthy();
   });
 
   it("each of the four UrStoa buttons opens its own matching modal", async () => {
@@ -263,18 +263,18 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
       return r;
     })) as HTMLElement;
 
-    fireEvent.click(within(row).getByTitle("Transfer UrStoa"));
+    fireEvent.click(within(row).getByLabelText("Transfer UrStoa"));
     expect(screen.getByTestId("mock-transfer-modal")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mock-transfer-success"));
     await waitFor(() => expect(screen.queryByTestId("mock-transfer-modal")).toBeNull());
 
-    fireEvent.click(within(row).getByTitle("Stake UrStoa"));
+    fireEvent.click(within(row).getByLabelText("Stake UrStoa"));
     expect(screen.getByTestId("mock-stake-modal")).toBeTruthy();
 
-    fireEvent.click(within(row).getByTitle("Unstake UrStoa"));
+    fireEvent.click(within(row).getByLabelText("Unstake UrStoa"));
     expect(screen.getByTestId("mock-unstake-modal")).toBeTruthy();
 
-    fireEvent.click(within(row).getByTitle("Collect UrStoa earnings"));
+    fireEvent.click(within(row).getByLabelText("Collect UrStoa earnings"));
     expect(screen.getByTestId("mock-collect-modal")).toBeTruthy();
   });
 
@@ -286,15 +286,15 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
       return r;
     })) as HTMLElement;
     // Stoa mode: "Send" opens the native SendStoaModal.
-    fireEvent.click(within(row).getByTitle("Send STOA"));
+    fireEvent.click(within(row).getByLabelText("Send STOA"));
     expect(screen.getByTestId("mock-send-modal")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mock-send-success"));
     await waitFor(() => expect(screen.queryByTestId("mock-send-modal")).toBeNull());
 
     // UrStoa mode: the SAME button slot now reads "Transfer" and opens TransferUrStoaModal.
     fireEvent.click(screen.getByRole("button", { name: "UrStoa" }));
-    await waitFor(() => expect(within(row).getByTitle("Transfer UrStoa")).toBeTruthy());
-    fireEvent.click(within(row).getByTitle("Transfer UrStoa"));
+    await waitFor(() => expect(within(row).getByLabelText("Transfer UrStoa")).toBeTruthy());
+    fireEvent.click(within(row).getByLabelText("Transfer UrStoa"));
     expect(screen.getByTestId("mock-transfer-modal")).toBeTruthy();
   });
 
@@ -351,7 +351,7 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
       return r;
     })) as HTMLElement;
 
-    const collectBtn = await waitFor(() => within(row).getByTitle("Collect UrStoa earnings"));
+    const collectBtn = await waitFor(() => within(row).getByLabelText("Collect UrStoa earnings"));
     fireEvent.focus(collectBtn);
     // Regression this catches: a static/generic tooltip string instead of the
     // REAL earnings figure sourced from the same useUrStoaBalances row data
@@ -374,7 +374,7 @@ describe("<StoaAccountsTab> — Stoa/UrStoa toggle + vault actions", () => {
     await waitFor(() => expect(urReadCount).toBeGreaterThan(0));
     const before = urReadCount;
     const row = container.querySelector(`[data-stoa-address="${ADDR}"]`) as HTMLElement;
-    fireEvent.click(within(row).getByTitle("Stake UrStoa"));
+    fireEvent.click(within(row).getByLabelText("Stake UrStoa"));
     fireEvent.click(screen.getByTestId("mock-stake-success"));
     // Regression this catches: a modal's onSuccess not calling the active
     // hook's refresh() at all, or calling the WRONG (Stoa) hook's refresh
@@ -1040,7 +1040,7 @@ describe("<StoaAccountsTab> — mobile: the AddressRow 2×2 entry layout (design
     expect(within(row).getByText("10")).toBeTruthy();
     // No per-row action buttons anymore — Send/Copy/Explorer all moved to
     // the tab-level shared action row, tied to the SELECTED entry instead.
-    expect(within(row).queryByTitle("Send STOA")).toBeNull();
+    expect(within(row).queryByLabelText("Send STOA")).toBeNull();
     expect(within(row).queryByTitle("Copy")).toBeNull();
   });
 
@@ -1135,7 +1135,7 @@ describe("<StoaAccountsTab> — mobile: select → shared action row → full-sc
     // Lit (gold) from the start — never a dim/un-lit initial state.
     expect(medallion.style.border).toContain("rgb(206, 172, 95)");
     expect(screen.queryByText(/tap an account below to select it/i)).toBeNull();
-    expect(screen.getByTitle("Send STOA")).toBeTruthy();
+    expect(screen.getByLabelText("Send STOA")).toBeTruthy();
     expect(screen.getByTitle("Copy")).toBeTruthy();
   });
 
@@ -1179,7 +1179,7 @@ describe("<StoaAccountsTab> — mobile: select → shared action row → full-sc
 
   it("clicking Send on the shared row opens SendStoaModal for the (default-selected) entry — no tap on the row needed first", async () => {
     await renderTabMobile(oneSeed);
-    fireEvent.click(screen.getByTitle("Send STOA"));
+    fireEvent.click(screen.getByLabelText("Send STOA"));
     expect(await screen.findByTestId("mock-send-modal")).toBeTruthy();
   });
 
@@ -1191,12 +1191,12 @@ describe("<StoaAccountsTab> — mobile: select → shared action row → full-sc
 
     fireEvent.click(screen.getByLabelText("Close"));
     expect(screen.queryByTestId("stoa-address-fullscreen")).toBeNull();
-    expect(screen.getByTitle("Send STOA")).toBeTruthy();
+    expect(screen.getByLabelText("Send STOA")).toBeTruthy();
   });
 
   it("switching Codex/Watched re-derives the default selection for the NEW subtab (round 3: 'always an entry is selected') — round 7: the edge buttons vanish entirely once nothing is selected", async () => {
     await renderTabMobile(oneSeed);
-    expect(screen.getByTitle("Send STOA")).toBeTruthy();
+    expect(screen.getByLabelText("Send STOA")).toBeTruthy();
 
     // The Watched list is genuinely empty in this fixture — round 7 owner
     // correction moved the action buttons to floating edge stacks with NO
@@ -1204,18 +1204,18 @@ describe("<StoaAccountsTab> — mobile: select → shared action row → full-sc
     // message ("No watched addresses.") is the only feedback now.
     fireEvent.click(screen.getByRole("button", { name: /watched 0/i }));
     expect(await screen.findByText(/no watched addresses/i)).toBeTruthy();
-    expect(screen.queryByTitle("Send STOA")).toBeNull();
+    expect(screen.queryByLabelText("Send STOA")).toBeNull();
     expect(screen.queryByTitle("Select an account first")).toBeNull();
 
     // Switching back re-derives the codex list's own first entry again.
     fireEvent.click(screen.getByRole("button", { name: /codex 1/i }));
-    expect(await screen.findByTitle("Send STOA")).toBeTruthy();
+    expect(await screen.findByLabelText("Send STOA")).toBeTruthy();
   });
 
   it("a genuinely empty subtab (no codex accounts at all) shows NO edge buttons — just the list's own empty state", async () => {
     await renderTabMobile([]);
     expect(await screen.findByText(/no stoa accounts in the codex/i)).toBeTruthy();
-    expect(screen.queryByTitle("Send STOA")).toBeNull();
+    expect(screen.queryByLabelText("Send STOA")).toBeNull();
     expect(screen.queryByTitle("Select an account first")).toBeNull();
   });
 
@@ -1373,7 +1373,7 @@ describe("<StoaAccountsTab> — mobile: round 4 polish (design.md §8, the 'furt
 
   it("the action buttons float as a horizontal bottom-bar group docked to the RIGHT edge (design.md §8, round 8 follow-up — owner correction: 'add the 3 + 3 buttons on the lower bar... they are drawing on top of existing buttons/elements, and they block view')", async () => {
     await renderTabMobile(oneSeed);
-    const sendBtn = screen.getByTitle("Send STOA");
+    const sendBtn = screen.getByLabelText("Send STOA");
     const stack = sendBtn.parentElement as HTMLElement;
     expect(stack.style.position).toBe("absolute");
     expect(stack.style.right).toBe("6px");
@@ -1534,13 +1534,13 @@ describe("<StoaAccountsTab> — mobile: bottom-bar action button groups (design.
   it("Stoa mode: exactly 3 buttons, all docked to the RIGHT of the bottom bar, left-to-right Send/Transfer → Copy → Explorer", async () => {
     const { container } = await renderTabMobile(oneSeed);
     await waitFor(() => expect(container.querySelector(`[data-stoa-address="${ADDR}"]`)).toBeTruthy());
-    const rightStack = screen.getByTitle("Send STOA").parentElement as HTMLElement;
+    const rightStack = screen.getByLabelText("Send STOA").parentElement as HTMLElement;
     expect(Array.from(rightStack.children)).toHaveLength(3);
     const [first, second, third] = Array.from(rightStack.children) as HTMLElement[];
     expect(first.title).toBe("Send STOA");
     expect(second.title).toBe("Copy");
     expect(third.title).toBe("Open in Stoa Chain Explorer");
-    expect(screen.queryByTitle("Stake UrStoa")).toBeNull();
+    expect(screen.queryByLabelText("Stake UrStoa")).toBeNull();
     // Round 8 follow-up: docked to the BOTTOM edge, laid out horizontally —
     // no longer vertically centered ("drawing on top of existing
     // buttons/elements... block view").
@@ -1552,11 +1552,11 @@ describe("<StoaAccountsTab> — mobile: bottom-bar action button groups (design.
     await renderTabMobile(oneSeed);
     fireEvent.click(screen.getByRole("button", { name: "UrStoa" }));
 
-    const rightStack = (await screen.findByTitle("Transfer UrStoa")).parentElement as HTMLElement;
+    const rightStack = (await screen.findByLabelText("Transfer UrStoa")).parentElement as HTMLElement;
     const rightTitles = Array.from(rightStack.children).map((el) => (el as HTMLElement).title);
     expect(rightTitles).toEqual(["Transfer UrStoa", "Copy", "Open in Stoa Chain Explorer"]);
 
-    const leftStack = screen.getByTitle("Collect UrStoa earnings").parentElement as HTMLElement;
+    const leftStack = screen.getByLabelText("Collect UrStoa earnings").parentElement as HTMLElement;
     const leftTitles = Array.from(leftStack.children).map((el) => (el as HTMLElement).title);
     expect(leftTitles).toEqual(["Collect UrStoa earnings", "Stake UrStoa", "Unstake UrStoa"]);
 
@@ -1572,7 +1572,7 @@ describe("<StoaAccountsTab> — mobile: bottom-bar action button groups (design.
   it("no edge buttons at all once nothing is selected (empty list)", async () => {
     await renderTabMobile([]);
     expect(await screen.findByText(/no stoa accounts in the codex/i)).toBeTruthy();
-    expect(screen.queryByTitle("Send STOA")).toBeNull();
+    expect(screen.queryByLabelText("Send STOA")).toBeNull();
     expect(screen.queryByTitle("Copy")).toBeNull();
   });
 
@@ -1598,8 +1598,8 @@ describe("<StoaAccountsTab> — mobile: bottom-bar action button groups (design.
         </CodexUiRoot>
       </CodexProvider>,
     );
-    await waitFor(() => expect(screen.getByTitle("Send STOA")).toBeTruthy());
-    const rightStack = screen.getByTitle("Send STOA").parentElement as HTMLElement;
+    await waitFor(() => expect(screen.getByLabelText("Send STOA")).toBeTruthy());
+    const rightStack = screen.getByLabelText("Send STOA").parentElement as HTMLElement;
     expect(rightStack.style.bottom).toBe("0px");
     expect(rightStack.style.transform).toBe("translateY(50%)");
     expect(zone3.contains(rightStack)).toBe(true);
@@ -1636,13 +1636,13 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
     expect((screen.getByRole("button", { name: "UrStoa" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("Kadena mode hides the 'Send STOA' action — signing against real Kadena mainnet isn't wired yet", async () => {
+  it("Kadena mode hides the 'Send STOA' action — Kadena mode gets its own separate 'Send KDA' action instead (see next test)", async () => {
     await renderTabNetwork(
       "kadena",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
     await screen.findByText("Prime Codex Seed");
-    expect(screen.queryByTitle("Send STOA")).toBeNull();
+    expect(screen.queryByLabelText("Send STOA")).toBeNull();
   });
 
   it("Stoa mode still shows 'Send STOA' — unaffected by the new prop's default", async () => {
@@ -1651,7 +1651,35 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
     await screen.findByText("Prime Codex Seed");
-    expect(await screen.findByTitle("Send STOA")).toBeTruthy();
+    expect(await screen.findByLabelText("Send STOA")).toBeTruthy();
+  });
+
+  it("Kadena mode shows a 'Send KDA' action (kadena-native-transfer topic) — Stoa mode does NOT show it", async () => {
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    expect(await screen.findByLabelText("Send KDA")).toBeTruthy();
+  });
+
+  it("Stoa mode does NOT show 'Send KDA'", async () => {
+    await renderTabNetwork(
+      "stoa",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    expect(screen.queryByLabelText("Send KDA")).toBeNull();
+  });
+
+  it("clicking 'Send KDA' in Kadena mode opens SendKadenaModal", async () => {
+    await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    fireEvent.click(await screen.findByLabelText("Send KDA"));
+    expect(await screen.findByLabelText(/receiver address/i)).toHaveProperty("id", "send-kadena-receiver");
   });
 
   it("Kadena mode reads balances through the REST balance gateway (the default source), not stoa-core's pactRead", async () => {
@@ -1679,6 +1707,24 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
     // 20 Kadena chains, one batched call each (KADENA_CHAINS, not STOA_CHAINS' 10).
     expect(kadenaDirtyRead.mock.calls.length).toBeGreaterThanOrEqual(20);
     setActiveKadenaBalanceSource(restKadenaBalanceSource); // restore the default for later tests
+  });
+
+  it("the expanded per-chain grid shows all 20 Kadena chains, not StoaChain's 10 — bug fix: this used to always iterate STOA_CHAINS regardless of activeNetwork", async () => {
+    const { container } = await renderTabNetwork(
+      "kadena",
+      [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+    );
+    await screen.findByText("Prime Codex Seed");
+    // Expand the row (the outer clickable div toggles `open`, revealing the
+    // per-chain grid) — click the row's own clickable header, scoped to
+    // THIS address row specifically (the tab's own mode-toggle buttons
+    // also carry `cursor: pointer`, so an unscoped style-attribute query
+    // would match the wrong element first).
+    const row = container.querySelector(`[data-stoa-address="k:${"a".repeat(64)}"]`) as HTMLElement;
+    expect(row).toBeTruthy();
+    fireEvent.click(row.firstElementChild as HTMLElement);
+    expect(await screen.findByText("Chain 19")).toBeTruthy(); // only exists in a 20-chain (Kadena) grid
+    expect(screen.getByText("Chain 0")).toBeTruthy();
   });
 
   it("2026-09-27: Kadena mode's explorer link points at denascan (not Stoa's explorer) and turns green", async () => {
@@ -1720,5 +1766,64 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
     );
     const link = await screen.findByTitle("Open in Stoa Chain Explorer");
     expect((link as HTMLAnchorElement).href).toBe(`https://explorer.stoachain.com/accounts/k:${"a".repeat(64)}`);
+  });
+
+  // The mobile fullscreen path is a SEPARATE render tree from the desktop
+  // one above (its own `showSendKadenaSlot`/edge-stack wiring and its own
+  // <SendKadenaModal> mount, StoaAccountsTab.tsx's mobile branch) — mirrors
+  // the established mobile-viewport pattern from the "select → shared
+  // action row → full-screen" describe block elsewhere in this file.
+  describe("mobile fullscreen path", () => {
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        this.callback(
+          [{ contentRect: { width: FakeResizeObserver.nextWidth } } as unknown as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+        void target;
+      }
+      unobserve() {}
+      disconnect() {}
+      static nextWidth = 390;
+    }
+
+    async function renderTabNetworkMobile(activeNetwork: "stoa" | "kadena", seeds: IStoaChainSeed[] = []) {
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+      const adapter = new MemoryCodexAdapter("dev");
+      const utils = render(
+        <CodexProvider adapter={adapter}>
+          <Seeder seeds={seeds} pairs={[]} />
+          <CodexUiRoot>
+            <StoaAccountsTab activeNetwork={activeNetwork} />
+          </CodexUiRoot>
+        </CodexProvider>,
+      );
+      await waitFor(() => expect(screen.getByRole("button", { name: /codex/i })).toBeTruthy());
+      return utils;
+    }
+
+    it("shows a 'Send KDA' action in the mobile edge stack for a Kadena-mode account, and clicking it opens SendKadenaModal there too", async () => {
+      await renderTabNetworkMobile(
+        "kadena",
+        [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+      );
+      const sendKda = await screen.findByLabelText("Send KDA");
+      expect(sendKda).toBeTruthy();
+      fireEvent.click(sendKda);
+      expect(await screen.findByLabelText(/receiver address/i)).toHaveProperty("id", "send-kadena-receiver");
+    });
+
+    it("Stoa mode's mobile edge stack does NOT show 'Send KDA'", async () => {
+      await renderTabNetworkMobile(
+        "stoa",
+        [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
+      );
+      await screen.findByLabelText("Send STOA");
+      expect(screen.queryByLabelText("Send KDA")).toBeNull();
+    });
   });
 });

@@ -40,6 +40,9 @@ import { MONO, pillStyle, sectionLabel } from "../internal/accountFields.js";
 import { usePostTxRefresh } from "../../zbom/toast/usePostTxRefresh.js";
 import RenameDualLaneModal from "../../zbom/modals/RenameDualLaneModal.js";
 import RevokeDualLinkModal from "../../zbom/modals/RevokeDualLinkModal.js";
+import { RENAME_DUAL_LANE_KEY, REVOKE_DUAL_LINK_KEY } from "../../zbom/pythia/dualLinkOps.js";
+import PreZbomHint from "../../zbom/cfm/PreZbomHint.js";
+import { ouronetAccountFillValues } from "../../zbom/cfm/preZbomFillMap.js";
 
 // Fields the panel renders as first-class rows (confirmed live shape). Anything
 // NOT in here is dumped raw, so a future contract change surfaces on sight.
@@ -85,6 +88,13 @@ export interface DualApiPanelProps {
 export function DualApiPanel({ standardApollo, smartApollo, apiKeyMap, accounts }: DualApiPanelProps) {
   // Which per-row op modal is open (rename lane / revoke), keyed by the composite.
   const [opModal, setOpModal] = useState<{ op: "rename" | "revoke"; key: string } | null>(null);
+  // The Standard half's DALOS owner for a pair's `halves` — the SAME
+  // resolution `RenameDualLaneModal.tsx`/`RevokeDualLinkModal.tsx` use for
+  // their own `executor`. Named once, at component scope, so the per-row
+  // hover-time fill (below) and the opened-modal block (further down, a
+  // DIFFERENT `halves` — the opened modal's own key, not the row's) never
+  // hand-roll two independently-editable copies of the same lookup.
+  const standardOwnerOf = (h: { standard: string }): string => apiKeyMap?.get(h.standard)?.["owner-account"] ?? "";
   // Names for pretty display (address → codex account name).
   const nameByAddr = useMemo(() => {
     const m = new Map<string, string>();
@@ -179,6 +189,37 @@ export function DualApiPanel({ standardApollo, smartApollo, apiKeyMap, accounts 
             // 1970 / empty phantom card.
             if (row && row["is-registered"] === false) return null;
             const halves = splitDualKey(key);
+            if (!halves) return null;
+            // Canon rule 7: `executor` is a real, launcher-time-knowable
+            // "ouronet-account"-roled exec param for both RENAME_DUAL_LANE_KEY
+            // and REVOKE_DUAL_LINK_KEY — the SAME `standardOwner` resolution
+            // `dualLinkOps.ts`'s own doc comment confirms is correct.
+            // `ouronetAccountFillValues` (the ONE shared fill map, see
+            // `preZbomFillMap.ts`) fills it, plus the other confirmed
+            // aliases (harmless extras: neither entrypoint declares
+            // `account`/`owner-account`/`apollo-account`, so they are
+            // simply ignored — values merge by name, never positionally).
+            //
+            // `patron` is a SEPARATE value with genuinely different
+            // semantics here, deliberately NOT `rowOwner`: confirmed reading
+            // `RevokeDualLinkModal.tsx` directly, its own patron resolution
+            // is resident-vs-prime, the SAME shape `preZbomFillMap.ts`
+            // already models — but "resident" there means the codex's
+            // CURRENTLY ACTIVE account, a wallet-wide concept this per-row
+            // launcher has no access to (unlike `OuronetAccountsTab.tsx`,
+            // where "resident" is simply the row's own account). Rather than
+            // guess at an active-account value this file cannot see, the
+            // fill here always uses `accounts[0]` (prime) — the real account
+            // `usePatronSelectionDefaults`'s own default ("prime", or
+            // "wealthiest" seeded as prime) resolves to in the common case,
+            // never a fabricated one, and never `rowOwner` (which is not
+            // this modal's own patron concept at all in ANY mode).
+            const rowOwner = standardOwnerOf(halves);
+            const primeAddress = accounts[0]?.address;
+            const dualRowFillValues: Record<string, string> = {
+              ...(rowOwner ? ouronetAccountFillValues(rowOwner) : {}),
+              ...(primeAddress ? { patron: primeAddress } : {}),
+            };
             return (
               <div key={key} style={{ borderRadius: 12, border: "1px solid #262626", background: "#0d1117", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
                 {/* Header: composite + status + actions */}
@@ -194,18 +235,25 @@ export function DualApiPanel({ standardApollo, smartApollo, apiKeyMap, accounts 
                     const alreadyRevoked = row?.["iz-active"] === false;
                     return (
                       <>
-                        <button type="button" disabled={alreadyRevoked}
-                          onClick={() => { if (!alreadyRevoked) setOpModal({ op: "rename", key }); }}
-                          title={alreadyRevoked ? "Revoked — can't rename a deactivated link" : "Rename this dual key's consumer lane (100 STOA)"}
-                          style={rowActionBtn("#a78bfa", alreadyRevoked)}>
-                          <Pencil style={{ width: 13, height: 13 }} /> Rename lane
-                        </button>
-                        <button type="button" disabled={alreadyRevoked}
-                          onClick={() => { if (!alreadyRevoked) setOpModal({ op: "revoke", key }); }}
-                          title={alreadyRevoked ? "Already revoked — deploy fresh halves to re-pair" : "Kill switch — revoke (deactivate) this dual key (1 IGNIS)"}
-                          style={rowActionBtn("#c0392b", alreadyRevoked)}>
-                          <Power style={{ width: 13, height: 13 }} /> {alreadyRevoked ? "Revoked" : "Revoke"}
-                        </button>
+                        <PreZbomHint
+                          entrypoint={RENAME_DUAL_LANE_KEY}
+                          values={{ ...dualRowFillValues, "dual-link-key": key, "new-name": "NewName" }}
+                        >
+                          <button type="button" disabled={alreadyRevoked}
+                            onClick={() => { if (!alreadyRevoked) setOpModal({ op: "rename", key }); }}
+                            title={alreadyRevoked ? "Revoked — can't rename a deactivated link" : "Rename this dual key's consumer lane (100 STOA)"}
+                            style={rowActionBtn("#a78bfa", alreadyRevoked)}>
+                            <Pencil style={{ width: 13, height: 13 }} /> Rename lane
+                          </button>
+                        </PreZbomHint>
+                        <PreZbomHint entrypoint={REVOKE_DUAL_LINK_KEY} values={{ ...dualRowFillValues, "dual-link-key": key }}>
+                          <button type="button" disabled={alreadyRevoked}
+                            onClick={() => { if (!alreadyRevoked) setOpModal({ op: "revoke", key }); }}
+                            title={alreadyRevoked ? "Already revoked — deploy fresh halves to re-pair" : "Kill switch — revoke (deactivate) this dual key (1 IGNIS)"}
+                            style={rowActionBtn("#c0392b", alreadyRevoked)}>
+                            <Power style={{ width: 13, height: 13 }} /> {alreadyRevoked ? "Revoked" : "Revoke"}
+                          </button>
+                        </PreZbomHint>
                       </>
                     );
                   })()}
@@ -247,7 +295,7 @@ export function DualApiPanel({ standardApollo, smartApollo, apiKeyMap, accounts 
       {opModal && (() => {
         const halves = splitDualKey(opModal.key);
         if (!halves) return null;
-        const stdOwner = apiKeyMap?.get(halves.standard)?.["owner-account"] ?? "";
+        const stdOwner = standardOwnerOf(halves);
         const smtOwner = apiKeyMap?.get(halves.smart)?.["owner-account"] ?? "";
         const close = () => setOpModal(null);
         if (opModal.op === "rename") {
