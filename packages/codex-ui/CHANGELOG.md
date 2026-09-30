@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.1 — 2026-09-30
+
+**PATCH — `useCodexBackup`'s `importFromCloud` now preserves a live
+`foreignKeys` keyring when the imported backup omits the field, instead of
+silently wiping it to `[]`.**
+
+- Found while writing `@ancientpantheon/codex`'s new
+  `IMPORT_EXPORT_CONTRACT.md`: `arweaveSeeds` and `watchList` already fall
+  back to the current in-store value when a backup omits the field
+  (`parsed.X ?? current.X ?? []`) — the exact funds-critical discipline
+  needed so an older backup (predating a given keyring) can never wipe a
+  live secret on restore. `foreignKeys` had no such fallback
+  (`parsed.foreignKeys?.keys ?? []`), an inconsistency with its own doc
+  comments elsewhere in the same file describing it as funds-critical. Fixed
+  to `parsed.foreignKeys?.keys ?? current.foreignKeys ?? []`, with a new
+  regression test mirroring the existing `arweaveSeeds`/`watchList`
+  "PRESERVES existing X when the backup omits the field" tests.
+
 ## 0.9.0 — 2026-09-27
 
 **MINOR — `CodexProvider` gains an optional `consumerName` prop (default

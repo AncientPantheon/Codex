@@ -641,6 +641,58 @@ describe("useCodexBackup", () => {
     expect(restored.arweaveSeeds?.[0].isPrime).toBe(true);
   });
 
+  it("importFromCloud PRESERVES existing foreignKeys when the backup omits the field (a pre-foreignKeys backup must not wipe a live foreign key)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    // Pre-seed the live store with a foreign key before the import runs.
+    const liveFk = {
+      id: "ar-live",
+      chainId: "arweave" as const,
+      label: "Live AR key",
+      encryptedKeyfile: "ENC::live-ciphertext",
+    };
+    const { result } = renderHook(
+      () => ({
+        backup: useCodexBackup(),
+        store: useCodexStore(),
+        codex: useCodex(),
+      }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+    await act(async () => {
+      await result.current.store.getState().actions.addForeignKey(liveFk);
+    });
+
+    // A "1.2" backup — written before foreignKeys existed — carries no
+    // foreignKeys field at all.
+    const payload = JSON.stringify({
+      version: "1.2",
+      exportedAt: "2024-11-02T09:14:33.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    });
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // The restore must PRESERVE the live foreign key, not wipe it to [] just
+    // because the backup file omitted the field entirely — the same wipe
+    // mechanism already fixed for arweaveSeeds/watchList below, but left
+    // unfixed for foreignKeys until now.
+    const restored = await adapter.loadAll();
+    expect(restored.foreignKeys).toEqual([liveFk]);
+  });
+
   it("importFromCloud PRESERVES existing arweaveSeeds when the backup omits the field (a pre-Arweave-seed backup must not wipe a live Prime Arweave Seed)", async () => {
     const adapter = new MemoryCodexAdapter("dev");
     // Pre-seed the live store with a Prime Arweave Seed before the import runs.

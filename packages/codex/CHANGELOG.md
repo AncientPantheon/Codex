@@ -2,6 +2,30 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.0.1 — 2026-09-30
+
+**PATCH — new `IMPORT_EXPORT_CONTRACT.md`, shipped inside this published
+package's own tarball, as the single normative written contract for the
+Codex JSON wire schema and the only sanctioned import/export functions
+(`useCodexBackup`'s `importFromFile`/`importFromCloud`/`exportForCloud`/
+`downloadAsJson`). Written directly in response to a real production
+incident: a host app hand-parsed a Codex JSON export using invented field
+names instead of calling the sanctioned hook, silently dropped the entire
+Arweave-seed keyring, and appended 34 duplicate pure-key entries because it
+never reset prior state before importing. The document also names, and
+explains why it must never be copied, `codex-playground`'s dev-tool-only
+pre-mount snapshot-seeding shim — the one path in this repo that looks
+similar to a real import but isn't one.**
+
+**PATCH — bundles `@ancientpantheon/codex-ui@0.9.1`, which fixes a real bug
+found while writing the contract document above: `useCodexBackup`'s
+`importFromCloud` was not preserving a live `foreignKeys` keyring when an
+imported backup omitted the field, unlike the identical fallback discipline
+already correctly applied to `arweaveSeeds`/`watchList`. A backup written
+before foreign keys existed could silently wipe a live foreign key on
+restore. See `@ancientpantheon/codex-ui`'s own changelog for detail.
+(`codex-ouronet`/`codex-core`/`arweave-core`/`codex-arweave` unchanged.)**
+
 ## 1.0.0 — 2026-09-28
 
 **MAJOR — first stable release. Real Kadena mainnet sends now work end to

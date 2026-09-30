@@ -223,7 +223,17 @@ export function useCodexBackup(): CodexBackupView {
         // `ForeignKeyEntry[]`. Assigning the whole block into an array-typed
         // field would make the slice/adapter `.map`/`.find` on a non-array →
         // the Arweave key is silently lost on restore = funds loss.
-        foreignKeys: parsed.foreignKeys?.keys ?? [],
+        //
+        // FUNDS-CRITICAL fallback (same discipline as `arweaveSeeds`/`watchList`
+        // below): a backup written before foreignKeys existed (or any backup
+        // that simply omits the field) must NOT WIPE the key(s) already
+        // resident in this codex. Only an explicit (possibly empty)
+        // `foreignKeys` block present in the backup itself should replace it.
+        // This was previously `parsed.foreignKeys?.keys ?? []` with no
+        // `current.foreignKeys` fallback — an inconsistency with the identical
+        // funds-critical discipline already applied to `arweaveSeeds`/
+        // `watchList`, found and fixed alongside the Import/Export Contract doc.
+        foreignKeys: parsed.foreignKeys?.keys ?? current.foreignKeys ?? [],
         // FUNDS-CRITICAL (the reported incident this fixes): a backup written
         // before Arweave seeds existed (or any backup that simply omits the
         // field) must NOT WIPE the seed(s) already resident in this codex.

@@ -14,6 +14,12 @@ The consumer-facing multi-chain Codex aggregator. **Install this single package 
 
 A React app gets the full multi-chain wallet from one dependency; a headless consumer imports only the core it needs without pulling React.
 
+> **Loading or saving a Codex JSON backup?** Read
+> [`IMPORT_EXPORT_CONTRACT.md`](./IMPORT_EXPORT_CONTRACT.md) first — it is the
+> single normative source for the wire schema and the only sanctioned
+> import/export functions. Hand-parsing the JSON shape yourself is
+> unsupported and has already caused a real, silent data-loss incident.
+
 ## Install
 
 ```bash
@@ -30,9 +36,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.0.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.0.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.0.1** — New `IMPORT_EXPORT_CONTRACT.md`, shipped inside this published package, as the single normative source for the Codex JSON wire schema and the only sanctioned import/export functions — written after a real incident where a host app hand-parsed the backup shape with invented field names, silently dropped the entire Arweave-seed keyring, and duplicated pure keys on every import. Also fixes a `codex-ui` bug found while writing it: `useCodexBackup`'s `importFromCloud` was not preserving a live `foreignKeys` keyring when the imported backup omitted the field (unlike the identical, already-correct fallback discipline applied to `arweaveSeeds`/`watchList`) — a backup written before foreign keys existed could silently wipe a live foreign key on restore. `codex-ui` release, plus this document (`codex-ouronet`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
 
 **v1.0.0** — First stable release. Real Kadena mainnet sends now work end to end — same-chain and cross-chain — for the first time: fixes a critical StoaChain signing bug that would have failed every native Send on-chain (a signer was built unscoped, never declaring the `coin.TRANSFER` capability it needed), the same-chain picker being unreachable on any non-default chain pair, and the Kadena node defaulting to a direct HTTP endpoint that hairpin-NATs from its own LAN and trips browser mixed-content blocks (now a real HTTPS gateway by default, direct node kept as a selectable fallback). Both chains' cross-chain send toast now shows real, step-by-step progress instead of going silent for the several minutes a cross-chain confirmation genuinely takes. Tooltip canon upgraded to `@ouronet/talos-registry@2.2.0` (Rule 7/8: closes 8 silently-no-op account-management launchers, classifies a "no row yet" chain refusal as a friendly answer instead of an alarming one). `codex-ouronet` release only (`codex-ui`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
 
@@ -94,7 +102,7 @@ Version `1.0.0` on public npmjs. The aggregate: the six subpath barrels wired to
 | Member package | Version |
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.5.0` |
-| `@ancientpantheon/codex-ui` | `0.9.0` |
+| `@ancientpantheon/codex-ui` | `0.9.1` |
 | `@ancientpantheon/codex-ouronet` | `1.0.0` |
 | `@ancientpantheon/codex-arweave` | `0.4.0` |
 | `@ancientpantheon/arweave-core` | `0.2.0` |
