@@ -2,8 +2,11 @@
  * Shared E3 RED-matrix test helpers.
  *
  * E3 has TWO disjoint injection seams (never interchange them):
- *   - the UPLOAD seam is `UploadOptions.clientFactory` (a fake `TurboUploadClient`
- *     whose `upload({ data, dataItemOpts })` records the call and returns an id);
+ *   - the UPLOAD seam is `UploadOptions.apiFactory` (a fake `UploadGatewayApi`
+ *     whose `getUploader(tx)` records the signed tx's `{ data, tags }` and
+ *     completes via a single-chunk fake uploader — the native, non-bundler
+ *     upload path; `TurboUploadClient`/`TurboUploadClientFactory` no longer
+ *     exist in arweave-core);
  *   - the STATUS / REBUILD seam is `fetchFn` (a `typeof fetch` returning a
  *     Response-shaped object) forwarded to arweave-core `getTransactionStatus` /
  *     `queryOwnerUploads`.
@@ -21,10 +24,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import type Transaction from "arweave/node/lib/transaction";
 import type {
   ArweaveJwk,
   Tag,
-  TurboUploadClient,
+  UploadGatewayApi,
+  UploadGatewayApiFactory,
+  ChunkedUploader,
   EndpointHealth,
   GatewayPool,
 } from "@ancientpantheon/arweave-core";
@@ -55,29 +61,71 @@ export const NON_CANONICAL_ID = "not-a-canonical-arweave-id";
 
 export const MANIFEST_CONTENT_TYPE = "application/x.arweave-manifest+json";
 
-/** A recording fake `TurboUploadClient`: captures the `{ data, dataItemOpts }`
- *  of every `upload` call and returns the configured id. A `throws` flag makes
- *  the client reject (the `upload-rejected` path). */
-export interface RecordingTurboClient {
-  factory: (jwk: ArweaveJwk) => TurboUploadClient;
-  calls: Array<{ data: string | Uint8Array; tags: Tag[]; jwk: ArweaveJwk }>;
+/** A fixed anchor / honest Winston price quote the recording fake's
+ *  `getAnchor`/`getPrice` return — mirrors arweave-core's own fake-apiFactory
+ *  fixtures (`tests/upload.test.ts`/`tests/upload-native.test.ts`). */
+const RECORDING_ANCHOR = "abcdEFGHijkLMNopQRSTuvWXyz0123456789_-ABCDEF".slice(0, 43);
+const RECORDING_PRICE = "1000000000";
+
+/** A chunked uploader completing after a single `uploadChunk()` call — mirrors
+ *  arweave-core's own `FakeChunkedUploader` (`tests/upload.test.ts`,
+ *  `tests/upload-native.test.ts`). */
+class FakeChunkedUploader implements ChunkedUploader {
+  private done = false;
+  get isComplete(): boolean {
+    return this.done;
+  }
+  async uploadChunk(): Promise<void> {
+    this.done = true;
+  }
 }
 
-export function makeRecordingTurboClient(
-  opts: { id?: string; throws?: boolean } = {},
-): RecordingTurboClient {
-  const { id = CANONICAL_ID_A, throws = false } = opts;
-  const calls: RecordingTurboClient["calls"] = [];
-  const factory = (jwk: ArweaveJwk): TurboUploadClient => ({
-    upload: async (p) => {
-      calls.push({ data: p.data, tags: p.dataItemOpts.tags, jwk });
+/** Decode a signed tx's on-wire tags back into plain `{ name, value }` pairs —
+ *  the same decode `upload-native.test.ts`'s assertions use (`tx.addTag`
+ *  base64url-encodes the name/value; a raw pass-through would be malformed). */
+function decodeTags(tx: Transaction): Tag[] {
+  return tx.tags.map((t) => ({
+    name: t.get("name", { decode: true, string: true }),
+    value: t.get("value", { decode: true, string: true }),
+  }));
+}
+
+/** A recording fake `UploadGatewayApiFactory`: captures the `{ data, tags }` of
+ *  every posted upload — read off the SIGNED transaction `postArweaveData`
+ *  hands to `getUploader` — and completes it via a single-chunk fake uploader.
+ *  A `throws` flag makes `getUploader` reject (the upload-rejected path).
+ *  Mirrors what `makeRecordingTurboClient` let callers configure before the
+ *  native-upload seam (T3/T5) replaced Turbo; the returned tx `id` is no
+ *  longer injectable here — it is the real, deterministic post-sign id, so
+ *  callers assert it structurally (canonical 43-char) rather than pinning it. */
+export interface RecordingUploadApi {
+  apiFactory: UploadGatewayApiFactory;
+  calls: Array<{ data: Uint8Array; tags: Tag[] }>;
+}
+
+export function makeRecordingUploadApi(
+  opts: { throws?: boolean } = {},
+): RecordingUploadApi {
+  const { throws = false } = opts;
+  const calls: RecordingUploadApi["calls"] = [];
+
+  const apiFactory: UploadGatewayApiFactory = (): UploadGatewayApi => ({
+    async getAnchor() {
+      return RECORDING_ANCHOR;
+    },
+    async getPrice() {
+      return RECORDING_PRICE;
+    },
+    async getUploader(tx: Transaction) {
+      calls.push({ data: tx.data, tags: decodeTags(tx) });
       if (throws) {
-        throw new Error("turbo upload rejected");
+        throw new Error("upload rejected");
       }
-      return { id };
+      return new FakeChunkedUploader();
     },
   });
-  return { factory, calls };
+
+  return { apiFactory, calls };
 }
 
 /** A fake `fetchFn` (a `typeof fetch`) returning a fixed status + body — the

@@ -25,11 +25,18 @@ import type {
   KeygenWorkerMsg,
 } from "../keygen/index.js";
 import type { LibraryEntry, LibraryStore } from "../library/types.js";
+import type { MultiOwnerRebuildProgress } from "../library/rebuild.js";
 import type {
   ArweaveSeedAccountSource,
   ArweaveSeedChainwebSource,
   ArweaveSeedDeletion,
 } from "./ArweaveSeedsArea.js";
+import type {
+  UploadTrackResult,
+  UploadBundleTrackResult,
+} from "./UploadArea.js";
+import type { UploadWizardSelection } from "./UploadWizard.js";
+import type { CodexBackupResult } from "./CodexBackupArea.js";
 
 /**
  * The subset of the D5 `AddressBookEntry` the Send recipient picker reads. The
@@ -72,7 +79,24 @@ export interface ArweaveSendRequest {
  * panel never reaches into concrete protocol modules itself.
  */
 export interface ArweavePanelDeps {
-  /** The selected Arweave address the balance/upload/library areas are scoped to. */
+  /**
+   * The host's single DEFAULT Arweave identity — typically its first
+   * configured key. Used as the balance/upload areas' starting point and as
+   * codex-backup's own default signing identity (which never carries an
+   * explicit per-call account selection the way `uploadAndTrack`/
+   * `uploadFilesAndTrack` do).
+   *
+   * NOT what the Library area scopes to, as of `arweave-library-multi-key`:
+   * a codex can hold more than one Arweave key, and an upload can genuinely
+   * go out under ANY of them (the Upload Wizard's own Account step resolves
+   * its `accountId` per call) — scoping Library to this one address made
+   * every OTHER key's uploads silently invisible and un-rebuildable. The
+   * panel therefore derives the FULL set of this chain's configured
+   * addresses from `foreignKeys` (see `ArweavePanel.tsx`'s own
+   * `libraryOwners`) and hands that whole list to `LibraryArea`, which
+   * aggregates `listLibrary`/`rebuildLibrary` across every one of them —
+   * this field is folded in too, as a floor, never a narrowing.
+   */
   address: string;
 
   // ── keyring (E1) ──
@@ -98,9 +122,20 @@ export interface ArweavePanelDeps {
   // A consumer that omits one leaves exactly that affordance disabled — the
   // area degrades per-source rather than failing, so a host with no decrypt
   // seam still gets Free Seed Input and the Accounts list.
-  /** Activated, dalos-curve Ouronet accounts offered by define-seed Option 2. */
+  //
+  // `arweave-upload-encryption` (T6): `ouronetAccounts`/`revealAccountSecret`
+  // are now a SHARED seam — `LibraryArea`'s decrypt-on-download also consumes
+  // both (forwarded the same way this seam already reaches
+  // `ArweaveSeedsArea`), since they're the ONLY mapping this panel has from
+  // an on-chain `Codex-Encryptor` address back to a revealable account. A
+  // consumer that omits either leaves encrypted-entry download disabled
+  // (surfacing `LibraryArea`'s "doesn't hold the account" message) exactly
+  // as omitting them already leaves seed-Option-2 disabled.
+  /** Activated, dalos-curve Ouronet accounts offered by define-seed Option 2,
+   *  and the address→account mapping `LibraryArea`'s decrypt-on-download uses. */
   ouronetAccounts?: readonly ArweaveSeedAccountSource[];
-  /** Decrypts an Ouronet account's stored secret (unlock-gated) for Option 2. */
+  /** Decrypts an Ouronet account's stored secret (unlock-gated), for
+   *  define-seed Option 2 AND `LibraryArea`'s decrypt-on-download. */
   revealAccountSecret?: (accountId: string) => Promise<string | null> | string | null;
   /** Chainweb seeds offered by define-seed Option 3. */
   chainwebSeeds?: readonly ArweaveSeedChainwebSource[];
@@ -131,11 +166,60 @@ export interface ArweavePanelDeps {
   /** E2 status poll: resolves the current confirmation state for a tx id. */
   pollStatus: (id: string) => Promise<"pending" | "final">;
 
-  // ── upload / library (E3) ──
-  /** E3 upload-then-append: uploads and returns the data-item result. */
+  // ── upload / library (E3, current T5/T7 shapes) ──
+  /** E3 upload-then-append (T5/T7/T8 CURRENT shape): uploads a single file
+   *  under a mandatory category selection and returns the data-item result.
+   *  Typed to `UploadWizardSelection` (`arweave-upload-wizard`, T2/T3) — a
+   *  STRICT widening of `UploadAreaProps`'s own `UploadCategorySelection`
+   *  (one additional optional field, `encryptFor`) — rather than the
+   *  narrower shape, because this is what the real underlying function
+   *  (`library/flow.ts`'s `uploadAndTrack`, via its `opts.encryptFor`)
+   *  actually accepts once an Encrypted upload is possible; a host wiring
+   *  that never threads `encryptFor` through still satisfies this type
+   *  exactly as before (the field is optional), and `UploadArea.tsx` itself
+   *  is unaffected — it only ever builds the narrower
+   *  `UploadCategorySelection`, which is assignable to this wider shape.
+   *
+   *  THIRD PARAMETER, `accountId` (owner-reported Bug 1 fix,
+   *  `arweave-upload-wizard-account-wiring`): the chosen account's id — the
+   *  SAME `ForeignKeyEntry.id` `UploadWizard`'s own Account step picker
+   *  already holds as its `accountId` state, forwarded verbatim with no
+   *  translation. Before this parameter existed, the Account step's
+   *  selection was purely cosmetic: nothing told a real implementation
+   *  WHICH account should sign/pay for the upload, so it silently used
+   *  whatever identity the host's deps happened to be constructed with
+   *  (see `realArweaveAdapter.ts`'s `buildRealPanelDeps`) regardless of what
+   *  the wizard showed as selected. A consumer MUST resolve the actual
+   *  signing key from this id at call time (never from a construction-time
+   *  default) for the Account step to mean anything in a multi-account
+   *  codex. */
   uploadAndTrack: (
     file: File,
-  ) => Promise<{ id: string; itemId: string; ownerAddress: string; tags: unknown[] }>;
+    selection: UploadWizardSelection,
+    accountId: string,
+  ) => Promise<UploadTrackResult>;
+  /** T7 bundle-aware upload-then-append: uploads 2+ files (or a folder), with
+   *  the SAME category selection applied to every item, as one atomic bundle.
+   *  Same `UploadWizardSelection` widening, AND the same mandatory
+   *  `accountId` third parameter, as {@link ArweavePanelDeps.uploadAndTrack}. */
+  uploadFilesAndTrack: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+  ) => Promise<UploadBundleTrackResult>;
+  /** `arweave-non-removable-account` T4: fired once an Encrypted upload
+   *  succeeds through the `UploadWizard` mount, with the ENCRYPTING Ouronet
+   *  account's id — mirrors `getBalance`/`revealAccountSecret`'s existing
+   *  injection shape exactly (optional, threaded straight through to
+   *  `UploadWizard`). This is the real-app wiring point `library/flow.ts`'s
+   *  own `uploadAndTrack`/`uploadFilesAndTrack` were already built to drive
+   *  (their `opts.onAccountUsedForEncryption`) — the non-removable-account
+   *  invariant's dead-letter gap: "the trigger exists and fires, but nothing
+   *  in the real app is wired to it yet" (design.md). `codex-arweave` itself
+   *  never interprets what "non-removable" means or imports `codex-ouronet`
+   *  — a consumer that omits this leaves the signal unobserved, exactly as
+   *  omitting any other optional seam here leaves its own affordance inert. */
+  onAccountUsedForEncryption?: (accountId: string) => void;
   /** E3 list: the owner's Library entries, newest-first. */
   listLibrary: (owner: string) => Promise<LibraryEntry[]>;
   /** E3 openUrl: composes a healthy-gateway URL for an id. */
@@ -146,6 +230,56 @@ export interface ArweavePanelDeps {
   libraryStore: LibraryStore;
   /** The gateway pool the open/rebuild paths run through. */
   pool: GatewayPool;
+  /**
+   * `arweave-auto-rebuild-on-unlock`: the HOST's own in-flight
+   * multi-address auto-rebuild progress (driven by `rebuildLibraryForAllOwners`,
+   * which the host runs once per unlock — this panel never triggers it
+   * itself), or `null`/absent when none is running. Mirrors the
+   * `onAccountUsedForEncryption`/`checkArweaveRestoreEligibility` optional-
+   * value-seam shape already established on this interface: the panel just
+   * forwards whatever the host reports, through `LibraryAutoRebuildProgress`,
+   * mounted in the Library category — an unwired host (or one that never
+   * updates this field) simply never shows the status, same "absent optional
+   * seam → graceful no-op" discipline every other optional field here
+   * already follows.
+   */
+  libraryAutoRebuildProgress?: MultiOwnerRebuildProgress | null;
+
+  // ── codex backup (arweave-upload-categories T5) ──
+  /** Resolves the codex's CURRENT encrypted export payload — the SAME
+   *  `useCodexBackup().exportForCloud` seam the download/cloud-backup flow
+   *  already uses. Computed by the HOST, forwarded to `CodexBackupArea`
+   *  verbatim: this module never parses, produces, or interprets it (matches
+   *  `CodexBackupAreaProps.getExportJson` verbatim). LAZY on purpose —
+   *  `CodexBackupArea` calls it fresh at confirm-time, never at mount/render
+   *  time, so a backup always captures whatever's true at the moment of the
+   *  click. */
+  getExportJson: () => Promise<string>;
+  /** Uploads the resolved export payload under `Codex-Category: codex-backup` (via
+   *  `backupCodexToLibrary`, `library/flow.ts`) and resolves the resulting
+   *  data-item id. The host's own closure is also where the codex's `dirty`
+   *  flag gets cleared on success — this module has zero knowledge of that.
+   *  Matches `CodexBackupAreaProps.backupCodex` verbatim. */
+  backupCodex: (exportJson: string) => Promise<CodexBackupResult>;
+  /** `codex-seed-restore-activation` T2: resolves whether the codex's Prime
+   *  Arweave seed currently shares origin words with Prime Ouronet (`true` ⇒
+   *  the NEXT `backupCodex` call will carry a `Codex-Backup-Recovery-Key`
+   *  recovery tag — `codex-recovery-backup-tagging`). HOST-SUPPLIED and
+   *  ZERO-ARGUMENT on purpose: the host already holds the Prime Ouronet
+   *  account's bitstring AND the Prime Arweave seed's stored address, so it
+   *  answers this itself via T1's `checkArweaveRestoreEligibility`
+   *  (`seeds/checkRestoreEligibility.ts`) — this package's UI layer never
+   *  touches an Ouronet account's bitstring directly, matching the
+   *  host-app-bridges-isolated-packages pattern every other seam here
+   *  follows. Same optional-seam shape precedent as `revealAccountSecret`
+   *  above. Drives `ArweaveRestoreEligibilityStatus`, mounted in the Library
+   *  category alongside `CodexBackupArea` — OPTIONAL: an unwired host simply
+   *  never shows the status (same "absent seam → graceful no-op" discipline
+   *  every other optional field here already follows), and the mock adapter
+   *  is not required to implement it. The underlying re-derivation is an
+   *  RSA-4096 keygen (~6.7s) — a consumer that wires this should expect a
+   *  real multi-second resolve, never an instant one. */
+  checkArweaveRestoreEligibility?: () => Promise<boolean>;
 
   // ── address book (D5) ──
   /** The unified address book — the Send recipient picker filters this to Arweave. */

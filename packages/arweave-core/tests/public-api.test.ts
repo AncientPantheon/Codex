@@ -442,9 +442,9 @@ describe("public API barrel — Phase 4 error classes are instanceof-usable on t
   });
 
   it("re-imported UploadFailedError is a distinct constructable class from the barrel", () => {
-    // Thrown when the Turbo client rejects or returns a bad id; consumers catch it
-    // by identity. Constructing it proves the barrel re-exports the real class and
-    // preserves the cause chain.
+    // A generic upload-failure error class; consumers catch it by identity.
+    // Constructing it proves the barrel re-exports the real class and preserves
+    // the cause chain.
     const cause = new Error("client rejected");
     const err = new UploadFailedError("upload-rejected", { cause });
     expect(err).toBeInstanceOf(UploadFailedError);
@@ -484,11 +484,11 @@ describe("public API barrel — Phase 4 error classes are instanceof-usable on t
 });
 
 describe("public API barrel — Phase 4 negative surface lock", () => {
-  it("does NOT export the internal default Turbo client factory", () => {
-    // Decision (mirrors T3.7's endpoint-client-factory call): the default factory
-    // is an internal seam — the ONLY runtime site importing @ardrive/turbo-sdk.
-    // Consumers inject a custom client via uploadData's options rather than minting
-    // SDK clients through us; a browser consumer aliases the SDK to its web build.
-    expect((api as Record<string, unknown>).defaultTurboClientFactory).toBeUndefined();
+  it("does NOT export the internal default native-upload gateway-API factory", () => {
+    // Decision (mirrors T3.7's endpoint-client-factory call): the default
+    // per-endpoint gateway-API factory built inside nativeUpload.ts is an
+    // internal seam. Consumers inject a custom `apiFactory` via `uploadData`'s
+    // options rather than minting arweave-js clients through us.
+    expect((api as Record<string, unknown>).defaultApiFactory).toBeUndefined();
   });
 });

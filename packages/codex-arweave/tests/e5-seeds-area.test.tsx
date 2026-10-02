@@ -541,12 +541,17 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
     expect(screen.queryByTestId("arweave-category-empty-accounts")).toBeNull();
   });
 
+  // Upload and Library are wired now too (arweave-upload-categories addendum:
+  // mounting) — with no provider (`deps === null`, this describe block's own
+  // deliberate rendering choice), they degrade to their own "unavailable"
+  // message rather than the old generic empty placeholder.
   it.each(["upload", "library"])(
-    "keeps the existing empty placeholder for `%s` — Pure Keys is now wired too (PureKeysArea)",
+    "shows the `%s` category's own 'unavailable' message (no provider wired) rather than the old generic empty placeholder",
     (id) => {
       render(<ArweavePanel id={ARWEAVE_CHAIN_ID} />);
       fireEvent.click(screen.getByTestId(`arweave-subtab-${id}`));
-      expect(screen.getByTestId(`arweave-category-empty-${id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`arweave-${id}-unavailable`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`arweave-category-empty-${id}`)).toBeNull();
     },
   );
 
@@ -608,6 +613,13 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
         ownerAddress: "ADDR-HOST",
         tags: [],
       })),
+      uploadFilesAndTrack: vi.fn(async () => ({
+        manifestId: "manifest-id",
+        fileIds: [],
+        uploadId: "upload-id",
+      })),
+      getExportJson: vi.fn(async () => "{}"),
+      backupCodex: vi.fn(async () => ({ id: "backup-id" })),
       listLibrary: vi.fn(async () => []),
       openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
       rebuildLibrary: vi.fn(async () => {}),
@@ -737,6 +749,13 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
         ownerAddress: "ADDR-HOST",
         tags: [],
       })),
+      uploadFilesAndTrack: vi.fn(async () => ({
+        manifestId: "manifest-id",
+        fileIds: [],
+        uploadId: "upload-id",
+      })),
+      getExportJson: vi.fn(async () => "{}"),
+      backupCodex: vi.fn(async () => ({ id: "backup-id" })),
       listLibrary: vi.fn(async () => []),
       openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
       rebuildLibrary: vi.fn(async () => {}),
@@ -861,6 +880,13 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
         ownerAddress: "ADDR-HOST",
         tags: [],
       })),
+      uploadFilesAndTrack: vi.fn(async () => ({
+        manifestId: "manifest-id",
+        fileIds: [],
+        uploadId: "upload-id",
+      })),
+      getExportJson: vi.fn(async () => "{}"),
+      backupCodex: vi.fn(async () => ({ id: "backup-id" })),
       listLibrary: vi.fn(async () => []),
       openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
       rebuildLibrary: vi.fn(async () => {}),
@@ -3510,6 +3536,13 @@ describe("ArweavePanel — warn before leaving an in-flight generation (T2)", ()
         ownerAddress: "ADDR-HOST",
         tags: [],
       })),
+      uploadFilesAndTrack: vi.fn(async () => ({
+        manifestId: "manifest-id",
+        fileIds: [],
+        uploadId: "upload-id",
+      })),
+      getExportJson: vi.fn(async () => "{}"),
+      backupCodex: vi.fn(async () => ({ id: "backup-id" })),
       listLibrary: vi.fn(async () => []),
       openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
       rebuildLibrary: vi.fn(async () => {}),
@@ -3618,7 +3651,7 @@ describe("ArweavePanel — warn before leaving an in-flight generation (T2)", ()
     expect(screen.queryByTestId("arweave-leave-generation-dialog")).toBeNull();
 
     fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
-    expect(screen.getByTestId("arweave-category-empty-upload")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-upload-unavailable")).toBeInTheDocument();
     expect(screen.queryByTestId("arweave-leave-generation-dialog")).toBeNull();
   });
 });

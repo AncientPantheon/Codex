@@ -88,6 +88,34 @@ describe("estimateFee — malformed quote", () => {
   });
 });
 
+describe("estimateFee — optional target (no transfer recipient)", () => {
+  it("forwards target as undefined to getPrice when target is omitted, so a byte-size-only quote (e.g. a data upload with no recipient) can be fetched", async () => {
+    const getPrice = vi.fn(async () => "1000000000");
+    const pool = createGatewayPool({
+      endpoints: ["https://a.example"],
+      sleep: instantSleep,
+    });
+
+    await expect(
+      estimateFee(pool, BYTE_SIZE, undefined, { getPrice }),
+    ).resolves.toBe(1000000000n);
+    expect(getPrice).toHaveBeenCalledWith("https://a.example", BYTE_SIZE, undefined);
+  });
+
+  it("still forwards a real target verbatim when one is supplied (existing callers unaffected)", async () => {
+    const getPrice = vi.fn(async () => "1000000000");
+    const pool = createGatewayPool({
+      endpoints: ["https://a.example"],
+      sleep: instantSleep,
+    });
+
+    await expect(estimateFee(pool, BYTE_SIZE, TARGET, { getPrice })).resolves.toBe(
+      1000000000n,
+    );
+    expect(getPrice).toHaveBeenCalledWith("https://a.example", BYTE_SIZE, TARGET);
+  });
+});
+
 describe("estimateFee — pool rotation semantics", () => {
   it("rotates to endpoint B's honest quote after A's gate-failing quote", async () => {
     const getPrice = vi.fn(async (endpoint: string) => {

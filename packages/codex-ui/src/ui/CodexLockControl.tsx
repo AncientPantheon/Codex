@@ -12,10 +12,11 @@
  * TTL comes from uiSettings.passwordCacheMinutes (edited in Codex UI Settings).
  */
 
-import { useState, useEffect, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { PasswordModal } from "../components/index.js";
 import { useCodexAuth } from "../hooks/useCodexAuth.js";
+import { useRequestLogout } from "../hooks/useRequestLogout.js";
 import { useCodexStore } from "../provider/index.js";
 import { CodexModalShell, PasswordField, ModalExecuteRow } from "./internal/CodexModalShell.js";
 
@@ -77,6 +78,22 @@ export function CodexLockControl({ className, fullWidth }: CodexLockControlProps
   const store = useCodexStore();
   const [now, setNow] = useState(() => Date.now());
 
+  // "Lock Codex" is the closest existing equivalent to "logout" in this
+  // single-codex-per-browser app (no separate multi-account logout concept
+  // exists) — so it's the sanctioned `useRequestLogout()` call site
+  // (docs/work/codex-session-lifecycle). `requestLogout()` resolves
+  // "clean" instantly with no prompt when the codex has no backup
+  // divergence (today's behavior, unchanged); on a dirty codex it surfaces
+  // <LogoutConfirmModal> via the store's `pendingLogoutRequest` slice and
+  // only this handler's own `.then` proceeds to the REAL `lock()` — and
+  // only when the user didn't cancel.
+  const requestLogout = useRequestLogout();
+  const handleLockClick = useCallback(() => {
+    void requestLogout().then((outcome) => {
+      if (outcome !== "cancelled") lock();
+    });
+  }, [requestLogout, lock]);
+
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -115,7 +132,7 @@ export function CodexLockControl({ className, fullWidth }: CodexLockControlProps
       <button
         type="button"
         className={className}
-        onClick={lock}
+        onClick={handleLockClick}
         style={{
           ...fullWidthButtonStyle,
           backgroundColor: "#0a0a0a", border: "1px solid #262626", color: "#d2d3d4",
@@ -134,7 +151,7 @@ export function CodexLockControl({ className, fullWidth }: CodexLockControlProps
     <div className={className} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
       <button
         type="button"
-        onClick={lock}
+        onClick={handleLockClick}
         style={{
           display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8,
           fontSize: 12, fontWeight: 600, cursor: "pointer",

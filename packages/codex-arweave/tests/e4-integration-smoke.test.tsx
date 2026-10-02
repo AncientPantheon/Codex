@@ -180,6 +180,13 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
         tags: entry.tags,
       };
     }),
+    uploadFilesAndTrack: vi.fn(async () => ({
+      manifestId: "manifest-id",
+      fileIds: [],
+      uploadId: "upload-id",
+    })),
+    getExportJson: vi.fn(async () => "{}"),
+    backupCodex: vi.fn(async () => ({ id: "backup-id" })),
     listLibrary: vi.fn(async () =>
       [...libraryRows].sort((a, b) => b.createdAt - a.createdAt),
     ),

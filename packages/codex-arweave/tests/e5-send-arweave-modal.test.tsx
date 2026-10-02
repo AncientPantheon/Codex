@@ -123,6 +123,13 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
       ownerAddress: ADDRESS_A,
       tags: [],
     })),
+    uploadFilesAndTrack: vi.fn(async () => ({
+      manifestId: "manifest-id",
+      fileIds: [],
+      uploadId: "upload-id",
+    })),
+    getExportJson: vi.fn(async () => "{}"),
+    backupCodex: vi.fn(async () => ({ id: "backup-id" })),
     listLibrary: vi.fn(async () => libraryRows),
     openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
     rebuildLibrary: vi.fn(async () => {}),

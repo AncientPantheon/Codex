@@ -33,11 +33,22 @@ export type {
 
 // ----- composition flows + rebuild-from-chain (E-07 / E-08) -----
 
-export { uploadAndTrack, pollStatus, openUrl } from "./flow.js";
+export { uploadAndTrack, backupCodexToLibrary, pollStatus, openUrl } from "./flow.js";
 export type {
   UploadAndTrackOptions,
+  BackupCodexToLibraryOptions,
   PollStatusOptions,
   OpenUrlOptions,
 } from "./flow.js";
-export { rebuildLibrary } from "./rebuild.js";
-export type { RebuildLibraryOptions } from "./rebuild.js";
+export { rebuildLibrary, rebuildLibraryForAllOwners } from "./rebuild.js";
+export type {
+  RebuildLibraryOptions,
+  RebuildLibraryForAllOwnersOptions,
+  OwnerRebuildProgress,
+  MultiOwnerRebuildProgress,
+} from "./rebuild.js";
+
+// ----- chain-query safety net (`arweave-non-removable-account` T3) -----
+
+export { checkAccountEncryptedArweaveUploads } from "./checkEncryptionSafety.js";
+export type { CheckAccountEncryptedArweaveUploadsOptions } from "./checkEncryptionSafety.js";

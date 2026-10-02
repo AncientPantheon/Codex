@@ -64,7 +64,14 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 /** A per-endpoint Winston price-quote fetch: `endpoint` targets a single
- *  gateway, mirroring `tx/types.ts`'s `TransferGatewayApi.getPrice`. */
+ *  gateway, mirroring `tx/types.ts`'s `TransferGatewayApi.getPrice`. Kept
+ *  REQUIRED (not widened to `target?: string`) so `tx/transfer.ts`'s existing
+ *  `opts.getPrice` contextual typing (bridging to `TransferGatewayApi.getPrice`,
+ *  itself required-target) is untouched — `estimateFee`'s OWN `target` param is
+ *  what becomes optional below; see its forwarding comment for how a
+ *  byte-size-only caller (e.g. a native upload's price quote, no recipient)
+ *  reaches a `getPrice` implementation that tolerates `undefined` despite this
+ *  seam type. */
 export type EstimateFeeGetPriceFn = (
   endpoint: string,
   byteSize: number,
@@ -94,7 +101,9 @@ function defaultGetPrice(): EstimateFeeGetPriceFn {
 
 /**
  * Fetch and validate a Winston reward (fee) quote for a `byteSize`-byte
- * transfer to `target`, through the gateway pool.
+ * transfer to `target`, through the gateway pool. `target` is optional —
+ * omitted (forwarded as `undefined` to `getPrice`) fetches a quote for a
+ * byte size with no transfer recipient, e.g. pricing a data upload.
  *
  * @throws {GatewayPoolExhaustedError} (unwrapped) if the pool exhausts; its
  *   `attempts` carry the per-endpoint underlying errors (e.g.
@@ -103,13 +112,26 @@ function defaultGetPrice(): EstimateFeeGetPriceFn {
 export async function estimateFee(
   pool: GatewayPool,
   byteSize: number,
-  target: string,
+  target?: string,
   opts: EstimateFeeOptions = {},
 ): Promise<bigint> {
   const getPrice = opts.getPrice ?? defaultGetPrice();
 
   const rewardString = await pool.execute(async (endpoint, { signal }) => {
-    const quote = await withAbort(getPrice(endpoint, byteSize, target), signal);
+    // `getPrice`'s seam type (`EstimateFeeGetPriceFn`) keeps `target: string`
+    // REQUIRED so `tx/transfer.ts`'s existing `opts.getPrice` (bridging to the
+    // required-target `TransferGatewayApi.getPrice`) stays untouched and
+    // unbroken. `estimateFee`'s own `target` is optional (a byte-size-only
+    // quote, e.g. for a data upload, has no recipient) — forwarding it
+    // verbatim, including `undefined`, is safe: arweave-js's real
+    // `transactions.getPrice(byteSize, targetAddress?)` already treats the
+    // target as optional, and a byte-size-only caller supplies its own
+    // `getPrice` implementation (typed to its own narrower needs) that
+    // likewise tolerates `undefined` despite this shared seam type.
+    const quote = await withAbort(
+      getPrice(endpoint, byteSize, target as string),
+      signal,
+    );
     // The quote is embedded in a SIGNED tx — gate it strictly. A gate-failing
     // quote throws inside the op so the pool rotates to an honest gateway.
     if (!WINSTON_DECIMAL.test(quote)) {

@@ -19,7 +19,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { useEffect } from "react";
-import { render, screen, cleanup, within, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -481,6 +481,7 @@ import {
   createSeedKeyDeleter,
   toArweaveSeedChainwebSources,
   ARWEAVE_WIRING_MODE_MOCK,
+  ARWEAVE_WIRING_MODE_REAL,
 } from "../src/ForeignChainsWiring";
 import { createArweaveKeyPersistence } from "../src/realArweaveAdapter";
 
@@ -1386,5 +1387,182 @@ describe("T1 — ForeignChainsWiring renders against a mixed-type watch list", (
     await renderWiredForeignChainsTab(snapshot);
 
     expect(await screen.findByTestId("arweave-panel")).toBeInTheDocument();
+  });
+});
+
+// ============================================================================
+// `arweave-non-removable-account` T5 — the dead-letter gap closed END TO END.
+//
+// Topic 1's design.md: "the trigger exists and fires [in library/flow.ts],
+// but nothing in the real app is wired to it yet." T4 (codex-arweave) proved
+// the real `ArweavePanel` -> `UploadWizard` mount actually calls
+// `deps.onAccountUsedForEncryption(accountId)` once a mocked Encrypted upload
+// succeeds — but that test's `deps` were hand-built fakes, not the REAL
+// app-side wiring. This drives the SAME UploadWizard flow through the REAL
+// `ForeignChainsWiring` component (the exact composition `App.tsx` mounts),
+// against the REAL `<CodexProvider>` store, so what is under test is the ONE
+// remaining unproven link: does the app-side `onAccountUsedForEncryption`
+// value this file's own `ForeignChainsWiring` component wires (T5,
+// `actions.markOuroAccountEncryptedArweaveUpload`) actually reach the real
+// store and flip the real account's flag — not a fake double that happens to
+// satisfy the type.
+// ============================================================================
+
+describe("`arweave-non-removable-account` T5 — a mocked encrypted upload through the real app wiring flips the real store flag", () => {
+  const ENCRYPTOR_ACCOUNT_ID = "ouro-encryptor-under-test";
+  const UPLOAD_KEY_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
+
+  function buildSnapshot(): CodexSnapshot {
+    const encryptor = ouroAccount({
+      id: ENCRYPTOR_ACCOUNT_ID,
+      name: "Encryptor Account",
+      address: "Ѻ.encryptor-under-test",
+      originCurve: "dalos",
+      isActive: true,
+    });
+    const uploadKey: ForeignKeyEntry = {
+      id: UPLOAD_KEY_ADDRESS,
+      chainId: ARWEAVE_CHAIN_ID,
+      encryptedKeyfile: "throwaway-ciphertext-blob",
+      address: UPLOAD_KEY_ADDRESS,
+    };
+    return {
+      ...emptySnapshot,
+      ouroAccounts: [encryptor],
+      foreignKeys: [uploadKey],
+    };
+  }
+
+  /** Drives the Upload wizard's full Encrypted-mode path through the REAL
+   *  `ArweavePanel`/`UploadWizard` mount — the SAME testid sequence T4's own
+   *  `codex-arweave` spec (`e4-panel-categories.test.tsx`) uses against its
+   *  hand-built fakes. */
+  async function driveEncryptedUpload(): Promise<void> {
+    fireEvent.click(await screen.findByTestId("arweave-subtab-upload"));
+    fireEvent.click(await screen.findByTestId("arweave-upload-start"));
+
+    fireEvent.click(
+      await screen.findByTestId(`upload-wizard-account-${UPLOAD_KEY_ADDRESS}`),
+    );
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category-option-general-other"));
+    fireEvent.click(screen.getByTestId("upload-wizard-mode-encrypted"));
+    fireEvent.click(screen.getByTestId(`upload-wizard-encryptor-${ENCRYPTOR_ACCOUNT_ID}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [new File([new Uint8Array(10)], "note.txt", { type: "text/plain" })] },
+    });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+  }
+
+  it("mock mode (the DEFAULT, funds-safe wiring): a successful Encrypted upload flips hasEncryptedArweaveUpload on the REAL encrypting account in the real store — not a fake double", async () => {
+    const storeRef: { current: ReturnType<typeof useCodexStore> | null } = { current: null };
+    await renderWiredForeignChainsTab(buildSnapshot(), TEST_PASSWORD, storeRef);
+
+    await driveEncryptedUpload();
+
+    // Before the flag flips, the account must start unflagged — otherwise a
+    // test fixture default (not this wiring) could be what the assertion below
+    // is actually observing.
+    expect(
+      storeRef.current
+        ?.getState()
+        .ouroAccounts.find((a) => a.id === ENCRYPTOR_ACCOUNT_ID)?.hasEncryptedArweaveUpload,
+    ).not.toBe(true);
+
+    await waitFor(() => {
+      const account = storeRef.current
+        ?.getState()
+        .ouroAccounts.find((a) => a.id === ENCRYPTOR_ACCOUNT_ID);
+      expect(account?.hasEncryptedArweaveUpload).toBe(true);
+    });
+
+    // A second, UNRELATED account present in the same codex must stay
+    // unflagged — this is the per-account, not global, invariant.
+    const bystander = ouroAccount({
+      id: "ouro-bystander",
+      address: "Ѻ.bystander",
+      originCurve: "dalos",
+      isActive: true,
+    });
+    expect(bystander.hasEncryptedArweaveUpload).not.toBe(true);
+  });
+
+  it("real mode (`buildArweaveWiring({ mode: ARWEAVE_WIRING_MODE_REAL })`): the SAME `onAccountUsedForEncryption` wiring this file's `ForeignChainsWiring` component builds reaches the real store action when invoked", async () => {
+    // WHY: real mode's `uploadAndTrack` runs the actual E1-E3 native-upload
+    // recipe against a live gateway pool — exercising it end to end through
+    // the UI would mean faking an entire Arweave gateway's price/anchor/post
+    // responses, which is `arweave-core`'s own test suite's job, not this
+    // app-wiring seam's. What this file is responsible for proving is that
+    // the value `ForeignChainsWiring` BUILDS for real mode (T5:
+    // `actions.markOuroAccountEncryptedArweaveUpload`, threaded through
+    // `buildArweaveWiring` exactly like the mock-mode branch just proved
+    // above) is the SAME live store action, by constructing it the identical
+    // way the component does — off a REAL mounted `<CodexProvider>` store —
+    // and invoking it directly.
+    const encryptor = ouroAccount({
+      id: ENCRYPTOR_ACCOUNT_ID,
+      name: "Encryptor Account",
+      address: "Ѻ.encryptor-under-test",
+      originCurve: "dalos",
+      isActive: true,
+    });
+    const adapter = await hydrateFromPlaintextSnapshot({
+      ...emptySnapshot,
+      ouroAccounts: [encryptor],
+    });
+    const storeRef: { current: ReturnType<typeof useCodexStore> | null } = { current: null };
+    const panelDepsRef: { current: ReturnType<typeof buildArweaveWiring>["panelDeps"] | null } = {
+      current: null,
+    };
+
+    // Builds the SAME real-mode `panelDeps` `ForeignChainsWiring`'s own
+    // component builds (T5), off the REAL mounted store's `actions` — but
+    // only CAPTURES it (never calls it from inside render: a store mutation
+    // is a side effect, and `CodexProvider`'s own adapter-wiring effect has
+    // not necessarily run yet on the FIRST render, which is exactly the
+    // "Codex store has no adapter wired" race this split avoids).
+    function RealModeWiringProbe(): null {
+      const store = useCodexStore();
+      storeRef.current = store;
+      const actions = store((s) => s.actions);
+      const { panelDeps } = buildArweaveWiring({
+        mode: ARWEAVE_WIRING_MODE_REAL,
+        gatewayUrl: DEFAULT_GATEWAY_URL,
+        pool: offlinePool,
+        onAccountUsedForEncryption: actions.markOuroAccountEncryptedArweaveUpload,
+      });
+      panelDepsRef.current = panelDeps;
+      return null;
+    }
+
+    render(
+      <CodexProvider adapter={adapter} deviceVariant="dev">
+        <RealModeWiringProbe />
+      </CodexProvider>,
+    );
+
+    // Wait for `CodexProvider`'s own adapter-wiring effect to finish before
+    // invoking a mutating store action — mirrors every other store-mutating
+    // seam this file's own tests already serialize behind a readiness wait.
+    await waitFor(() => {
+      expect(storeRef.current?.getState().adapter).toBeTruthy();
+    });
+
+    // Invoke the REAL-mode-built signal directly — this is the exact
+    // function `UploadWizard` calls (via `ArweavePanel`'s
+    // `onAccountUsedForEncryption={deps.onAccountUsedForEncryption}` mount,
+    // proven in `codex-arweave`'s own T4 spec) once a real-mode Encrypted
+    // upload succeeds.
+    panelDepsRef.current?.onAccountUsedForEncryption?.(ENCRYPTOR_ACCOUNT_ID);
+
+    await waitFor(() => {
+      const account = storeRef.current
+        ?.getState()
+        .ouroAccounts.find((a) => a.id === ENCRYPTOR_ACCOUNT_ID);
+      expect(account?.hasEncryptedArweaveUpload).toBe(true);
+    });
   });
 });

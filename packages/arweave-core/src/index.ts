@@ -136,13 +136,13 @@ export {
   RewardExceedsCapError,
 } from "./tx/errors.js";
 
-// ── Upload: Turbo bundling path + required tag schema (Phase 4) ─────────────
-// The DEFAULT Turbo client factory (turboClient.ts) is DELIBERATELY PRIVATE —
-// the single runtime site importing `@ardrive/turbo-sdk`. Consumers inject a
-// custom client via `uploadData`'s options (a browser consumer injects a
-// web-built client / aliases the SDK to its web build), rather than minting SDK
-// clients through us — mirroring the tx module's endpoint-client-factory
-// decision. `uploadData` lazily imports it only when no client is injected.
+// ── Upload: native Arweave transaction path + required tag schema (Phase 4) ─
+// `uploadData` posts a data item as a native (non-bundler) Arweave transaction
+// through `postArweaveData` (nativeUpload.ts, T3) — a pool-driven, chunked
+// upload, no bundler service involved. The per-endpoint gateway-API factory is
+// the injectable seam (`UploadOptions.apiFactory`), mirroring the tx module's
+// `SendTransferOptions.apiFactory` decision; consumers/tests inject a fake
+// rather than minting SDK clients through us.
 export { uploadData } from "./upload/upload.js";
 export type { UploadOptions } from "./upload/upload.js";
 export {
@@ -153,16 +153,66 @@ export {
   TAG_CODEX_ITEM_ID,
   TAG_CODEX_OWNER,
   REQUIRED_UPLOAD_TAG_NAMES,
+  TAG_CODEX_TAG_SCHEMA_VERSION,
+  CODEX_TAG_SCHEMA_VERSION_CURRENT,
+  TAG_CODEX_UPLOAD_ID,
+  TAG_CODEX_ITEM_TYPE,
+  TAG_CODEX_CATEGORY,
+  TAG_CODEX_ASSET_TYPE,
+  TAG_CODEX_APP_ID,
+  TAG_CODEX_APP_VERSION,
+  TAG_CODEX_ENCRYPTED,
+  TAG_CODEX_ENCRYPTOR,
+  TAG_CODEX_ENCRYPTION_VERSION,
+  CODEX_ENCRYPTION_VERSION_CURRENT,
+  UPLOAD_CATEGORIES,
+  NFT_ASSET_TYPES,
 } from "./upload/tags.js";
-export type { Tag, BuildUploadTagsParams } from "./upload/tags.js";
 export type {
-  UploadParams,
-  UploadResult,
-  TurboUploadClient,
-  TurboUploadClientFactory,
-} from "./upload/types.js";
+  Tag,
+  BuildUploadTagsParams,
+  UploadItemType,
+  UploadCategory,
+  NftAssetType,
+} from "./upload/tags.js";
+export type { UploadParams, UploadResult } from "./upload/types.js";
 export { InvalidUploadParamsError, UploadFailedError } from "./upload/errors.js";
 export type { UploadFailedReason } from "./upload/errors.js";
+// The injectable per-endpoint gateway-API seam `uploadData`/`uploadBundle` both
+// forward to `postArweaveData` (`UploadOptions.apiFactory` / T6's
+// `UploadBundleOptions.apiFactory`) — mirroring `TransferGatewayApiFactory`'s
+// own exported-type treatment just above. A consumer composing its own
+// upload-then-track flow (e.g. codex-arweave's `library/flow.ts`) needs this
+// type to declare its own forwarding seam without a deep-path import.
+export type {
+  UploadGatewayApi,
+  UploadGatewayApiFactory,
+  ChunkedUploader,
+} from "./upload/nativeUpload.js";
+
+// ── Upload: multi-file/folder ANS-104 bundle path (Phase 4, T6) ─────────────
+// `uploadBundle` is the counterpart to `uploadData` for 2+ files or an
+// explicit folder selection — one atomic `arbundles` ANS-104 bundle (N signed
+// file data items + a signed `arweave/paths` manifest data item, all sharing
+// one `Codex-Upload-Id`), posted as ONE wrapping transaction via the SAME
+// `postArweaveData` primitive. Held back from the T5 export block (Wave 2) to
+// avoid a concurrent-edit conflict with T5 on this same file; added here now
+// that both Wave 2 tasks have landed.
+export { uploadBundle } from "./upload/bundle.js";
+export type {
+  UploadBundleFile,
+  UploadBundleParams,
+  UploadBundleOptions,
+  UploadBundleResult,
+} from "./upload/bundle.js";
+
+// ── Upload: dedicated codex-backup primitive (arweave-upload-categories, T4) ─
+// `uploadCodexBackup` is a thin, hardcoded-`category:"codex-backup"` wrapper
+// around `uploadData` — the codex's own consuming app (codex-arweave) composes
+// it with its own export flow; this package stays zero-dependency on any
+// `codex-*` package.
+export { uploadCodexBackup } from "./upload/codexBackup.js";
+export type { UploadCodexBackupParams } from "./upload/codexBackup.js";
 
 // ── Rebuild: owner → matching tx ids + tags via GraphQL through the pool ────
 export { queryOwnerUploads } from "./rebuild/query.js";
@@ -178,3 +228,14 @@ export {
   InvalidRebuildParamsError,
   RebuildPageLimitError,
 } from "./rebuild/errors.js";
+
+// ── Rebuild: tag-only (no owner filter) GraphQL query through the pool ─────
+// `queryUploadsByTag` (T2, `arweave-non-removable-account`) is the sanctioned
+// seam for a downstream chain-query safety net (e.g. `codex-arweave`'s
+// `checkAccountEncryptedArweaveUploads`) that must find any confirmed upload
+// carrying an arbitrary tag/value pair — `queryOwnerUploads`'s `owners`
+// filter is mandatory (see that function's own module doc) and cannot answer
+// this. Exported the same way `queryOwnerUploads` is, so downstream packages
+// never need a deep-path import.
+export { queryUploadsByTag } from "./rebuild/query.js";
+export type { QueryUploadsByTagOptions } from "./rebuild/query.js";

@@ -83,9 +83,12 @@ export {
   MANIFEST_CONTENT_TYPE,
   UPLOAD_PERMANENCE_WARNING,
   uploadAndTrack,
+  backupCodexToLibrary,
   pollStatus,
   openUrl,
   rebuildLibrary,
+  rebuildLibraryForAllOwners,
+  checkAccountEncryptedArweaveUploads,
 } from "./library/index.js";
 export type {
   LibraryStore,
@@ -94,7 +97,12 @@ export type {
   OpenIndexedDBLibraryStoreOptions,
   OpenSqliteLibraryStoreOptions,
   UploadAndTrackOptions,
+  BackupCodexToLibraryOptions,
   PollStatusOptions,
   OpenUrlOptions,
   RebuildLibraryOptions,
+  RebuildLibraryForAllOwnersOptions,
+  OwnerRebuildProgress,
+  MultiOwnerRebuildProgress,
+  CheckAccountEncryptedArweaveUploadsOptions,
 } from "./library/index.js";

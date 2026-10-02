@@ -1,8 +1,10 @@
 // @ancientpantheon/codex-ui/hooks
 //
-// Public React hooks consumers use to interact with the codex — the 16-hook set
-// relocated from codex-ouronet in the D5 carve, with every hook name + every
-// `*View`/`*Fn` type export preserved BYTE-FOR-BYTE (D-11).
+// Public React hooks consumers use to interact with the codex — the 18-hook set
+// (the original 16-hook set relocated from codex-ouronet in the D5 carve, plus
+// the two codex-session-lifecycle additions, `useCodexUnsavedChangesGuard` and
+// `useRequestLogout`), with every hook name + every `*View`/`*Fn` type export
+// preserved BYTE-FOR-BYTE (D-11).
 //
 // The ~14 generic hooks read the store via useCodexStore() (codex-ui's provider
 // context — the store is INJECTED by codex-ouronet through the `createStore`
@@ -26,6 +28,8 @@
 //   - useCodexGuard()        active CodexGuard read + generate/rotate
 //   - useConsumerSettings()  per-consumer namespaced settings
 //   - useRequestPassword()   Promise-returning unlock-and-get-password gate
+//   - useCodexUnsavedChangesGuard()  generic backup-divergence beforeunload guard
+//   - useRequestLogout()     Promise-returning logout-confirmation gate
 
 export { useCodex } from "./useCodex.js";
 export type { CodexView } from "./useCodex.js";
@@ -38,6 +42,11 @@ export type { CodexAuthView } from "./useCodexAuth.js";
 
 export { useRequestPassword } from "./useRequestPassword.js";
 export type { RequestPasswordFn } from "./useRequestPassword.js";
+
+export { useCodexUnsavedChangesGuard } from "./useCodexUnsavedChangesGuard.js";
+
+export { useRequestLogout } from "./useRequestLogout.js";
+export type { RequestLogoutFn } from "./useRequestLogout.js";
 
 export { useGetKeypair } from "./useGetKeypair.js";
 export type { GetKeypairFn } from "./useGetKeypair.js";
@@ -80,7 +89,7 @@ export type { ConsumerSettingsView } from "./useConsumerSettings.js";
 
 // The injected resolver-provider seam type the two StoaChain-bound hooks consume.
 // Type-only — no runtime value is added to the barrel (the D-11 surface lock
-// pins the /hooks runtime exports to EXACTLY the 16 hook functions).
+// pins the /hooks runtime exports to EXACTLY the 18 hook functions).
 export type {
   CodexResolverSeam,
   CreateSigningStrategyOptions,
@@ -88,6 +97,6 @@ export type {
 
 // NOTE: the codex-ui-LOCAL `CodexImportError` class lives in `./errors.js` and
 // is intentionally NOT re-exported here — the `/hooks` barrel's runtime surface
-// is byte-locked to the 16 hook functions (D-11). Consumers that need to catch
+// is byte-locked to the 18 hook functions (D-11). Consumers that need to catch
 // the typed import error import it from `@ancientpantheon/codex-ui` (the root
 // barrel) instead, keeping the `/hooks` subpath surface stable.

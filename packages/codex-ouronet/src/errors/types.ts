@@ -81,6 +81,28 @@ export class CodexPrimeProtectedError extends CodexError {
   }
 }
 
+/** Thrown when a user attempts to delete an Ouronet account that has ever
+ *  encrypted a confirmed Arweave upload (docs/work/arweave-non-removable-
+ *  account/design.md). Deleting such an account would orphan permanent
+ *  on-chain ciphertext forever — this is the LOCAL, synchronous,
+ *  offline half of the invariant (`deleteOuroAccount` checks the
+ *  account's own `hasEncryptedArweaveUpload` flag); the chain-query
+ *  fallback for when that flag is absent lives separately in
+ *  `codex-arweave`'s `checkAccountEncryptedArweaveUploads`. */
+export class CodexArweaveEncryptionProtectedError extends CodexError {
+  public override readonly name = "CodexArweaveEncryptionProtectedError";
+  public readonly ouroAccountId: string;
+
+  constructor(ouroAccountId: string) {
+    super(
+      `Ouro account ${ouroAccountId} has encrypted a confirmed Arweave ` +
+        `upload and cannot be deleted. Deleting it would orphan permanent ` +
+        `on-chain ciphertext forever.`
+    );
+    this.ouroAccountId = ouroAccountId;
+  }
+}
+
 /** Thrown when a user attempts to delete the Prime Codex Seed — the
  *  IStoaChainSeed that kickstarted the codex (spec §B1, v0.2.0+). The
  *  prime seed is structurally tied to the codex's identity; removing it

@@ -25,6 +25,7 @@ import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 import type { ForeignChainAdapter, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import {
   MemoryLibraryStore,
+  MANIFEST_CONTENT_TYPE,
   type LibraryEntry,
   type LibraryStore,
 } from "@ancientpantheon/codex-arweave";
@@ -35,6 +36,13 @@ import type {
   PanelAddressBookEntry,
 } from "@ancientpantheon/codex-arweave/panel";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
+import {
+  TAG_CODEX_CATEGORY,
+  TAG_CODEX_ASSET_TYPE,
+  TAG_CODEX_APP_ID,
+  TAG_CODEX_APP_VERSION,
+  type Tag,
+} from "@ancientpantheon/arweave-core";
 
 /**
  * The fixed fake Winston balance the mock `getBalance` resolves. Chosen so
@@ -165,6 +173,55 @@ export interface BuildMockPanelDepsOptions {
    *  Accounts category, so an empty Codex shows the empty state. Defaults to
    *  empty for the non-React callers — NEVER to a demo entry (E5/T8). */
   foreignKeys?: ForeignKeyEntry[];
+  /** Resolves the codex's CURRENT export payload, forwarded to
+   *  `CodexBackupArea` verbatim. LAZY on purpose, mirroring
+   *  `buildRealPanelDeps`'s identically-named option — `CodexBackupArea`
+   *  calls it fresh at confirm-time, never at mount/render time. Mock mode
+   *  has no real export flow of its own (that is `ForeignChainsWiring.tsx`'s
+   *  job) — a deterministic placeholder getter is used when omitted so
+   *  `backupCodex` still round-trips end to end with NO network and NO real
+   *  export. */
+  getExportJson?: () => Promise<string>;
+  /** Called after the fake codex-backup "upload" resolves — mirrors
+   *  `buildRealPanelDeps`'s identically-named option. */
+  onBackupSuccess?: () => void;
+  /** `arweave-non-removable-account` T5: forwarded verbatim to
+   *  `ArweavePanelDeps.onAccountUsedForEncryption` — mirrors
+   *  `buildRealPanelDeps`'s identically-named option, so mock mode exercises
+   *  the SAME dead-letter-closing signal with NO network. `UploadWizard`
+   *  calls this straight through once a mock Encrypted upload "succeeds"
+   *  (mock mode's `uploadAndTrack` below is a real, no-network round-trip
+   *  through the in-memory library store — it is not a stub that always
+   *  throws), with the encrypting Ouronet account's id. */
+  onAccountUsedForEncryption?: (accountId: string) => void;
+}
+
+/** A deterministic mock export payload — used only when the caller does not
+ *  supply a real getter (mock mode has no real codex-export flow wired).
+ *  NEVER a real codex export: no secret field, no ciphertext, just a
+ *  placeholder shape so `backupCodex` has something non-empty to "upload". */
+const MOCK_EXPORT_JSON = '{"mock":"codex-export"}';
+
+/** The Codex-Category/-Asset-Type/-App-Id/-App-Version tags a mock upload
+ *  "applies" — reuses arweave-core's own tag-name constants (never
+ *  re-spelled) so a mock entry's tags read exactly like a real one's. */
+function mockTagsForSelection(selection: {
+  category: string;
+  assetType?: string;
+  appId?: string;
+  appVersion?: string;
+}): Tag[] {
+  const tags: Tag[] = [{ name: TAG_CODEX_CATEGORY, value: selection.category }];
+  if (selection.assetType !== undefined) {
+    tags.push({ name: TAG_CODEX_ASSET_TYPE, value: selection.assetType });
+  }
+  if (selection.appId !== undefined) {
+    tags.push({ name: TAG_CODEX_APP_ID, value: selection.appId });
+  }
+  if (selection.appVersion !== undefined) {
+    tags.push({ name: TAG_CODEX_APP_VERSION, value: selection.appVersion });
+  }
+  return tags;
 }
 
 /**
@@ -183,11 +240,24 @@ export interface BuildMockPanelDepsOptions {
  * key material into the user's real codex.
  */
 export function buildMockPanelDeps(
-  { addressBook = [], foreignKeys = [] }: BuildMockPanelDepsOptions = {},
+  {
+    addressBook = [],
+    foreignKeys = [],
+    getExportJson = async () => MOCK_EXPORT_JSON,
+    onBackupSuccess,
+    onAccountUsedForEncryption,
+  }: BuildMockPanelDepsOptions = {},
 ): ArweavePanelDeps {
   const adapter = createMockArweaveAdapter();
   const libraryStore: LibraryStore = new MemoryLibraryStore();
   const pool = createNoopGatewayPool();
+  // A per-instance counter, so repeated uploads within ONE `buildMockPanelDeps`
+  // call get distinct deterministic ids — never colliding, never real network.
+  let mockUploadCounter = 0;
+  const nextMockId = (prefix: string): string => {
+    mockUploadCounter += 1;
+    return `mock-${prefix}-${mockUploadCounter}`;
+  };
 
   return {
     address: MOCK_FAKE_ADDRESS,
@@ -209,18 +279,92 @@ export function buildMockPanelDeps(
     estimateFee: async () => 100_000_000n,
     pollStatus: async () => "final",
 
-    // upload / library seams (fakes)
-    uploadAndTrack: async () => ({
-      id: "mock-upload-id",
-      itemId: "mock-item-id",
-      ownerAddress: MOCK_FAKE_ADDRESS,
-      tags: [],
-    }),
-    listLibrary: async (): Promise<LibraryEntry[]> => [],
+    // upload / library seams (fakes, but a REAL round-trip through the SAME
+    // in-memory `libraryStore` `listLibrary`/`rebuildLibrary` read — so mock
+    // mode's Upload/Library categories work end to end with NO network).
+    // Both now take a third `accountId` parameter for type-signature parity
+    // with the real adapter's widened `ArweavePanelDeps` shape
+    // (`arweave-upload-wizard-account-wiring`, Bug 1) — mock mode has no real
+    // key material to resolve, so it is accepted and intentionally unused.
+    uploadAndTrack: async (file, selection, _accountId) => {
+      const id = nextMockId("upload");
+      const tags = mockTagsForSelection(selection);
+      const entry: LibraryEntry = {
+        id,
+        owner: MOCK_FAKE_ADDRESS,
+        itemId: id,
+        contentType: file.type || "application/octet-stream",
+        status: "pending",
+        createdAt: Date.now(),
+        tags,
+        uploadId: id,
+      };
+      await libraryStore.append(entry);
+      return { id, itemId: id, ownerAddress: MOCK_FAKE_ADDRESS, tags };
+    },
+    uploadFilesAndTrack: async (files, selection, _accountId) => {
+      const uploadId = nextMockId("bundle");
+      const tags = mockTagsForSelection(selection);
+      const fileIds = [];
+      for (const file of files) {
+        const id = nextMockId("bundle-file");
+        await libraryStore.append({
+          id,
+          owner: MOCK_FAKE_ADDRESS,
+          itemId: id,
+          contentType: file.type || "application/octet-stream",
+          status: "pending",
+          createdAt: Date.now(),
+          tags,
+          uploadId,
+        });
+        fileIds.push({ path: file.webkitRelativePath || file.name, id });
+      }
+      const manifestId = nextMockId("bundle-manifest");
+      await libraryStore.append({
+        id: manifestId,
+        owner: MOCK_FAKE_ADDRESS,
+        itemId: manifestId,
+        contentType: MANIFEST_CONTENT_TYPE,
+        status: "pending",
+        createdAt: Date.now(),
+        tags,
+        uploadId,
+        manifest: { isManifest: true },
+      });
+      return { manifestId, fileIds, uploadId };
+    },
+    // `arweave-non-removable-account` T5: the mock half of the dead-letter
+    // gap's host-app wiring — forwarded verbatim, mirroring
+    // `buildRealPanelDeps`'s identically-named field. Left `undefined` when
+    // the caller wires none (never a synthesized no-op).
+    onAccountUsedForEncryption,
+    listLibrary: (owner: string): Promise<LibraryEntry[]> =>
+      libraryStore.list(owner),
     openUrl: (id: string) => `mock://library/${id}`,
     rebuildLibrary: async () => {},
     libraryStore,
     pool,
+
+    // codex backup (arweave-upload-categories T5) — a fake, but a REAL
+    // round-trip through the same in-memory `libraryStore`, same as above.
+    getExportJson,
+    backupCodex: async (payload: string) => {
+      const id = nextMockId("backup");
+      await libraryStore.append({
+        id,
+        owner: MOCK_FAKE_ADDRESS,
+        itemId: id,
+        contentType: "application/json",
+        status: "pending",
+        createdAt: Date.now(),
+        tags: [{ name: TAG_CODEX_CATEGORY, value: "codex-backup" }],
+        uploadId: id,
+      });
+      onBackupSuccess?.();
+      void payload; // the mock never inspects/parses it — forwarded verbatim, like the real path.
+      return { id };
+    },
 
     // address book (D5) — the codex entries the app mapped in (empty when the
     // caller supplied none).

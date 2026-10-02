@@ -19,7 +19,15 @@
 export interface OwnerUploadRecord {
   /** The transaction / data-item id (canonical 43-char base64url form). */
   readonly id: string;
-  /** The item's on-chain tags, verbatim, in gateway-returned order. */
+  /** The item's on-chain tags, verbatim, in gateway-returned order. Carries
+   *  WHATEVER tags the item was actually uploaded with — the four original
+   *  required tags, PLUS (T4) `Codex-Tag-Schema-Version`, `Codex-Upload-Id`,
+   *  `Codex-Item-Type` when present. This is untyped/unfiltered by design: the
+   *  query layer never interprets individual tag names, so an upload that
+   *  predates the schema-versioning tags (missing `Codex-Tag-Schema-Version`)
+   *  round-trips exactly as before — never dropped, never an error. A consumer
+   *  reading the schema/grouping tags (e.g. `codex-arweave`'s rebuild) does its
+   *  own presence check. */
   readonly tags: ReadonlyArray<{ name: string; value: string }>;
 }
 
@@ -60,4 +68,17 @@ export interface QueryOwnerUploadsOptions {
   /** Injectable fetch seam; defaults to a binding-safe call-time delegate to
    *  `globalThis.fetch`. */
   fetchFn?: FetchFn;
+  /**
+   * Optional per-page progress callback — called AFTER each page the
+   * pagination loop genuinely FETCHES (a successful `pool.execute` outcome),
+   * never for a mid-pagination restart (which discards an already-fetched
+   * page and re-issues from `after: null` without that discarded page ever
+   * counting). Page-level granularity matches the loop's own natural
+   * checkpoint — a per-record callback would fire far more often than any
+   * progress UI needs to repaint. Carries the RUNNING totals (pages fetched,
+   * records found so far) for THIS ONE owner's query — a caller fanning this
+   * out across several owners composes its own cross-owner context (which
+   * owner, how many total) on top of this.
+   */
+  onProgress?: (progress: { pagesFetched: number; recordsFound: number }) => void;
 }

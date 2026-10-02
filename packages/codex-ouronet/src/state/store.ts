@@ -19,6 +19,7 @@ import {
   CodexError,
   CodexLockedError,
   CodexPrimeProtectedError,
+  CodexArweaveEncryptionProtectedError,
   CodexPrimeSeedProtectedError,
   CodexKickstartError,
   CodexIdentityError,
@@ -167,6 +168,53 @@ export interface PendingPasswordRequest {
   reject: (error: unknown) => void;
 }
 
+/** The three ways a logout-confirmation request can settle. See
+ *  `PendingLogoutRequest` JSDoc for the full lifecycle. */
+export type LogoutConfirmationOutcome =
+  | "backed-up"
+  | "proceeded-without-backup"
+  | "cancelled";
+
+/**
+ * A pending request for the user to decide what to do about a
+ * backup-divergent (`dirty === true`) codex before logging out — the
+ * mechanism by which a future `<LogoutConfirmModal>` "self-shows" when
+ * `requestLogoutConfirmation()` is called. Modeled directly on
+ * `PendingPasswordRequest`'s own shape (same three-part pattern: state
+ * slice, requesting action that returns a Promise, completion actions a
+ * modal calls to settle it) — unlike the password prompt, there is no
+ * `reject` path here: every outcome (back up, proceed anyway, cancel) is
+ * a successful resolution with a tag, never a thrown error.
+ *
+ * Lifecycle:
+ *   1. A hook (`useRequestLogout`, a later task) calls
+ *      `actions.requestLogoutConfirmation()` — but ONLY after it has
+ *      already fast-pathed `dirty === false` itself (this action never
+ *      creates a pending request on a clean codex; see its own JSDoc).
+ *      The store sets `pendingLogoutRequest` to a fresh entry.
+ *   2. `<LogoutConfirmModal>` (a later task) subscribes; when the slice
+ *      becomes non-null it renders its choice.
+ *   3. User picks "back up now" or "continue without backing up" →
+ *      `actions.completeLogoutRequest(outcome)`:
+ *        - resolves the request's promise with `outcome`
+ *        - if `outcome === "backed-up"`, also calls `clearDirty()`
+ *        - clears the slice
+ *   4. User picks "cancel" → `actions.cancelLogoutRequest()`:
+ *        - resolves the request's promise with `"cancelled"`
+ *        - does NOT touch `dirty`
+ *        - clears the slice
+ *
+ * Multiple concurrent `requestLogoutConfirmation()` calls dedup to a
+ * single outstanding request, exactly like `PendingPasswordRequest` —
+ * the slice is a single nullable, not a queue.
+ */
+export interface PendingLogoutRequest {
+  id: string;
+  createdAt: number;
+  resolve: (outcome: LogoutConfirmationOutcome) => void;
+  reject: (error: unknown) => void;
+}
+
 /**
  * Args for `kickstartCodex` / `recoverCodexFromMnemonic` (v0.2.0+).
  *
@@ -210,6 +258,10 @@ export interface CodexStoreState {
   // Password prompt — single outstanding request at a time. See
   // PendingPasswordRequest JSDoc for the lifecycle.
   pendingPasswordRequest: PendingPasswordRequest | null;
+
+  // Logout-confirmation prompt — single outstanding request at a time.
+  // See PendingLogoutRequest JSDoc for the lifecycle.
+  pendingLogoutRequest: PendingLogoutRequest | null;
 
   // Codex content (mirrors adapter)
   kadenaSeeds: IStoaChainSeed[];
@@ -293,6 +345,40 @@ export interface CodexStoreActions {
   /** Called by <PasswordModal> on cancel (Esc, backdrop click, etc.).
    *  Rejects the outstanding request's promise with CodexLockedError. */
   cancelPasswordRequest(): void;
+
+  // ----- logout confirmation prompt -----
+  /** Request the user's decision on what to do about a backup-divergent
+   *  codex before logging out. Returns a Promise that resolves with
+   *  `"backed-up"` | `"proceeded-without-backup"` | `"cancelled"` once
+   *  `completeLogoutRequest`/`cancelLogoutRequest` settles it.
+   *
+   *  INVARIANT: this action does NOT check `dirty` itself and will
+   *  unconditionally create a pending request (or dedup into an
+   *  existing one) every time it's called. The "codex is already
+   *  clean, resolve instantly, no prompt" fast path is the CALLER's
+   *  responsibility — `useRequestLogout()` (a later task) checks
+   *  `get().dirty === false` itself before ever calling this action,
+   *  exactly the same division of labor `useRequestPassword`'s own
+   *  password-cache check has with `requestPassword()` (which likewise
+   *  only handles the "needs prompting" path). Calling this action
+   *  directly on a clean codex will still surface a prompt.
+   *
+   *  If a request is already outstanding, returns a Promise tied to
+   *  that same request — multiple concurrent callers see the same
+   *  modal, same dedup mechanism `requestPassword()` uses. */
+  requestLogoutConfirmation(): Promise<LogoutConfirmationOutcome>;
+  /** Called by <LogoutConfirmModal> when the user picks "back up now"
+   *  or "continue without backing up". Resolves the outstanding
+   *  request's promise with `outcome` and clears the slice. On
+   *  `"backed-up"`, also calls `clearDirty()` — a modal confirming a
+   *  real backup completed never needs its own separate call to clear
+   *  the flag. */
+  completeLogoutRequest(outcome: "backed-up" | "proceeded-without-backup"): void;
+  /** Called by <LogoutConfirmModal> on cancel (Esc, backdrop click,
+   *  "stay logged in", etc.). Resolves the outstanding request's
+   *  promise with `"cancelled"` and clears the slice. Does NOT touch
+   *  `dirty` either way. */
+  cancelLogoutRequest(): void;
 
   // ----- kadena seeds -----
   addStoaChainSeed(seed: IStoaChainSeed): Promise<void>;
@@ -390,6 +476,31 @@ export interface CodexStoreActions {
   addOuroAccount(account: IOuroAccount): Promise<void>;
   updateOuroAccount(account: IOuroAccount): Promise<void>;
   deleteOuroAccount(id: string): Promise<void>;
+  /** Promote an ALREADY-correctly-derived seed+account pair to Prime
+   *  (docs/work/stoachain-prime-promotion/design.md). `accountId`'s own
+   *  `parentSeedId` must already equal `seedId` — this action does NOT
+   *  establish the derivation relationship itself, only re-points which
+   *  existing pair carries `isPrime: true`. Validates first (zero
+   *  mutation on any failure): `seedId` must reference an existing
+   *  `IStoaChainSeed`, `accountId` must reference an existing
+   *  `IOuroAccount`, and that account's `parentSeedId` must equal
+   *  `seedId`. On success, ONE atomic `set()` call flips the target seed
+   *  (and demotes every other seed in `kadenaSeeds`) and the target
+   *  account (and demotes every other account in `ouroAccounts`) — never
+   *  two sequential updates that could leave an inconsistent
+   *  intermediate state observable. Promoting the current Prime pair
+   *  again is a no-op (succeeds, leaves both collections unchanged). */
+  promoteSeedAndAccountToPrime(
+    seedId: string,
+    accountId: string
+  ): Promise<void>;
+  /** Non-removable-account invariant (docs/work/arweave-non-removable-
+   *  account/design.md). Sets `hasEncryptedArweaveUpload: true` on the
+   *  matching account and persists it. The host app wires this to
+   *  `library/flow.ts`'s `onAccountUsedForEncryption` callback after a
+   *  successful encrypted Arweave upload. A missing id is a silent
+   *  no-op, matching `deleteOuroAccount`'s own existing convention. */
+  markOuroAccountEncryptedArweaveUpload(id: string): Promise<void>;
 
   // ----- address book -----
   addAddressBookEntry(entry: AddressBookEntry): Promise<void>;
@@ -529,6 +640,7 @@ const initialState: Omit<CodexStoreState, "actions"> = {
   locked: true,
   passwordCache: null,
   pendingPasswordRequest: null,
+  pendingLogoutRequest: null,
   kadenaSeeds: [],
   arweaveSeeds: [],
   pureKeypairs: [],
@@ -1158,6 +1270,67 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         req.reject(new CodexLockedError("requestPassword"));
       },
 
+      // ----- logout confirmation prompt -----
+
+      requestLogoutConfirmation(): Promise<LogoutConfirmationOutcome> {
+        // NOTE: does NOT check `dirty` here — see this action's own
+        // JSDoc on CodexStoreActions. The "clean codex, resolve
+        // instantly" fast path is the caller's (useRequestLogout's)
+        // responsibility, not this action's.
+        //
+        // Dedup mechanism mirrors requestPassword() exactly: if a
+        // request is already outstanding, return a Promise tied to the
+        // SAME pending request rather than creating a second one — two
+        // concurrent callers only ever see one modal.
+        const existing = get().pendingLogoutRequest;
+        if (existing) {
+          return new Promise<LogoutConfirmationOutcome>((resolve, reject) => {
+            const prevResolve = existing.resolve;
+            const prevReject = existing.reject;
+            existing.resolve = (outcome) => {
+              prevResolve(outcome);
+              resolve(outcome);
+            };
+            existing.reject = (err) => {
+              prevReject(err);
+              reject(err);
+            };
+          });
+        }
+
+        return new Promise<LogoutConfirmationOutcome>((resolve, reject) => {
+          const req: PendingLogoutRequest = {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `lgt-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            createdAt: Date.now(),
+            resolve,
+            reject,
+          };
+          set({ pendingLogoutRequest: req });
+        });
+      },
+
+      completeLogoutRequest(outcome: "backed-up" | "proceeded-without-backup") {
+        const req = get().pendingLogoutRequest;
+        if (!req) return; // no-op if no request is outstanding
+        set({ pendingLogoutRequest: null });
+        req.resolve(outcome);
+        // A modal confirming a real backup completed never needs its
+        // own separate call to clear the flag.
+        if (outcome === "backed-up") {
+          actions.clearDirty();
+        }
+      },
+
+      cancelLogoutRequest() {
+        const req = get().pendingLogoutRequest;
+        if (!req) return;
+        set({ pendingLogoutRequest: null });
+        req.resolve("cancelled");
+      },
+
       // ----- kadena seeds -----
 
       async addStoaChainSeed(seed: IStoaChainSeed) {
@@ -1722,12 +1895,78 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         if (target?.isPrime) {
           throw new CodexPrimeProtectedError(id);
         }
+        // Non-removable-account invariant (docs/work/arweave-non-removable-
+        // account/design.md) — LOCAL-FLAG-ONLY check, synchronous, no
+        // network access. A known-true flag blocks deletion
+        // unconditionally; there is no override for this check (the
+        // `allowDeletingArweaveEncryptedAccounts` UiSettings override only
+        // ever suppresses the separate chain-query safety net in
+        // codex-arweave, never this local check).
+        if (target?.hasEncryptedArweaveUpload === true) {
+          throw new CodexArweaveEncryptionProtectedError(id);
+        }
         const next = get().ouroAccounts.filter((a) => a.id !== id);
         set({ ouroAccounts: next });
         if (get().activeOuroAccountId === id) {
           set({ activeOuroAccountId: next[0]?.id ?? null });
         }
         await persistAndTouch((a) => a.saveOuroAccounts(next));
+      },
+
+      async markOuroAccountEncryptedArweaveUpload(id: string) {
+        const next = get().ouroAccounts.map((a) =>
+          a.id === id ? { ...a, hasEncryptedArweaveUpload: true } : a
+        );
+        set({ ouroAccounts: next });
+        await persistAndTouch((a) => a.saveOuroAccounts(next));
+      },
+
+      async promoteSeedAndAccountToPrime(seedId: string, accountId: string) {
+        // Validate first — zero mutation on any failure (mirrors the
+        // existingPrime pre-flight style of addStoaChainSeed/addOuroAccount).
+        const targetSeed = get().kadenaSeeds.find((s) => s.id === seedId);
+        if (!targetSeed) {
+          throw new CodexError(
+            `promoteSeedAndAccountToPrime: no StoaChain seed with id "${seedId}" exists.`
+          );
+        }
+        const targetAccount = get().ouroAccounts.find((a) => a.id === accountId);
+        if (!targetAccount) {
+          throw new CodexError(
+            `promoteSeedAndAccountToPrime: no ouro account with id "${accountId}" exists.`
+          );
+        }
+        // The causal link must already be true — this action promotes an
+        // existing, already-correctly-derived pair; it does not establish
+        // the derivation relationship itself.
+        if (targetAccount.parentSeedId !== seedId) {
+          throw new CodexError(
+            `promoteSeedAndAccountToPrime: ouro account "${accountId}" is not ` +
+              `derived from seed "${seedId}" (its parentSeedId is ` +
+              `"${targetAccount.parentSeedId ?? "undefined"}"). This action only ` +
+              `promotes an already-correctly-derived seed+account pair.`
+          );
+        }
+
+        // Build both next collections in local vars first, then commit both
+        // in ONE set() call — mirrors kickstartCodex's atomic in-memory
+        // commit discipline (one state transition, one persisted snapshot,
+        // never two sequential updates that could leave an inconsistent
+        // intermediate state observable).
+        const nextSeeds = get().kadenaSeeds.map((s) => {
+          if (s.id === seedId) return s.isPrime ? s : { ...s, isPrime: true };
+          return s.isPrime ? { ...s, isPrime: false } : s;
+        });
+        const nextAccounts = get().ouroAccounts.map((a) => {
+          if (a.id === accountId) return a.isPrime ? a : { ...a, isPrime: true };
+          return a.isPrime ? { ...a, isPrime: false } : a;
+        });
+
+        set({ kadenaSeeds: nextSeeds, ouroAccounts: nextAccounts });
+        await persistAndTouch(async (a) => {
+          await a.saveStoaChainSeeds(nextSeeds);
+          await a.saveOuroAccounts(nextAccounts);
+        });
       },
 
       // ----- address book -----

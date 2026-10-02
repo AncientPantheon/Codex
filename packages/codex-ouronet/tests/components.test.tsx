@@ -20,6 +20,7 @@ import {
 import {
   CodexProvider,
 } from "@ancientpantheon/codex-ouronet/provider";
+import { createCodexStore } from "@ancientpantheon/codex-ouronet/state";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import {
   PasswordModal,
@@ -257,6 +258,115 @@ describe("useRequestPassword (in store/hook)", () => {
     // Defuse the unresolved promises so vitest doesn't warn.
     p1.catch(() => {});
     p2.catch(() => {});
+  });
+});
+
+// --------------------------------------------------------------------
+// requestLogoutConfirmation / completeLogoutRequest / cancelLogoutRequest
+// (store actions — mirrors the requestPassword/pendingPasswordRequest
+// three-part shape tested above, but driven directly against the store
+// since there is no modal/hook consuming this slice yet — that's a
+// later task).
+// --------------------------------------------------------------------
+
+describe("requestLogoutConfirmation (store action)", () => {
+  it("creates a pending request and returns an unresolved Promise while dirty", async () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    let settled = false;
+    const p = store.getState().actions.requestLogoutConfirmation();
+    p.then(() => {
+      settled = true;
+    });
+
+    expect(p).toBeInstanceOf(Promise);
+    expect(store.getState().pendingLogoutRequest).not.toBeNull();
+    // Give the microtask queue a tick — it should still be unsettled,
+    // since nothing has called a completion action yet.
+    await Promise.resolve();
+    expect(settled).toBe(false);
+  });
+
+  it("concurrent calls dedup to a single pending request, mirroring requestPassword's own dedup", () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    const p1 = store.getState().actions.requestLogoutConfirmation();
+    const first = store.getState().pendingLogoutRequest;
+    const p2 = store.getState().actions.requestLogoutConfirmation();
+    const second = store.getState().pendingLogoutRequest;
+
+    // Second call must NOT replace the pending entry with a fresh one —
+    // same dedup contract as requestPassword (single nullable, not a
+    // queue): both callers share the SAME outstanding request id.
+    expect(second?.id).toBe(first?.id);
+
+    expect(p1).toBeInstanceOf(Promise);
+    expect(p2).toBeInstanceOf(Promise);
+    p1.catch(() => {});
+    p2.catch(() => {});
+  });
+
+  it("completing a deduped pair resolves BOTH callers with the same outcome", async () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    const p1 = store.getState().actions.requestLogoutConfirmation();
+    const p2 = store.getState().actions.requestLogoutConfirmation();
+
+    store.getState().actions.completeLogoutRequest("proceeded-without-backup");
+
+    await expect(p1).resolves.toBe("proceeded-without-backup");
+    await expect(p2).resolves.toBe("proceeded-without-backup");
+  });
+});
+
+describe("completeLogoutRequest (store action)", () => {
+  it('"backed-up" resolves the pending promise and clears dirty', async () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    const p = store.getState().actions.requestLogoutConfirmation();
+    store.getState().actions.completeLogoutRequest("backed-up");
+
+    await expect(p).resolves.toBe("backed-up");
+    expect(store.getState().dirty).toBe(false);
+    expect(store.getState().pendingLogoutRequest).toBeNull();
+  });
+
+  it('"proceeded-without-backup" resolves the pending promise and leaves dirty unchanged (true)', async () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    const p = store.getState().actions.requestLogoutConfirmation();
+    store.getState().actions.completeLogoutRequest("proceeded-without-backup");
+
+    await expect(p).resolves.toBe("proceeded-without-backup");
+    expect(store.getState().dirty).toBe(true);
+    expect(store.getState().pendingLogoutRequest).toBeNull();
+  });
+});
+
+describe("cancelLogoutRequest (store action)", () => {
+  it('resolves the pending promise with "cancelled" and does not touch dirty', async () => {
+    const store = createCodexStore();
+    store.setState({ dirty: true });
+
+    const p = store.getState().actions.requestLogoutConfirmation();
+    store.getState().actions.cancelLogoutRequest();
+
+    await expect(p).resolves.toBe("cancelled");
+    expect(store.getState().dirty).toBe(true);
+    expect(store.getState().pendingLogoutRequest).toBeNull();
+  });
+
+  it("is a no-op when no request is outstanding (mirrors cancelPasswordRequest's no-op guard)", () => {
+    const store = createCodexStore();
+    store.setState({ dirty: false });
+
+    expect(() => store.getState().actions.cancelLogoutRequest()).not.toThrow();
+    expect(store.getState().pendingLogoutRequest).toBeNull();
   });
 });
 

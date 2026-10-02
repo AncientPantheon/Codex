@@ -55,15 +55,36 @@ import {
   ControlsProvider,
   SwipeDeck,
 } from "@ancientpantheon/codex-ui/ui";
+import { LogoutConfirmModal } from "@ancientpantheon/codex-ui/components";
+import { useCodexUnsavedChangesGuard } from "@ancientpantheon/codex-ui/hooks";
 import {
   useCodex,
   useCodexAuth,
   useCodexBackup,
+  useCodexLifecycle,
 } from "@ancientpantheon/codex-ouronet/hooks";
+import type {
+  KickstartArgsV3,
+  KickstartResultV3,
+} from "@ancientpantheon/codex-ouronet/codex-identity";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
+import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
+import type { KeygenProgress } from "@ancientpantheon/codex-arweave/seeds";
 
 import { UnlockScreen } from "./UnlockScreen";
+// The minimal "create a brand-new codex" flow (T4 of
+// docs/work/codex-recovery-backup-tagging/plan.md) — no file under `apps/`
+// called `useCodexLifecycle()`'s `kickstart` before this task (grep-
+// confirmed), so there was no local way to exercise kickstart + the Prime
+// Arweave seed auto-install at all. `CreateCodexScreen` is the presentational
+// form; `kickstartAndInstallPrimeArweaveSeed` is the host-layer composition
+// (own unit-tested module, independent of this UI) that derives the Prime
+// Arweave seed from the SAME words that seed the new Prime Ouronet account
+// and installs it automatically, with no separate manual step.
+import { CreateCodexScreen } from "./CreateCodexScreen";
+import { kickstartAndInstallPrimeArweaveSeed } from "./kickstartPrimeArweaveSeed";
+import { createKeygenWorker } from "./realArweaveAdapter";
 // THE Codex tab shell for the playground: `ForeignChainsWiring` renders
 // `CodexTabs` with Class 2 already fed the Arweave + Chainweb rail. Mounting a
 // bare `<CodexTabs />` here instead would leave Blockchain Accounts empty.
@@ -91,10 +112,13 @@ import "./app.css";
 // Injected by vite.config `define` from @ancientpantheon/codex-ouronet's version.
 declare const __CODEX_VERSION__: string;
 
-/** What the App is currently rendering: the load screen, or a mounted codex. */
+/** What the App is currently rendering: the load screen, a mounted codex
+ *  restored from an upload, or a mounted EMPTY codex en route to kickstart
+ *  (T4 — "create a brand-new codex"). */
 type LoadedState =
   | { kind: "idle" }
-  | { kind: "encrypted"; adapter: MemoryCodexAdapter; backupText: string };
+  | { kind: "encrypted"; adapter: MemoryCodexAdapter; backupText: string }
+  | { kind: "new"; adapter: MemoryCodexAdapter };
 
 /**
  * The dashboard — the real shipped shell inside a slim playground chrome (title
@@ -125,9 +149,17 @@ function DashboardBody({
 }: {
   onReset?: () => void;
 }): ReactElement {
-  const { downloadAsJson } = useCodexBackup();
+  const { downloadAsJson, exportForCloud, clearDirty } = useCodexBackup();
   const { isReady } = useCodex();
   const store = useCodexStore();
+
+  // The generic backup-divergence `beforeunload` guard (docs/work/
+  // codex-session-lifecycle) — armed/disarmed off `store.dirty` for as
+  // long as the dashboard is mounted. A UX convenience reminder only (no
+  // custom copy is possible for the native prompt); it has no bearing on
+  // the non-removable-account invariant, which is independently
+  // chain-truth-backed.
+  useCodexUnsavedChangesGuard();
 
   // The full-screen modal-portal target (design.md §8 feedback round: "the
   // whole screen, not Zone 2 only"). Zone 2's own CodexUiRoot is a small,
@@ -313,6 +345,58 @@ function DashboardBody({
           conditional render once per branch. */}
       {debouncerInfoOpen && <DebouncerInfoModal onClose={() => setDebouncerInfoOpen(false)} />}
 
+      {/* The logout-confirmation modal `CodexLockControl`'s own "Lock Codex"
+          button now surfaces via `useRequestLogout()` (docs/work/
+          codex-session-lifecycle) whenever the codex is dirty — a UX
+          convenience reminder ("back this up somewhere outside this
+          browser"), never a safety/funds gate (that's independently
+          chain-truth-backed and unaffected by anything here). Mounted ONCE,
+          unconditionally (renders nothing while no request is pending) —
+          unlike `<CodexPasswordPrompt>` below it does not need the mobile/
+          desktop `CodexUiRoot`-relative positioning dance (its own render
+          here is `position: fixed` against the viewport, so no containing
+          block matters). */}
+      <LogoutConfirmModal
+        render={(a) => (
+          <div
+            style={{
+              position: "fixed", inset: 0, zIndex: 2147483647,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "#000000a6", padding: 24,
+            }}
+          >
+            <div className="cxpg-card cxpg-card--status" style={{ textAlign: "left", alignItems: "stretch", gap: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>Back up before locking?</h2>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--cxpg-text-dim)" }}>
+                This codex has changes that only exist in this browser. Back it
+                up somewhere else before locking, or continue without backing up.
+              </p>
+              {a.error && (
+                <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--cxpg-danger)" }}>
+                  {a.error}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="cxpg-btn cxpg-btn--primary"
+                  onClick={a.onBackUpNow}
+                  disabled={a.backingUp}
+                >
+                  {a.backingUp ? "Backing up…" : "Back up now"}
+                </button>
+                <button type="button" className="cxpg-btn cxpg-btn--ghost" onClick={a.onContinueWithoutBackup}>
+                  Continue without backing up
+                </button>
+                <button type="button" className="cxpg-btn cxpg-btn--ghost" onClick={a.onCancel}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      />
+
       {/* Global codex password prompt — the modal the CodexID lock control opens.
           Kept OUT of the header flow (mirrors OuronetUI's codex-ui route).
           MOBILE: bug fix, take 2 (design.md §8, the "further optimize round
@@ -475,6 +559,8 @@ function DashboardBody({
                     edgeRailAnchorTarget={edgeRailAnchorTarget}
                     zone3AnchorTarget={zone3AnchorTarget}
                     fullScreenPortalTarget={modalPortalRoot}
+                    getExportJson={exportForCloud}
+                    onBackupSuccess={clearDirty}
                   />
                 ) : (
                 <CodexSettingsSection
@@ -588,7 +674,12 @@ function DashboardBody({
                    mode is now the default (owner directive) — no toggle box
                    sits on this view any more; it lives in Settings → Network
                    instead, alongside the gateway URL field it edits. */
-                <ForeignChainsWiring mode={arweaveMode} gatewayUrl={gatewayUrl} />
+                <ForeignChainsWiring
+                  mode={arweaveMode}
+                  gatewayUrl={gatewayUrl}
+                  getExportJson={exportForCloud}
+                  onBackupSuccess={clearDirty}
+                />
               ) : (
                 <CodexSettingsSection
                   consumerName="Codex Playground"
@@ -736,6 +827,15 @@ export function App(): ReactElement {
     [],
   );
 
+  // T4 — "create a brand-new codex" entry point. Mounts a fresh EMPTY
+  // adapter (no restore to do — unlike `loadEncrypted`, there is nothing to
+  // read yet); `NewCodexSession` drives the actual kickstart once mounted
+  // under the provider, mirroring `loadEncrypted`'s own "mount empty, then
+  // act post-mount" shape.
+  const startNewCodex = useCallback(() => {
+    setLoaded({ kind: "new", adapter: new MemoryCodexAdapter("dev") });
+  }, []);
+
   if (loadError !== null) {
     return (
       <StatusScreen>
@@ -750,7 +850,16 @@ export function App(): ReactElement {
   }
 
   if (loaded.kind === "idle") {
-    return <LoadCodexScreen onUploadBackup={loadEncrypted} />;
+    return <LoadCodexScreen onUploadBackup={loadEncrypted} onStartNewCodex={startNewCodex} />;
+  }
+
+  if (loaded.kind === "new") {
+    // Mount empty → kickstart + Prime Arweave seed auto-install → dashboard.
+    return (
+      <CodexProvider adapter={loaded.adapter} deviceVariant="dev">
+        <NewCodexSession onReset={reset} />
+      </CodexProvider>
+    );
   }
 
   // Mount empty → restore → unlock → dashboard.
@@ -759,6 +868,121 @@ export function App(): ReactElement {
       <EncryptedSession backupText={loaded.backupText} onReset={reset} />
     </CodexProvider>
   );
+}
+
+/**
+ * NewCodexSession — T4's host-layer wiring: mounted inside an EMPTY
+ * <CodexProvider>, drives `CreateCodexScreen`'s submit through kickstart +
+ * the Prime Arweave seed auto-install, then renders the real dashboard once
+ * both finish — no separate manual step, and the ~6.7s derivation is a real,
+ * visible in-progress state (`progressLabel`) the whole time, never a silent
+ * freeze.
+ *
+ * `kickstartAndInstallPrimeArweaveSeed` (own unit-tested module) owns the
+ * COMPOSITION; this component owns only the glue a React host needs to
+ * reach the store — `addArweaveSeed`, reached the exact way
+ * `useCodexLifecycle.ts` itself reaches `kickstartCodex`
+ * (`useCodexStore()` -> `store((s) => s.actions)` -> the action), since
+ * `addArweaveSeed` is not exposed through any `codex-ui`/`codex-ouronet`
+ * hook.
+ */
+function NewCodexSession({ onReset }: { onReset: () => void }): ReactElement {
+  // `kickstart`'s type covers BOTH the v0.2 legacy shape and the v0.3 atomic
+  // shape it dispatches on at runtime (per useCodexLifecycle.ts's own doc
+  // comment); this call site only ever sends KickstartArgsV3 (below), which
+  // the store's own runtime dispatch always answers with KickstartResultV3 —
+  // narrowed here so `kickstartAndInstallPrimeArweaveSeed`'s deps stay typed
+  // to the v0.3 shape it actually reads (`result.codexPrime`).
+  const { kickstart: kickstartAction } = useCodexLifecycle();
+  const kickstartV3 = useCallback(
+    (args: KickstartArgsV3) => kickstartAction(args) as Promise<KickstartResultV3>,
+    [kickstartAction],
+  );
+  const { authenticate, getCurrentPassword, isLocked } = useCodexAuth();
+  const { isReady } = useCodex();
+  const store = useCodexStore();
+  const addArweaveSeed = store((s) => s.actions.addArweaveSeed);
+
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [progressLabel, setProgressLabel] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleCreate = useCallback(
+    async ({ password, words }: { password: string; words: string }) => {
+      setBusy(true);
+      setErrorMessage(null);
+      setProgressLabel("Kickstarting your codex…");
+      try {
+        // authenticate() seeds the password cache kickstartCodex itself reads
+        // (actions.getPassword()) — the same pattern
+        // state-kickstart-codex-v3.test.ts's own `kickstart()` helper uses:
+        // authenticate FIRST, then call the kickstart action.
+        authenticate(password, NEW_CODEX_SESSION_TTL_MINUTES);
+        const args: KickstartArgsV3 = {
+          codexIdSeed: { mode: "words", value: words },
+          // fresh-dalos is the ONLY source producing a DALOS-curve CodexPrime
+          // account — see kickstartPrimeArweaveSeed.ts's own doc comment for
+          // why that is required for the Prime Arweave seed derivation below.
+          codexPrimeSeed: { source: "fresh-dalos", words },
+          duoPrime: { mode: "auto-pure-keys" },
+        };
+        await kickstartAndInstallPrimeArweaveSeed(
+          args,
+          {
+            kickstart: kickstartV3,
+            workerFactory: createKeygenWorker,
+            encryptSecret: (plaintext) => encryptStringV2(plaintext, getCurrentPassword()),
+            addArweaveSeed,
+          },
+          (p: KeygenProgress) => setProgressLabel(progressLabelOf(p)),
+        );
+        setDone(true);
+      } catch (err: unknown) {
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+        setProgressLabel(null);
+      }
+    },
+    [authenticate, getCurrentPassword, kickstartV3, addArweaveSeed],
+  );
+
+  if (done && !isLocked) {
+    return <Dashboard onReset={onReset} />;
+  }
+
+  return (
+    <CreateCodexScreen
+      onCreate={handleCreate}
+      busy={busy || !isReady}
+      progressLabel={progressLabel}
+      errorMessage={errorMessage}
+      onCancel={onReset}
+    />
+  );
+}
+
+/** The playground's dev-session TTL for a freshly-created codex — same
+ *  30-minute figure `UnlockScreen.tsx`'s own `DEFAULT_TTL_MINUTES` uses. */
+const NEW_CODEX_SESSION_TTL_MINUTES = 30;
+
+/** `KeygenProgress.state` -> the live text `CreateCodexScreen`'s submit
+ *  button shows WHILE busy. `SECONDS_PER_KEY` (~6.7s) is
+ *  `ArweaveSeedsArea.tsx`'s own measured RSA-4096 #0 cost — named here too so
+ *  the wait is never a silent freeze. */
+function progressLabelOf(p: KeygenProgress): string {
+  switch (p.state) {
+    case "start":
+    case "working":
+      return "Deriving your Prime Arweave seed… (~7s)";
+    case "done":
+      return "Prime Arweave seed derived — saving…";
+    case "error":
+      return "Prime Arweave seed derivation failed…";
+    default:
+      return "Working…";
+  }
 }
 
 /** A centered chrome wrapper for the load / status / error screens. */
@@ -777,8 +1001,13 @@ function StatusScreen({ children }: { children: ReactNode }): ReactElement {
  */
 function LoadCodexScreen({
   onUploadBackup,
+  onStartNewCodex,
 }: {
   onUploadBackup: (event: ChangeEvent<HTMLInputElement>) => void;
+  /** T4 — "create a brand-new codex" entry point, alongside the existing
+   *  upload-a-backup path. Optional so any other mount of this screen
+   *  (none currently exist) is unaffected if it omits the prop. */
+  onStartNewCodex?: () => void;
 }): ReactElement {
   return (
     <div className="cxpg-app cxpg-landing">
@@ -810,6 +1039,16 @@ function LoadCodexScreen({
             onChange={onUploadBackup}
           />
         </label>
+
+        {onStartNewCodex ? (
+          <button
+            type="button"
+            className="cxpg-btn cxpg-btn--ghost cxpg-btn--block"
+            onClick={onStartNewCodex}
+          >
+            Create a new Codex
+          </button>
+        ) : null}
 
         <p className="cxpg-note">
           Nothing leaves this device — no account, no cloud.

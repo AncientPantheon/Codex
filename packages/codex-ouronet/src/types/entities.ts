@@ -289,6 +289,23 @@ export interface IOuroAccount {
    *  invariant is causal ("derived from the prime seed") rather than
    *  positional ("first added wins"). See docs/v0.2.0-design.md §4.2. */
   parentSeedId?: string;
+  /** Non-removable-account invariant (docs/work/arweave-non-removable-
+   *  account/design.md). True once this account has ever encrypted a
+   *  confirmed Arweave upload — set by `markOuroAccountEncryptedArweaveUpload`,
+   *  which the host app wires to `library/flow.ts`'s
+   *  `onAccountUsedForEncryption` callback after a successful encrypted
+   *  upload. Deleting the account afterward would orphan permanent
+   *  on-chain ciphertext forever, so `deleteOuroAccount` checks this flag
+   *  and throws `CodexArweaveEncryptionProtectedError` when true — this is
+   *  the LOCAL, offline, synchronous half of the invariant; the chain-query
+   *  fallback (`checkAccountEncryptedArweaveUploads` in `codex-arweave`,
+   *  for when this flag is absent but may still be true on chain) is a
+   *  separate, exported function this package has no knowledge of.
+   *  ADDITIVE-OPTIONAL: absent on every account persisted before this field
+   *  existed; absence is NOT proof an account never encrypted an upload —
+   *  callers that need a definitive answer must also run the chain-query
+   *  fallback. Once `true`, nothing in this package ever clears it. */
+  hasEncryptedArweaveUpload?: boolean;
 }
 
 /** Address-book entry — a labeled recipient address for the address picker.
@@ -361,6 +378,18 @@ export interface UiSettings {
   zbomZone3: boolean;
   /** Execute button position in the ZBOM popup. */
   zbomExecutePosition: "top" | "bottom";
+  /** Allow deleting Ouronet accounts without the Arweave safety check — NOT
+   *  RECOMMENDED. Defaults to `false` (fail-safe). This override ONLY ever
+   *  suppresses the SEPARATE chain-query safety net
+   *  (`checkAccountEncryptedArweaveUploads` in `codex-arweave`) that a
+   *  delete-account UI runs when the local `IOuroAccount.hasEncryptedArweaveUpload`
+   *  flag is absent and the chain can't be reached/isn't worth querying — it
+   *  can NEVER suppress `deleteOuroAccount`'s own local-flag check: a
+   *  known-true `hasEncryptedArweaveUpload` blocks deletion unconditionally,
+   *  no override possible, because deleting such an account would orphan
+   *  permanent on-chain ciphertext forever. See
+   *  docs/work/arweave-non-removable-account/design.md. */
+  allowDeletingArweaveEncryptedAccounts: boolean;
   /** Allow consumer-specific keys without forcing a typed extension here.
    *  OuronetUI stashes its DEX-specific UI settings under the same
    *  `uiSettings` umbrella historically; this escape hatch keeps that
@@ -385,6 +414,7 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   zbomZone2: false,
   zbomZone3: false,
   zbomExecutePosition: "top",
+  allowDeletingArweaveEncryptedAccounts: false,
 };
 
 /** Device-variant marker — Vite consumers usually read this from

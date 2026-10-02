@@ -1,26 +1,37 @@
+// @vitest-environment node
 /**
  * E3 RED matrix — the adapter `upload?` FILL (E-06).
  *
+ * `// @vitest-environment node` (mirrors `e3-library-flow.test.ts`'s own FIX-9
+ * pragma): this file's happy-path uploads post real string payloads through
+ * arweave-core `createTransaction`. Under the package's default jsdom/"client"
+ * environment, Vite resolves the `arweave` dependency via its `browser`
+ * package.json field, whose `createTransaction` is MISSING the node build's
+ * `typeof data === "string"` → `stringToBuffer` conversion — a plain-string
+ * upload payload throws purely as an artifact of the test environment, not a
+ * real code defect. Forcing this file to the `node` environment resolves
+ * `arweave`'s `main` field instead, matching arweave-core's own test
+ * environment.
+ *
  * The Arweave adapter's ABSENT `upload?` optional method is filled to delegate to
- * arweave-core `uploadData(params, opts?)`. These tests inject a FAKE recording
- * Turbo `clientFactory` (NEVER the real SDK — a real Turbo call is a real,
+ * arweave-core `uploadData(pool, params, opts?)` (pool-first, T3/T5's native,
+ * non-bundler upload path). These tests inject a FAKE recording
+ * `UploadGatewayApiFactory` (NEVER the real SDK — a real network call is a real,
  * PERMANENT, irreversible upload) and assert:
- *   - the returned `UploadResult` carries the canonical id + the REQUIRED tag
+ *   - the returned `UploadResult` carries a canonical id + the REQUIRED tag
  *     schema (App-Name / Content-Type / Codex-Item-Id / Codex-Owner) in canonical
  *     order, imported from arweave-core (never re-spelled);
  *   - `Codex-Owner === addressOf(jwk)` (the rebuild anchor);
- *   - bad params (empty data / reserved-name metadata / non-canonical owner)
+ *   - bad params (empty data / reserved-name metadata / missing maxRewardWinston)
  *     surface `InvalidUploadParamsError`;
- *   - a throwing client → `UploadFailedError("upload-rejected")`; a non-canonical
- *     returned id → `UploadFailedError("bad-response")`;
+ *   - a throwing gateway-API `getUploader` propagates its error, unwrapped, before
+ *     completing; a quote exceeding the caller's `maxRewardWinston` surfaces
+ *     `RewardExceedsCapError` before any signing/posting;
  *   - the JWK is a PER-CALL arg (not a constructor dep, not cached) — two uploads
  *     with two JWKs derive their OWN ownerAddress;
  *   - NO JWK private-field VALUE ever appears in a tag / error / result;
  *   - a MANDATORY exported `UPLOAD_PERMANENCE_WARNING` value exists (permanent +
  *     public + no delete/edit + public tags).
- *
- * RED: `upload` is ABSENT on the adapter + `UPLOAD_PERMANENCE_WARNING` does not
- * exist yet → these fail on import / on the missing method.
  */
 
 import { describe, it, expect } from "vitest";
@@ -33,25 +44,32 @@ import {
   DEFAULT_APP_NAME,
   REQUIRED_UPLOAD_TAG_NAMES,
   InvalidUploadParamsError,
-  UploadFailedError,
+  RewardExceedsCapError,
   addressOf,
   type Tag,
   type UploadResult,
 } from "@ancientpantheon/arweave-core";
 
-// RED: `upload` is not yet on the adapter surface; `UPLOAD_PERMANENCE_WARNING`
-// does not yet exist. Both imports resolve only after GREEN (T13.4).
 import { createArweaveAdapter } from "../src/adapter";
-import { UPLOAD_PERMANENCE_WARNING } from "../src/library";
+// Imported from the specific submodule (not the `../src/library` barrel, which
+// also re-exports `SqliteLibraryStore` — pulling in `sqliteStore.ts`'s lazy
+// `import("node:sqlite")`, a documented pre-existing vite/vitest limitation in
+// this exact sandbox — see `e3-library-flow.test.ts`'s own identical comment).
+import { UPLOAD_PERMANENCE_WARNING } from "../src/library/constants.js";
 
 import {
   throwawayJwk,
   KNOWN_ADDRESS,
-  CANONICAL_ID_A,
-  NON_CANONICAL_ID,
   MANIFEST_CONTENT_TYPE,
-  makeRecordingTurboClient,
+  makeRecordingUploadApi,
+  makeHealthPool,
 } from "./e3-helpers";
+
+/** A cap comfortably above the recording fake's honest quote (e3-helpers'
+ *  `RECORDING_PRICE`) — the fee cap is REQUIRED on every native-upload call. */
+const CAP = 1_000_000_000_000n;
+
+const CANONICAL_ID_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /** Pull a tag value by name off an applied tag list. */
 function tagValue(tags: readonly Tag[], name: string): string | undefined {
@@ -68,9 +86,9 @@ function privateValues(): string[] {
 }
 
 describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadData (E-06)", () => {
-  it("(a) upload delegates to uploadData via the injected clientFactory and returns a canonical UploadResult", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient({ id: CANONICAL_ID_A });
+  it("(a) upload delegates to uploadData via the injected apiFactory and returns a canonical UploadResult", async () => {
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     const result = (await adapter.upload!(
       {
@@ -78,23 +96,23 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
         data: "hello permaweb",
         contentType: "text/plain",
         itemId: "item-xyz-1",
+        maxRewardWinston: CAP,
       },
-      { clientFactory: turbo.factory },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
-    // The recording client saw exactly one upload — no real SDK, no real network.
-    expect(turbo.calls).toHaveLength(1);
-    // The returned id is the client's id, and it is canonical 43-char.
-    expect(result.id).toBe(CANONICAL_ID_A);
-    expect(result.id).toHaveLength(43);
+    // The recording fake saw exactly one posted upload — no real SDK, no real network.
+    expect(recorded.calls).toHaveLength(1);
+    // The id is the real, deterministic post-sign transaction id — canonical 43-char.
+    expect(result.id).toMatch(CANONICAL_ID_RE);
     expect(result.ownerAddress).toBe(KNOWN_ADDRESS);
     expect(result.itemId).toBe("item-xyz-1");
     expect(Array.isArray(result.tags)).toBe(true);
   });
 
   it("(b) the applied tags carry the REQUIRED schema in canonical order (imported names, never re-spelled)", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     const result = (await adapter.upload!(
       {
@@ -102,8 +120,9 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
         data: "payload",
         contentType: "text/plain",
         itemId: "item-schema",
+        maxRewardWinston: CAP,
       },
-      { clientFactory: turbo.factory },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
     // The four required names appear FIRST, in canonical order.
@@ -122,19 +141,19 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     expect(tagValue(result.tags, TAG_APP_NAME)).toBe(DEFAULT_APP_NAME);
     expect(tagValue(result.tags, TAG_CONTENT_TYPE)).toBe("text/plain");
     expect(tagValue(result.tags, TAG_CODEX_ITEM_ID)).toBe("item-schema");
-    // The client received the SAME tags the result reports (delegation, not a
-    // re-built list).
-    expect(turbo.calls[0].tags).toEqual(result.tags);
+    // The signed tx carries the SAME tags the result reports (delegation, not a
+    // re-built list) — read off the recording fake's captured `getUploader(tx)` call.
+    expect(recorded.calls[0].tags).toEqual(result.tags);
   });
 
   it("(c) Codex-Owner EQUALS addressOf(jwk) — the canonical rebuild anchor", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
     const expectedOwner = await addressOf(throwawayJwk);
 
     const result = (await adapter.upload!(
-      { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
-      { clientFactory: turbo.factory },
+      { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i", maxRewardWinston: CAP },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
     expect(expectedOwner).toBe(KNOWN_ADDRESS);
@@ -142,23 +161,23 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
     expect(result.ownerAddress).toBe(KNOWN_ADDRESS);
   });
 
-  it("(d.1) EMPTY data surfaces InvalidUploadParamsError with the offending field, and never reaches the client", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+  it("(d.1) EMPTY data surfaces InvalidUploadParamsError with the offending field, and never reaches the gateway API", async () => {
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     await expect(
       adapter.upload!(
-        { jwk: throwawayJwk, data: "", contentType: "text/plain", itemId: "i" },
-        { clientFactory: turbo.factory },
+        { jwk: throwawayJwk, data: "", contentType: "text/plain", itemId: "i", maxRewardWinston: CAP },
+        { apiFactory: recorded.apiFactory },
       ),
     ).rejects.toBeInstanceOf(InvalidUploadParamsError);
     // The invalid param is rejected BEFORE any upload call — no phantom upload.
-    expect(turbo.calls).toHaveLength(0);
+    expect(recorded.calls).toHaveLength(0);
   });
 
   it("(d.2) a reserved-name metadata tag surfaces InvalidUploadParamsError (forgery guard)", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     await expect(
       adapter.upload!(
@@ -167,79 +186,87 @@ describe("E3 upload — the adapter `upload?` delegates to arweave-core uploadDa
           data: "x",
           contentType: "text/plain",
           itemId: "i",
+          maxRewardWinston: CAP,
           appMetadata: [{ name: TAG_CODEX_OWNER, value: "forged" }],
         },
-        { clientFactory: turbo.factory },
+        { apiFactory: recorded.apiFactory },
       ),
     ).rejects.toBeInstanceOf(InvalidUploadParamsError);
-    expect(turbo.calls).toHaveLength(0);
+    expect(recorded.calls).toHaveLength(0);
   });
 
-  it("(e.1) a THROWING Turbo client surfaces UploadFailedError('upload-rejected')", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient({ throws: true });
+  it("(e.1) a THROWING gateway-API getUploader propagates its error, and the attempt was recorded before failing", async () => {
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi({ throws: true });
 
     const err = await adapter
       .upload!(
-        { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
-        { clientFactory: turbo.factory },
+        { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i", maxRewardWinston: CAP },
+        { apiFactory: recorded.apiFactory },
       )
       .catch((e: unknown) => e);
 
-    expect(err).toBeInstanceOf(UploadFailedError);
-    expect((err as UploadFailedError).message).toContain("upload-rejected");
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("upload rejected");
+    // The signed tx reached getUploader (one attempt recorded) before the
+    // rejection — the failure is a post-build/post-sign posting failure, not
+    // a validation short-circuit.
+    expect(recorded.calls).toHaveLength(1);
   });
 
-  it("(e.2) a client returning a NON-canonical id surfaces UploadFailedError('bad-response')", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient({ id: NON_CANONICAL_ID });
+  it("(e.2) a quote exceeding maxRewardWinston surfaces RewardExceedsCapError, BEFORE any signing/posting", async () => {
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     const err = await adapter
       .upload!(
-        { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
-        { clientFactory: turbo.factory },
+        {
+          jwk: throwawayJwk,
+          data: "x",
+          contentType: "text/plain",
+          itemId: "i",
+          // Below the recording fake's honest 1_000_000_000 Winston quote.
+          maxRewardWinston: 1n,
+        },
+        { apiFactory: recorded.apiFactory },
       )
       .catch((e: unknown) => e);
 
-    expect(err).toBeInstanceOf(UploadFailedError);
-    expect((err as UploadFailedError).message).toContain("bad-response");
+    expect(err).toBeInstanceOf(RewardExceedsCapError);
+    // Refused before build/sign/post — getUploader was never reached.
+    expect(recorded.calls).toHaveLength(0);
   });
 
   it("(f) the JWK is a PER-CALL arg — createArweaveAdapter deps carry no jwk; each call derives its OWN ownerAddress", async () => {
-    // The factory is constructible with NO jwk (a jwk dep would be required here).
-    const adapter = createArweaveAdapter();
+    // The factory takes NO jwk dep (only `pool`/`fetchFn`) — a jwk dep would
+    // be required here otherwise.
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
     expect(adapter).not.toHaveProperty("jwk");
 
-    const turbo = makeRecordingTurboClient();
+    const recorded = makeRecordingUploadApi();
     const r1 = (await adapter.upload!(
-      { jwk: throwawayJwk, data: "one", contentType: "text/plain", itemId: "i1" },
-      { clientFactory: turbo.factory },
+      { jwk: throwawayJwk, data: "one", contentType: "text/plain", itemId: "i1", maxRewardWinston: CAP },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
     const r2 = (await adapter.upload!(
-      { jwk: throwawayJwk, data: "two", contentType: "text/plain", itemId: "i2" },
-      { clientFactory: turbo.factory },
+      { jwk: throwawayJwk, data: "two", contentType: "text/plain", itemId: "i2", maxRewardWinston: CAP },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
     // Both calls derived the owner from THEIR per-call jwk (same throwaway key
     // here → same address, but derived per-call, never a cached ctor value).
     expect(r1.ownerAddress).toBe(KNOWN_ADDRESS);
     expect(r2.ownerAddress).toBe(KNOWN_ADDRESS);
-    // The client saw both jwks per-call (the delegate forwards the per-call key).
-    // Value-equality (not reference): uploadData normalizes the jwk via
-    // importKeyfile before handing it to the client, so a correct thin delegate
-    // yields a value-equal (canonical 9-field) object, not the same reference.
-    expect(turbo.calls).toHaveLength(2);
-    expect(turbo.calls[0].jwk).toStrictEqual(throwawayJwk);
-    expect(turbo.calls[1].jwk).toStrictEqual(throwawayJwk);
+    expect(recorded.calls).toHaveLength(2);
   });
 
   it("(g) NO JWK private-field VALUE (d/p/q/dp/dq/qi) appears in any tag or in the result", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     const result = (await adapter.upload!(
-      { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i" },
-      { clientFactory: turbo.factory },
+      { jwk: throwawayJwk, data: "x", contentType: "text/plain", itemId: "i", maxRewardWinston: CAP },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
     const serialized = JSON.stringify(result);
@@ -268,8 +295,8 @@ describe("E3 upload — the MANDATORY permanence warning (E-06, N-10)", () => {
   });
 
   it("surfaces the manifest content-type constant so upload↔library share one spelling", async () => {
-    const adapter = createArweaveAdapter();
-    const turbo = makeRecordingTurboClient();
+    const adapter = createArweaveAdapter({ pool: makeHealthPool() });
+    const recorded = makeRecordingUploadApi();
 
     const result = (await adapter.upload!(
       {
@@ -277,8 +304,9 @@ describe("E3 upload — the MANDATORY permanence warning (E-06, N-10)", () => {
         data: "manifest bytes",
         contentType: MANIFEST_CONTENT_TYPE,
         itemId: "manifest-1",
+        maxRewardWinston: CAP,
       },
-      { clientFactory: turbo.factory },
+      { apiFactory: recorded.apiFactory },
     )) as UploadResult;
 
     // The manifest content-type round-trips verbatim through the applied tags —

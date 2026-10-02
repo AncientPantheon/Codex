@@ -29,7 +29,7 @@
 // surface; there is no second, parallel foreign-chains section.
 // ============================================================================
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { createForeignChainRegistry } from "@ancientpantheon/codex-core";
 import {
@@ -43,6 +43,12 @@ import {
   type PanelAddressBookEntry,
 } from "@ancientpantheon/codex-arweave/panel";
 import {
+  MemoryLibraryStore,
+  rebuildLibraryForAllOwners,
+  type LibraryStore,
+  type MultiOwnerRebuildProgress,
+} from "@ancientpantheon/codex-arweave/library";
+import {
   ChainwebPanel,
   CodexTabs,
   type CodexTabKey,
@@ -50,6 +56,7 @@ import {
 import {
   getRegisteredChains,
   useAddressBook,
+  useCodex,
   useCodexAuth,
   useOuroAccounts,
   useStoaChainSeeds,
@@ -66,7 +73,7 @@ import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 import type { ForeignChainPanels } from "@ancientpantheon/codex-ui/ui/foreign-chains";
 import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
 
-import type { GatewayPool } from "@ancientpantheon/arweave-core";
+import { createGatewayPool, type GatewayPool } from "@ancientpantheon/arweave-core";
 import type { ForeignChainAdapter, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 
 import { createWorkerKeygenRunner } from "@ancientpantheon/codex-arweave/keygen";
@@ -309,6 +316,46 @@ export function createRevealSeedWords({
       const mnemonic = await smartDecrypt(seed.secret, getPassword());
       const words = mnemonic.trim().split(/\s+/).filter(Boolean);
       return words.length === 0 ? null : words;
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Build the Prime Arweave seed's ON-DEMAND plaintext-bits reveal seam — the
+ * Arweave-SEED counterpart of {@link createRevealAccountSecret} (which
+ * reveals an Ouronet ACCOUNT's secret) and {@link createRevealSeedWords}
+ * (which reveals a CHAINWEB seed's mnemonic words).
+ *
+ * `codex-seed-restore-activation` T3: `ArweaveSeedsArea.tsx`'s own "decrypt
+ * on demand" pattern covers exactly those two cases — NEITHER reveals an
+ * ARWEAVE seed's own bits by id, so this is a genuinely NEW seam, not a
+ * reuse of an existing one. (This file's own `revealArweaveSeedBits` above
+ * is a different shape: it decrypts EVERY stored seed EAGERLY, in an
+ * effect, to populate the Seeds area's synchronous row list — this
+ * function instead decrypts exactly ONE seed, on demand, for
+ * `checkArweaveRestoreEligibility`/`backupCodex`'s own one-off need.)
+ *
+ * Same failure contract as `createRevealAccountSecret`/`createRevealSeedWords`:
+ * `null`, NEVER a throw — an unknown seed id or a decrypt failure (locked
+ * codex, wrong password) both fold into "cannot read this seed's bits right
+ * now", which the caller treats as "no recovery tag this time", never an
+ * error.
+ */
+export function createRevealArweaveSeedSecret({
+  seeds,
+  getPassword,
+}: {
+  seeds: readonly StoredArweaveSeed[];
+  getPassword: () => string;
+}): (seedId: string) => Promise<string | null> {
+  return async (seedId: string): Promise<string | null> => {
+    const seed = seeds.find((entry) => entry.id === seedId);
+    if (seed === undefined) return null;
+    try {
+      // `getPassword()` throws on a locked codex — inside the try on purpose.
+      return await smartDecrypt(seed.secret, getPassword());
     } catch {
       return null;
     }
@@ -648,6 +695,14 @@ export interface BuildArweaveWiringOptions {
   chainwebSeeds?: ArweaveSeedChainwebSource[];
   /** Option 3's LAZY mnemonic reveal seam ({@link createRevealSeedWords}). */
   revealSeedWords?: (seedId: string) => Promise<readonly string[] | null>;
+  /** `codex-seed-restore-activation` T3: the Prime Arweave seed's ON-DEMAND
+   *  plaintext-bits reveal seam ({@link createRevealArweaveSeedSecret}).
+   *  Threaded into `buildRealPanelDeps` (real mode only) alongside the
+   *  `primeOuronetAccountId`/`primeArweaveSeedId` this function derives
+   *  from `ouronetAccounts`/`arweaveSeeds` below, so `backupCodex` can
+   *  reveal the seed's own bits for the recovery-tag cipher without a
+   *  second decrypt path. */
+  revealArweaveSeedSecret?: (seedId: string) => Promise<string | null>;
   /** The seed → keys delete cascade ({@link createSeedKeyDeleter}). */
   onDeleteSeed?: (request: ArweaveSeedDeletionRequest) => Promise<void>;
   /** The seeded-keygen worker factory. Defaults to the app's real bundler-built
@@ -660,6 +715,48 @@ export interface BuildArweaveWiringOptions {
   addForeignKey?: (entry: ForeignKeyEntry) => Promise<void>;
   /** The codex store's `deleteForeignKey` action — where a deleted key leaves. */
   deleteForeignKey?: (id: string) => Promise<void>;
+  /** Resolves the codex's CURRENT export payload (`useCodexBackup()
+   *  .exportForCloud`), threaded through to `CodexBackupArea` via
+   *  `ArweavePanelDeps.getExportJson`. LAZY on purpose — called fresh at
+   *  confirm-time, never at mount/render time, so a backup always captures
+   *  whatever's true at the moment of the click. Without it, both modes'
+   *  `backupCodex` fall back to their own unarmed/placeholder behavior. */
+  getExportJson?: () => Promise<string>;
+  /** Called after a codex-backup upload resolves — the caller's own
+   *  `clearDirty()` store action belongs here. Threaded through to both
+   *  `buildRealPanelDeps` and `buildMockPanelDeps`. */
+  onBackupSuccess?: () => void;
+  /** `arweave-non-removable-account` T5: forwarded verbatim to
+   *  `ArweavePanelDeps.onAccountUsedForEncryption` in BOTH wiring modes —
+   *  mirrors `getExportJson`/`onBackupSuccess`'s own threading discipline
+   *  exactly. The `ForeignChainsWiring` component below wires this to the
+   *  mounted codex-ouronet store's own `markOuroAccountEncryptedArweaveUpload`
+   *  action (the SAME `actions` selector `addForeignKey`/`deleteForeignKey`
+   *  already read from), closing the dead-letter gap design.md calls out:
+   *  "the trigger exists and fires [in library/flow.ts], but nothing in the
+   *  real app is wired to it yet." */
+  onAccountUsedForEncryption?: (accountId: string) => void;
+  /**
+   * `arweave-auto-rebuild-on-unlock`: an injected, STABLE Library persistence
+   * seam for REAL mode (forwarded verbatim to `buildRealPanelDeps`'s own
+   * identically-named, already-supported parameter — mock mode's
+   * `buildMockPanelDeps` has no such override, and does not need one: its
+   * `rebuildLibrary` is a true no-op, so there is nothing for an unstable
+   * store identity to lose there).
+   *
+   * Omitting this leaves `buildRealPanelDeps` to default-construct its own
+   * fresh `MemoryLibraryStore()` — fine for a caller that only ever builds
+   * the wiring ONCE. `ForeignChainsWiring`'s own component below does NOT
+   * omit it: `buildArweaveWiring` is `useMemo`'d there, but even a memoized
+   * call can still legitimately recompute more than once across a component's
+   * lifetime (e.g. its own `arweaveSeeds` memo settling identity once,
+   * shortly after mount, as its seed-bits/-words reveal effects resolve) —
+   * and the background `rebuildLibraryForAllOwners` run must keep writing
+   * into the SAME store instance `ArweavePanel`'s mounted `LibraryArea`
+   * reads from, across any such recompute, or its reconciled entries become
+   * invisible (written into a store nothing downstream still points at).
+   */
+  libraryStore?: LibraryStore;
 }
 
 /**
@@ -676,6 +773,7 @@ export function buildArweaveWiring({
   mode,
   gatewayUrl = DEFAULT_GATEWAY_URL,
   pool,
+  libraryStore,
   addressBook = [],
   foreignKeys = [],
   arweaveSeeds = [],
@@ -687,11 +785,15 @@ export function buildArweaveWiring({
   revealAccountSecret,
   chainwebSeeds = [],
   revealSeedWords,
+  revealArweaveSeedSecret,
   onDeleteSeed,
   workerFactory = createKeygenWorker,
   getPassword,
   addForeignKey,
   deleteForeignKey,
+  getExportJson,
+  onBackupSuccess,
+  onAccountUsedForEncryption,
 }: BuildArweaveWiringOptions): ArweaveWiring {
   const registry = createForeignChainRegistry();
 
@@ -714,16 +816,57 @@ export function buildArweaveWiring({
     // OPT-IN real path — constructs the E1 adapter + E3 seams against the
     // configured gateway (or the injected fake pool in tests). Reached ONLY here.
     adapter = createRealArweaveAdapter({ gatewayUrl, pool });
+    // The panel's single DEFAULT "selected Arweave address" (realArweaveAdapter.ts's
+    // `ownerAddress`) — codex-backup's own default signing identity (it never
+    // carries an explicit per-call account selection the way
+    // `uploadAndTrack`/`uploadFilesAndTrack` do, both of which resolve their
+    // REAL signing key from the Upload Wizard's own per-call `accountId` via
+    // `findEntryForAddress`, never from this). There is no "active Arweave
+    // account" concept tracked anywhere yet (unlike `activeOuroAccountId`/
+    // `activeStoaChainWalletId` for other entity kinds), so the codex's
+    // FIRST Arweave-chain foreign key is this one default identity. Filtered
+    // to `ARWEAVE_CHAIN_ID` — `foreignKeys` is the chain-agnostic store slice
+    // — so this picks the SAME `#0` entry `ArweavePanel`'s own `arweaveKeys`
+    // (and therefore `UploadWizard`'s `accounts[0]`) would. `id` is the
+    // fallback (never `address`, which is optional) because `id` IS the
+    // canonical address for every entry this app ever writes
+    // (`createArweaveKeyPersistence`'s `persistJwk` sets both to the same
+    // value) and `findEntryForAddress` itself accepts either. Omitted
+    // entirely before this fix, `ownerAddress` was unconditionally `""` in
+    // every real-mode build, so every real upload/backup/send threw "No
+    // Arweave key found for the selected address \"\"" regardless of how
+    // many keys the codex held — the reported bug this fixes.
+    //
+    // `arweave-library-multi-key`: a codex holding MORE than one configured
+    // key is a real case (the Upload Wizard's Account step can select any of
+    // them), and the Library area does NOT scope to this single default —
+    // `ArweavePanel.tsx`'s own `libraryOwners` derives the FULL address list
+    // from `panelDeps.foreignKeys` instead, so an upload made under a
+    // non-default key still shows up and is still rebuildable.
+    const ownerAddress = foreignKeys.find((k) => k.chainId === ARWEAVE_CHAIN_ID);
     baseDeps = buildRealPanelDeps({
       gatewayUrl,
       pool,
+      libraryStore,
       adapter,
+      address: ownerAddress?.address ?? ownerAddress?.id,
       addressBook,
       foreignKeys,
       workerFactory,
       getPassword,
       addForeignKey,
       deleteForeignKey,
+      getExportJson,
+      onBackupSuccess,
+      onAccountUsedForEncryption,
+      // `codex-seed-restore-activation` T3: the Prime identity, derived from
+      // the SAME filtered lists already passed to the panel (Option 2's
+      // `isDefault` carve-out for the Prime Ouronet account; the codex's
+      // `isPrime` Arweave seed) — never a second "find the prime" query.
+      primeOuronetAccountId: ouronetAccounts.find((a) => a.isDefault === true)?.id,
+      revealAccountSecret,
+      primeArweaveSeedId: arweaveSeeds.find((s) => s.isPrime === true)?.id,
+      revealArweaveSeedSecret,
     });
   } else {
     // The mock path (the default, funds-safe, offline). No network, no real keys.
@@ -739,7 +882,13 @@ export function buildArweaveWiring({
     // persist seam. Mock's NETWORK seams (send/upload/gateway) stay fakes.
     adapter = createMockArweaveAdapter();
     baseDeps = {
-      ...buildMockPanelDeps({ addressBook, foreignKeys }),
+      ...buildMockPanelDeps({
+        addressBook,
+        foreignKeys,
+        getExportJson,
+        onBackupSuccess,
+        onAccountUsedForEncryption,
+      }),
       ...(persistence ?? {}),
       // Pure Keys' "Create Random Key" rides `deps.keygenRunner` straight into
       // the now-REAL `generateArweaveKey` above (armed whenever `persistence`
@@ -818,6 +967,15 @@ export interface ForeignChainsWiringProps {
   zone3AnchorTarget?: Element | null;
   /** Forwarded to `CodexTabs` — see that prop's own doc comment. */
   fullScreenPortalTarget?: Element | null;
+  /** Resolves the codex's CURRENT export payload (`useCodexBackup()
+   *  .exportForCloud`), forwarded to `buildArweaveWiring` → `CodexBackupArea`.
+   *  LAZY on purpose — called fresh at confirm-time, never at mount/render
+   *  time. Without it, `CodexBackupArea`'s "Back up codex to Arweave" action
+   *  falls back to its mode's own unarmed/placeholder behavior. */
+  getExportJson?: () => Promise<string>;
+  /** Called after a codex-backup upload resolves — typically the caller's
+   *  own `useCodexBackup().clearDirty`. Forwarded to `buildArweaveWiring`. */
+  onBackupSuccess?: () => void;
 }
 
 /**
@@ -850,6 +1008,8 @@ export function ForeignChainsWiring({
   edgeRailAnchorTarget,
   zone3AnchorTarget,
   fullScreenPortalTarget,
+  getExportJson,
+  onBackupSuccess,
 }: ForeignChainsWiringProps = {}): ReactElement {
   // The REAL codex address book (never a fake): mapped into the panel seam so a
   // saved Arweave address is selectable as a Send recipient.
@@ -972,6 +1132,19 @@ export function ForeignChainsWiring({
     [storedArweaveSeeds, seedBits, seedWords],
   );
 
+  // `codex-seed-restore-activation` T3: the Prime Arweave seed's ON-DEMAND
+  // reveal seam — the counterpart of `revealAccountSecret` above, for
+  // `checkArweaveRestoreEligibility`/`backupCodex`'s own one-off need
+  // (never the eager `revealArweaveSeedBits` effect's shape).
+  const revealArweaveSeedSecret = useMemo(
+    () =>
+      createRevealArweaveSeedSecret({
+        seeds: storedArweaveSeeds,
+        getPassword: getCurrentPassword,
+      }),
+    [storedArweaveSeeds, getCurrentPassword],
+  );
+
   const onSeedDefined = useMemo(
     () =>
       createArweaveSeedPersistence({
@@ -993,32 +1166,171 @@ export function ForeignChainsWiring({
     [actions],
   );
 
-  const { foreignChains, foreignChainPanels, panelDeps } = buildArweaveWiring({
-    mode,
-    gatewayUrl,
-    pool,
-    addressBook,
-    foreignKeys,
-    arweaveSeeds,
-    onSeedDefined,
-    watchedAddresses,
-    addWatchedAddress,
-    removeWatchedAddress,
-    ouronetAccounts,
-    revealAccountSecret,
-    chainwebSeeds,
-    revealSeedWords,
-    onDeleteSeed,
-    // The persist path: encrypt-at-rest under the codex password, then into the
-    // REAL foreign-key slice — which is what makes a generated key survive and
-    // show up in Arweave → Accounts.
-    getPassword: getCurrentPassword,
-    addForeignKey: actions.addForeignKey,
-    deleteForeignKey: actions.deleteForeignKey,
-  });
+  // STABLE, lazily-constructed real-mode Library store + gateway pool —
+  // `arweave-auto-rebuild-on-unlock` (below) runs a BACKGROUND rebuild that
+  // writes into `panelDeps.libraryStore` over some real time; that write
+  // must land in the SAME store instance `ArweavePanel`'s mounted
+  // `LibraryArea` later reads from, or it becomes invisible. `useMemo`
+  // below guards `buildArweaveWiring` against recomputing on an UNRELATED
+  // render, but a memoized call can still legitimately recompute more than
+  // once across this component's real lifetime (e.g. `arweaveSeeds`'s own
+  // identity settling once, shortly after mount, as its seed-bits/-words
+  // reveal effects resolve — unrelated to anything added here) — each
+  // recompute previously minted a BRAND-NEW `MemoryLibraryStore`/gateway
+  // pool (real mode's `buildRealPanelDeps` defaults both when not injected),
+  // orphaning whatever the in-flight background rebuild had already written.
+  // Constructing both ONCE, in a ref, and injecting them into EVERY
+  // `buildArweaveWiring` call closes that gap — a real fix (every recompute
+  // of `panelDeps` now carries the identical store/pool), not merely a
+  // workaround for the auto-rebuild's own timing.
+  const stableLibraryStoreRef = useRef<LibraryStore | null>(null);
+  if (stableLibraryStoreRef.current === null) {
+    stableLibraryStoreRef.current = new MemoryLibraryStore();
+  }
+  // FUNDS-SAFETY: a real `GatewayPool` is constructed ONLY in the real-mode
+  // branch, exactly like `buildArweaveWiring`'s own identical invariant (see
+  // that function's own module doc) — the default mock path must never reach
+  // `createGatewayPool`, so building the default wiring still opens no
+  // network connection.
+  const stablePoolRef = useRef<GatewayPool | null>(null);
+  if (mode === ARWEAVE_WIRING_MODE_REAL && stablePoolRef.current === null) {
+    // An explicitly injected `pool` prop (automated tests — zero live
+    // network) is used verbatim; absent, ONE real pool is minted here rather
+    // than leaving `buildRealPanelDeps`'s own `resolveRealPool` to default a
+    // fresh one on every recompute.
+    stablePoolRef.current = pool ?? createGatewayPool({ endpoints: [gatewayUrl ?? DEFAULT_GATEWAY_URL] });
+  }
+  const resolvedPool = pool ?? stablePoolRef.current ?? undefined;
+
+  // MEMOIZED: `buildArweaveWiring` only recomputes when one of its REAL
+  // inputs actually changes identity — see the stable-store/-pool doc
+  // comment just above for why a recompute must still carry the SAME
+  // store/pool across it.
+  const { foreignChains, foreignChainPanels, panelDeps } = useMemo(
+    () =>
+      buildArweaveWiring({
+        mode,
+        gatewayUrl,
+        pool: resolvedPool,
+        libraryStore: stableLibraryStoreRef.current!,
+        addressBook,
+        foreignKeys,
+        arweaveSeeds,
+        onSeedDefined,
+        watchedAddresses,
+        addWatchedAddress,
+        removeWatchedAddress,
+        ouronetAccounts,
+        revealAccountSecret,
+        chainwebSeeds,
+        revealSeedWords,
+        revealArweaveSeedSecret,
+        onDeleteSeed,
+        // The persist path: encrypt-at-rest under the codex password, then into
+        // the REAL foreign-key slice — which is what makes a generated key
+        // survive and show up in Arweave → Accounts.
+        getPassword: getCurrentPassword,
+        addForeignKey: actions.addForeignKey,
+        deleteForeignKey: actions.deleteForeignKey,
+        getExportJson,
+        onBackupSuccess,
+        // `arweave-non-removable-account` T5: the dead-letter gap closed — the
+        // REAL codex-ouronet store action, reached the SAME way `addForeignKey`/
+        // `deleteForeignKey` above already are (the `actions` selector off the
+        // mounted store). A successful Encrypted upload now actually flips
+        // `IOuroAccount.hasEncryptedArweaveUpload` on the encrypting account,
+        // rather than firing into the void.
+        onAccountUsedForEncryption: actions.markOuroAccountEncryptedArweaveUpload,
+      }),
+    [
+      mode,
+      gatewayUrl,
+      resolvedPool,
+      addressBook,
+      foreignKeys,
+      arweaveSeeds,
+      onSeedDefined,
+      watchedAddresses,
+      addWatchedAddress,
+      removeWatchedAddress,
+      ouronetAccounts,
+      revealAccountSecret,
+      chainwebSeeds,
+      revealSeedWords,
+      revealArweaveSeedSecret,
+      onDeleteSeed,
+      getCurrentPassword,
+      actions,
+      getExportJson,
+      onBackupSuccess,
+    ],
+  );
+
+  // `arweave-auto-rebuild-on-unlock`: EVERY address this chain currently
+  // holds a configured key for — the SAME derivation `ArweavePanel.tsx`'s own
+  // `libraryOwners` memo performs (duplicated rather than imported: that
+  // component does not export the helper, and this file independently needs
+  // the identical "don't just rebuild the default identity, rebuild every
+  // configured key" set, for the same reason — see that memo's own doc
+  // comment). `panelDeps.address` is folded in as a FLOOR, never a
+  // narrowing, matching `libraryOwners`'s own contract exactly.
+  const arweaveLibraryOwners = useMemo<string[]>(() => {
+    const owners = new Set<string>();
+    for (const key of foreignKeys) {
+      if (key.chainId === ARWEAVE_CHAIN_ID) owners.add(key.address ?? key.id);
+    }
+    if (panelDeps.address) owners.add(panelDeps.address);
+    return [...owners];
+  }, [foreignKeys, panelDeps.address]);
+
+  // The codex's own readiness — `CodexProvider`'s adapter-wiring init effect
+  // has not necessarily committed yet on this component's OWN first render
+  // (same race `App.tsx`'s `EncryptedSession`/`NewCodexSession` already gate
+  // on via this exact `isReady` flag), so `foreignKeys`/`arweaveLibraryOwners`
+  // read off the store may still be the pre-init empty default at that
+  // instant. Gating on `isReady` (re-evaluated whenever it flips, per the
+  // effect's own dependency array below) is what lets the auto-rebuild below
+  // capture the REAL, settled owner list instead of firing once, early, and
+  // forever after on an empty one.
+  const { isReady } = useCodex();
+
+  // The one-shot "auto-rebuild already started" guard — the SAME
+  // `useRef`-boolean idiom `App.tsx`'s own `EncryptedSession`
+  // (`restoreStarted`) already uses for "run this exactly once per mount
+  // (= once per unlock, since this component unmounts on lock and remounts
+  // fresh on the next unlock), never again on a later re-render."
+  const autoRebuildStartedRef = useRef(false);
+  const [autoRebuildProgress, setAutoRebuildProgress] =
+    useState<MultiOwnerRebuildProgress | null>(null);
+
+  useEffect(() => {
+    if (!isReady || autoRebuildStartedRef.current) return;
+    autoRebuildStartedRef.current = true;
+    // Runs across EVERY configured address, continuing past any single
+    // owner's failure (see `rebuildLibraryForAllOwners`'s own doc comment) —
+    // a bad/unreachable address must never hide every other address's
+    // uploads. `onOwnerError` is deliberately omitted: a swallowed failure
+    // here degrades to "that one address didn't index this time," the same
+    // silent-degrade discipline this file's other optional seams already
+    // follow, rather than surfacing a toast/alert no design for one exists
+    // for yet.
+    void rebuildLibraryForAllOwners(arweaveLibraryOwners, {
+      store: panelDeps.libraryStore,
+      pool: panelDeps.pool,
+      onProgress: setAutoRebuildProgress,
+    }).finally(() => setAutoRebuildProgress(null));
+  }, [isReady, arweaveLibraryOwners, panelDeps]);
+
+  // The progress state above rides ALONGSIDE the memoized `panelDeps` rather
+  // than inside it — composed fresh here so updating it never has to rebuild
+  // `panelDeps` itself (which would defeat the memoization fix above).
+  const providerDeps: WiredArweavePanelDeps = useMemo(
+    () => ({ ...panelDeps, libraryAutoRebuildProgress: autoRebuildProgress }),
+    [panelDeps, autoRebuildProgress],
+  );
 
   return (
-    <ArweavePanelProvider deps={panelDeps}>
+    <ArweavePanelProvider deps={providerDeps}>
       <CodexTabs
         className={className}
         defaultTab={defaultTab}

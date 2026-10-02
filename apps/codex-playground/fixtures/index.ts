@@ -87,6 +87,10 @@ const DEFAULT_UI_SETTINGS: UiSettings = {
   zbomZone2: false,
   zbomZone3: false,
   zbomExecutePosition: "top",
+  // `arweave-non-removable-account` T1: defaults to `false` — matches
+  // `codex-ouronet`'s own `DEFAULT_UI_SETTINGS` exactly (never opt the
+  // fixtures into skipping the Arweave safety check).
+  allowDeletingArweaveEncryptedAccounts: false,
 };
 
 /** A valid but EMPTY CodexSnapshot (mode-2). No StoaChain/Ouro entries. */

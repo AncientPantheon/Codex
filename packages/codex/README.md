@@ -20,6 +20,20 @@ A React app gets the full multi-chain wallet from one dependency; a headless con
 > import/export functions. Hand-parsing the JSON shape yourself is
 > unsupported and has already caused a real, silent data-loss incident.
 
+> **Uploading to or reading from Arweave?** Read
+> [`ARWEAVE_TAG_SCHEMA.md`](./ARWEAVE_TAG_SCHEMA.md) first — it is the single
+> normative source for every tag a Codex Arweave upload carries, in canonical
+> order, plus the exact encryption procedure behind each
+> `Codex-Encryption-Version`. Arweave data is permanent, so guessing a tag
+> name or an encryption scheme is not a fixable mistake.
+
+> **Reminding a user to back up before they log out?** Read
+> [`SESSION_LIFECYCLE_CONTRACT.md`](./SESSION_LIFECYCLE_CONTRACT.md) first —
+> it documents what the `dirty` flag actually tracks, the `beforeunload`
+> guard, and `useRequestLogout()`'s four outcomes. It is a UX convenience
+> contract, not a safety mechanism, and explicitly has no role in the
+> Arweave non-removable-account invariant.
+
 ## Install
 
 ```bash

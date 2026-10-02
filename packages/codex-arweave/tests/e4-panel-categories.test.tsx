@@ -2,18 +2,21 @@
  * The Arweave panel's CATEGORY menu (Class IA restructure).
  *
  * Pins the five-category vocabulary the Class 2 shell presents for Arweave —
- * Seeds · Pure Keys · Accounts · Upload · Library — and the fact that every one
- * of them is currently an EXPLICIT EMPTY placeholder.
+ * Seeds · Pure Keys · Accounts · Upload · Library.
  *
- * The categories previously mounted demo/mock surfaces (KeyringArea, BalanceArea,
- * SendArea, UploadArea, LibraryArea). Those were removed deliberately: they are
- * being replaced with real wiring one category at a time, Seeds first. The area
- * components still exist and keep their own direct specs, so this file does NOT
- * assert them — it asserts the menu and that no category ever renders blank or
- * throws while it waits its turn.
+ * Seeds, Pure Keys, and Accounts are wired to their real areas (own direct
+ * specs in `e5-seeds-area.test.tsx` / `e4-panel-pure-keys.test.tsx` /
+ * `e5-accounts-area.test.tsx`). This file's own concern is the MENU itself —
+ * every category stays reachable and never renders blank or throws.
  *
- * Each case guards a user-visible regression: a category vanishing from the menu
- * makes it unreachable; a blank body reads as a bug rather than as "pending".
+ * `arweave-upload-categories` addendum (mounting): Upload and Library are now
+ * ALSO wired for real — Upload mounts `UploadArea`, Library mounts
+ * `CodexBackupArea` + `LibraryArea`. Their own deep behaviour is covered by
+ * `e4-panel-upload.test.tsx` / `e4-panel-codex-backup.test.tsx`; this file
+ * only asserts the real components actually mount through the panel (not the
+ * old empty placeholder) and that a `deps === null` host still degrades to a
+ * visible "unavailable" message rather than a crash, mirroring the existing
+ * Pure Keys pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,6 +34,23 @@ import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
 
 import throwawayKeyfile from "./fixtures/throwaway-arweave-keyfile.json" assert { type: "json" };
+
+// `arweave-upload-wizard` T2: the SAME `useEnsureCodexUnlockedOptional`
+// source `ArweavePanel.tsx` already threads into `ArweaveSeedsArea`'s mount
+// (see that mount's own `ensureCodexUnlocked={ensureCodexUnlocked ?? undefined}`)
+// is now ALSO threaded into the `UploadWizard` mount — mocked here (same
+// pattern `e5-send-arweave-modal.test.tsx` already uses for the sibling
+// `useEnsureCodexUnlocked` export) so a test can assert the wizard's own
+// Confirm step actually calls it, rather than just checking the prop exists
+// on the type.
+const ensureCodexUnlockedOptionalMock = vi.fn(async () => true);
+vi.mock("@ancientpantheon/codex-ouronet/zbom", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useEnsureCodexUnlockedOptional: () => ensureCodexUnlockedOptionalMock,
+  };
+});
 
 const ARWEAVE_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
 const fixtureJwk = throwawayKeyfile as unknown as ArweaveJwk;
@@ -93,6 +113,13 @@ function makeDeps(overrides: Partial<ArweavePanelDeps> = {}): ArweavePanelDeps {
       ownerAddress: ARWEAVE_ADDRESS,
       tags: [],
     })),
+    uploadFilesAndTrack: vi.fn(async () => ({
+      manifestId: "manifest-id",
+      fileIds: [],
+      uploadId: "upload-id",
+    })),
+    getExportJson: vi.fn(async () => "{}"),
+    backupCodex: vi.fn(async () => ({ id: "backup-id" })),
     listLibrary: vi.fn(async () => libraryRows),
     openUrl: vi.fn((id: string) => `https://arweave.net/${id}`),
     rebuildLibrary: vi.fn(async () => {}),
@@ -181,26 +208,14 @@ describe("ArweavePanel — the five-category menu", () => {
     );
   });
 
-  // Seeds, Pure Keys and Accounts are WIRED now (ArweaveSeedsArea /
-  // PureKeysArea / ArweaveAccountsArea), so only the two still-unwired
-  // categories keep the placeholder body. The wired trio's own coverage lives
-  // in tests/e5-seeds-area.test.tsx and tests/e4-panel-pure-keys.test.tsx.
-  const UNWIRED = CATEGORIES.filter(
-    ([id]) => id !== "seeds" && id !== "accounts" && id !== "pure-keys",
-  );
-
-  it.each(UNWIRED)(
-    "renders a visible 'not wired yet' body for `%s` — never blank, never a throw",
-    (id, label) => {
-      renderPanel();
-      fireEvent.click(screen.getByTestId(`arweave-subtab-${id}`));
-      const body = screen.getByTestId(`arweave-category-empty-${id}`);
-      // Visible copy, naming the category, so the state reads as pending work
-      // rather than as a broken panel.
-      expect(body.textContent).toContain(label);
-      expect(body.textContent).toMatch(/not wired yet/i);
-    },
-  );
+  // Seeds, Pure Keys, Accounts, Upload, and Library are ALL wired now
+  // (ArweaveSeedsArea / PureKeysArea / ArweaveAccountsArea / UploadArea /
+  // CodexBackupArea+LibraryArea) — no category keeps the generic empty
+  // placeholder body any longer, so the old "renders a visible 'not wired
+  // yet' body" matrix has no subject left. Each wired category's own deep
+  // coverage lives in its own spec file (see this file's own module doc);
+  // the Upload/Library "mounts for real" + "deps === null unavailable"
+  // cases live in the describe blocks below.
 
   it("threads deps all the way to Accounts so its Send button is actually reachable (not just present on the component)", () => {
     // Regression guard: ArweaveAccountsArea's `deps` prop can exist and be
@@ -217,10 +232,233 @@ describe("ArweavePanel — the five-category menu", () => {
   it("shows exactly one category body at a time (switching away unmounts the last)", () => {
     renderPanel();
     fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
-    expect(screen.getByTestId("arweave-category-empty-upload")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-upload-start")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("arweave-subtab-library"));
+    expect(screen.queryByTestId("arweave-upload-start")).toBeNull();
+    expect(screen.getByTestId("library-area")).toBeInTheDocument();
+  });
+});
+
+describe("ArweavePanel — Upload category (arweave-upload-wizard, T3: the wizard entry point)", () => {
+  beforeEach(() => cleanup());
+
+  it("selecting Upload with real deps shows two entry-point buttons, not the old always-visible flat form", () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
     expect(screen.queryByTestId("arweave-category-empty-upload")).toBeNull();
-    expect(screen.getByTestId("arweave-category-empty-library")).toBeInTheDocument();
+    // The old flat, always-mounted form is gone — Upload is an entry point now.
+    expect(screen.queryByTestId("upload-area")).toBeNull();
+    expect(screen.getByTestId("arweave-upload-start")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-upload-backup-codex")).toBeInTheDocument();
+  });
+
+  it('clicking "Start Upload" opens the UploadWizard modal wired from this panel\'s own deps/state (accounts, ouronetAccounts, pool)', () => {
+    const ouronetAccounts = [
+      { id: "ouro-1", label: "Ouro One", account: { address: "Ѻ.ouro-one-address" } },
+    ];
+    renderPanel({ ouronetAccounts });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    expect(screen.queryByTestId("upload-wizard-modal")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+    expect(screen.getByTestId("upload-wizard-modal")).toBeInTheDocument();
+    // Step 0's account list is this panel's OWN `arweaveKeys` (the chain-
+    // scoped slice of `deps.foreignKeys`) — not a second, separately-fetched
+    // list.
+    expect(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`)).toBeInTheDocument();
+
+    // Closing the wizard (its own close button) returns to the two-button
+    // entry point, not a torn-down panel.
+    fireEvent.click(screen.getByTestId("upload-wizard-close"));
+    expect(screen.queryByTestId("upload-wizard-modal")).toBeNull();
+    expect(screen.getByTestId("arweave-upload-start")).toBeInTheDocument();
+  });
+
+  it('shows "Back Up Codex to Arweave" as a visibly-disabled "coming soon" affordance that opens nothing yet (its destination is a later topic\'s page)', () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    const backupBtn = screen.getByTestId("arweave-upload-backup-codex");
+    expect(backupBtn).toBeDisabled();
+    fireEvent.click(backupBtn);
+    expect(screen.queryByTestId("upload-wizard-modal")).toBeNull();
+  });
+
+  it("with deps === null, Upload shows a visible 'unavailable' message rather than crashing, mirroring the Pure Keys pattern", () => {
+    render(<ArweavePanel id={ARWEAVE_CHAIN_ID} />);
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    expect(screen.getByTestId("arweave-upload-unavailable")).toBeInTheDocument();
+  });
+
+  // arweave-upload-wizard, T2: wiring `getBalance`/`ensureCodexUnlocked`
+  // through to the mounted `UploadWizard` — exercised, not just typed.
+  it("wires the real `getBalance` from deps into the mounted UploadWizard — a fake deps.getBalance is actually called and its resolved balance shows on the Account step", async () => {
+    const getBalance = vi.fn(async (address: string) =>
+      address === ARWEAVE_ADDRESS ? 7_000_000_000_000n : 0n,
+    );
+    renderPanel({ getBalance });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    expect(getBalance).toHaveBeenCalledWith(ARWEAVE_ADDRESS);
+    await waitFor(() =>
+      expect(screen.getByTestId(`upload-wizard-account-balance-${ARWEAVE_ADDRESS}`).textContent).toBe(
+        "7 AR",
+      ),
+    );
+  });
+
+  it("wires the real `ensureCodexUnlocked` into the mounted UploadWizard — the SAME source (`useEnsureCodexUnlockedOptional`) Seeds already uses, not a second path — Confirm & Upload actually calls it before uploading", async () => {
+    const { deps } = renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    fireEvent.click(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    // Round 2: the category picker is a custom ACCENT-styled dropdown, not a
+    // native `<select>` — open it, then click the matching option.
+    fireEvent.click(screen.getByTestId("upload-wizard-category"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category-option-general-other"));
+    fireEvent.click(screen.getByTestId("upload-wizard-mode-public"));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [new File([new Uint8Array(10)], "note.txt", { type: "text/plain" })] },
+    });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() => expect(ensureCodexUnlockedOptionalMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(deps.uploadAndTrack).toHaveBeenCalledTimes(1));
+  });
+
+  // arweave-non-removable-account T4: `ArweavePanelDeps.onAccountUsedForEncryption`
+  // threaded into the mounted `UploadWizard` — regression guard for the
+  // non-removable-account invariant's dead-letter gap (design.md: "the
+  // trigger exists and fires [in library/flow.ts], but nothing in the real
+  // app is wired to it yet"). This asserts the wiring is ACTUALLY reachable
+  // through the real `ArweavePanel` → `UploadWizard` mount, not just present
+  // on `ArweavePanelDeps`'s type — a fake could be type-compatible while the
+  // panel silently never passed it down (the same class of regression the
+  // Send-button test above this one already guards against for Accounts).
+  it("wires the real `onAccountUsedForEncryption` from deps into the mounted UploadWizard — a fake is actually called with the encrypting account's id once a mocked encrypted upload succeeds", async () => {
+    const onAccountUsedForEncryption = vi.fn();
+    const ouronetAccounts = [
+      { id: "ouro-1", label: "Ouro One", account: { address: "Ѻ.ouro-one-address" } },
+    ];
+    const { deps } = renderPanel({ ouronetAccounts, onAccountUsedForEncryption });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    fireEvent.click(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category-option-general-other"));
+    fireEvent.click(screen.getByTestId("upload-wizard-mode-encrypted"));
+    fireEvent.click(screen.getByTestId("upload-wizard-encryptor-ouro-1"));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [new File([new Uint8Array(10)], "note.txt", { type: "text/plain" })] },
+    });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() => expect(deps.uploadAndTrack).toHaveBeenCalledTimes(1));
+    expect(onAccountUsedForEncryption).toHaveBeenCalledWith("ouro-1");
+  });
+});
+
+describe("ArweavePanel — Library category (arweave-upload-categories addendum: mounting)", () => {
+  beforeEach(() => cleanup());
+
+  it("selecting Library with real deps renders the real LibraryArea (General Data tab, the default) AND, on the Codex tab, CodexBackupArea — not the old empty placeholder", () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-library"));
+    expect(screen.queryByTestId("arweave-category-empty-library")).toBeNull();
+    // General Data is the default tab — LibraryArea is visible immediately.
+    expect(screen.getByTestId("library-area")).toBeInTheDocument();
+    // CodexBackupArea/CodexBackupHistoryArea now live on their OWN "Codex"
+    // tab (`arweave-upload-library` follow-up redesign) rather than always
+    // stacked above LibraryArea — reachable, not orphaned, just one click
+    // away instead of unconditionally visible.
+    fireEvent.click(screen.getByTestId("library-tab-codex"));
+    expect(screen.getByTestId("codex-backup-area")).toBeInTheDocument();
+    // CodexBackupHistoryArea (Part 2 of the same addendum) is mounted
+    // alongside CodexBackupArea on that SAME "Codex" tab — the dedicated
+    // "just my codex backups" list, not left orphaned either.
+    expect(screen.getByTestId("codex-backup-history-area")).toBeInTheDocument();
+  });
+
+  it("with deps === null, Library shows a visible 'unavailable' message rather than crashing, mirroring the Pure Keys pattern", () => {
+    render(<ArweavePanel id={ARWEAVE_CHAIN_ID} />);
+    fireEvent.click(screen.getByTestId("arweave-subtab-library"));
+    expect(screen.getByTestId("arweave-library-unavailable")).toBeInTheDocument();
+  });
+
+  // Real-world composition proof (owner's own report): a genuine 2-file
+  // nft-data bundle (a manifest + 2 files sharing one Codex-Upload-Id, tagged
+  // Codex-Category: nft-data) must render correctly through the FULL
+  // ArweavePanel composition — not just in `LibraryArea`'s own isolated
+  // tests, which could pass while the panel wires some prop incorrectly.
+  it("a real nft-data bundle upload renders as ONE grouped NFT Data section with 2 named file rows, mounted through the real ArweavePanel", async () => {
+    const MANIFEST_ID = "manManManManManManManManManManManManManManMa";
+    const FILE_IMAGE_ID = "imgImgImgImgImgImgImgImgImgImgImgImgImgImgI";
+    const FILE_METADATA_ID = "metMetMetMetMetMetMetMetMetMetMetMetMetMetMe";
+
+    const libraryRows: LibraryEntry[] = [
+      {
+        id: MANIFEST_ID,
+        owner: ARWEAVE_ADDRESS,
+        itemId: "item-manifest",
+        contentType: "application/x.arweave-manifest+json",
+        status: "final",
+        createdAt: 300,
+        manifest: { isManifest: true },
+        uploadId: "upload-bunny",
+        tags: [{ name: "Codex-Category", value: "nft-data" }],
+      },
+      {
+        id: FILE_IMAGE_ID,
+        owner: ARWEAVE_ADDRESS,
+        itemId: "item-image",
+        contentType: "image/png",
+        status: "final",
+        createdAt: 300,
+        uploadId: "upload-bunny",
+        tags: [
+          { name: "Codex-Category", value: "nft-data" },
+          { name: "Codex-Path", value: "Set_Bunny_RGB_Big.png" },
+        ],
+      },
+      {
+        id: FILE_METADATA_ID,
+        owner: ARWEAVE_ADDRESS,
+        itemId: "item-metadata",
+        contentType: "application/json",
+        status: "final",
+        createdAt: 300,
+        uploadId: "upload-bunny",
+        tags: [
+          { name: "Codex-Category", value: "nft-data" },
+          { name: "Codex-Path", value: "metadata.json" },
+        ],
+      },
+    ];
+
+    renderPanel({ listLibrary: vi.fn(async () => libraryRows) });
+    fireEvent.click(screen.getByTestId("arweave-subtab-library"));
+
+    expect(await screen.findByTestId("library-category-nft-data")).toHaveTextContent("NFT Data");
+    const group = screen.getByTestId("library-bundle-group");
+    const rows = within(group).getAllByTestId("library-entry");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.textContent).join(" ")).toContain("Set_Bunny_RGB_Big.png");
+    expect(rows.map((r) => r.textContent).join(" ")).toContain("metadata.json");
+    // The manifest is demoted to the group header, never a 3rd peer row.
+    expect(screen.queryAllByTestId("library-entry")).toHaveLength(2);
+    // Each file row's own copyable link box + Copy button are present.
+    for (const row of rows) {
+      expect(within(row).getByTestId("library-link-box")).toBeInTheDocument();
+      expect(within(row).getByTestId("library-copy-button")).toBeInTheDocument();
+    }
   });
 });
 
@@ -247,10 +485,10 @@ describe("ArweavePanel — mobile: icon-only, centered, single-line category row
     expect(row.style.justifyContent).toBe("center");
   });
 
-  it("still switches categories via the SAME generation-guard-aware requestCategory path — e.g. lands on an unwired category's empty body", () => {
+  it("still switches categories via the SAME generation-guard-aware requestCategory path — e.g. lands on the Upload category's real body", () => {
     renderPanelMobile();
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
-    expect(screen.getByTestId("arweave-category-empty-upload")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-upload-start")).toBeInTheDocument();
   });
 
   it("desktop (no CodexUiRoot ancestor) is unaffected — still the wrapping text-pill tablist", () => {

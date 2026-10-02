@@ -12,6 +12,7 @@ export {
   CodexLockedError,
   CodexKeyMissingError,
   CodexPrimeProtectedError,
+  CodexArweaveEncryptionProtectedError,
   CodexPrimeSeedProtectedError,
   CodexKickstartError,
   CodexAdapterError,

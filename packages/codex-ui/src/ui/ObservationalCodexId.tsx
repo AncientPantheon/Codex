@@ -25,6 +25,7 @@ import { SwipeDeck } from "./mobile/SwipeDeck.js";
 import { useRegisterControlsOptional } from "./mobile/controls-context.js";
 import { useCodex } from "../hooks/useCodex.js";
 import { useCodexAuth } from "../hooks/useCodexAuth.js";
+import { useRequestLogout } from "../hooks/useRequestLogout.js";
 import { useOuroAccounts } from "../hooks/useOuroAccounts.js";
 import { useCodexIdentity } from "../hooks/useCodexIdentity.js";
 import { usePureKeypairs } from "../hooks/usePureKeypairs.js";
@@ -320,6 +321,7 @@ export function ObservationalCodexIdDisplay({ className, onDefineIdentity, rende
   // desktop's own row/card layout is unaffected (never reads this state).
   const [collapsed, setCollapsed] = useState(true);
   const { isLocked, lock } = useCodexAuth();
+  const requestLogout = useRequestLogout();
   const store = useCodexStore();
 
   const std = cfg.enabled ? accounts.find((a) => a.id === cfg.standardId) : undefined;
@@ -370,7 +372,13 @@ export function ObservationalCodexIdDisplay({ className, onDefineIdentity, rende
         label: isLocked ? "Unlock Codex" : "Lock Codex",
         onClick: () => {
           if (isLocked) void store.getState().actions.requestPassword().catch(() => {});
-          else lock();
+          // Same save-reminder gate CodexLockControl's "Lock Codex" button
+          // uses — a UX convenience checkpoint only (see
+          // SESSION_LIFECYCLE_CONTRACT.md), never a block: proceed to the
+          // real lock() on any outcome except an explicit cancel.
+          else void requestLogout().then((outcome) => {
+            if (outcome !== "cancelled") lock();
+          });
         },
       },
     ],

@@ -60,9 +60,16 @@ import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 import { useEnsureCodexUnlockedOptional } from "@ancientpantheon/codex-ouronet/zbom";
 
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
+import type { LibraryEntry } from "../library/types.js";
 import { ArweavePanelContext } from "./context.js";
 import { ArweaveAccountsArea } from "./ArweaveAccountsArea.js";
 import { PureKeysArea } from "./PureKeysArea.js";
+import { UploadWizard } from "./UploadWizard.js";
+import { LibraryArea } from "./LibraryArea.js";
+import { LibraryAutoRebuildProgress } from "./LibraryAutoRebuildProgress.js";
+import { CodexBackupArea } from "./CodexBackupArea.js";
+import { CodexBackupHistoryArea } from "./CodexBackupHistoryArea.js";
+import { ArweaveRestoreEligibilityStatus } from "./ArweaveRestoreEligibilityStatus.js";
 import {
   ArweaveSeedsArea,
   type ArweaveSeedDeletion,
@@ -489,6 +496,84 @@ const EMPTY_STYLE: React.CSSProperties = {
   fontSize: 13,
 };
 
+/** The Upload category's own entry-point buttons (`arweave-upload-wizard`,
+ *  T3) — replaces the old always-visible flat `UploadArea` form. */
+const UPLOAD_ENTRY_WRAP_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  maxWidth: 360,
+};
+
+const UPLOAD_ENTRY_BUTTON_STYLE: React.CSSProperties = {
+  padding: "14px 18px",
+  borderRadius: 12,
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+  textAlign: "left",
+  border: `1px solid ${CATEGORY_META.upload.color}`,
+  backgroundColor: `${CATEGORY_META.upload.color}1a`,
+  color: CATEGORY_META.upload.color,
+};
+
+/**
+ * The Library category's own "General Data" / "Codex" tab switcher
+ * (`arweave-upload-library` follow-up redesign — owner's own words: "lets
+ * make two Tabs here, General Data and Codex, separate on their own
+ * display"). Mirrors the TOP-LEVEL category strip's own per-tab button
+ * shape EXACTLY (`desktopStrip` below) — same pill geometry, same
+ * selected/unselected border+background+color formula — just one accent
+ * (`CATEGORY_META.library.color`) and no icon, since this is a sub-tab of
+ * the already-icon-labeled "Library" category, not a second category rail.
+ */
+const LIBRARY_TABS = ["general", "codex"] as const;
+type LibraryTabId = (typeof LIBRARY_TABS)[number];
+const LIBRARY_TAB_LABELS: Record<LibraryTabId, string> = {
+  general: "General Data",
+  codex: "Codex",
+};
+const LIBRARY_TAB_ROW_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+  marginBottom: 16,
+};
+function libraryTabButtonStyle(selected: boolean): React.CSSProperties {
+  const color = CATEGORY_META.library.color;
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    height: CATEGORY_ROW_HEIGHT,
+    padding: "0 16px",
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: `1px solid ${selected ? color : "#262626"}`,
+    backgroundColor: selected ? `${color}1a` : "transparent",
+    color: selected ? color : "#888",
+    whiteSpace: "nowrap",
+  };
+}
+
+/** "Back Up Codex to Arweave" has no destination yet (its real target — the
+ *  Codex Upload wizard — lives on the not-yet-built Codex ID page, a later
+ *  topic), so it renders as a visibly-disabled "coming soon" affordance
+ *  rather than a button that silently does nothing on click — mirrors
+ *  `codex-ui`'s own `IconOuronetExplorerBtn` "(coming soon)" disabled-button
+ *  convention. */
+const UPLOAD_ENTRY_BUTTON_DISABLED_STYLE: React.CSSProperties = {
+  ...UPLOAD_ENTRY_BUTTON_STYLE,
+  cursor: "not-allowed",
+  opacity: 0.4,
+  border: "1px solid #444",
+  backgroundColor: "transparent",
+  color: "#888",
+};
+
 /** The full-panel backdrop behind the leave-generation confirm dialog (design.md
  *  ask A) — dims the tab strip and whichever area is still mounted underneath,
  *  so the choice reads as blocking rather than an inline aside. */
@@ -591,6 +676,21 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
   // uses throughout this file.
   const [openSeedFormHandle, setOpenSeedFormHandle] = useState<(() => void) | null>(null);
   const [pureKeysPaginationHandle, setPureKeysPaginationHandle] = useState<PaginationHandle>(null);
+  /** Upload's own entry-point state (`arweave-upload-wizard`, T3) — the
+   *  Upload category has no other modal-ish open/close state of its own to
+   *  mirror in this file (Accounts' `SendArweaveModal` and Seeds' define
+   *  form each own their local open/close state INSIDE their own area
+   *  component, not lifted here), so this is a plain `useState`, the same
+   *  way `ArweaveSeedsArea`/`PureKeysArea`'s own internal modal toggles work. */
+  const [uploadWizardOpen, setUploadWizardOpen] = useState(false);
+  /** The Library category's own "General Data" / "Codex" sub-tab — defaults
+   *  to "general" so the owner never lands on the Library category and sees
+   *  an empty screen (the Codex tab's own content is nothing until a backup
+   *  actually exists). Local to this component, same as `accountsSubTab`'s
+   *  own "report upward from a sibling area, keep the switch itself here"
+   *  shape — except Library's two tabs are two WHOLE areas, not two sub-views
+   *  of one area, so there is no child component to report a handle from. */
+  const [libraryTab, setLibraryTab] = useState<LibraryTabId>("general");
 
   /** The Seeds area's live run, reported up via `ArweaveSeedsArea`'s
    *  `onRunActivityChange` (T1) — non-null exactly while a generate run has
@@ -695,6 +795,58 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
     for (const entry of sessionKeys) byId.set(entry.id, entry);
     return [...byId.values()];
   }, [deps?.foreignKeys, sessionKeys]);
+
+  /**
+   * EVERY address this chain currently holds a configured key for — fed to
+   * `LibraryArea.owners` below. Library's whole point is "show me everything
+   * I've uploaded", not "show me what the FIRST configured key uploaded": a
+   * codex can hold more than one Arweave key, and the Upload Wizard's own
+   * Account step genuinely lets an upload go out under ANY of them
+   * (`arweave-upload-wizard-account-wiring`'s per-call `accountId`
+   * resolution) — scoping Library to the single `deps.address` (the host's
+   * construction-time default identity, still correct for codex-backup's
+   * OWN default signing identity, which never carries an explicit accountId
+   * selection) silently hid every OTHER key's uploads, even though they
+   * genuinely exist on chain under a key this very codex holds.
+   *
+   * Derived from `arweaveKeys` (already chain-filtered + session-merged)
+   * rather than re-reading `deps.foreignKeys` a second time; `deps.address`
+   * is folded in too (as a floor, never a narrowing) so a host that supplies
+   * an address outside `foreignKeys` — or a test double that only wires
+   * `address` — still gets at least that one address queried, matching the
+   * pre-fix behaviour as a strict superset rather than a regression.
+   */
+  const libraryOwners = useMemo<string[]>(() => {
+    const owners = new Set<string>();
+    for (const key of arweaveKeys) owners.add(key.address ?? key.id);
+    if (deps?.address) owners.add(deps.address);
+    return [...owners];
+  }, [arweaveKeys, deps?.address]);
+
+  /**
+   * `arweave-auto-rebuild-on-unlock`: `LibraryArea` reads the Library ONCE,
+   * on its own mount (`listLibrary`/`uniqueOwners` identity are its own
+   * `refresh` effect's only dependencies — see that component's own doc
+   * comment) — it has no way to know the HOST's background
+   * `rebuildLibraryForAllOwners` run just reconciled new entries into the
+   * SAME store out-of-band, since that mutation is a plain method call, not
+   * a React state update anything here subscribes to. Re-identifying
+   * `listLibrary` on every `libraryAutoRebuildProgress` tick (every page
+   * fetched, AND the final settle-to-`null`) is what makes `LibraryArea`'s
+   * own effect refire and actually pick up what the auto-rebuild wrote —
+   * without this, the Library would show nothing until the user manually
+   * clicked "Rebuild from chain" themselves, defeating the whole feature.
+   * `deps?.listLibrary` is read fresh each call (never captured stale); the
+   * `deps === null` fallback is never actually reached by a mounted
+   * `LibraryArea` (that branch only renders once `deps !== null`), kept only
+   * so this Hook can be called unconditionally, at the top level, every
+   * render (Rules of Hooks).
+   */
+  const listLibraryWithAutoRebuildRefresh = useCallback(
+    (owner: string): Promise<LibraryEntry[]> =>
+      deps?.listLibrary(owner) ?? Promise.resolve([]),
+    [deps?.listLibrary, deps?.libraryAutoRebuildProgress],
+  );
 
   /** Persist ONE generated key, composed from the existing E1 seams: the
    *  keyring encrypts the JWK at rest, then the entry is stored with its seed
@@ -1010,14 +1162,20 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
         // for `StoaAccountsTab`.
         style={isMobile ? { height: "100%" } : undefined}
       >
-        {/* Seeds, Pure Keys and Accounts are WIRED (E5). The remaining two keep
-            their explicit empty placeholder: the demo/mock surfaces they used
-            to mount (BalanceArea / SendArea / UploadArea / LibraryArea) are
-            being replaced by real wiring one category at a time. Those area
-            components still exist and keep their own e4-panel-*.test.tsx specs,
-            so nothing was deleted — they are simply no longer mounted here.
+        {/* Seeds, Pure Keys, Accounts, Upload and Library are ALL WIRED (E5 +
+            the arweave-upload-categories addendum: mounting what the prior
+            two topics built but never mounted). Upload renders the real
+            `UploadArea`; Library renders `CodexBackupArea` and
+            `CodexBackupHistoryArea` above the real `LibraryArea` —
+            CodexBackupArea lives there (not its own category) because
+            backing up the codex is a Library-adjacent action, not a
+            file-upload-centric one, and CodexBackupHistoryArea is a
+            dedicated filtered "just my codex backups" list over that same
+            Library data. Every category keeps its own
+            e4-panel-*.test.tsx / e5-*.test.tsx specs, so nothing here re-tests
+            an area's own internals — only that the panel actually mounts it.
 
-            Seeds is a KEEP-ALIVE, unlike Accounts and the placeholders: it is
+            Seeds is a KEEP-ALIVE, unlike the rest: it is
             hidden with `display: none` rather than unmounted when another
             category is active, because it is the one category that can carry
             an in-flight generation. The worker keeps running regardless of
@@ -1146,6 +1304,146 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
               // wired to a live value display either, so there is no display
               // reason to force the read here today.
             />
+          )
+        ) : active === "upload" ? (
+          deps === null ? (
+            <div data-testid="arweave-upload-unavailable" style={EMPTY_STYLE}>
+              Upload is not available until the Arweave upload seam is wired.
+            </div>
+          ) : (
+            <>
+              <div style={UPLOAD_ENTRY_WRAP_STYLE}>
+                <button
+                  type="button"
+                  data-testid="arweave-upload-start"
+                  onClick={() => setUploadWizardOpen(true)}
+                  style={UPLOAD_ENTRY_BUTTON_STYLE}
+                >
+                  Start Upload
+                </button>
+                {/* Its real destination — the Codex Upload (backup) wizard —
+                    primarily lives on the new Codex ID page, a not-yet-built
+                    later topic. Disabled + "(coming soon)" rather than a
+                    button that silently does nothing on click. */}
+                <button
+                  type="button"
+                  disabled
+                  data-testid="arweave-upload-backup-codex"
+                  title="Back Up Codex to Arweave (coming soon)"
+                  style={UPLOAD_ENTRY_BUTTON_DISABLED_STYLE}
+                >
+                  Back Up Codex to Arweave (coming soon)
+                </button>
+              </div>
+              {uploadWizardOpen ? (
+                <UploadWizard
+                  accounts={arweaveKeys}
+                  ouronetAccounts={deps.ouronetAccounts ?? []}
+                  pool={deps.pool}
+                  uploadAndTrack={deps.uploadAndTrack}
+                  uploadFilesAndTrack={deps.uploadFilesAndTrack}
+                  openUrl={(id) => deps.openUrl(id, { pool: deps.pool })}
+                  revealAccountSecret={deps.revealAccountSecret}
+                  // Owner correction pass (`arweave-upload-wizard` T2): the
+                  // SAME live-balance seam `ArweaveAccountsArea`'s own
+                  // `getBalance` prop already uses, straight from `deps`.
+                  getBalance={deps.getBalance}
+                  // The SAME `ensureCodexUnlocked` source the Seeds mount
+                  // just above already uses (`useEnsureCodexUnlockedOptional()`,
+                  // read once near the top of this component) — NOT a
+                  // field on `ArweavePanelDeps`, because that is not
+                  // actually how this panel sources it for Seeds either.
+                  ensureCodexUnlocked={ensureCodexUnlocked ?? undefined}
+                  // `arweave-non-removable-account` T4: the dead-letter gap
+                  // closed — the real seam straight from `deps`, mirroring
+                  // `getBalance`/`revealAccountSecret` just above.
+                  onAccountUsedForEncryption={deps.onAccountUsedForEncryption}
+                  onClose={() => setUploadWizardOpen(false)}
+                />
+              ) : null}
+            </>
+          )
+        ) : active === "library" ? (
+          deps === null ? (
+            <div data-testid="arweave-library-unavailable" style={EMPTY_STYLE}>
+              Library is not available until the Arweave library seam is wired.
+            </div>
+          ) : (
+            <div>
+              {/* `arweave-auto-rebuild-on-unlock`: the HOST's own in-flight
+                  multi-address auto-rebuild progress — a visible,
+                  non-blocking status, topmost in the Library category so it
+                  is the first thing seen here. Optional seam: an unwired
+                  host (or one that never updates it, or has already
+                  settled it back to `null`) renders nothing. */}
+              <LibraryAutoRebuildProgress progress={deps.libraryAutoRebuildProgress ?? null} />
+              {/* The "General Data" / "Codex" sub-tab switcher — owner's own
+                  words: "lets make two Tabs here, General Data and Codex,
+                  separate on their own display." General Data is the
+                  redesigned `LibraryArea` (every upload EXCEPT a codex
+                  backup); Codex is the backup button + its dedicated history
+                  list, moved OFF the always-stacked layout and under their
+                  own tab. */}
+              <div role="tablist" aria-label="Library view" style={LIBRARY_TAB_ROW_STYLE}>
+                {LIBRARY_TABS.map((tab) => {
+                  const selected = tab === libraryTab;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      data-testid={`library-tab-${tab}`}
+                      onClick={() => setLibraryTab(tab)}
+                      style={libraryTabButtonStyle(selected)}
+                    >
+                      {LIBRARY_TAB_LABELS[tab]}
+                    </button>
+                  );
+                })}
+              </div>
+              {libraryTab === "codex" ? (
+                <>
+                  {/* ArweaveRestoreEligibilityStatus (`codex-seed-restore-activation`
+                      T2) sits directly above CodexBackupArea — "true" here means
+                      the backup button right below it will carry a recovery tag,
+                      so the signal belongs immediately next to the action it
+                      describes. Optional seam: an unwired host (`deps.
+                      checkArweaveRestoreEligibility` undefined) renders nothing. */}
+                  <ArweaveRestoreEligibilityStatus
+                    checkArweaveRestoreEligibility={deps.checkArweaveRestoreEligibility}
+                  />
+                  {/* CodexBackupArea — a special, distinct upload path (its own
+                      dedicated permanence warning), not just another Library
+                      entry — now reachable from its own "Codex" tab rather than
+                      always stacked above the general upload list. */}
+                  <CodexBackupArea
+                    getExportJson={deps.getExportJson}
+                    backupCodex={deps.backupCodex}
+                    openUrl={(id) => deps.openUrl(id, { pool: deps.pool })}
+                  />
+                  {/* CodexBackupHistoryArea: a dedicated, filtered "just my
+                      codex backups" list, mounted alongside CodexBackupArea on
+                      the SAME "Codex" tab — same props-reuse pattern as
+                      CodexBackupArea above (listLibrary/openUrl are the SAME
+                      seams LibraryArea itself is given). */}
+                  <CodexBackupHistoryArea
+                    owner={deps.address}
+                    pool={deps.pool}
+                    listLibrary={deps.listLibrary}
+                    openUrl={deps.openUrl}
+                  />
+                </>
+              ) : (
+                <LibraryArea
+                  owners={libraryOwners}
+                  pool={deps.pool}
+                  listLibrary={listLibraryWithAutoRebuildRefresh}
+                  openUrl={deps.openUrl}
+                  rebuildLibrary={deps.rebuildLibrary}
+                />
+              )}
+            </div>
           )
         ) : active !== "seeds" ? (
           <div data-testid={`arweave-category-empty-${active}`} style={EMPTY_STYLE}>

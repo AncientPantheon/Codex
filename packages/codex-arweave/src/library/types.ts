@@ -49,6 +49,17 @@ export interface LibraryEntry {
   tags: Tag[];
   /** Present (and `{ isManifest: true }`) iff the content-type is the manifest type. */
   manifest?: { isManifest: true };
+  /**
+   * The `Codex-Upload-Id` tag value grouping this entry with every other entry
+   * from the SAME upload action — a bundle's N files + manifest share one
+   * value (T7); a single-file upload's own Codex-Item-Id is its own one-item
+   * upload action's uploadId, for consistency (`uploadData`'s own
+   * `uploadId: itemId` convention). Optional/additive (mirrors T2's own
+   * optional `uploadId`/`itemType` additions to `BuildUploadTagsParams`): an
+   * entry created before this field existed, or rebuilt from a chain record
+   * that predates the `Codex-Upload-Id` tag, may omit it.
+   */
+  uploadId?: string;
 }
 
 /**
@@ -108,6 +119,10 @@ export function mergeReconciled(
     itemId: incoming.itemId,
     contentType,
     owner: incoming.owner,
+    // uploadId is chain-provenance data, same as itemId/contentType/owner/tags
+    // above — refreshed from the incoming rebuild record, not preserved from
+    // the local pending write (unlike createdAt/manifest below).
+    uploadId: incoming.uploadId,
     status: "final",
     tags: incoming.tags,
     // The manifest flag is derived from the RESULTING contentType so this MERGE

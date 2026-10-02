@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/arweave-core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Framework-agnostic Arweave protocol library — chain-native primitives for wallets, signing, and permanent-storage uploads, with no UI or framework dependencies.",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
   "sideEffects": false,
   "dependencies": {
     "arweave": "^1.15.7",
-    "@ardrive/turbo-sdk": "^1.42.0"
+    "arbundles": "^0.11.2"
   },
   "files": [
     "dist",

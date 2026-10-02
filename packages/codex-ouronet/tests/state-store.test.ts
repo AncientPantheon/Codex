@@ -8,13 +8,15 @@
  *      (locked codex, CodexPrime delete, etc.).
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createCodexStore } from "@ancientpantheon/codex-ouronet/state";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import type { CodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import {
   CodexLockedError,
   CodexPrimeProtectedError,
+  CodexArweaveEncryptionProtectedError,
+  CodexError,
 } from "@ancientpantheon/codex-ouronet/errors";
 import type {
   IStoaChainSeed,
@@ -288,6 +290,77 @@ describe("CodexStore", () => {
     });
   });
 
+  describe("Arweave non-removable account invariant", () => {
+    it("markOuroAccountEncryptedArweaveUpload flips the flag and persists it", async () => {
+      await store.getState().actions.addOuroAccount(ouro("first"));
+      await store.getState().actions.addOuroAccount(ouro("second"));
+      await store
+        .getState()
+        .actions.markOuroAccountEncryptedArweaveUpload("second");
+      expect(
+        store.getState().ouroAccounts.find((a) => a.id === "second")
+          ?.hasEncryptedArweaveUpload
+      ).toBe(true);
+      // Other account untouched.
+      expect(
+        store.getState().ouroAccounts.find((a) => a.id === "first")
+          ?.hasEncryptedArweaveUpload
+      ).toBeUndefined();
+      // Verify it actually reached the adapter.
+      const snap = await adapter.loadAll();
+      expect(
+        snap.ouroAccounts.find((a) => a.id === "second")
+          ?.hasEncryptedArweaveUpload
+      ).toBe(true);
+    });
+
+    it("markOuroAccountEncryptedArweaveUpload on a missing id is a silent no-op", async () => {
+      await store.getState().actions.addOuroAccount(ouro("first"));
+      await expect(
+        store
+          .getState()
+          .actions.markOuroAccountEncryptedArweaveUpload("non-existent-id")
+      ).resolves.toBeUndefined();
+      expect(store.getState().ouroAccounts).toHaveLength(1);
+      expect(
+        store.getState().ouroAccounts[0]?.hasEncryptedArweaveUpload
+      ).toBeUndefined();
+    });
+
+    it("deleteOuroAccount throws CodexArweaveEncryptionProtectedError on a flagged, non-prime account", async () => {
+      // "first" auto-flags isPrime; "second" does not, isolating the new
+      // Arweave-flag guard from the pre-existing Prime guard.
+      await store.getState().actions.addOuroAccount(ouro("first"));
+      await store.getState().actions.addOuroAccount(ouro("second"));
+      await store
+        .getState()
+        .actions.markOuroAccountEncryptedArweaveUpload("second");
+
+      const saveSpy = vi.spyOn(adapter, "saveOuroAccounts");
+      await expect(
+        store.getState().actions.deleteOuroAccount("second")
+      ).rejects.toBeInstanceOf(CodexArweaveEncryptionProtectedError);
+
+      // No mutation: both accounts still present, flag still set.
+      expect(store.getState().ouroAccounts).toHaveLength(2);
+      expect(
+        store.getState().ouroAccounts.find((a) => a.id === "second")
+          ?.hasEncryptedArweaveUpload
+      ).toBe(true);
+      // No persist call on the rejected path.
+      expect(saveSpy).not.toHaveBeenCalled();
+      saveSpy.mockRestore();
+    });
+
+    it("deleteOuroAccount on an unflagged, non-prime account still deletes exactly as today", async () => {
+      await store.getState().actions.addOuroAccount(ouro("first"));
+      await store.getState().actions.addOuroAccount(ouro("second"));
+      await store.getState().actions.deleteOuroAccount("second");
+      expect(store.getState().ouroAccounts).toHaveLength(1);
+      expect(store.getState().ouroAccounts[0]?.id).toBe("first");
+    });
+  });
+
   describe("address book", () => {
     it("add + delete round-trip through adapter", async () => {
       await store.getState().actions.addAddressBookEntry(addr());
@@ -330,6 +403,12 @@ describe("CodexStore", () => {
       expect(s.passwordCacheMinutes).toBe(99);
       // Other fields preserved.
       expect(s.selectedNode).toBe("node2");
+    });
+
+    it("allowDeletingArweaveEncryptedAccounts defaults to false", () => {
+      expect(
+        store.getState().uiSettings.allowDeletingArweaveEncryptedAccounts
+      ).toBe(false);
     });
   });
 
@@ -676,6 +755,150 @@ describe("CodexStore", () => {
       // no spurious flags should appear.
       expect(store.getState().kadenaSeeds).toHaveLength(0);
       expect(store.getState().ouroAccounts).toHaveLength(0);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // promoteSeedAndAccountToPrime — docs/work/stoachain-prime-promotion
+  // ----------------------------------------------------------------
+
+  describe("promoteSeedAndAccountToPrime", () => {
+    /** Kickstarts the store with primeSeed/primeOuro, then adds a second,
+     *  already-correctly-derived, non-prime seed+account pair to promote. */
+    async function setupTwoPairs() {
+      await store.getState().actions.kickstartCodex({
+        seed: seed("primeSeed"),
+        primeOuroAccount: ouro("primeOuro"),
+      });
+      await store.getState().actions.addStoaChainSeed(seed("otherSeed"));
+      await store
+        .getState()
+        .actions.addOuroAccount(
+          ouro("otherOuro", { parentSeedId: "otherSeed" })
+        );
+    }
+
+    it("promotes exactly the targeted seed+account, demoting every other entry in the FULL collections", async () => {
+      await setupTwoPairs();
+
+      await store
+        .getState()
+        .actions.promoteSeedAndAccountToPrime("otherSeed", "otherOuro");
+
+      const seeds = store.getState().kadenaSeeds;
+      const accounts = store.getState().ouroAccounts;
+
+      // Whole-collection assertion — not just the two targeted entities.
+      expect(seeds.map((s) => ({ id: s.id, isPrime: !!s.isPrime }))).toEqual(
+        [
+          { id: "primeSeed", isPrime: false },
+          { id: "otherSeed", isPrime: true },
+        ]
+      );
+      expect(
+        accounts.map((a) => ({ id: a.id, isPrime: !!a.isPrime }))
+      ).toEqual([
+        { id: "primeOuro", isPrime: false },
+        { id: "otherOuro", isPrime: true },
+      ]);
+
+      // Persisted too.
+      const snap = await adapter.loadAll();
+      expect(
+        snap.kadenaSeeds.find((s) => s.id === "otherSeed")?.isPrime
+      ).toBe(true);
+      expect(
+        snap.ouroAccounts.find((a) => a.id === "otherOuro")?.isPrime
+      ).toBe(true);
+    });
+
+    it("throws and performs zero mutation when the account's seed-id doesn't match seedId", async () => {
+      await setupTwoPairs();
+      const seedsBefore = store.getState().kadenaSeeds;
+      const accountsBefore = store.getState().ouroAccounts;
+
+      // primeOuro.parentSeedId === "primeSeed", not "otherSeed".
+      await expect(
+        store
+          .getState()
+          .actions.promoteSeedAndAccountToPrime("otherSeed", "primeOuro")
+      ).rejects.toThrow(CodexError);
+
+      expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
+      expect(store.getState().ouroAccounts).toEqual(accountsBefore);
+    });
+
+    it("throws and performs zero mutation for an unknown seedId", async () => {
+      await setupTwoPairs();
+      const seedsBefore = store.getState().kadenaSeeds;
+      const accountsBefore = store.getState().ouroAccounts;
+
+      await expect(
+        store
+          .getState()
+          .actions.promoteSeedAndAccountToPrime("ghost-seed", "otherOuro")
+      ).rejects.toThrow(CodexError);
+
+      expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
+      expect(store.getState().ouroAccounts).toEqual(accountsBefore);
+    });
+
+    it("throws and performs zero mutation for an unknown accountId", async () => {
+      await setupTwoPairs();
+      const seedsBefore = store.getState().kadenaSeeds;
+      const accountsBefore = store.getState().ouroAccounts;
+
+      await expect(
+        store
+          .getState()
+          .actions.promoteSeedAndAccountToPrime("otherSeed", "ghost-ouro")
+      ).rejects.toThrow(CodexError);
+
+      expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
+      expect(store.getState().ouroAccounts).toEqual(accountsBefore);
+    });
+
+    it("never exposes an intermediate state with two primes (or zero primes) in either collection", async () => {
+      await setupTwoPairs();
+
+      const observedSeedPrimeCounts: number[] = [];
+      const observedAccountPrimeCounts: number[] = [];
+      const unsubscribe = store.subscribe((state) => {
+        observedSeedPrimeCounts.push(
+          state.kadenaSeeds.filter((s) => s.isPrime).length
+        );
+        observedAccountPrimeCounts.push(
+          state.ouroAccounts.filter((a) => a.isPrime).length
+        );
+      });
+
+      await store
+        .getState()
+        .actions.promoteSeedAndAccountToPrime("otherSeed", "otherOuro");
+
+      unsubscribe();
+
+      // Every observed render (including the persistAndTouch dirty-bump
+      // render that follows the entity-mutation set()) has exactly one
+      // prime seed and one prime account — never two, never zero.
+      expect(observedSeedPrimeCounts.length).toBeGreaterThan(0);
+      for (const count of observedSeedPrimeCounts) expect(count).toBe(1);
+      for (const count of observedAccountPrimeCounts) expect(count).toBe(1);
+    });
+
+    it("promoting the CURRENT prime pair again succeeds and leaves state unchanged", async () => {
+      await setupTwoPairs();
+      const seedsBefore = store.getState().kadenaSeeds;
+      const accountsBefore = store.getState().ouroAccounts;
+
+      await expect(
+        store
+          .getState()
+          .actions.promoteSeedAndAccountToPrime("primeSeed", "primeOuro")
+      ).resolves.toBeUndefined();
+
+      expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
+      expect(store.getState().ouroAccounts).toEqual(accountsBefore);
     });
   });
 });

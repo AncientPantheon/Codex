@@ -28,6 +28,8 @@ export type {
   CodexStoreActions,
   PasswordCacheEntry,
   PendingPasswordRequest,
+  PendingLogoutRequest,
+  LogoutConfirmationOutcome,
   KickstartArgs,
   KickstartResult,
   UnsignedPactTx,

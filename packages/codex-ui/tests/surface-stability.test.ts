@@ -8,15 +8,19 @@
  * T9.4 lands the hooks barrel (consuming T9.5's provider) inside codex-ui.
  *
  * What this file pins (the byte-stable D-11 surface):
- *   (1) The ENUMERATED 16-hook FUNCTION set — BOTH directions: every one of the
- *       16 named hooks is present AND typeof "function"; NO extra runtime value
- *       export beyond the 16. NEVER `length === 16/17` alone — the NAME SET is
+ *   (1) The ENUMERATED 18-hook FUNCTION set — BOTH directions: every one of the
+ *       18 named hooks is present AND typeof "function"; NO extra runtime value
+ *       export beyond the 18. NEVER `length === 18/19` alone — the NAME SET is
  *       the contract (a drop/rename/leak fails by name, per C4's precedent in
- *       codex-ouronet/tests/guard-hook-surface.test.ts).
- *   (2) The 14 *View + 2 Fn-type + UseSignTransactionOptions type exports resolve
+ *       codex-ouronet/tests/guard-hook-surface.test.ts). (Widened from the
+ *       original 16 by the codex-session-lifecycle topic's T3, which added
+ *       `useCodexUnsavedChangesGuard` and `useRequestLogout` — the first task
+ *       in that topic to need a genuinely new public hook, not scope creep.)
+ *   (2) The 14 *View + 3 Fn-type + UseSignTransactionOptions type exports resolve
  *       through the codex-ui `/hooks` barrel (types erase at runtime, so a typed
  *       noop referencing each is the only lock — a dropped type export fails the
- *       vitest TS transform at compile time).
+ *       vitest TS transform at compile time). (The third Fn-type,
+ *       `RequestLogoutFn`, is the T3 addition alongside the 18-hook widening.)
  *   (3) The THREE contracts stay stable:
  *         - storage-adapter contract: `CodexAdapter` (codex-core generic seam);
  *         - key-resolver contract: `ResolvedStoaChainKeypair` (codex-core) is
@@ -56,6 +60,7 @@ import type {
   ConsumerSettingsView,
   SignTransactionView,
   RequestPasswordFn,
+  RequestLogoutFn,
   GetKeypairFn,
   UseSignTransactionOptions,
 } from "../src/hooks/index.js";
@@ -76,9 +81,13 @@ import type {
 import type { IStoaChainKeypair } from "@ancientpantheon/codex-ouronet/resolver";
 
 // The authoritative enumerated hook set, mechanically mirrored from the source
-// barrel `ouronet-codex/src/hooks/index.ts` (16 hook FUNCTIONS). The 17th "hook"
-// in the spec prose is the `RequestPasswordFn` TYPE companion of
-// `useRequestPassword` — a type, not a function, so the FUNCTION surface is 16.
+// barrel `ouronet-codex/src/hooks/index.ts` (18 hook FUNCTIONS). The "hook"
+// companions `RequestPasswordFn` and `RequestLogoutFn` in the spec prose are
+// TYPES, not functions, so the FUNCTION surface is 18, not 20.
+//
+// `useCodexUnsavedChangesGuard` and `useRequestLogout` are the
+// codex-session-lifecycle topic's T3 additions (widened from the original
+// 16-hook D5-carve set — see this file's header comment).
 const EXPECTED_HOOK_FUNCTIONS = [
   "useCodex",
   "useActiveWallet",
@@ -96,6 +105,8 @@ const EXPECTED_HOOK_FUNCTIONS = [
   "useCodexIdentity",
   "useCodexGuard",
   "useConsumerSettings",
+  "useCodexUnsavedChangesGuard",
+  "useRequestLogout",
 ] as const;
 
 describe("codex-ui /hooks surface — forward lock (each enumerated hook present)", () => {
@@ -109,10 +120,10 @@ describe("codex-ui /hooks surface — forward lock (each enumerated hook present
     },
   );
 
-  it("exposes all 16 contracted hook functions (cardinality floor pinned by the NAME set)", () => {
+  it("exposes all 18 contracted hook functions (cardinality floor pinned by the NAME set)", () => {
     // Guards the it.each roster itself: if the allow-list is edited down, the
-    // count of PRESENT-and-callable names drops below 16 and this fails. The
-    // count is derived from the enumerated names, never a bare `=== 16`.
+    // count of PRESENT-and-callable names drops below 18 and this fails. The
+    // count is derived from the enumerated names, never a bare `=== 18`.
     const present = EXPECTED_HOOK_FUNCTIONS.filter(
       (name) => typeof (hooks as Record<string, unknown>)[name] === "function",
     );
@@ -121,7 +132,7 @@ describe("codex-ui /hooks surface — forward lock (each enumerated hook present
 });
 
 describe("codex-ui /hooks surface — negative lock (surface does not widen)", () => {
-  it("exposes EXACTLY the 16 allow-listed function exports — no extras", () => {
+  it("exposes EXACTLY the 18 allow-listed function exports — no extras", () => {
     // An `export *` regression, a leaked helper, or an un-allow-listed new hook
     // adds a name to the sorted set here and FAILS, naming the offender via the
     // set diff.
@@ -133,11 +144,11 @@ describe("codex-ui /hooks surface — negative lock (surface does not widen)", (
     expect(runtimeFunctionExports).toEqual([...EXPECTED_HOOK_FUNCTIONS].sort());
   });
 
-  it("exposes NO runtime VALUE export outside the 16 hook functions", () => {
+  it("exposes NO runtime VALUE export outside the 18 hook functions", () => {
     // Broader than the function-set check: any own enumerable runtime export
-    // (const/object/class/re-exported value helper) that is not one of the 16
+    // (const/object/class/re-exported value helper) that is not one of the 18
     // hooks is a surface widening. Types erase, so a clean barrel has only the
-    // 16 function keys.
+    // 18 function keys.
     const allow = new Set<string>(EXPECTED_HOOK_FUNCTIONS);
     const stray = Object.keys(hooks).filter((name) => !allow.has(name));
     expect(stray).toEqual([]);
@@ -168,6 +179,7 @@ describe("codex-ui /hooks surface — type-shape lock (view/fn type exports pres
     acceptType<ConsumerSettingsView>();
     acceptType<SignTransactionView>();
     acceptType<RequestPasswordFn>();
+    acceptType<RequestLogoutFn>();
     acceptType<GetKeypairFn>();
     acceptType<UseSignTransactionOptions>();
 

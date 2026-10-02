@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import { useCodexAuth } from "../../hooks/useCodexAuth.js";
+import { useRequestLogout } from "../../hooks/useRequestLogout.js";
 
 export interface ChangePasswordPayload {
   currentPassword: string;
@@ -53,6 +54,7 @@ export function ChangePasswordCard({
   className,
 }: ChangePasswordCardProps) {
   const { lock } = useCodexAuth();
+  const requestLogout = useRequestLogout();
 
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
@@ -235,7 +237,14 @@ export function ChangePasswordCard({
 
           <button
             type="button"
-            onClick={() => lock()}
+            onClick={() => {
+              // Same save-reminder gate CodexLockControl's "Lock Codex"
+              // button uses — a UX convenience checkpoint only (see
+              // SESSION_LIFECYCLE_CONTRACT.md), never a block.
+              void requestLogout().then((outcome) => {
+                if (outcome !== "cancelled") lock();
+              });
+            }}
             style={{
               alignSelf: "flex-start",
               background: "none",

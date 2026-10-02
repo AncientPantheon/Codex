@@ -132,8 +132,9 @@ function resolveWinston(
  * delegate to `arweave-core`; `sign` delegates to the isolated sibling signer
  * (`signArweaveTransaction` → arweave-core `signTransaction`). `post`/`buildSend`
  * run the native send. `upload` delegates to arweave-core `uploadData` — a
- * permaweb data write (E3); the JWK rides `params.jwk` per-call and the Turbo
- * client is injected via `opts.clientFactory`.
+ * permaweb data write (E3, native/non-bundler as of the Turbo-removal pass);
+ * the JWK rides `params.jwk` per-call and the pool is the same
+ * constructor-injected `pool` `post`/`getBalance` already use.
  */
 export function createArweaveAdapter(
   deps: ArweaveAdapterDeps = {},
@@ -212,13 +213,19 @@ export function createArweaveAdapter(
       // transient carried inside `params.jwk` (mirroring `post`'s per-call key,
       // never a constructor dep, never cached) so a re-locked codex cannot sign
       // an upload with a stale key. `uploadData` owns the whole recipe —
-      // key-validate → owner-address → required tag schema → the INJECTED Turbo
-      // client → id validation — so this adapter re-authors none of it. The
-      // `clientFactory` seam is forwarded verbatim: tests inject a fake so no
-      // real, permanent Turbo upload is ever made. arweave-core's typed errors
-      // (`InvalidUploadParamsError`, `UploadFailedError`) propagate UNWRAPPED,
-      // and the JWK never reaches a log, tag, or error.
-      return uploadData(params, opts);
+      // key-validate → owner-address → required tag schema → native pool-driven
+      // post (T3/T5, no bundler service) → id validation — so this adapter
+      // re-authors none of it. arweave-core's typed errors
+      // (`InvalidUploadParamsError`, `RewardExceedsCapError`,
+      // `GatewayPoolExhaustedError`) propagate UNWRAPPED, and the JWK never
+      // reaches a log, tag, or error. Same pool-required guard as `post`/
+      // `getBalance`: `uploadData` is POOL-FIRST (pool, params, opts) since the
+      // Turbo-removal pass, so a missing pool fails closed rather than posting
+      // through an implicit default.
+      if (pool === undefined) {
+        throw new NotImplementedError("upload (no gateway pool injected)");
+      }
+      return uploadData(pool, params, opts);
     },
   };
 }

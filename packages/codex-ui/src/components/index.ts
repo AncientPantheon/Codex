@@ -14,6 +14,12 @@ export type {
   PasswordModalRenderArgs,
 } from "./PasswordModal.js";
 
+export { LogoutConfirmModal } from "./LogoutConfirmModal.js";
+export type {
+  LogoutConfirmModalProps,
+  LogoutConfirmModalRenderArgs,
+} from "./LogoutConfirmModal.js";
+
 export { BackupRestorePanel } from "./BackupRestorePanel.js";
 export type {
   BackupRestorePanelProps,

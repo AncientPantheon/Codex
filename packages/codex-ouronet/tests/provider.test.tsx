@@ -130,6 +130,7 @@ describe("CodexProvider — passwordCacheMinutes (Phase 7)", () => {
         zbomZone2: false,
         zbomZone3: false,
         zbomExecutePosition: "top",
+        allowDeletingArweaveEncryptedAccounts: false,
       },
       schemaVersion: 1, // non-zero = NOT fresh
       lastUpdatedAt: "2026-01-01T00:00:00.000Z",
@@ -195,6 +196,7 @@ describe("CodexProvider — initialUiSettings (Phase 7)", () => {
         zbomZone2: false,
         zbomZone3: false,
         zbomExecutePosition: "top",
+        allowDeletingArweaveEncryptedAccounts: false,
       },
       schemaVersion: 1,
       lastUpdatedAt: "2026-01-01T00:00:00.000Z",

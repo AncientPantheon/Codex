@@ -16,7 +16,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createGatewayPool } from "../src/gateway/pool.js";
 import { GatewayPoolExhaustedError } from "../src/gateway/errors.js";
-import { queryOwnerUploads } from "../src/rebuild/query.js";
+import { queryOwnerUploads, queryUploadById, queryUploadsByTag } from "../src/rebuild/query.js";
 import { DEFAULT_REBUILD_PAGE_SIZE } from "../src/rebuild/types.js";
 import {
   RebuildPageLimitError,
@@ -24,10 +24,19 @@ import {
 } from "../src/rebuild/errors.js";
 import {
   InvalidAddressError,
+  InvalidTransactionIdError,
   InvalidGatewayResponseError,
 } from "../src/reads/errors.js";
 import { UnsupportedEndpointError } from "../src/endpoints.js";
-import { DEFAULT_APP_NAME, TAG_APP_NAME, TAG_CODEX_OWNER } from "../src/upload/tags.js";
+import {
+  DEFAULT_APP_NAME,
+  TAG_APP_NAME,
+  TAG_CODEX_OWNER,
+  TAG_CODEX_TAG_SCHEMA_VERSION,
+  CODEX_TAG_SCHEMA_VERSION_CURRENT,
+  TAG_CODEX_UPLOAD_ID,
+  TAG_CODEX_ITEM_TYPE,
+} from "../src/upload/tags.js";
 
 const instantSleep = async () => {};
 
@@ -187,6 +196,40 @@ describe("queryOwnerUploads — single page mapping", () => {
   });
 });
 
+describe("queryOwnerUploads — T4 schema-versioning tags flow through additively", () => {
+  it("round-trips a fixture carrying all 7 tags (the 4 original + schema version, upload id, item type) with every tag intact", async () => {
+    const fullTags = [
+      ...TAGS1,
+      { name: TAG_CODEX_TAG_SCHEMA_VERSION, value: CODEX_TAG_SCHEMA_VERSION_CURRENT },
+      { name: TAG_CODEX_UPLOAD_ID, value: "upload-123" },
+      { name: TAG_CODEX_ITEM_TYPE, value: "file" },
+    ];
+    const fetchFn = vi.fn(async () =>
+      jsonResponse(gqlBody([{ cursor: "c1", id: ID1, tags: fullTags }], false)),
+    );
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    const result = await queryOwnerUploads(pool, ADDR, { fetchFn });
+
+    expect(result).toEqual([{ id: ID1, tags: fullTags }]);
+  });
+
+  it("still returns a valid record with no thrown error for a fixture carrying only the original 4 tags (a pre-existing upload that predates the schema)", async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse(gqlBody([{ cursor: "c1", id: ID1, tags: TAGS1 }], false)),
+    );
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    const result = await queryOwnerUploads(pool, ADDR, { fetchFn });
+
+    expect(result).toEqual([{ id: ID1, tags: TAGS1 }]);
+    // No Codex-Tag-Schema-Version tag present — must not be dropped or thrown on.
+    expect(
+      result[0].tags.some((t) => t.name === TAG_CODEX_TAG_SCHEMA_VERSION),
+    ).toBe(false);
+  });
+});
+
 describe("queryOwnerUploads — pagination", () => {
   it("passes page 1's last cursor as `after` on the second request and concatenates", async () => {
     const afters: Array<string | null> = [];
@@ -228,6 +271,94 @@ describe("queryOwnerUploads — pagination", () => {
     expect((thrown as RebuildPageLimitError).pagesFetched).toBe(3);
     expect((thrown as RebuildPageLimitError).recordsCollected).toBe(3);
     expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("queryOwnerUploads — onProgress callback", () => {
+  // Regression guard for the owner-reported "no visible progress on a big
+  // rebuild" gap: a codex with many uploads across many pages had NO way to
+  // show the user anything was happening mid-rebuild — `queryOwnerUploads`
+  // resolved (or threw RebuildPageLimitError) only at the very end. This pins
+  // the fix: an injected `onProgress` fires after EVERY genuinely fetched
+  // page (not per-record — page-level granularity matches the loop's own
+  // natural checkpoint) with the RUNNING total pages/records for this one
+  // owner's query.
+  it("calls onProgress after each fetched page with the running pagesFetched/recordsFound totals", async () => {
+    const calls: Array<{ pagesFetched: number; recordsFound: number }> = [];
+    const fetchFn = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.variables.after == null) {
+        return jsonResponse(gqlBody([{ cursor: "cursor-A", id: ID1, tags: TAGS1 }], true));
+      }
+      return jsonResponse(
+        gqlBody(
+          [
+            { cursor: "cursor-B1", id: ID2, tags: TAGS1 },
+            { cursor: "cursor-B2", id: ID2, tags: TAGS1 },
+          ],
+          false,
+        ),
+      );
+    });
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await queryOwnerUploads(pool, ADDR, {
+      fetchFn,
+      onProgress: (p) => calls.push(p),
+    });
+
+    // Page 1: 1 record. Page 2: 2 MORE records — the total is RUNNING, not
+    // per-page.
+    expect(calls).toEqual([
+      { pagesFetched: 1, recordsFound: 1 },
+      { pagesFetched: 2, recordsFound: 3 },
+    ]);
+  });
+
+  it("never fires onProgress for the restart's own silent budget-consuming iteration (mid-pagination rotation discards a stale cursor without a real fetch succeeding)", async () => {
+    // The EXACT scenario the "cursor-endpoint binding" describe block below
+    // already pins deterministically (A serves page 1, dies on page 2, the
+    // loop restarts and B serves the full 2-page run from after:null) —
+    // reused verbatim here rather than inventing a new pool-rotation
+    // sequence, since the precise endpoint-selection behavior on a restart is
+    // that test's own well-established contract, not this one's to re-derive.
+    const bReceivedCursors: Array<string | null> = [];
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body));
+      const after: string | null = body.variables.after ?? null;
+
+      if (url.startsWith("https://a.example")) {
+        if (after == null) {
+          return jsonResponse(gqlBody([{ cursor: "A-cursor-1", id: ID1, tags: TAGS1 }], true));
+        }
+        return jsonResponse({ e: 1 }, 500);
+      }
+
+      bReceivedCursors.push(after);
+      if (after == null) {
+        return jsonResponse(gqlBody([{ cursor: "B-cursor-1", id: ID2, tags: TAGS1 }], true));
+      }
+      return jsonResponse(gqlBody([{ cursor: "B-cursor-2", id: ID1, tags: TAGS1 }], false));
+    });
+    const pool = createGatewayPool({
+      endpoints: ["https://a.example", "https://b.example"],
+      sleep: instantSleep,
+    });
+    const calls: Array<{ pagesFetched: number; recordsFound: number }> = [];
+
+    await queryOwnerUploads(pool, ADDR, { fetchFn, onProgress: (p) => calls.push(p) });
+
+    // A's genuine page 1 fires once (pagesFetched:1). The restart's OWN
+    // budget-consuming iteration (pagesFetched:2) is silent — no onProgress
+    // call ever reports pagesFetched:2 — then B's two genuine pages fire at
+    // pagesFetched 3 and 4. The gap at 2 IS the assertion.
+    expect(calls.map((c) => c.pagesFetched)).toEqual([1, 3, 4]);
+    expect(calls).toEqual([
+      { pagesFetched: 1, recordsFound: 1 },
+      { pagesFetched: 3, recordsFound: 1 },
+      { pagesFetched: 4, recordsFound: 2 },
+    ]);
   });
 });
 
@@ -561,6 +692,240 @@ describe("queryOwnerUploads — default fetch seam is binding-safe and call-time
     try {
       const pool = createGatewayPool({ endpoints: ["https://arweave.net"], sleep: instantSleep });
       await expect(queryOwnerUploads(pool, ADDR)).resolves.toEqual([]);
+      expect(stub).toHaveBeenCalledTimes(1);
+      expect(String(stub.mock.calls[0][0])).toBe("https://arweave.net/graphql");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("queryUploadById — T7 single-id lookup (retroactive add)", () => {
+  it("throws InvalidTransactionIdError for a 42-char id with ZERO fetch calls (caller validation before any pool attempt)", async () => {
+    const fetchFn = vi.fn();
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await expect(
+      queryUploadById(pool, ID1.slice(0, 42), { fetchFn }),
+    ).rejects.toThrow(InvalidTransactionIdError);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("surfaces UnsupportedEndpointError UNWRAPPED with ZERO attempts for a pathed endpoint", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse(gqlBody([], false)));
+    const pool = createGatewayPool({
+      endpoints: ["https://gw.example/graphql-proxy"],
+      sleep: instantSleep,
+    });
+
+    await expect(queryUploadById(pool, ID1, { fetchFn })).rejects.toThrow(
+      UnsupportedEndpointError,
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("resolves null for a well-formed, empty (zero-match) response — NEVER throws for 'not found'", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse(gqlBody([], false)));
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await expect(queryUploadById(pool, ID1, { fetchFn })).resolves.toBeNull();
+  });
+
+  it("resolves the matching record's id + tags verbatim when found", async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse(gqlBody([{ cursor: "c1", id: ID1, tags: TAGS1 }], false)),
+    );
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await expect(queryUploadById(pool, ID1, { fetchFn })).resolves.toEqual({
+      id: ID1,
+      tags: TAGS1,
+    });
+  });
+
+  it("POSTs the composed {endpoint}/graphql URL with an $ids variable, never string-interpolating the id into the query text", async () => {
+    let seenUrl = "";
+    let seenInit: RequestInit | undefined;
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      seenUrl = String(input);
+      seenInit = init;
+      return jsonResponse(gqlBody([], false));
+    });
+    // Trailing-slash endpoint proves no double-slash in the composed URL.
+    const pool = createGatewayPool({ endpoints: ["https://arweave.net/"], sleep: instantSleep });
+
+    await queryUploadById(pool, ID1, { fetchFn });
+
+    expect(seenUrl).toBe("https://arweave.net/graphql");
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+
+    const body = JSON.parse(String(seenInit?.body));
+    expect(body.variables.ids).toEqual([ID1]);
+    expect(body.query).toContain("$ids");
+    expect(body.query).not.toContain(ID1);
+  });
+
+  it("rejects GatewayPoolExhaustedError UNWRAPPED when every endpoint fails — a genuine gateway failure, unlike 'not found'", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse({ e: 1 }, 503));
+    const pool = createGatewayPool({
+      endpoints: ["https://a.example", "https://b.example"],
+      maxAttemptsPerEndpoint: 1,
+      sleep: instantSleep,
+    });
+
+    let thrown: unknown;
+    try {
+      await queryUploadById(pool, ID1, { fetchFn });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(GatewayPoolExhaustedError);
+  });
+
+  it("delegates to globalThis.fetch when no fetchFn is injected", async () => {
+    const stub = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse(gqlBody([], false)),
+    );
+    vi.stubGlobal("fetch", stub);
+    try {
+      const pool = createGatewayPool({ endpoints: ["https://arweave.net"], sleep: instantSleep });
+      await expect(queryUploadById(pool, ID1)).resolves.toBeNull();
+      expect(stub).toHaveBeenCalledTimes(1);
+      expect(String(stub.mock.calls[0][0])).toBe("https://arweave.net/graphql");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("queryUploadsByTag — tag-only query (no owner filter), the T2 chain-query safety-net seam", () => {
+  const TAG_NAME = "Codex-Encryptor";
+  const TAG_VALUE = ADDR;
+  const TAG_FIXTURE_TAGS = [
+    { name: TAG_NAME, value: TAG_VALUE },
+    { name: "Codex-Encrypted", value: "true" },
+  ];
+
+  it("resolves the parsed records for a fixture response with matching edges", async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse(gqlBody([{ cursor: "c1", id: ID1, tags: TAG_FIXTURE_TAGS }], false)),
+    );
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await expect(queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn })).resolves.toEqual([
+      { id: ID1, tags: TAG_FIXTURE_TAGS },
+    ]);
+  });
+
+  it("resolves [] for an empty edges array — never throws for 'no matches'", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse(gqlBody([], false)));
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await expect(queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn })).resolves.toEqual([]);
+  });
+
+  it("composes the query body with ONLY a tags filter — no owners key anywhere in variables", async () => {
+    let seenInit: RequestInit | undefined;
+    const fetchFn = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      seenInit = init;
+      return jsonResponse(gqlBody([], false));
+    });
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn });
+
+    const body = JSON.parse(String(seenInit?.body));
+    expect(body.variables.tags).toEqual([{ name: TAG_NAME, values: [TAG_VALUE] }]);
+    expect(body.variables).not.toHaveProperty("owners");
+    expect(body.query).not.toMatch(/owners/);
+    // The query uses GraphQL variables, never string-interpolating the tag value.
+    expect(body.query).toContain("$tags");
+    expect(body.query).not.toContain(TAG_VALUE);
+  });
+
+  it("defaults `first` to a low value (existence-check sized) when opts.first is omitted", async () => {
+    let body: { variables: { first: number } } | undefined;
+    const fetchFn = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return jsonResponse(gqlBody([], false));
+    });
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn });
+
+    expect(body?.variables.first).toBe(1);
+  });
+
+  it("honors an explicit opts.first override for a caller that wants a full list", async () => {
+    let body: { variables: { first: number } } | undefined;
+    const fetchFn = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return jsonResponse(gqlBody([], false));
+    });
+    const pool = createGatewayPool({ endpoints: ["https://a.example"], sleep: instantSleep });
+
+    await queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { first: 100, fetchFn });
+
+    expect(body?.variables.first).toBe(100);
+  });
+
+  it("POSTs the composed {endpoint}/graphql URL, same URL-join convention as queryOwnerUploads", async () => {
+    let seenUrl = "";
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      seenUrl = String(input);
+      return jsonResponse(gqlBody([], false));
+    });
+    // Trailing-slash endpoint proves no double-slash in the composed URL.
+    const pool = createGatewayPool({ endpoints: ["https://arweave.net/"], sleep: instantSleep });
+
+    await queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn });
+
+    expect(seenUrl).toBe("https://arweave.net/graphql");
+  });
+
+  it("surfaces UnsupportedEndpointError UNWRAPPED with ZERO attempts for a pathed endpoint", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse(gqlBody([], false)));
+    const pool = createGatewayPool({
+      endpoints: ["https://gw.example/graphql-proxy"],
+      sleep: instantSleep,
+    });
+
+    await expect(queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn })).rejects.toThrow(
+      UnsupportedEndpointError,
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("rejects GatewayPoolExhaustedError UNWRAPPED when every endpoint fails — a genuine gateway failure never silently resolves []", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse({ e: 1 }, 503));
+    const pool = createGatewayPool({
+      endpoints: ["https://a.example", "https://b.example"],
+      maxAttemptsPerEndpoint: 1,
+      sleep: instantSleep,
+    });
+
+    let thrown: unknown;
+    try {
+      await queryUploadsByTag(pool, TAG_NAME, TAG_VALUE, { fetchFn });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(GatewayPoolExhaustedError);
+  });
+
+  it("delegates to globalThis.fetch when no fetchFn is injected", async () => {
+    const stub = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse(gqlBody([], false)),
+    );
+    vi.stubGlobal("fetch", stub);
+    try {
+      const pool = createGatewayPool({ endpoints: ["https://arweave.net"], sleep: instantSleep });
+      await expect(queryUploadsByTag(pool, TAG_NAME, TAG_VALUE)).resolves.toEqual([]);
       expect(stub).toHaveBeenCalledTimes(1);
       expect(String(stub.mock.calls[0][0])).toBe("https://arweave.net/graphql");
     } finally {
