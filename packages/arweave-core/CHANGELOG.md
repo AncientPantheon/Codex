@@ -2,6 +2,31 @@
 
 All notable changes to `@ancientpantheon/arweave-core`.
 
+## 0.3.0 — 2026-10-02
+
+**MINOR — native upload engine replaces the Turbo bundler.** Uploads now
+build and sign ANS-104 bundles natively and post them as a single
+self-signed transaction via arweave-js's chunked, resumable uploader
+(`postArweaveData`) — no third-party bundling service in the upload path
+anymore; the `@ardrive/turbo-sdk` dependency this package added in 0.1.0
+is gone. New `uploadBundle` primitive (N files + 1 manifest, one atomic
+transaction, a real default `"index"` path so a bare manifest link
+resolves to real content). The tag schema gained independent versioning
+for the tag set itself (`Codex-Tag-Schema-Version`) versus the exact
+encryption procedure that produced a given upload's ciphertext
+(`Codex-Encryption-Version`), plus category/asset-type/app-lineage tags —
+see `@ancientpantheon/codex`'s shipped `ARWEAVE_TAG_SCHEMA.md` for the
+full, versioned reference. `rebuild`'s `queryOwnerUploads` gained
+per-page progress reporting and a new tag-only (no-owner) query,
+`queryUploadsByTag`, for lookups that aren't scoped to a known address.
+Fixed a real bug found via a live reproduction against the actual
+`arbundles` library: its `DataItem.sign()`/`rawId` path unconditionally
+re-derives the item id via a Node-only `crypto.createHash` call even
+after a correct WebCrypto signature already succeeded, which would crash
+any browser bundle that reached it — uploads now sign via `arbundles`'
+standalone WebCrypto-only `sign()` function and reassemble the bundle
+directly, never touching the broken path.
+
 ## 0.2.0 — 2026-07-11
 
 Injectable gateway endpoints. The gateway pool now accepts its endpoint list at construction, so a host — the Codex connection layer — can drive Arweave reads/posts from its own network settings instead of the package's hard-coded default pool. No breaking changes to the read/transfer/upload/rebuild surface.

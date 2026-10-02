@@ -2,6 +2,27 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.1.0 — 2026-10-02
+
+**MINOR — native Arweave upload, Library, and account-safety engine.**
+Replaces the Turbo-bundler upload path with a native, self-posted ANS-104
+bundle/single-file engine (chunked, resumable uploads), a full tag schema
+with independently versioned encryption and schema axes
+(`ARWEAVE_TAG_SCHEMA.md`, now shipped in this package), and a redesigned
+Upload Wizard + Library UI (category-grouped, collapsible, paginated,
+compact rows with copyable links). An Ouronet account that has ever
+encrypted a confirmed Arweave upload is now non-removable end to end. A
+fresh codex auto-installs a Prime Arweave seed sharing origin words with
+its Prime Ouronet account, making it eligible for seed-words-only restore
+by construction. Also ships a generic backup-divergence `beforeunload`
+guard and a sanctioned `requestLogout()` confirmation flow
+(`SESSION_LIFECYCLE_CONTRACT.md`, now shipped in this package) — a UX
+convenience, explicitly not a funds/safety mechanism. A 1 GiB
+total-upload-size cap is enforced pending a streaming/OPFS-based upload
+architecture needed for larger sets. See
+`@ancientpantheon/arweave-core`'s own changelog for the upload-engine
+detail (`codex-core` unchanged this release).
+
 ## 1.0.1 — 2026-09-30
 
 **PATCH — new `IMPORT_EXPORT_CONTRACT.md`, shipped inside this published
