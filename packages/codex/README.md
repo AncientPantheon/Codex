@@ -50,9 +50,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.0.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.1.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.1.0** — Native Arweave upload, Library, and account-safety engine: the Upload Wizard, a redesigned category-grouped/collapsible/paginated Library UI with copyable per-file links, non-removable-account enforcement for any Ouronet account that has ever encrypted a confirmed upload, auto-installed Prime Arweave seeds for seed-words-only restore eligibility, and a session-lifecycle save-reminder layer (`beforeunload` guard + `requestLogout()`, a UX convenience, never a funds/safety mechanism). Ships two new normative reference documents inside this package's own tarball: `ARWEAVE_TAG_SCHEMA.md` and `SESSION_LIFECYCLE_CONTRACT.md`. A 1 GiB total-upload-size cap is enforced pending a streaming/OPFS-based upload architecture for larger sets. See `@ancientpantheon/arweave-core`'s own changelog for the upload-engine detail (`codex-core` unchanged this release).
 
 **v1.0.1** — New `IMPORT_EXPORT_CONTRACT.md`, shipped inside this published package, as the single normative source for the Codex JSON wire schema and the only sanctioned import/export functions — written after a real incident where a host app hand-parsed the backup shape with invented field names, silently dropped the entire Arweave-seed keyring, and duplicated pure keys on every import. Also fixes a `codex-ui` bug found while writing it: `useCodexBackup`'s `importFromCloud` was not preserving a live `foreignKeys` keyring when the imported backup omitted the field (unlike the identical, already-correct fallback discipline applied to `arweaveSeeds`/`watchList`) — a backup written before foreign keys existed could silently wipe a live foreign key on restore. `codex-ui` release, plus this document (`codex-ouronet`/`codex-core`/`arweave-core`/`codex-arweave` unchanged).
 
