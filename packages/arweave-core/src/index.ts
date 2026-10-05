@@ -189,6 +189,21 @@ export type {
   UploadGatewayApiFactory,
   ChunkedUploader,
 } from "./upload/nativeUpload.js";
+// `postArweaveData` itself (the pool-driven build+sign+chunked-post
+// primitive `uploadData`/`uploadBundle` both forward to) was previously
+// reachable ONLY through those two thin wrappers. Exported directly here
+// (arweave-streaming-post-core, T3) because the streaming post path's own
+// comparison tests need to drive it with ARBITRARY raw tags/data (not
+// `uploadData`'s Codex tag schema, nor `uploadBundle`'s own internal
+// per-file signing) to prove the streaming path produces a
+// protocol-identical transaction for the SAME input — a gap this task found
+// and fixed, not a pre-existing export.
+export { postArweaveData } from "./upload/nativeUpload.js";
+export type {
+  PostArweaveDataParams,
+  PostArweaveDataOptions,
+  PostArweaveDataResult,
+} from "./upload/nativeUpload.js";
 
 // ── Upload: multi-file/folder ANS-104 bundle path (Phase 4, T6) ─────────────
 // `uploadBundle` is the counterpart to `uploadData` for 2+ files or an
@@ -213,6 +228,57 @@ export type {
 // `codex-*` package.
 export { uploadCodexBackup } from "./upload/codexBackup.js";
 export type { UploadCodexBackupParams } from "./upload/codexBackup.js";
+
+// ── Upload: streaming data_root pipeline (arweave-streaming-data-root) ─────
+// `planChunkBoundaries` (T1) and `computeStreamingDataRoot` (T2) are the
+// foundation of the streaming-upload project (`docs/work/arweave-streaming-
+// upload/design.md`): computing an Arweave `data_root` from a byte-range
+// reader instead of a fully-materialized buffer, so a 6+ GB upload never
+// needs to be resident in browser memory. Exported the same way
+// `queryUploadsByTag` was (this package's `exports` field only exposes the
+// barrel, no subpath exports) because the OPFS-backed bundle-assembly work
+// that consumes these lives in `codex-arweave`, a separate package — it can
+// only reach them through here.
+export { planChunkBoundaries } from "./upload/streaming/planChunkBoundaries.js";
+export type { ChunkBoundary } from "./upload/streaming/planChunkBoundaries.js";
+export { computeStreamingDataRoot } from "./upload/streaming/computeStreamingDataRoot.js";
+export type {
+  ByteRangeReader,
+  StreamingDataRootResult,
+  Chunk,
+} from "./upload/streaming/computeStreamingDataRoot.js";
+
+// ── Upload: streaming transaction creation + gateway post seam
+//    (arweave-streaming-post-core, T3) ──────────────────────────────────────
+// `createStreamingTransaction` builds+signs a Transaction directly from an
+// already-computed streaming `data_root` (never a resident data buffer) —
+// the real `arweave` package's `Transaction`/`createTransaction` surface this
+// needs is NOT otherwise reachable outside this package (see that module's
+// own "PACKAGE PLACEMENT" doc comment for why this stays here rather than in
+// `codex-arweave`, whose own `src` takes no direct `arweave` dependency at
+// all). Exported the same way `computeStreamingDataRoot` just above is —
+// `codex-arweave`'s own streaming post loop (OPFS-specific chunk reads) is a
+// separate package and can only reach this through the barrel.
+export {
+  createStreamingTransaction,
+  createDefaultStreamingUploadGatewayApiFactory,
+} from "./upload/streaming/createStreamingTransaction.js";
+export type {
+  SignedStreamingTransaction,
+  CreateStreamingTransactionParams,
+  StreamingChunkPostBody,
+  StreamingUploadGatewayApi,
+  StreamingUploadGatewayApiFactory,
+} from "./upload/streaming/createStreamingTransaction.js";
+
+// ── Upload: local/no-op dry-run gateway (arweave-upload-dry-run, T1) ────────
+// A shippable (not test-only) stand-in satisfying both `UploadGatewayApiFactory`
+// and `StreamingUploadGatewayApiFactory` — captures posted tx/chunks in
+// memory, zero real network reachability. `codex-arweave`'s own dry-run
+// engine (`arweave-upload-dry-run` T2) needs this through the barrel, same
+// cross-package-reachability reason as `createStreamingTransaction` above.
+export { createLocalDryRunGatewayApiFactory } from "./upload/localDryRunGateway.js";
+export type { LocalDryRunGateway, CapturedDryRunTx } from "./upload/localDryRunGateway.js";
 
 // ── Rebuild: owner → matching tx ids + tags via GraphQL through the pool ────
 export { queryOwnerUploads } from "./rebuild/query.js";

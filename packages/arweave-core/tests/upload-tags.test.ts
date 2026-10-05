@@ -634,7 +634,7 @@ describe("buildUploadTags — encryptionVersion (T1, arweave-tag-schema-spec)", 
   it("pins the new tag name and the current pinned version value", () => {
     // GraphQL matching is exact-string, same rationale as every other tag constant.
     expect(TAG_CODEX_ENCRYPTION_VERSION).toBe("Codex-Encryption-Version");
-    expect(CODEX_ENCRYPTION_VERSION_CURRENT).toBe("1");
+    expect(CODEX_ENCRYPTION_VERSION_CURRENT).toBe("2");
   });
 
   it("emits Codex-Encryption-Version immediately after Codex-Encryptor when encrypted is true", () => {
@@ -649,7 +649,7 @@ describe("buildUploadTags — encryptionVersion (T1, arweave-tag-schema-spec)", 
     expect(tags.slice(7)).toEqual([
       { name: "Codex-Encrypted", value: "true" },
       { name: "Codex-Encryptor", value: OWNER },
-      { name: "Codex-Encryption-Version", value: "1" },
+      { name: "Codex-Encryption-Version", value: CODEX_ENCRYPTION_VERSION_CURRENT },
     ]);
   });
 

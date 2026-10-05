@@ -45,14 +45,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, cleanup, fireEvent, within } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent, within, act } from "@testing-library/react";
 
-import { createGatewayPool } from "@ancientpantheon/arweave-core";
+import { createGatewayPool, CODEX_ENCRYPTION_VERSION_CURRENT } from "@ancientpantheon/arweave-core";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 
 import { UploadWizard, type UploadWizardSelection } from "../src/panel/UploadWizard.js";
+import type { UploadTrackResult } from "../src/panel/UploadArea.js";
 import type { ArweaveSeedAccountSource } from "../src/panel/ArweaveSeedsArea.js";
 import { UPLOAD_PERMANENCE_WARNING } from "../src/library/constants.js";
+// `arweave-upload-dry-run` T3: `DryRunResult` is T2's own plain result
+// shape — not re-exported by any barrel (confirmed by reading
+// `src/panel/index.ts`/`src/library/index.ts` in full), so it rides the
+// SAME relative-path-into-package-source convention this file's own
+// `UploadWizard.js` import already uses.
+import type { DryRunResult } from "../src/library/streaming/dryRunUpload.js";
 
 const ACCOUNT_A = "acct-address-AAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const ACCOUNT_B = "acct-address-BBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -77,13 +84,15 @@ function makeFolderFile(relativePath: string, size = 10): File {
 }
 
 /** A `File` whose reported `.size` is a large value WITHOUT actually
- *  allocating that many bytes (the 1-GiB-cap tests need file sizes at and
- *  past the real 1,073,741,824-byte cap — allocating real multi-hundred-MB
- *  `Uint8Array`s per test would be slow and memory-heavy for no benefit,
- *  since this component only ever reads `.size`, never the file's actual
- *  bytes, when validating the cap). Overrides the otherwise-real (tiny)
- *  backing `File`'s own `size` getter via `Object.defineProperty`, the SAME
- *  technique `makeFolderFile` above already uses for `webkitRelativePath`. */
+ *  allocating that many bytes (the cap tests — both the streaming-removed
+ *  cap and the OPFS-fallback 2 GiB cap, T3 `arweave-streaming-ui` — need
+ *  file sizes at and past multi-gigabyte boundaries; allocating real
+ *  multi-hundred-MB `Uint8Array`s per test would be slow and memory-heavy
+ *  for no benefit, since this component only ever reads `.size`, never the
+ *  file's actual bytes, when validating any size cap). Overrides the
+ *  otherwise-real (tiny) backing `File`'s own `size` getter via
+ *  `Object.defineProperty`, the SAME technique `makeFolderFile` above
+ *  already uses for `webkitRelativePath`. */
 function makeFileWithSize(name: string, size: number): File {
   const file = new File([new Uint8Array(1)], name, { type: "application/octet-stream" });
   Object.defineProperty(file, "size", { value: size, configurable: true });
@@ -141,8 +150,28 @@ function makeProps(overrides: Record<string, unknown> = {}) {
     onClose: vi.fn(),
     revealAccountSecret: vi.fn(async (_accountId: string) => "revealed-secret"),
     getPrice: vi.fn(async () => "66846281419287301199"),
+    // T3 (`arweave-streaming-ui`): deterministic "unsupported" by default —
+    // every pre-T3 test (and every test that doesn't care about streaming)
+    // keeps exercising the OPFS-fallback 2 GiB cap exactly as before,
+    // without depending on jsdom's own (absent) real `navigator.storage`.
+    // Tests that specifically exercise the streaming-supported path
+    // override this explicitly.
+    isStreamingUploadSupported: vi.fn(async () => false),
     ...overrides,
   };
+}
+
+/** Awaits the Upload Wizard's own `isStreamingUploadSupported()` mount
+ *  effect resolving (and its state update landing) — the OPFS-support probe
+ *  runs once per wizard session and is awaited explicitly by every test that
+ *  needs its SETTLED result (not whatever transiently renders before it
+ *  resolves). Mirrors this file's own `waitFor`-based "wait for the settled
+ *  async state" convention used for `getBalance` elsewhere in this suite. */
+async function flushStreamingSupportDetection(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 /** Round 2: the category picker is a custom ACCENT-styled dropdown, not a
@@ -601,29 +630,34 @@ describe("UploadWizard — Step 2 (Files) gating, the 10-file cap, and multi-fol
     expect(screen.getByText(/^images \(2\)\/img1\.png/)).toBeInTheDocument();
   });
 
-  it("blocks adding a file that would push the running total over the temporary 1 GiB cap, never silently adding it", () => {
+  it("[streaming unsupported] blocks adding a file that would push the running total over the OPFS-fallback 2 GiB cap, never silently adding it, with an honest browser-support message", async () => {
     render(<UploadWizard {...makeProps()} />);
+    await flushStreamingSupportDetection();
     advanceToFiles();
 
-    // One byte past the 1 GiB (1,073,741,824-byte) cap.
-    const oversized = makeFileWithSize("huge.bin", 1_073_741_825);
+    // One byte past the 2 GiB (2,147,483,648-byte) fallback cap.
+    const oversized = makeFileWithSize("huge.bin", 2_147_483_649);
     fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [oversized] } });
 
-    // Not added at all — the architecture-limit message explains why,
-    // naming the actual prospective total, the 1 GiB limit, and that the
-    // cap is temporary (not a permanent product decision).
+    // Not added at all — the message explains why, naming the actual
+    // prospective total, the 2 GiB limit, and that this is a BROWSER-SUPPORT
+    // limitation (this browser lacks OPFS), never a permanent product
+    // choice — the new, honest wording (never the old "temporary
+    // architecture limitation" phrasing).
     expect(screen.queryByTestId("upload-wizard-file-entry")).not.toBeInTheDocument();
     const message = screen.getByTestId("upload-wizard-file-cap-message").textContent ?? "";
-    expect(message).toContain("1073741825");
-    expect(message.toLowerCase()).toContain("1 gib");
-    expect(message.toLowerCase()).toContain("temporary");
+    expect(message).toContain("2147483649");
+    expect(message.toLowerCase()).toContain("2 gib");
+    expect(message.toLowerCase()).toContain("browser");
+    expect(message.toLowerCase()).not.toContain("temporary");
   });
 
-  it("allows a selection totaling EXACTLY 1 GiB — the cap boundary is inclusive, only a total that EXCEEDS it blocks", () => {
+  it("[streaming unsupported] allows a selection totaling EXACTLY 2 GiB — the fallback cap boundary is inclusive, only a total that EXCEEDS it blocks", async () => {
     render(<UploadWizard {...makeProps()} />);
+    await flushStreamingSupportDetection();
     advanceToFiles();
 
-    const atCap = makeFileWithSize("exact.bin", 1_073_741_824); // exactly 1 GiB
+    const atCap = makeFileWithSize("exact.bin", 2_147_483_648); // exactly 2 GiB
     fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [atCap] } });
 
     expect(screen.getAllByTestId("upload-wizard-file-entry")).toHaveLength(1);
@@ -631,34 +665,36 @@ describe("UploadWizard — Step 2 (Files) gating, the 10-file cap, and multi-fol
     expect(screen.getByTestId("upload-wizard-next")).toBeEnabled();
   });
 
-  it("the 1 GiB cap also accounts for files already selected — a second file that would push the running TOTAL over the cap is blocked, even though it is small on its own", () => {
+  it("[streaming unsupported] the 2 GiB fallback cap also accounts for files already selected — a second file that would push the running TOTAL over the cap is blocked, even though it is small on its own", async () => {
     render(<UploadWizard {...makeProps()} />);
+    await flushStreamingSupportDetection();
     advanceToFiles();
 
     fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
-      target: { files: [makeFileWithSize("first.bin", 1_073_741_820)] },
+      target: { files: [makeFileWithSize("first.bin", 2_147_483_640)] },
     });
     expect(screen.getAllByTestId("upload-wizard-file-entry")).toHaveLength(1);
 
-    // On its own, 10 bytes is nothing — but added to the 1,073,741,820
-    // already selected, the running total would be 1,073,741,830, past the
+    // On its own, 10 bytes is nothing — but added to the 2,147,483,640
+    // already selected, the running total would be 2,147,483,650, past the
     // cap, so this second file is blocked too.
     fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
       target: { files: [makeFileWithSize("second.bin", 10)] },
     });
     expect(screen.getAllByTestId("upload-wizard-file-entry")).toHaveLength(1);
-    expect(screen.getByTestId("upload-wizard-file-cap-message").textContent?.toLowerCase()).toContain("1 gib");
+    expect(screen.getByTestId("upload-wizard-file-cap-message").textContent?.toLowerCase()).toContain("2 gib");
   });
 
-  it("blocks adding a whole folder whose combined size would push the running total over the 1 GiB cap — never partially adding it", () => {
+  it("[streaming unsupported] blocks adding a whole folder whose combined size would push the running total over the 2 GiB fallback cap — never partially adding it", async () => {
     render(<UploadWizard {...makeProps()} />);
+    await flushStreamingSupportDetection();
     advanceToFiles();
 
     fireEvent.change(screen.getByTestId("upload-wizard-add-folder-input"), {
       target: {
         files: [
-          makeFolderFile("big/a.bin", 700_000_000),
-          makeFolderFile("big/b.bin", 400_000_000), // combined: 1,100,000,000 — over the cap
+          makeFolderFile("big/a.bin", 1_200_000_000),
+          makeFolderFile("big/b.bin", 1_000_000_000), // combined: 2,200,000,000 — over the 2 GiB cap
         ],
       },
     });
@@ -668,8 +704,8 @@ describe("UploadWizard — Step 2 (Files) gating, the 10-file cap, and multi-fol
     expect(screen.queryByTestId("upload-wizard-file-entry")).not.toBeInTheDocument();
     expect(screen.queryByText(/big\/a\.bin/)).not.toBeInTheDocument();
     const message = screen.getByTestId("upload-wizard-file-cap-message").textContent ?? "";
-    expect(message.toLowerCase()).toContain("1 gib");
-    expect(message.toLowerCase()).toContain("temporary");
+    expect(message.toLowerCase()).toContain("2 gib");
+    expect(message.toLowerCase()).toContain("browser");
   });
 
   it("removes an individually-added file, and removes a whole folder's files at once, both updating the running total live", () => {
@@ -693,6 +729,75 @@ describe("UploadWizard — Step 2 (Files) gating, the 10-file cap, and multi-fol
     expect(screen.queryByText(/catA\/img1\.png/)).not.toBeInTheDocument();
     expect(screen.queryByText(/catA\/img2\.png/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-wizard-file-total-size")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * T3 (`arweave-streaming-ui`): once streaming is supported, the
+ * `MAX_TOTAL_SIZE_BYTES` block-on-add behavior is removed entirely for the
+ * Files step — a selection that would have been blocked under the old
+ * (or the new OPFS-fallback) cap now adds cleanly. The detection itself
+ * runs ONCE per wizard session (on mount), never re-probed per file add.
+ */
+describe("UploadWizard — Step 2 (Files): streaming-supported removes the size cap entirely", () => {
+  it("adds a file far past both the old 1 GiB cap AND the new 2 GiB fallback cap without blocking, once isStreamingUploadSupported resolves true", async () => {
+    const isStreamingUploadSupported = vi.fn(async () => true);
+    render(<UploadWizard {...makeProps({ isStreamingUploadSupported })} />);
+    await flushStreamingSupportDetection();
+    expect(isStreamingUploadSupported).toHaveBeenCalledTimes(1);
+    advanceToFiles();
+
+    const huge = makeFileWithSize("huge.bin", 3_000_000_000); // ~2.79 GiB — past both caps
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [huge] } });
+
+    expect(screen.getAllByTestId("upload-wizard-file-entry")).toHaveLength(1);
+    expect(screen.queryByTestId("upload-wizard-file-cap-message")).not.toBeInTheDocument();
+    expect(screen.getByTestId("upload-wizard-next")).toBeEnabled();
+  });
+
+  it("only probes isStreamingUploadSupported ONCE per wizard session, never again per file/folder add", async () => {
+    const isStreamingUploadSupported = vi.fn(async () => true);
+    render(<UploadWizard {...makeProps({ isStreamingUploadSupported })} />);
+    await flushStreamingSupportDetection();
+    advanceToFiles();
+
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [makeFileWithSize("a.bin", 3_000_000_000)] },
+    });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [makeFileWithSize("b.bin", 3_000_000_000)] },
+    });
+
+    expect(isStreamingUploadSupported).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("UploadWizard — T4: the streaming disclaimer banner (Files step)", () => {
+  it("shows a persistent, plain-language banner explaining disk-streamed uploads, the browser-storage requirement, and the honest 2 GiB fallback, linking to the real docs page", () => {
+    render(<UploadWizard {...makeProps()} />);
+    advanceToFiles();
+
+    const banner = screen.getByTestId("upload-wizard-streaming-disclaimer");
+    expect(banner).toBeInTheDocument();
+    const text = banner.textContent ?? "";
+    // Plain language, not internal API/type names — "OPFS" never appears.
+    expect(text).not.toContain("OPFS");
+    expect(text.toLowerCase()).toContain("private");
+    expect(text.toLowerCase()).toContain("storage");
+    expect(text).toContain("2 GiB");
+
+    // A real, reachable documentation page — not a dead "#" placeholder.
+    const link = screen.getByTestId("upload-wizard-streaming-docs-link") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/docs/arweave-upload-streaming.md");
+  });
+
+  it("stays visible after adding files — a persistent fact, not a one-shot/dismissible notice", () => {
+    render(<UploadWizard {...makeProps()} />);
+    advanceToFiles();
+
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile()] } });
+
+    expect(screen.getByTestId("upload-wizard-streaming-disclaimer")).toBeInTheDocument();
   });
 });
 
@@ -1049,7 +1154,7 @@ describe("UploadWizard — Review & Cost tag preview: fixed, canonical row set (
     // never caller-suppliable, matching the real `uploadAndTrack` call this
     // preview must agree with (see the flow.ts assertions in
     // e3-library-flow.test.ts).
-    expect(byName.get("Codex-Encryption-Version")).toBe("1");
+    expect(byName.get("Codex-Encryption-Version")).toBe(CODEX_ENCRYPTION_VERSION_CURRENT);
   });
 
   it("App-Id/App-Version show REAL values (not a placeholder) for an app/site category (software-code), while Codex-Encryptor/Codex-Encryption-Version still show the public placeholder", () => {
@@ -1071,5 +1176,323 @@ describe("UploadWizard — Review & Cost tag preview: fixed, canonical row set (
     expect(byName.get("Codex-App-Id")).toBe("my-app");
     expect(byName.get("Codex-App-Version")).toBe("1.2.3");
     expect(byName.get("Codex-Encryptor")).toBe("— does not apply (public upload)");
+  });
+});
+
+/**
+ * T3 (`arweave-streaming-ui`): `onConfirmUpload` now threads a 4th,
+ * optional `callbacks` argument (`{ onProgress?, onRouteDecided? }`) into
+ * `uploadAndTrack`/`uploadFilesAndTrack` — the real wiring's own call into
+ * `library/flow.ts`'s `uploadAndTrack` is expected to forward these into
+ * ITS OWN `onProgress`/`onUploadRouteDecided` options. These specs drive a
+ * FAKE `uploadAndTrack` that calls those callbacks directly (the same "fake
+ * at the seam" convention every other injected prop in this suite already
+ * uses), proving the component's own state renders what arrives through
+ * that call chain — never a hardcoded placeholder.
+ */
+describe("UploadWizard — T3: persistent progress rendering during an in-flight upload", () => {
+  it("renders a persistent progress element during the 'uploading' phase that updates LIVE as the injected call drives onProgress, and disappears once the upload resolves", async () => {
+    let resolveUpload: (value: UploadTrackResult) => void = () => {};
+    const uploadAndTrack = vi.fn(
+      (
+        _file: File,
+        _selection: UploadWizardSelection,
+        _accountId: string,
+        callbacks?: {
+          onProgress?: (uploadedChunks: number, totalChunks: number) => void;
+          onRouteDecided?: (route: "streaming" | "fallback") => void;
+        },
+      ) => {
+        callbacks?.onRouteDecided?.("streaming");
+        callbacks?.onProgress?.(1, 4);
+        return new Promise<UploadTrackResult>((resolve) => {
+          resolveUpload = resolve;
+          // A second, later progress update — proves the rendered chunk
+          // count tracks REAL, changing values, not a one-shot snapshot.
+          void Promise.resolve().then(() => callbacks?.onProgress?.(3, 4));
+        });
+      },
+    );
+    const props = makeProps({ uploadAndTrack });
+    render(<UploadWizard {...props} />);
+    await flushStreamingSupportDetection();
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+
+    // Appears immediately on entering "uploading" — persistent, not a toast.
+    expect(await screen.findByTestId("upload-wizard-progress")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-wizard-progress-chunks").textContent).toContain("3"),
+    );
+    expect(screen.getByTestId("upload-wizard-progress-chunks").textContent).toContain("4");
+    // Still present right up until the upload actually resolves — it never
+    // disappeared on its own mid-flight.
+    expect(screen.getByTestId("upload-wizard-progress")).toBeInTheDocument();
+
+    resolveUpload({ id: DATA_ITEM_ID, itemId: "item-uuid-1", ownerAddress: ACCOUNT_A, tags: [] });
+    expect(await screen.findByTestId("upload-wizard-result")).toBeInTheDocument();
+    // Scoped to the in-flight phase only — gone once the upload is done.
+    expect(screen.queryByTestId("upload-wizard-progress")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * T3: the routing SIGNAL (which engine actually ran) is observable in the
+ * DOM, driven by the SAME `onRouteDecided` callback the progress tests
+ * above exercise — correct and distinguishable in BOTH cases.
+ */
+describe("UploadWizard — T3: the streaming-vs-fallback routing signal is observable and correct", () => {
+  it("shows the streaming route when the injected call signals onRouteDecided('streaming')", async () => {
+    const uploadAndTrack = vi.fn(
+      async (
+        _file: File,
+        _selection: UploadWizardSelection,
+        _accountId: string,
+        callbacks?: { onRouteDecided?: (route: "streaming" | "fallback") => void },
+      ) => {
+        callbacks?.onRouteDecided?.("streaming");
+        return { id: DATA_ITEM_ID, itemId: "item-uuid-1", ownerAddress: ACCOUNT_A, tags: [] };
+      },
+    );
+    const props = makeProps({ uploadAndTrack });
+    render(<UploadWizard {...props} />);
+    await flushStreamingSupportDetection();
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-wizard-upload-route").textContent?.toLowerCase()).toContain("streaming"),
+    );
+  });
+
+  it("shows the fallback route when the injected call signals onRouteDecided('fallback') — a DIFFERENT, distinguishable message", async () => {
+    const uploadAndTrack = vi.fn(
+      async (
+        _file: File,
+        _selection: UploadWizardSelection,
+        _accountId: string,
+        callbacks?: { onRouteDecided?: (route: "streaming" | "fallback") => void },
+      ) => {
+        callbacks?.onRouteDecided?.("fallback");
+        return { id: DATA_ITEM_ID, itemId: "item-uuid-1", ownerAddress: ACCOUNT_A, tags: [] };
+      },
+    );
+    const props = makeProps({ uploadAndTrack });
+    render(<UploadWizard {...props} />);
+    await flushStreamingSupportDetection();
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() =>
+      expect(screen.getByTestId("upload-wizard-upload-route").textContent?.toLowerCase()).not.toContain("streaming"),
+    );
+    expect(screen.getByTestId("upload-wizard-upload-route").textContent?.toLowerCase()).toContain("standard");
+  });
+});
+
+/**
+ * `arweave-upload-dry-run` T3: the Review step's "Test this upload" button
+ * — a SECOND, entirely separate action from the real "Confirm & Upload"
+ * button. Regression this guards against: a future change accidentally
+ * routing the Test button through the real `uploadAndTrack`/
+ * `uploadFilesAndTrack` path (spending nothing should never risk spending
+ * something), or letting a dry run's own loading/result state leak into —
+ * or be confused with — the real upload's `phase`/progress/result UI.
+ */
+function makeDryRunResult(overrides: Partial<DryRunResult> = {}): DryRunResult {
+  return {
+    success: true,
+    filesTested: 1,
+    totalBytes: 10,
+    chunksPosted: 1,
+    resumeTested: true,
+    proofsValid: true,
+    decryptRoundTripOk: "not-applicable",
+    streamingSupported: true,
+    elapsedMs: 42,
+    errors: [],
+    ...overrides,
+  };
+}
+
+describe("UploadWizard — T3 (arweave-upload-dry-run): the 'Test this upload' button and its dedicated result panel", () => {
+  it("is absent entirely when runDryRunUpload is not supplied — never crashes, never renders a dead button", () => {
+    render(<UploadWizard {...makeProps()} />);
+    advanceToReview();
+
+    expect(screen.queryByTestId("upload-wizard-dry-run-button")).not.toBeInTheDocument();
+  });
+
+  it("is present and enabled under the same conditions as Confirm & Upload when runDryRunUpload IS supplied", () => {
+    const runDryRunUpload = vi.fn(async () => makeDryRunResult());
+    render(<UploadWizard {...makeProps({ runDryRunUpload })} />);
+    advanceToReview();
+
+    const button = screen.getByTestId("upload-wizard-dry-run-button");
+    expect(button).toBeEnabled();
+    // Same gate `upload-wizard-confirm-upload` itself uses: disabled when
+    // there's nothing to test.
+    expect(screen.getByTestId("upload-wizard-confirm-upload")).toBeEnabled();
+  });
+
+  it("clicking Test calls ONLY runDryRunUpload — never the real uploadAndTrack/uploadFilesAndTrack — with the current files/selection/accountId", async () => {
+    const runDryRunUpload = vi.fn(
+      async (_files: File[], _selection: UploadWizardSelection, _accountId: string) => makeDryRunResult(),
+    );
+    const props = makeProps({ runDryRunUpload });
+    render(<UploadWizard {...props} />);
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    await waitFor(() => expect(runDryRunUpload).toHaveBeenCalledTimes(1));
+
+    expect(props.uploadAndTrack).not.toHaveBeenCalled();
+    expect(props.uploadFilesAndTrack).not.toHaveBeenCalled();
+    const [files, selection, accountId] = runDryRunUpload.mock.calls[0]!;
+    expect(files).toHaveLength(1);
+    expect((selection as UploadWizardSelection).category).toBe("general-other");
+    expect(accountId).toBe(ACCOUNT_A);
+  });
+
+  it("renders the resolved DryRunResult's fields in the dedicated panel, distinct from the real upload's result/progress/route testids", async () => {
+    const result = makeDryRunResult({
+      filesTested: 3,
+      totalBytes: 12345,
+      chunksPosted: 7,
+      resumeTested: true,
+      proofsValid: true,
+      decryptRoundTripOk: true,
+      streamingSupported: true,
+      errors: [],
+    });
+    const runDryRunUpload = vi.fn(async () => result);
+    render(<UploadWizard {...makeProps({ runDryRunUpload })} />);
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    const panel = await screen.findByTestId("upload-wizard-dry-run-result");
+
+    expect(within(panel).getByTestId("upload-wizard-dry-run-success").textContent).toMatch(/pass/i);
+    expect(within(panel).getByTestId("upload-wizard-dry-run-files-tested").textContent).toContain("3");
+    expect(within(panel).getByTestId("upload-wizard-dry-run-total-bytes").textContent).toContain("12345");
+    expect(within(panel).getByTestId("upload-wizard-dry-run-chunks-posted").textContent).toContain("7");
+    expect(within(panel).getByTestId("upload-wizard-dry-run-resume-tested").textContent?.toLowerCase()).toContain("yes");
+    expect(within(panel).getByTestId("upload-wizard-dry-run-proofs-valid").textContent?.toLowerCase()).toContain("yes");
+    expect(within(panel).getByTestId("upload-wizard-dry-run-decrypt-round-trip").textContent?.toLowerCase()).toContain("yes");
+
+    // Distinct from every real-upload testid — never the same element, never
+    // a shared container.
+    expect(screen.queryByTestId("upload-wizard-result")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-upload-route")).not.toBeInTheDocument();
+  });
+
+  it("renders a clear FAILURE banner (never a false pass) and every error message when the engine reports success: false", async () => {
+    const result = makeDryRunResult({
+      success: false,
+      proofsValid: false,
+      decryptRoundTripOk: false,
+      errors: ["Decrypt self-check failed: the posted ciphertext did not decrypt back to the original plaintext."],
+    });
+    const runDryRunUpload = vi.fn(async () => result);
+    render(<UploadWizard {...makeProps({ runDryRunUpload })} />);
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    const panel = await screen.findByTestId("upload-wizard-dry-run-result");
+
+    expect(within(panel).getByTestId("upload-wizard-dry-run-success").textContent).toMatch(/fail/i);
+    expect(within(panel).getByTestId("upload-wizard-dry-run-errors").textContent).toContain(
+      "Decrypt self-check failed",
+    );
+  });
+
+  it("shows a running indicator while the dry run is in flight, and it disappears once the result renders", async () => {
+    let resolveDryRun: (value: DryRunResult) => void = () => {};
+    const runDryRunUpload = vi.fn(
+      () =>
+        new Promise<DryRunResult>((resolve) => {
+          resolveDryRun = resolve;
+        }),
+    );
+    render(<UploadWizard {...makeProps({ runDryRunUpload })} />);
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    expect(await screen.findByTestId("upload-wizard-dry-run-running")).toBeInTheDocument();
+
+    resolveDryRun(makeDryRunResult());
+    expect(await screen.findByTestId("upload-wizard-dry-run-result")).toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-dry-run-running")).not.toBeInTheDocument();
+  });
+
+  it("a rejected runDryRunUpload call renders a dry-run-scoped error — never the real upload's own error view", async () => {
+    const runDryRunUpload = vi.fn(async () => {
+      throw new Error("No Arweave key found for the selected address.");
+    });
+    render(<UploadWizard {...makeProps({ runDryRunUpload })} />);
+    advanceToReview();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    expect(await screen.findByTestId("upload-wizard-dry-run-error")).toHaveTextContent(
+      "No Arweave key found for the selected address.",
+    );
+    expect(screen.queryByTestId("upload-wizard-error")).not.toBeInTheDocument();
+  });
+
+  it("the real phase/progress/route state is COMPLETELY untouched by a dry run — including a FAILED dry-run result — the real Confirm/Done/error views never render because of a dry run alone", async () => {
+    const result = makeDryRunResult({ success: false, errors: ["simulated failure"] });
+    const runDryRunUpload = vi.fn(async () => result);
+    const props = makeProps({ runDryRunUpload });
+    render(<UploadWizard {...props} />);
+    await flushStreamingSupportDetection();
+    advanceToReview();
+
+    // Before: still on Review, no real-upload artifacts.
+    expect(screen.getByTestId("upload-wizard-step-review")).toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-progress")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    await screen.findByTestId("upload-wizard-dry-run-result");
+
+    // After a (failed) dry run: STILL on Review — never flipped to the
+    // real upload's "uploading"/"done"/"error" views, and the real upload
+    // was genuinely never attempted.
+    expect(screen.getByTestId("upload-wizard-step-review")).toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-result")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-bundle-result")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-wizard-done")).not.toBeInTheDocument();
+    expect(props.uploadAndTrack).not.toHaveBeenCalled();
+    expect(props.uploadFilesAndTrack).not.toHaveBeenCalled();
+
+    // Confirm & Upload is STILL fully usable afterward — a dry run never
+    // leaves the real action gated/disabled.
+    expect(screen.getByTestId("upload-wizard-confirm-upload")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() => expect(props.uploadAndTrack).toHaveBeenCalledTimes(1));
+  });
+
+  it("a bundle (2+ files) selection still calls runDryRunUpload exactly once with every file — never uploadFilesAndTrack", async () => {
+    const runDryRunUpload = vi.fn(
+      async (_files: File[], _selection: UploadWizardSelection, _accountId: string) =>
+        makeDryRunResult({ filesTested: 2 }),
+    );
+    const props = makeProps({ runDryRunUpload });
+    render(<UploadWizard {...props} />);
+    advanceToFiles();
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("a.txt")] } });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("b.txt")] } });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-dry-run-button"));
+    await waitFor(() => expect(runDryRunUpload).toHaveBeenCalledTimes(1));
+
+    const [files] = runDryRunUpload.mock.calls[0]!;
+    expect(files).toHaveLength(2);
+    expect(props.uploadFilesAndTrack).not.toHaveBeenCalled();
   });
 });

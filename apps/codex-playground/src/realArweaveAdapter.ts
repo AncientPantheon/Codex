@@ -46,11 +46,60 @@ import {
   pollStatus,
   openUrl,
   rebuildLibrary,
-  uploadAndTrack as libraryUploadAndTrack,
   backupCodexToLibrary,
   type LibraryEntry,
   type LibraryStore,
 } from "@ancientpantheon/codex-arweave";
+// `arweave-streaming-worker-wiring` T3-revised: the real worker-backed
+// upload-performing seam `uploadAndTrack`/`uploadFilesAndTrack` below now
+// drive, INSTEAD OF calling `library/flow.ts`'s own `uploadAndTrack`
+// directly on the main thread (OPFS sync-access-handles are Worker-only —
+// see that sub-topic's design.md). `resolveEncryptionKey` and
+// `createWorkerStreamingUploadRunner`/`StreamingUploadRunner` are reached
+// via a RELATIVE path into the package's own SOURCE, not a bare package
+// specifier — GROUNDED (not guessed) by directly probing `tsc`: neither
+// symbol rides a `package.json` `exports` subpath, and the workspace
+// `tsconfig` `paths` wildcard (`@ancientpantheon/codex-arweave/*` →
+// `./packages/codex-arweave/src/*/index.ts`) only maps a SINGLE path
+// segment onto its OWN `index.ts` barrel — `library/flow.js` and
+// `library/streaming/StreamingUploadRunner.js` are each a second segment
+// deep with no barrel of their own at this scope, so
+// `@ancientpantheon/codex-arweave/library/flow.js` fails to resolve
+// (`TS2307`) under that mapping. A plain relative import resolves cleanly
+// under both `tsc` and Vite's `.js`→`.ts` extension fallback (the SAME
+// fallback this whole package's own source relies on throughout, e.g.
+// `flow.ts`'s own `"./streaming/isStreamingUploadSupported.js"` import) —
+// mirrors `createKeygenWorker`'s own "relative path into the package
+// SOURCE" convention below, used there for the identical reason (`./keygen`
+// has no `exports` subpath either).
+import { resolveEncryptionKey } from "../../../packages/codex-arweave/src/library/flow.js";
+import {
+  createWorkerStreamingUploadRunner,
+  type StreamingUploadRunner,
+} from "../../../packages/codex-arweave/src/library/streaming/StreamingUploadRunner.js";
+// `arweave-upload-dry-run` T3: the SAME relative-path convention as the two
+// imports above, for the identical grounded reason (neither rides a
+// `package.json` `exports` subpath). `StreamingDryRunRunner`/
+// `createWorkerStreamingDryRunRunner`/`dryRunWorker.ts` are a SCOPE
+// DEVIATION this task's own build report flags — added after the real-
+// browser capstone found that `runUploadDryRun` must run inside a dedicated
+// Worker (exactly like a real streaming upload) for
+// `isStreamingUploadSupported()` to ever resolve `true`; see
+// `StreamingDryRunRunner.ts`'s own doc comment for the full finding.
+import {
+  createWorkerStreamingDryRunRunner,
+  type StreamingDryRunRunner,
+} from "../../../packages/codex-arweave/src/library/streaming/StreamingDryRunRunner.js";
+import type { DryRunResult } from "../../../packages/codex-arweave/src/library/streaming/dryRunUpload.js";
+// TYPE-ONLY (erased at compile time, so this costs nothing at runtime —
+// never a heavy React import of the panel): `UploadWizardUploadCallbacks`/
+// `UploadWizardSelection` aren't re-exported by the `./panel` barrel either,
+// so they ride the SAME relative-path convention as the two imports above,
+// for the identical grounded reason.
+import type {
+  UploadWizardUploadCallbacks,
+  UploadWizardSelection,
+} from "../../../packages/codex-arweave/src/panel/UploadWizard.js";
 // Aliased: `checkArweaveRestoreEligibility` (the ArweavePanelDeps FIELD
 // name) is a zero-arg closure THIS file builds; the imported T1 PRIMITIVE
 // it's built from needs a different local name to avoid shadowing.
@@ -125,6 +174,69 @@ export function createKeygenWorker(): Worker {
   return new Worker(
     new URL(
       "../../../packages/codex-arweave/src/keygen/worker.ts",
+      import.meta.url,
+    ),
+    { type: "module" },
+  );
+}
+
+/**
+ * The DEFAULT worker factory for real-mode streaming uploads
+ * (`arweave-streaming-worker-wiring` T3-revised): the bundler-built Web
+ * Worker for codex-arweave's streaming-upload entry
+ * (`src/library/streaming/uploadWorker.ts`) — the dedicated Worker
+ * `isStreamingUploadSupported()`/`bundleAssemblyFile.ts`'s
+ * `createSyncAccessHandle()` calls require (they throw on the main document
+ * thread; see that sub-topic's design.md).
+ *
+ * Mirrors {@link createKeygenWorker} exactly, for the identical reason: a
+ * RELATIVE path into the package SOURCE, not a bare specifier —
+ * `library/streaming/uploadWorker.ts` has no `package.json` `exports`
+ * subpath of its own (it is a bundler worker entry, not a library symbol,
+ * same as `keygen/worker.ts`) and the relative `new URL(...,
+ * import.meta.url)` form is what Vite statically analyses into its own
+ * emitted worker chunk (this app's `vite.config.ts` already sets
+ * `worker: { format: "es" }` for exactly this reason — the keygen worker's
+ * own lazy heavy import needed it, and this worker's own lazy
+ * `import("../flow.js")` / `import("./isStreamingUploadSupported.js")`
+ * needs it identically).
+ *
+ * Constructed LAZILY (inside the factory, on the first real streaming
+ * upload) so importing this module never spawns a worker, and so jsdom
+ * (which has no `Worker` global — confirmed directly, not assumed) only
+ * trips over it if a test actually drives a real upload instead of
+ * injecting a `streamingUploadRunner` (see {@link buildRealPanelDeps}'s own
+ * option of that name).
+ */
+export function createStreamingUploadWorker(): Worker {
+  return new Worker(
+    new URL(
+      "../../../packages/codex-arweave/src/library/streaming/uploadWorker.ts",
+      import.meta.url,
+    ),
+    { type: "module" },
+  );
+}
+
+/**
+ * The DEFAULT worker factory for the "Test this upload" dry run
+ * (`arweave-upload-dry-run` T3 — a SCOPE DEVIATION; see this file's own
+ * `StreamingDryRunRunner` import comment for why). Mirrors
+ * {@link createStreamingUploadWorker} exactly, for the identical reason: a
+ * RELATIVE path into the package SOURCE, not a bare specifier —
+ * `library/streaming/dryRunWorker.ts` is a bundler worker entry with no
+ * `package.json` `exports` subpath of its own.
+ *
+ * Constructed LAZILY (inside the factory, on the first dry run) so importing
+ * this module never spawns a worker, and so jsdom (which has no `Worker`
+ * global) only trips over it if a test actually drives a real dry run
+ * instead of injecting a `streamingDryRunRunner` (see
+ * {@link buildRealPanelDeps}'s own option of that name).
+ */
+export function createStreamingDryRunWorker(): Worker {
+  return new Worker(
+    new URL(
+      "../../../packages/codex-arweave/src/library/streaming/dryRunWorker.ts",
       import.meta.url,
     ),
     { type: "module" },
@@ -256,6 +368,22 @@ async function bufferedFeeCap(pool: GatewayPool, byteSize: number): Promise<bigi
 }
 
 /**
+ * `arweave-upload-dry-run` T3: a FIXED fee-cap placeholder for
+ * `runDryRunUpload` — deliberately NEVER derived from a live `estimateFee`
+ * quote (unlike {@link bufferedFeeCap} above), because the design's own
+ * "zero real network request… across a full dry-run execution" acceptance
+ * criterion forbids it: `estimateFee` reaches the REAL configured gateway
+ * pool for a live price quote, which would be a genuine network call during
+ * a run whose entire point is "nothing leaves your browser". The dry-run
+ * engine's own posting loop checks this cap only against T1's local
+ * gateway's own fixed, structurally-plausible price quote
+ * (`createLocalDryRunGatewayApiFactory`'s `DRY_RUN_PRICE`, `1_000_000_000`
+ * Winston) — this value is comfortably (1000x) above that, so the cap check
+ * never spuriously fails a genuine dry run.
+ */
+const DRY_RUN_MAX_REWARD_WINSTON = 1_000_000_000_000n;
+
+/**
  * Resolves the {@link ForeignKeyEntry} a given address/id corresponds to,
  * from the app's own `foreignKeys` list. `sendFrom` receives its entry
  * explicitly (chosen from the Accounts row the user clicked); `uploadAndTrack`/
@@ -301,6 +429,8 @@ export function buildRealPanelDeps({
   adapter,
   libraryStore,
   workerFactory = createKeygenWorker,
+  streamingUploadRunner,
+  streamingDryRunRunner,
   getPassword,
   addForeignKey,
   deleteForeignKey,
@@ -322,6 +452,31 @@ export function buildRealPanelDeps({
   pool?: GatewayPool;
   adapter?: ForeignChainAdapter;
   libraryStore?: LibraryStore;
+  /**
+   * `arweave-streaming-worker-wiring` T3-revised: the off-main-thread
+   * streaming-upload seam `uploadAndTrack`/`uploadFilesAndTrack` below drive
+   * INSTEAD OF calling `library/flow.ts`'s `uploadAndTrack` directly.
+   * Defaults to the real `createWorkerStreamingUploadRunner({ workerFactory:
+   * createStreamingUploadWorker })` — a genuine Worker-backed run. Tests
+   * inject a `FakeStreamingUploadRunner` (or any other
+   * `StreamingUploadRunner`) so these closures are exercised with NO real
+   * Worker (jsdom has none — confirmed directly) and no real upload.
+   * Constructed once per `buildRealPanelDeps` call and shared by BOTH
+   * closures below — safe, since the real runner spawns (and terminates) its
+   * own fresh worker on every `.run()` call; it carries no per-call state of
+   * its own.
+   */
+  streamingUploadRunner?: StreamingUploadRunner;
+  /**
+   * `arweave-upload-dry-run` T3 (SCOPE DEVIATION — see this file's own
+   * `StreamingDryRunRunner` import comment): the off-main-thread dry-run
+   * seam `runDryRunUpload` (below) drives. Defaults to a real
+   * Worker-backed `createWorkerStreamingDryRunRunner({ workerFactory:
+   * createStreamingDryRunWorker })`. Tests inject a `FakeStreamingDryRunRunner`
+   * (or any other `StreamingDryRunRunner`) so `runDryRunUpload` is exercised
+   * with NO real Worker and no real dry run.
+   */
+  streamingDryRunRunner?: StreamingDryRunRunner;
   /** The worker the keygen runner drives. Defaults to the real bundler-built
    *  worker; tests inject a fake so the runner is exercised without a real
    *  Web Worker (jsdom has none). */
@@ -409,12 +564,41 @@ export function buildRealPanelDeps({
    *  (unknown seed id, locked codex, wrong password) is folded into "cannot
    *  attach a recovery tag this time", never a thrown error. */
   revealArweaveSeedSecret?: (seedId: string) => Promise<string | null>;
-}): ArweavePanelDeps {
+}): ArweavePanelDeps & {
+  /**
+   * `arweave-upload-dry-run` T3: the REAL wiring behind `UploadWizard`'s
+   * "Test this upload" button — NOT a member of `ArweavePanelDeps` itself
+   * (`context.tsx`, out of this task's file scope), so it is widened onto
+   * this function's own return type via intersection instead of touching
+   * that interface. Mirrors `uploadAndTrack`/`uploadFilesAndTrack`'s own
+   * parameter shape exactly (`UploadWizardProps.runDryRunUpload`): decrypts
+   * the PASSED-IN `accountId`'s key, resolves `selection.encryptFor` into a
+   * `CryptoKey` the SAME way the real upload path does, and calls T2's
+   * `runUploadDryRun` (via the injectable, Worker-backed
+   * `streamingDryRunRunner`) — never touching `store`/Library at all.
+   */
+  runDryRunUpload: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+  ) => Promise<DryRunResult>;
+} {
   const resolvedPool = resolveRealPool({ gatewayUrl, pool });
   const resolvedAdapter =
     adapter ?? createArweaveAdapter({ pool: resolvedPool });
   const store: LibraryStore = libraryStore ?? new MemoryLibraryStore();
   const ownerAddress = address ?? "";
+  // T3-revised: ONE runner shared by `uploadAndTrack`/`uploadFilesAndTrack`
+  // below — see the `streamingUploadRunner` parameter's own doc comment.
+  const resolvedStreamingUploadRunner =
+    streamingUploadRunner ??
+    createWorkerStreamingUploadRunner({ workerFactory: createStreamingUploadWorker });
+  // `arweave-upload-dry-run` T3: the SAME construction pattern, for
+  // `runDryRunUpload` below — see the `streamingDryRunRunner` parameter's
+  // own doc comment.
+  const resolvedStreamingDryRunRunner =
+    streamingDryRunRunner ??
+    createWorkerStreamingDryRunRunner({ workerFactory: createStreamingDryRunWorker });
   // ARMED only when the caller wired the codex password + store action. The
   // seeded flow spends ~6.7 s of CPU per key, so an unarmed build must REFUSE up
   // front rather than resolve a key into a no-op.
@@ -563,30 +747,56 @@ export function buildRealPanelDeps({
     // decrypted at CALL time (never cached), same discipline as `sendFrom`
     // above — so picking a different account in the wizard actually signs
     // with a different key.
-    uploadAndTrack: async (file, selection, accountId) => {
+    //
+    // `arweave-streaming-worker-wiring` T3-revised: the actual
+    // upload-performing call now goes through `resolvedStreamingUploadRunner`
+    // (off-main-thread, Worker-backed in real use) INSTEAD OF calling
+    // `library/flow.ts`'s `uploadAndTrack` directly — everything else below
+    // (JWK resolution, fee cap, the bundle-vs-single-file result-shape
+    // guards) is unchanged. `selection.encryptFor`'s live
+    // `revealAccountSecret` CALLBACK cannot cross the runner's Worker
+    // boundary (functions are not structured-cloneable), so it is resolved
+    // into a plain `CryptoKey` HERE, on the main thread, via the now-exported
+    // `resolveEncryptionKey` — exactly where `library/flow.ts`'s own
+    // `uploadAndTrack` resolves it today. Only the already-resolved key, plus
+    // the callback-free `{ accountId, accountAddress }` identity, cross into
+    // `.run()`; a caller that picked Public (`encryptFor` absent) resolves
+    // `undefined`, unchanged from before this task.
+    uploadAndTrack: async (file, selection, accountId, callbacks?: UploadWizardUploadCallbacks) => {
       const jwk = await decryptArweaveKey(findEntryForAddress(foreignKeys, accountId));
       const data = new Uint8Array(await file.arrayBuffer());
       const maxRewardWinston = await bufferedFeeCap(resolvedPool, data.byteLength);
-      const result = await libraryUploadAndTrack(
+      const { encryptFor, ...selectionRest } = selection;
+      const resolvedKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+      const result = await resolvedStreamingUploadRunner.run(
         {
           jwk,
           data,
           contentType: file.type || "application/octet-stream",
           maxRewardWinston,
-          ...selection,
+          ...selectionRest,
         },
-        { store, pool: resolvedPool },
+        resolvedKey,
+        {
+          store,
+          pool: resolvedPool,
+          encryptFor: encryptFor
+            ? { accountId: encryptFor.accountId, accountAddress: encryptFor.accountAddress }
+            : undefined,
+          onRoute: callbacks?.onRouteDecided,
+          onProgress: callbacks?.onProgress,
+        },
       );
-      // `libraryUploadAndTrack` only takes the bundle path for a `files` array
-      // of 2+ — a plain (non-`files`) `UploadParams` call, as above, ALWAYS
-      // resolves the single-file `UploadResult` shape `UploadTrackResult`
-      // matches verbatim.
+      // The runner only takes the bundle path for a `files` array of 2+ — a
+      // plain (non-`files`) `UploadParams` call, as above, ALWAYS resolves
+      // the single-file `UploadResult` shape `UploadTrackResult` matches
+      // verbatim.
       if ("manifestId" in result) {
         throw new Error("Unexpected bundle result from a single-file upload.");
       }
       return result;
     },
-    uploadFilesAndTrack: async (files, selection, accountId) => {
+    uploadFilesAndTrack: async (files, selection, accountId, callbacks?: UploadWizardUploadCallbacks) => {
       const jwk = await decryptArweaveKey(findEntryForAddress(foreignKeys, accountId));
       const bundleFiles = await Promise.all(
         files.map(async (file) => ({
@@ -597,15 +807,72 @@ export function buildRealPanelDeps({
       );
       const totalBytes = bundleFiles.reduce((sum, f) => sum + f.data.byteLength, 0);
       const maxRewardWinston = await bufferedFeeCap(resolvedPool, totalBytes);
-      const result = await libraryUploadAndTrack(
-        { jwk, files: bundleFiles, maxRewardWinston, ...selection },
-        { store, pool: resolvedPool },
+      const { encryptFor, ...selectionRest } = selection;
+      const resolvedKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+      const result = await resolvedStreamingUploadRunner.run(
+        { jwk, files: bundleFiles, maxRewardWinston, ...selectionRest },
+        resolvedKey,
+        {
+          store,
+          pool: resolvedPool,
+          encryptFor: encryptFor
+            ? { accountId: encryptFor.accountId, accountAddress: encryptFor.accountAddress }
+            : undefined,
+          onRoute: callbacks?.onRouteDecided,
+          onProgress: callbacks?.onProgress,
+        },
       );
-      // `files.length >= 2` ALWAYS takes `libraryUploadAndTrack`'s bundle path.
+      // `files.length >= 2` ALWAYS takes the runner's bundle path.
       if (!("manifestId" in result)) {
         throw new Error("Unexpected single-file result from a bundle upload.");
       }
       return result;
+    },
+    // `arweave-upload-dry-run` T3: the "Test this upload" button's real
+    // wiring — mirrors `uploadAndTrack`/`uploadFilesAndTrack`'s own JWK/
+    // encryptFor resolution exactly, but routes into the Worker-backed
+    // `resolvedStreamingDryRunRunner` (never `store`/Library — T2's own
+    // `runUploadDryRun` takes no `store` param at all, by construction) and
+    // uses a FIXED fee cap rather than a live `estimateFee` quote (see
+    // `DRY_RUN_MAX_REWARD_WINSTON`'s own doc comment: a dry run must reach
+    // zero real network, including for its own fee-cap bookkeeping).
+    runDryRunUpload: async (
+      files: File[],
+      selection: UploadWizardSelection,
+      accountId: string,
+    ): Promise<DryRunResult> => {
+      const jwk = await decryptArweaveKey(findEntryForAddress(foreignKeys, accountId));
+      const { encryptFor, ...selectionRest } = selection;
+      const resolvedKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+
+      const first = files[0];
+      if (first === undefined) {
+        throw new Error("runDryRunUpload requires at least one file.");
+      }
+
+      const params =
+        files.length >= 2
+          ? {
+              jwk,
+              files: await Promise.all(
+                files.map(async (file) => ({
+                  path: file.webkitRelativePath || file.name,
+                  data: new Uint8Array(await file.arrayBuffer()),
+                  contentType: file.type || "application/octet-stream",
+                })),
+              ),
+              maxRewardWinston: DRY_RUN_MAX_REWARD_WINSTON,
+              ...selectionRest,
+            }
+          : {
+              jwk,
+              data: new Uint8Array(await first.arrayBuffer()),
+              contentType: first.type || "application/octet-stream",
+              maxRewardWinston: DRY_RUN_MAX_REWARD_WINSTON,
+              ...selectionRest,
+            };
+
+      return resolvedStreamingDryRunRunner.run(params, resolvedKey, { pool: resolvedPool });
     },
     // `arweave-non-removable-account` T5: the dead-letter gap's host-app half
     // — forwarded verbatim to `ArweavePanelDeps.onAccountUsedForEncryption`,

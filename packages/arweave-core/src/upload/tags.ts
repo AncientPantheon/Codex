@@ -134,8 +134,15 @@ export const TAG_CODEX_ENCRYPTION_VERSION = "Codex-Encryption-Version";
  *  caller-supplied directly, mirroring `CODEX_TAG_SCHEMA_VERSION_CURRENT`'s own
  *  pattern. Bumps only when the real encryption procedure in `fileEncryption.ts`
  *  changes; version `"1"`'s decrypt logic is never removed, since real data may
- *  depend on it forever. */
-export const CODEX_ENCRYPTION_VERSION_CURRENT = "1";
+ *  depend on it forever.
+ *
+ *  Bumped to `"2"` by `arweave-streaming-encryption` T2: newly-encrypted
+ *  uploads now use `streamingFileEncryption.ts`'s chunked-AES-GCM v2 envelope
+ *  (`IV(12) ‖ ciphertext+tag(16)` per `ENCRYPTION_CHUNK_SIZE` chunk, no
+ *  base64 blowup) instead of v1's whole-blob `base64(plaintext)` + single
+ *  `AES-GCM` call (`fileEncryption.ts`'s `encryptWithDerivedKey`, still
+ *  unchanged and still what every `"1"`-tagged item depends on forever). */
+export const CODEX_ENCRYPTION_VERSION_CURRENT = "2";
 
 /** The `itemType` enum `buildUploadTags` accepts for `Codex-Item-Type`. */
 export type UploadItemType = "file" | "manifest";

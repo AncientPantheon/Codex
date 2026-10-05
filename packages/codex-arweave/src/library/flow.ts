@@ -50,7 +50,16 @@ import {
   type GatewayPool,
   type UploadGatewayApiFactory,
   type ArweaveJwk,
+  type StreamingUploadGatewayApiFactory,
 } from "@ancientpantheon/arweave-core";
+// T3 (`arweave-streaming-ui`): the Wave-1 OPFS-support detector and the
+// streaming-engine-calling counterparts to `uploadBundle`/`uploadData` this
+// module now routes to when streaming is supported — see `uploadAndTrack`'s
+// own doc comment below for the exact routing rule.
+import { isStreamingUploadSupported } from "./streaming/isStreamingUploadSupported.js";
+import { uploadBundleStreaming, uploadStreaming } from "./streaming/uploadBundleStreaming.js";
+import type { StreamingPostResumeStore } from "./streaming/streamingPostResumeStore.js";
+import type { BundleAssemblyFile } from "./streaming/bundleAssemblyFile.js";
 // Namespace import so `vi.spyOn(arweaveCore, "getTransactionStatus")` in the
 // test intercepts THIS call site: a destructured local binding would capture
 // the original function reference and defeat the spy.
@@ -116,6 +125,25 @@ export interface UploadEncryptFor {
  *  `"manifestId" in result`. */
 export type UploadAndTrackResult = UploadResult | UploadBundleResult;
 
+/**
+ * `arweave-streaming-worker-wiring` T1: the already-resolved encryption
+ * IDENTITY {@link performUploadAndTrack} needs post-`resolveEncryptionKey` —
+ * everything {@link UploadEncryptFor} carries EXCEPT the live
+ * `revealAccountSecret` CALLBACK, which cannot cross a Worker `postMessage`
+ * boundary (functions are not structured-cloneable; see `uploadWorker.ts`'s
+ * own module doc). `accountId`/`accountAddress` are plain strings — readily
+ * cloneable — so they ride straight through unchanged; only the callback
+ * itself is excluded.
+ */
+export interface ResolvedEncryptFor {
+  /** `UploadEncryptFor.accountId` verbatim — forwarded to
+   *  `onAccountUsedForEncryption` after a successful encrypted upload. */
+  accountId: string;
+  /** `UploadEncryptFor.accountAddress` verbatim — becomes the posted
+   *  `encryptorAddress` (`Codex-Encryptor`). */
+  accountAddress: string;
+}
+
 /** Options for {@link uploadAndTrack}. */
 export interface UploadAndTrackOptions {
   /** The Library persistence seam the pending entry/entries are appended to. */
@@ -146,6 +174,80 @@ export interface UploadAndTrackOptions {
    *  entirely to whatever the host wires into this callback. Never called for
    *  an unencrypted upload, and never called when the upload rejects. */
   onAccountUsedForEncryption?: (accountId: string) => void;
+  /**
+   * T3 (`arweave-streaming-ui`): injectable OPFS-support probe, forwarded
+   * verbatim to T1's `isStreamingUploadSupported`. Called ONCE per upload
+   * action — before either path below does any work — to make the routing
+   * decision. Defaults to the real detector; tests inject a fake so the
+   * decision never touches a real OPFS API.
+   */
+  isStreamingSupported?: () => Promise<boolean>;
+  /**
+   * T3: fires ONCE per upload action, synchronously, the moment the routing
+   * decision is made (before either path's own work begins) — the
+   * UI-facing SIGNAL of which engine actually handles this upload.
+   * `"streaming"` when `isStreamingSupported` resolved `true` (T2's
+   * `uploadBundleStreaming`/`uploadStreaming` are about to run);
+   * `"fallback"` otherwise (the classic in-memory `uploadBundle`/
+   * `uploadData` are about to run, exactly as before T3). Mirrors
+   * `UploadWizard.tsx`'s own `UploadWizardUploadCallbacks.onRouteDecided`,
+   * which this module's real caller threads straight through.
+   */
+  onUploadRouteDecided?: (route: "streaming" | "fallback") => void;
+  /**
+   * T3: chunk/byte progress, forwarded verbatim to the streaming path's own
+   * `uploadBundleStreaming`/`uploadStreaming` → `streamingPostBundle`
+   * `onProgress` callback. NEVER called when the fallback path runs — that
+   * path has no chunk concept at all. Additive; omitted → zero behavior
+   * change.
+   */
+  onProgress?: (uploadedChunks: number, totalChunks: number) => void;
+  /**
+   * T3: the REAL resume-checkpoint store the streaming path persists its
+   * progress through (`uploadBundleStreaming`/`uploadStreaming`'s own
+   * `resumeStore` — never bypassed/mocked, per that module's own contract).
+   * REQUIRED only when the streaming path actually runs (i.e.
+   * `isStreamingSupported` resolves `true`); the fallback path never
+   * touches this and omitting it there is fine. Omitted while streaming
+   * WOULD run throws a specific error BEFORE any upload is attempted — the
+   * same "throw before any upload, never a silent degrade" discipline
+   * {@link resolveEncryptionKey} already applies for a bad reveal.
+   */
+  streamingResumeStore?: StreamingPostResumeStore;
+  /** T3: injectable per-endpoint streaming gateway-API factory, forwarded to
+   *  `uploadBundleStreaming`/`uploadStreaming`'s own `apiFactory`. Defaults
+   *  to their own default (arweave-js-backed); tests inject plain fakes —
+   *  NEVER the classic `apiFactory` above, a completely different API shape
+   *  (streaming's chunk-posting surface vs. the native single-post one). */
+  streamingApiFactory?: StreamingUploadGatewayApiFactory;
+  /** T3: injectable OPFS-file-open seam, forwarded to
+   *  `uploadBundleStreaming`/`uploadStreaming`'s own `openFile`. Defaults to
+   *  the real `openOpfsBundleAssemblyFile`; tests inject a fake (neither
+   *  Node nor jsdom has real OPFS). */
+  streamingOpenFile?: (fileName: string) => Promise<BundleAssemblyFile>;
+  /** T3: injectable OPFS-file-delete seam, forwarded to
+   *  `uploadBundleStreaming`/`uploadStreaming`'s own `deleteFile`. */
+  streamingDeleteFile?: (fileName: string) => Promise<void>;
+}
+
+/**
+ * Options for {@link performUploadAndTrack} (`arweave-streaming-worker-
+ * wiring` T1) — every {@link UploadAndTrackOptions} field EXCEPT
+ * `encryptFor`, which is replaced by the already-resolved
+ * {@link ResolvedEncryptFor} (no live callback — see that type's own doc).
+ * `uploadAndTrack` itself still accepts the full live `UploadEncryptFor`;
+ * this narrower options type is what's left once `resolveEncryptionKey` has
+ * already run and only its OUTPUT needs to keep flowing — the exact shape
+ * `uploadWorker.ts`'s `{ kind: "start" }` message carries across the Worker
+ * boundary.
+ */
+export interface PerformUploadAndTrackOptions
+  extends Omit<UploadAndTrackOptions, "encryptFor"> {
+  /** The resolved encryption identity for `resolvedKey`, OMITTING the live
+   *  `revealAccountSecret` callback. Required (together with a defined
+   *  `resolvedKey`) to tag/attribute an encrypted upload; omit entirely for
+   *  an unencrypted one — mirrors `resolvedKey: undefined`. */
+  encryptFor?: ResolvedEncryptFor;
 }
 
 /** The app-metadata tag carrying a bundled file item's relative path — mirrors
@@ -171,7 +273,7 @@ const TAG_CODEX_BACKUP_RECOVERY_KEY = "Codex-Backup-Recovery-Key";
  * than silently uploading unencrypted or under a garbage key. Throws BEFORE
  * any upload is attempted, so a bad reveal never partially uploads.
  */
-async function resolveEncryptionKey(encryptFor: UploadEncryptFor): Promise<CryptoKey> {
+export async function resolveEncryptionKey(encryptFor: UploadEncryptFor): Promise<CryptoKey> {
   const bitstring = await encryptFor.revealAccountSecret(encryptFor.accountId);
   if (bitstring === null || bitstring === undefined || bitstring === "") {
     throw new Error(
@@ -363,6 +465,16 @@ function isManifestContentType(contentType: string): boolean {
  * Upload `params` and, ONLY after the upload RESOLVES, append the resulting
  * `pending` {@link LibraryEntry}/entries to the store.
  *
+ * `arweave-streaming-worker-wiring` T1: this function is now a THIN wrapper —
+ * it resolves `opts.encryptFor` into a `CryptoKey | undefined` (unchanged,
+ * still via the real `revealAccountSecret` callback, which must stay on the
+ * main thread since functions cannot cross a Worker boundary), then hands
+ * everything else to {@link performUploadAndTrack}, which carries the full
+ * upload-then-append / bundle-vs-single-file / streaming-routing logic
+ * documented below (the logic itself did not move conceptually, only its
+ * home within this file — `uploadWorker.ts`'s Worker entry calls
+ * `performUploadAndTrack` directly with an already-resolved key).
+ *
  * The append is upload-THEN-append: a throwing upload rejects and leaves the
  * store EMPTY (no phantom-pending placeholder) — true for BOTH paths below.
  * The JWK rides `params.jwk` as a per-call transient and is NEVER persisted
@@ -401,12 +513,58 @@ export async function uploadAndTrack(
   params: UploadAndTrackParams,
   opts: UploadAndTrackOptions,
 ): Promise<UploadAndTrackResult> {
-  const { store, pool, apiFactory, now = Date.now, encryptFor, onAccountUsedForEncryption } = opts;
+  const { encryptFor, ...rest } = opts;
 
   // T5: resolve the bitstring + derive the AES key ONCE for the WHOLE upload
   // action (single file or N-file bundle alike) — never once per file. Runs
-  // BEFORE either path below, so a bad reveal never partially uploads.
-  const encryptionKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+  // BEFORE any upload is attempted, so a bad reveal never partially uploads.
+  // This step MUST stay on the main thread (`arweave-streaming-worker-
+  // wiring` T1): `encryptFor.revealAccountSecret` is a live callback that
+  // cannot cross a Worker boundary — only its OUTPUT, the derived
+  // `CryptoKey`, is handed to `performUploadAndTrack` below.
+  const resolvedKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+
+  return performUploadAndTrack(params, resolvedKey, {
+    ...rest,
+    encryptFor: encryptFor
+      ? { accountId: encryptFor.accountId, accountAddress: encryptFor.accountAddress }
+      : undefined,
+  });
+}
+
+/**
+ * Everything {@link uploadAndTrack} runs AFTER its key resolution step —
+ * factored out verbatim (`arweave-streaming-worker-wiring` T1, a PURE
+ * refactor, zero behavior change) so the SAME logic is callable with an
+ * ALREADY-RESOLVED key: both `uploadAndTrack` itself (the main-thread public
+ * entry point) and `uploadWorker.ts`'s thin Worker entry (which receives
+ * `resolvedKey` over `postMessage`, never a live callback) call this
+ * function. See {@link uploadAndTrack}'s own doc comment for the full
+ * upload-THEN-append / bundle-vs-single-file / streaming-routing contract —
+ * none of that changed, it simply now lives here.
+ */
+export async function performUploadAndTrack(
+  params: UploadAndTrackParams,
+  resolvedKey: CryptoKey | undefined,
+  opts: PerformUploadAndTrackOptions,
+): Promise<UploadAndTrackResult> {
+  const {
+    store,
+    pool,
+    apiFactory,
+    now = Date.now,
+    encryptFor,
+    onAccountUsedForEncryption,
+    isStreamingSupported = isStreamingUploadSupported,
+    onUploadRouteDecided,
+    onProgress,
+    streamingResumeStore,
+    streamingApiFactory,
+    streamingOpenFile,
+    streamingDeleteFile,
+  } = opts;
+
+  const encryptionKey = resolvedKey;
   const encrypted = encryptionKey !== undefined;
   const encryptorAddress = encryptFor?.accountAddress;
   // `arweave-tag-schema-spec` T4: the pinned CURRENT encryption-procedure
@@ -417,21 +575,96 @@ export async function uploadAndTrack(
   // action is actually encrypted.
   const encryptionVersion = encrypted ? CODEX_ENCRYPTION_VERSION_CURRENT : undefined;
 
-  if ("files" in params && params.files.length >= 2) {
-    const files = encryptionKey
-      ? await Promise.all(
-          params.files.map(async (file) => ({
-            ...file,
-            data: await encryptFileForUpload(file.data, encryptionKey),
-          })),
-        )
-      : params.files;
+  // T3 (`arweave-streaming-ui`): ONE routing decision per upload action,
+  // made BEFORE either path below does any work. `onUploadRouteDecided`
+  // fires regardless of which path is about to run — see its own doc
+  // comment on `UploadAndTrackOptions` for exactly what it signals.
+  const streaming = await isStreamingSupported();
+  onUploadRouteDecided?.(streaming ? "streaming" : "fallback");
 
-    // Upload FIRST. A rejection propagates here, before any store write — so
-    // the failure path never leaves an orphan pending entry.
-    const bundleParams: UploadBundleParams = {
+  if ("files" in params && params.files.length >= 2) {
+    let result: UploadBundleResult;
+
+    if (streaming) {
+      if (!streamingResumeStore) {
+        throw new Error(
+          'uploadAndTrack: streaming is supported but no "streamingResumeStore" was supplied — cannot route this upload through the streaming engines.',
+        );
+      }
+      // T2's `uploadBundleStreaming` takes the SAME already-derived
+      // `encryptionKey` (never re-derived) and performs its own chunked
+      // AES-GCM internally (`assembleBundleToFile`'s `encryption` param) —
+      // UNLIKE the fallback branch below, this path never eagerly
+      // `encryptFileForUpload`s a whole-file buffer first.
+      result = await uploadBundleStreaming(
+        {
+          jwk: params.jwk,
+          files: params.files.map((f) => ({
+            path: f.path,
+            contentType: f.contentType,
+            readData: async () => f.data,
+          })),
+          maxRewardWinston: params.maxRewardWinston,
+          category: params.category,
+          assetType: params.assetType,
+          appId: params.appId,
+          appVersion: params.appVersion,
+          encrypted,
+          encryptorAddress,
+          encryptionVersion,
+          encryptionKey,
+        },
+        {
+          pool,
+          resumeStore: streamingResumeStore,
+          apiFactory: streamingApiFactory,
+          openFile: streamingOpenFile,
+          deleteFile: streamingDeleteFile,
+          onProgress,
+        },
+      );
+    } else {
+      // EXACTLY today's existing in-memory path — unchanged.
+      const files = encryptionKey
+        ? await Promise.all(
+            params.files.map(async (file) => ({
+              ...file,
+              data: await encryptFileForUpload(file.data, encryptionKey),
+            })),
+          )
+        : params.files;
+
+      const bundleParams: UploadBundleParams = {
+        jwk: params.jwk,
+        files,
+        maxRewardWinston: params.maxRewardWinston,
+        category: params.category,
+        assetType: params.assetType,
+        appId: params.appId,
+        appVersion: params.appVersion,
+        encrypted,
+        encryptorAddress,
+        encryptionVersion,
+      };
+      result = await uploadBundle(pool, bundleParams, { apiFactory });
+    }
+
+    // `UploadBundleResult` does not carry `ownerAddress` (only ids) — derive
+    // it independently, the SAME derivation `uploadBundle` itself already
+    // performed internally, so the appended entries' `owner` field is correct.
+    const jwk = importKeyfile(params.jwk);
+    const ownerAddress = await addressOf(jwk);
+    const createdAt = now();
+
+    // Entry-building only ever reads each file's path/contentType plus the
+    // per-batch category/tag inputs — never the actual bytes — so the SAME
+    // reconstruction correctly serves EITHER path above; built fresh from
+    // the ORIGINAL (pre-encryption) `params.files` rather than whichever
+    // (possibly ciphertext-swapped) `files` variable the fallback branch
+    // used internally.
+    const bundleParamsForEntries: UploadBundleParams = {
       jwk: params.jwk,
-      files,
+      files: params.files,
       maxRewardWinston: params.maxRewardWinston,
       category: params.category,
       assetType: params.assetType,
@@ -441,16 +674,8 @@ export async function uploadAndTrack(
       encryptorAddress,
       encryptionVersion,
     };
-    const result = await uploadBundle(pool, bundleParams, { apiFactory });
 
-    // `UploadBundleResult` does not carry `ownerAddress` (only ids) — derive
-    // it independently, the SAME derivation `uploadBundle` itself already
-    // performed internally, so the appended entries' `owner` field is correct.
-    const jwk = importKeyfile(params.jwk);
-    const ownerAddress = await addressOf(jwk);
-    const createdAt = now();
-
-    const entries = buildBundleEntries(result, bundleParams, ownerAddress, createdAt);
+    const entries = buildBundleEntries(result, bundleParamsForEntries, ownerAddress, createdAt);
     for (const entry of entries) {
       await store.append(entry);
     }
@@ -474,21 +699,65 @@ export async function uploadAndTrack(
         }
       : params;
 
-  const data = encryptionKey
-    ? await encryptFileForUpload(toBytes(singleParamsBase.data), encryptionKey)
-    : singleParamsBase.data;
+  let result: UploadResult;
 
-  const singleParams: UploadParams = {
-    ...singleParamsBase,
-    data,
-    encrypted,
-    encryptorAddress,
-    encryptionVersion,
-  };
+  if (streaming) {
+    if (!streamingResumeStore) {
+      throw new Error(
+        'uploadAndTrack: streaming is supported but no "streamingResumeStore" was supplied — cannot route this upload through the streaming engines.',
+      );
+    }
+    // Same rule as the bundle branch above: the SAME already-derived
+    // `encryptionKey` is passed straight through to T2's `uploadStreaming`,
+    // which performs its own chunked AES-GCM internally — never an eager
+    // whole-file `encryptFileForUpload` first.
+    const bytes = toBytes(singleParamsBase.data);
+    result = await uploadStreaming(
+      {
+        jwk: singleParamsBase.jwk,
+        readData: async (offset, length) => bytes.subarray(offset, offset + length),
+        totalLength: bytes.byteLength,
+        contentType: singleParamsBase.contentType,
+        maxRewardWinston: singleParamsBase.maxRewardWinston,
+        itemId: singleParamsBase.itemId,
+        appName: singleParamsBase.appName,
+        appMetadata: singleParamsBase.appMetadata,
+        category: singleParamsBase.category,
+        assetType: singleParamsBase.assetType,
+        appId: singleParamsBase.appId,
+        appVersion: singleParamsBase.appVersion,
+        encrypted,
+        encryptorAddress,
+        encryptionVersion,
+        encryptionKey,
+      },
+      {
+        pool,
+        resumeStore: streamingResumeStore,
+        apiFactory: streamingApiFactory,
+        openFile: streamingOpenFile,
+        deleteFile: streamingDeleteFile,
+        onProgress,
+      },
+    );
+  } else {
+    // EXACTLY today's existing in-memory path — unchanged.
+    const data = encryptionKey
+      ? await encryptFileForUpload(toBytes(singleParamsBase.data), encryptionKey)
+      : singleParamsBase.data;
 
-  const result = await uploadData(pool, singleParams, { apiFactory });
+    const singleParams: UploadParams = {
+      ...singleParamsBase,
+      data,
+      encrypted,
+      encryptorAddress,
+      encryptionVersion,
+    };
 
-  const entry = buildSingleEntry(result, singleParams.contentType, now());
+    result = await uploadData(pool, singleParams, { apiFactory });
+  }
+
+  const entry = buildSingleEntry(result, singleParamsBase.contentType, now());
   await store.append(entry);
   if (encryptFor) onAccountUsedForEncryption?.(encryptFor.accountId);
   return result;

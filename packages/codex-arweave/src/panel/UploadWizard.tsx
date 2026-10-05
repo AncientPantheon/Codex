@@ -113,6 +113,18 @@ import { CodexModalShell } from "@ancientpantheon/codex-ouronet/ui";
 
 import { UPLOAD_PERMANENCE_WARNING } from "../library/constants.js";
 import type { UploadEncryptFor } from "../library/flow.js";
+// T3 (`arweave-streaming-ui`): T1's real OPFS-support probe — called ONCE
+// per wizard session (on mount) to decide whether `MAX_TOTAL_SIZE_BYTES`'s
+// block-on-add behavior applies at all. Read-only import (this task never
+// edits that file); a real caller gets the genuine browser probe, tests
+// inject a fake via the new `isStreamingUploadSupported` prop below.
+import { isStreamingUploadSupported as defaultIsStreamingUploadSupported } from "../library/streaming/isStreamingUploadSupported.js";
+// `arweave-upload-dry-run` T3: `DryRunResult` is T2's own plain result
+// shape, reached the SAME way `isStreamingUploadSupported` above already
+// is — a relative path into `library/streaming`, since `DryRunResult` isn't
+// re-exported by this package's own barrel (checked directly: neither
+// `src/panel/index.ts` nor `src/library/index.ts` names it).
+import type { DryRunResult } from "../library/streaming/dryRunUpload.js";
 import type { ArweaveSeedAccountSource } from "./ArweaveSeedsArea.js";
 import {
   CATEGORY_GROUPS,
@@ -132,6 +144,30 @@ import { estimateUploadCostAr, type UploadCostEstimate } from "./estimateUploadC
  *  empty object) for Public. */
 export interface UploadWizardSelection extends UploadCategorySelection {
   encryptFor?: UploadEncryptFor;
+}
+
+/**
+ * T3 (`arweave-streaming-ui`): the optional 4th argument
+ * `uploadAndTrack`/`uploadFilesAndTrack` now accept — additive, not
+ * breaking either prop's existing 3-argument call shape (a caller that
+ * ignores this extra argument behaves exactly as before). A real wiring of
+ * these props is expected to forward both callbacks straight into
+ * `library/flow.ts`'s own `uploadAndTrack` options
+ * (`onProgress`/`onUploadRouteDecided`, same names) — this component itself
+ * never calls `flow.ts` directly, so it cannot enforce that forwarding; it
+ * only supplies the callbacks and renders whatever actually arrives through
+ * them.
+ */
+export interface UploadWizardUploadCallbacks {
+  /** Chunk/byte progress from the streaming engines' own posting loop.
+   *  Never called when the in-memory fallback path runs — that path has no
+   *  chunk concept. */
+  onProgress?: (uploadedChunks: number, totalChunks: number) => void;
+  /** Fired once, synchronously, as soon as the upload's routing decision is
+   *  known — `"streaming"` when the streaming engines are actually running
+   *  this upload, `"fallback"` when the classic in-memory path is. Mirrors
+   *  `library/flow.ts`'s own `UploadAndTrackOptions.onUploadRouteDecided`. */
+  onRouteDecided?: (route: "streaming" | "fallback") => void;
 }
 
 export interface UploadWizardProps {
@@ -162,15 +198,17 @@ export interface UploadWizardProps {
     file: File,
     selection: UploadWizardSelection,
     accountId: string,
+    callbacks?: UploadWizardUploadCallbacks,
   ) => Promise<UploadTrackResult>;
   /** T7 bundle-aware upload-then-append: uploads 2+ files (or a folder), the
    *  SAME category selection applied to every item, as one atomic bundle.
-   *  Same widening (including the mandatory `accountId`) as
-   *  {@link UploadWizardProps.uploadAndTrack}. */
+   *  Same widening (including the mandatory `accountId` AND, T3, the
+   *  optional 4th `callbacks`) as {@link UploadWizardProps.uploadAndTrack}. */
   uploadFilesAndTrack: (
     files: File[],
     selection: UploadWizardSelection,
     accountId: string,
+    callbacks?: UploadWizardUploadCallbacks,
   ) => Promise<UploadBundleTrackResult>;
   /** E3 openUrl: composes a healthy-gateway URL for a data-item id. */
   openUrl: (id: string) => string;
@@ -223,10 +261,69 @@ export interface UploadWizardProps {
    *  upload. OPTIONAL and additive — omitted, Confirm proceeds exactly as
    *  before (every pre-this-task test). */
   onAccountUsedForEncryption?: (accountId: string) => void;
+  /**
+   * T3 (`arweave-streaming-ui`): injectable OPFS-support probe, mirroring
+   * T1's own `isStreamingUploadSupported`. Called ONCE per wizard session
+   * (on mount, cached in state — never re-probed per file/folder add) to
+   * decide whether `MAX_TOTAL_SIZE_BYTES`'s block-on-add behavior applies
+   * at all: `true` removes the cap entirely for this session; `false` (or
+   * still-pending, before the probe resolves) keeps it enforced. OPTIONAL —
+   * defaults to the real `isStreamingUploadSupported`; tests inject a fake
+   * so the decision never touches a real OPFS API.
+   */
+  isStreamingUploadSupported?: () => Promise<boolean>;
+  /**
+   * `arweave-upload-dry-run` T3: runs a REAL, local, zero-network rehearsal
+   * of this exact selection through the real streaming-upload engines —
+   * "Test this upload (free — runs locally, nothing is sent to Arweave)".
+   * Mirrors {@link UploadWizardProps.uploadAndTrack}/
+   * {@link UploadWizardProps.uploadFilesAndTrack}'s own `(files, selection,
+   * accountId)` call shape exactly (so the real wiring reuses the SAME
+   * JWK/`encryptFor` resolution those two already do), but takes EVERY
+   * selected file directly — this component never decides single-vs-bundle
+   * for a dry run; that routing is the real `runUploadDryRun` engine's own
+   * job. OPTIONAL and purely additive: omitted, the "Test this upload"
+   * button does not render at all (never a disabled dead button) — every
+   * pre-this-task test, and every host that hasn't wired a dry-run runner
+   * yet, behaves exactly as before. This prop, and the panel it renders
+   * into, NEVER touch `phase`/`uploadProgress`/`uploadRoute` — the real
+   * upload's own state machine is completely untouched by a dry run, so a
+   * dry-run result can never be mistaken for a real completed upload.
+   */
+  runDryRunUpload?: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+  ) => Promise<DryRunResult>;
 }
 
 type UploadMode = "" | "public" | "encrypted";
 type UploadPhase = "idle" | "uploading" | "done" | "error";
+/**
+ * T3 (`arweave-streaming-ui`): the `"uploading"` phase's own progress state
+ * — mirrors `CostState`'s discriminated-union shape (this file's own
+ * established convention for other async state) rather than a new shape
+ * convention. `"active"`'s `stage` is a best-effort label, not a fully
+ * independently-signalled pipeline stage: `onProgress` (the only progress
+ * hook `library/flow.ts`/the streaming engines currently expose — see this
+ * task's own build report) only ever reports chunk/byte POSTING progress,
+ * with no separate hook for "assembling"/"computing-root"/"resuming" at
+ * all. This state therefore starts at `"assembling"` the instant the upload
+ * begins (the honest "something is happening, no chunk numbers yet"
+ * label) and flips to `"posting"` the FIRST time `onProgress` actually
+ * fires — it never claims to distinguish "computing-root" or "resuming"
+ * from "assembling", since nothing currently signals either one
+ * separately.
+ */
+type UploadProgressState =
+  | { status: "idle" }
+  | {
+      status: "active";
+      stage: "assembling" | "computing-root" | "posting" | "resuming";
+      uploadedChunks?: number;
+      totalChunks?: number;
+    }
+  | { status: "done" };
 type CostState =
   | { status: "idle" }
   | { status: "loading" }
@@ -236,6 +333,23 @@ type CostState =
  *  `ArweaveAccountsArea.tsx`'s own `BalanceState` shape so both surfaces
  *  read the same way. */
 type AccountBalanceState = { status: "loading" } | { status: "ready"; balance: bigint } | { status: "error" };
+
+/**
+ * `arweave-upload-dry-run` T3: the "Test this upload" button's OWN state —
+ * entirely separate from {@link UploadPhase}/{@link UploadProgressState}/
+ * the real `uploadRoute` state, by construction (a dry run must never be
+ * confused with, or interfere with, a real upload's own state machine).
+ * `"error"` covers the injected `runDryRunUpload` call itself REJECTING
+ * (e.g. "no Arweave key found for the selected address") — distinct from a
+ * resolved {@link DryRunResult} whose own `success` is `false` (a genuine,
+ * informative dry-run FAILURE, rendered in the SAME `"done"` panel as a
+ * pass, never this `"error"` state).
+ */
+type DryRunState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "done"; result: DryRunResult }
+  | { status: "error"; message: string };
 
 const STEP_LABELS = ["Account", "Category & Mode", "Files", "Review & Cost"] as const;
 const LAST_STEP = STEP_LABELS.length - 1;
@@ -389,34 +503,80 @@ const CATEGORY_RECOMMENDED_MODE: Partial<Record<UploadCategory, UploadMode>> = {
  *  carry no cap (design.md addendum point 4). */
 const MAX_INDIVIDUAL_FILES = 10;
 
-/** A TEMPORARY total-upload-size cap — 1 GiB, the binary gibibyte value
- *  (1,073,741,824 bytes), not a decimal-GB approximation. The current
- *  bundle-assembly architecture holds roughly 2x the total upload size in
- *  browser memory (every file read fully into memory concurrently, then
- *  concatenated into a second buffer), so an uncapped multi-gigabyte
- *  selection can crash the tab mid-upload. A future streaming rewrite
- *  removes this cap entirely — until then it is enforced here, mirroring
- *  `MAX_INDIVIDUAL_FILES`'s own block-on-add pattern exactly: adding a
- *  file/folder that would push the RUNNING TOTAL over this cap is blocked
- *  outright (never partially added, and the cap applies to the total across
- *  every file/folder already selected plus the new one, not just the new
- *  one on its own), with a clear inline message reusing the SAME
- *  `fileCapMessage` state/UI the 10-file cap already uses. The boundary is
- *  INCLUSIVE — a running total of EXACTLY `MAX_TOTAL_SIZE_BYTES` is allowed;
- *  only a total that EXCEEDS it blocks. */
-const MAX_TOTAL_SIZE_BYTES = 1_073_741_824;
+/**
+ * T3 (`arweave-streaming-ui`): a total-upload-size cap for the IN-MEMORY
+ * FALLBACK PATH ONLY — 2 GiB, the binary gibibyte value (2,147,483,648
+ * bytes), not a decimal-GB approximation. Applies ONLY when this browser
+ * context's OPFS support probe (`isStreamingUploadSupported`) has resolved
+ * `false` (or hasn't resolved yet) — once it resolves `true`, this cap is
+ * removed entirely for the session (see `onAddFile`/`onAddFolder` below);
+ * the streaming engines read/write/post in bounded windows regardless of
+ * total size, so there is no architectural ceiling left to enforce there.
+ *
+ * THE NUMBER, justified fresh (not kept at the old 1 GiB "because it was
+ * already there"): the fallback path's own bundle-assembly architecture
+ * still holds roughly 2x the total upload size in browser memory (every
+ * file read fully into memory concurrently, then concatenated into a
+ * second buffer — unchanged for this path, see `library/flow.ts`'s fallback
+ * branch). Modern desktop browser tabs (Chrome/Firefox/Edge on a 64-bit OS)
+ * commonly tolerate single-tab memory budgets in the 4+ GiB range before a
+ * renderer is OOM-killed; a 2 GiB selection therefore peaks at roughly 4
+ * GiB resident, sitting at the edge of that commonly-cited safe budget —
+ * double the old 1 GiB cap's own (roughly 2 GiB peak) headroom, a
+ * deliberate, justified loosening for an increasingly MINORITY population
+ * (browsers without OPFS) rather than an arbitrary bump. Low-memory/mobile
+ * contexts remain more exposed at this new ceiling than the old one, which
+ * is the explicit tradeoff this task's report calls out — ground truth,
+ * not an unexamined choice.
+ */
+const MAX_TOTAL_SIZE_BYTES = 2_147_483_648;
 
-/** The Files step's block-on-add message for the `MAX_TOTAL_SIZE_BYTES` cap
- *  — same plain, factual tone as `MAX_INDIVIDUAL_FILES`'s own inline
- *  message: names the actual total this add would have produced, states the
- *  limit explicitly, and is explicit that the cap is a TEMPORARY
- *  architecture limitation (not a permanent product decision), so it never
- *  reads as an alarming or permanent restriction. */
+/**
+ * T4 (`arweave-streaming-ui`): the real, user-facing documentation page this
+ * task creates (see that task's own build report for the exact file). No
+ * existing in-app docs route/modal/markdown-viewer precedent exists anywhere
+ * reachable from this component's real host (`apps/codex-playground` —
+ * grepped for any router, markdown renderer, or docs-serving convention;
+ * none found beyond the app's own `public/` static-asset folder, already
+ * used for images). A plain static `.md` file under that SAME `public/`
+ * folder, opened in a new tab, is therefore the smallest addition that
+ * follows an existing precedent rather than inventing new app
+ * infrastructure (a dedicated route/modal/markdown-renderer dependency).
+ * Root-relative so it resolves correctly regardless of which step/modal this
+ * link is clicked from.
+ */
+const STREAMING_DOCS_URL = "/docs/arweave-upload-streaming.md";
+
+/**
+ * T4 (`arweave-streaming-ui`): the Files step's persistent, plain-language
+ * disclaimer about HOW large uploads actually work — added once streaming
+ * (T1-T3) made that worth explaining at all; never a dismissible toast (a
+ * static part of the step's own tree, same as `MAX_TOTAL_SIZE_BYTES`'s own
+ * cap message below), and never using the internal "OPFS" name — "your
+ * browser's private, on-device storage" is the plain-language equivalent the
+ * design doc calls for. States the REAL 2 GiB fallback number honestly
+ * rather than hiding it, and links to {@link STREAMING_DOCS_URL} for the
+ * full explanation.
+ */
+const STREAMING_DISCLAIMER_TEXT =
+  "Large uploads now stream directly from your device instead of being fully loaded into memory first. " +
+  "This uses your browser's private, on-device storage. If your browser doesn't support that private storage, " +
+  "uploads here are capped at 2 GiB instead, so this app can still hold everything safely in memory.";
+
+/** The Files step's block-on-add message for the `MAX_TOTAL_SIZE_BYTES`
+ *  fallback cap — same plain, factual tone as `MAX_INDIVIDUAL_FILES`'s own
+ *  inline message: names the actual total this add would have produced,
+ *  states the limit explicitly, and is explicit that this is a
+ *  BROWSER-SUPPORT limitation (this browser lacks the private, on-device
+ *  storage large uploads stream through), not an arbitrary or permanent
+ *  product choice — a browser WITH that support removes this cap entirely
+ *  (see `onAddFile`/`onAddFolder` below), which this message says plainly. */
 function totalSizeCapMessage(prospectiveTotalBytes: number): string {
   return (
-    `Total selected size would be ${prospectiveTotalBytes} bytes — uploads are currently capped at 1 GiB ` +
-    `(${MAX_TOTAL_SIZE_BYTES} bytes) while a larger-upload architecture is being built. This is a temporary ` +
-    "limit, not a permanent one — remove a file, or split this into smaller batches, for now."
+    `Total selected size would be ${prospectiveTotalBytes} bytes — this browser doesn't support the private, ` +
+    `on-device storage large uploads stream through, so uploads here are capped at 2 GiB ` +
+    `(${MAX_TOTAL_SIZE_BYTES} bytes) to stay within this browser's memory limits. This is a browser-support ` +
+    "limitation, not a permanent product choice — a browser with that support removes this cap entirely."
   );
 }
 
@@ -612,6 +772,42 @@ function formatSignedAr(winston: bigint): string {
   return winston < 0n ? `-${winstonToAr(-winston)}` : winstonToAr(winston);
 }
 
+/** T3: plain-language label for an active {@link UploadProgressState}'s
+ *  `stage` — see that type's own doc comment for exactly which stages are
+ *  genuinely distinguishable today vs. which share the `"assembling"`
+ *  default label. */
+function progressStageLabel(
+  stage: "assembling" | "computing-root" | "posting" | "resuming",
+): string {
+  switch (stage) {
+    case "assembling":
+      return "Preparing your files…";
+    case "computing-root":
+      return "Verifying file integrity…";
+    case "posting":
+      return "Uploading to Arweave…";
+    case "resuming":
+      return "Resuming an interrupted upload…";
+  }
+}
+
+/** `arweave-upload-dry-run` T3: plain-language "Yes"/"No"/"N/A" for a
+ *  {@link DryRunResult} boolean-or-"not-applicable" field. */
+function yesNoNa(value: boolean | "not-applicable"): string {
+  if (value === "not-applicable") return "N/A (unencrypted)";
+  return value ? "Yes" : "No";
+}
+
+/** T3: the Confirm step's persistent routing-signal copy — DIFFERENT,
+ *  distinguishable wording per route so a test (or a curious user) can tell
+ *  which engine actually ran this upload, never the exact same string for
+ *  both. */
+function uploadRouteLabel(route: "streaming" | "fallback"): string {
+  return route === "streaming"
+    ? "Uploading via the streaming engine (no size limit)."
+    : "Uploading via the standard engine (this browser's size-limited fallback).";
+}
+
 export function UploadWizard(props: UploadWizardProps): React.ReactElement {
   const {
     accounts,
@@ -626,6 +822,8 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     getBalance,
     ensureCodexUnlocked,
     onAccountUsedForEncryption,
+    isStreamingUploadSupported = defaultIsStreamingUploadSupported,
+    runDryRunUpload,
   } = props;
 
   const [step, setStep] = useState(0);
@@ -647,6 +845,34 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [costState, setCostState] = useState<CostState>({ status: "idle" });
   const [balances, setBalances] = useState<Record<string, AccountBalanceState>>({});
+  // T3 (`arweave-streaming-ui`): the progress state fed by `onProgress`
+  // (see `UploadProgressState`'s own doc comment) and the routing signal
+  // fed by `onRouteDecided` — both threaded through `onConfirmUpload`'s own
+  // call into `uploadAndTrack`/`uploadFilesAndTrack` below.
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState>({ status: "idle" });
+  const [uploadRoute, setUploadRoute] = useState<"streaming" | "fallback" | null>(null);
+  // T3: `null` (not yet known) until the ONE per-session probe below
+  // resolves — treated as "not supported" by the cap checks (never
+  // optimistically unblocked before the real answer is in).
+  const [streamingSupported, setStreamingSupported] = useState<boolean | null>(null);
+  // `arweave-upload-dry-run` T3: the "Test this upload" button's own,
+  // entirely separate state — see `DryRunState`'s own doc comment for why
+  // this never touches `phase`/`uploadProgress`/`uploadRoute`.
+  const [dryRunState, setDryRunState] = useState<DryRunState>({ status: "idle" });
+
+  // T3: probes OPFS support exactly ONCE per wizard session, on mount —
+  // never re-probed per file/folder add (`onAddFile`/`onAddFolder` below
+  // only ever READ this cached `streamingSupported` state).
+  useEffect(() => {
+    let cancelled = false;
+    isStreamingUploadSupported().then((supported) => {
+      if (!cancelled) setStreamingSupported(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -829,8 +1055,13 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
       );
       return;
     }
+    // T3 (`arweave-streaming-ui`): the fallback size cap applies ONLY while
+    // this session's OPFS-support probe has NOT resolved `true` — once it
+    // has, the streaming engines have no such ceiling, so the cap is
+    // skipped entirely (never re-probed here; `streamingSupported` is read
+    // from the ONE per-session state above).
     const prospectiveTotal = totalByteSize + picked.size;
-    if (prospectiveTotal > MAX_TOTAL_SIZE_BYTES) {
+    if (streamingSupported !== true && prospectiveTotal > MAX_TOTAL_SIZE_BYTES) {
       setFileCapMessage(totalSizeCapMessage(prospectiveTotal));
       return;
     }
@@ -843,13 +1074,14 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     const picked = Array.from(ev.target.files ?? []);
     ev.target.value = ""; // allow re-picking the same folder later
     if (picked.length === 0) return;
-    // The 1 GiB total-size cap applies to the whole folder pick at once —
-    // never a partial add (see MAX_TOTAL_SIZE_BYTES above): if the folder's
-    // OWN combined size, added to what's already selected, would exceed the
-    // cap, the entire pick is blocked outright.
+    // The 2 GiB fallback total-size cap applies to the whole folder pick at
+    // once — never a partial add (see MAX_TOTAL_SIZE_BYTES above): if the
+    // folder's OWN combined size, added to what's already selected, would
+    // exceed the cap, the entire pick is blocked outright. Same streaming-
+    // supported skip as `onAddFile` above.
     const pickedTotal = picked.reduce((sum, f) => sum + f.size, 0);
     const prospectiveTotal = totalByteSize + pickedTotal;
-    if (prospectiveTotal > MAX_TOTAL_SIZE_BYTES) {
+    if (streamingSupported !== true && prospectiveTotal > MAX_TOTAL_SIZE_BYTES) {
       setFileCapMessage(totalSizeCapMessage(prospectiveTotal));
       return;
     }
@@ -931,17 +1163,34 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     }
     setPhase("uploading");
     setErrorMessage(null);
+    // T3 (`arweave-streaming-ui`): "assembling" is the honest starting
+    // label — the real pipeline is underway but no chunk numbers exist yet
+    // (see `UploadProgressState`'s own doc comment for why `"posting"` is
+    // the first stage this component can actually distinguish). The route
+    // signal resets too — a retry after an error must never show a stale
+    // route from a previous attempt.
+    setUploadProgress({ status: "active", stage: "assembling" });
+    setUploadRoute(null);
     try {
       const selection = buildSelection();
+      const callbacks: UploadWizardUploadCallbacks = {
+        onProgress: (uploadedChunks, totalChunks) => {
+          setUploadProgress({ status: "active", stage: "posting", uploadedChunks, totalChunks });
+        },
+        onRouteDecided: (route) => {
+          setUploadRoute(route);
+        },
+      };
       // Owner-reported Bug 1: thread the Account step's OWN chosen id
       // through verbatim — this is what makes the real signing/paying key
       // actually track the wizard's selection instead of whatever identity
       // the host's deps were constructed with.
       const res = isBundle
-        ? await uploadFilesAndTrack(files, selection, accountId)
-        : await uploadAndTrack(files[0], selection, accountId);
+        ? await uploadFilesAndTrack(files, selection, accountId, callbacks)
+        : await uploadAndTrack(files[0], selection, accountId, callbacks);
       setResult(res);
       setPhase("done");
+      setUploadProgress({ status: "done" });
       // `arweave-non-removable-account` T4: the ONE place this component
       // fires the non-removable-account trigger — only once the upload has
       // actually resolved successfully, and only for an Encrypted upload
@@ -954,12 +1203,41 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Upload failed.");
       setPhase("error");
+      setUploadProgress({ status: "idle" });
+    }
+  }
+
+  /**
+   * `arweave-upload-dry-run` T3: the "Test this upload" button's handler —
+   * entirely separate from {@link onConfirmUpload}. Deliberately never
+   * reads or writes `phase`/`uploadProgress`/`uploadRoute`/`result`/
+   * `errorMessage` — a dry run, success OR failure, cannot affect the real
+   * upload's own state in any way. `runDryRunUpload` itself (per T2's own
+   * contract) never rejects in normal operation, but a rejection is still
+   * handled explicitly (e.g. the adapter's own `decryptArweaveKey`/
+   * `findEntryForAddress` can throw before the engine ever runs) and
+   * rendered as a DIFFERENT, dry-run-scoped error state — never silently
+   * swallowed, and never the real upload's own `"error"` view.
+   */
+  async function onRunDryRun(): Promise<void> {
+    if (!runDryRunUpload || dryRunState.status === "running" || files.length === 0 || !categoryChosen) return;
+    setDryRunState({ status: "running" });
+    try {
+      const result = await runDryRunUpload(files, buildSelection(), accountId);
+      setDryRunState({ status: "done", result });
+    } catch (err) {
+      setDryRunState({
+        status: "error",
+        message: err instanceof Error ? err.message : "The dry run failed unexpectedly.",
+      });
     }
   }
 
   function onRetry(): void {
     setPhase("idle");
     setErrorMessage(null);
+    setUploadProgress({ status: "idle" });
+    setUploadRoute(null);
   }
 
   function goNext(): void {
@@ -1219,6 +1497,36 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     body = (
       <div data-testid="upload-wizard-step-files">
         <p>Add the file(s) or folder(s) to upload.</p>
+        {/* T4 (`arweave-streaming-ui`): persistent, plain-language disclaimer
+            — see `STREAMING_DISCLAIMER_TEXT`'s own doc comment. Static, not
+            dismissible: stays visible for the whole Files step regardless of
+            how many files/folders are added or removed. */}
+        <div
+          data-testid="upload-wizard-streaming-disclaimer"
+          style={{
+            margin: "10px 0 16px",
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "1px solid #262626",
+            backgroundColor: "#111",
+            fontSize: 12,
+            color: "#aaa",
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            {STREAMING_DISCLAIMER_TEXT}{" "}
+            <a
+              href={STREAMING_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="upload-wizard-streaming-docs-link"
+              style={{ color: ACCENT }}
+            >
+              Learn more about how uploads work
+            </a>
+            .
+          </p>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             type="button"
@@ -1375,17 +1683,161 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
           </p>
         </div>
 
-        <button
-          type="button"
-          data-testid="upload-wizard-confirm-upload"
-          disabled={phase === "uploading" || files.length === 0 || !categoryChosen || insufficientBalance}
-          onClick={() => {
-            void onConfirmUpload();
-          }}
-          style={primaryButtonStyle(phase === "uploading" || files.length === 0 || !categoryChosen || insufficientBalance)}
-        >
-          {phase === "uploading" ? "Uploading…" : "Confirm & Upload"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            data-testid="upload-wizard-confirm-upload"
+            disabled={phase === "uploading" || files.length === 0 || !categoryChosen || insufficientBalance}
+            onClick={() => {
+              void onConfirmUpload();
+            }}
+            style={primaryButtonStyle(phase === "uploading" || files.length === 0 || !categoryChosen || insufficientBalance)}
+          >
+            {phase === "uploading" ? "Uploading…" : "Confirm & Upload"}
+          </button>
+          {/* `arweave-upload-dry-run` T3: absent entirely (never a disabled
+              dead button) when the host hasn't wired `runDryRunUpload` — see
+              that prop's own doc comment. Gated on the SAME "is there
+              anything to test" conditions as Confirm, plus its own
+              `dryRunState.status === "running"` (never a second concurrent
+              dry run), but NEVER on `phase`/`insufficientBalance` — a dry
+              run costs no AR, so an insufficient-balance account can still
+              test the upload itself. */}
+          {runDryRunUpload ? (
+            <button
+              type="button"
+              data-testid="upload-wizard-dry-run-button"
+              disabled={dryRunState.status === "running" || files.length === 0 || !categoryChosen}
+              onClick={() => {
+                void onRunDryRun();
+              }}
+              style={secondaryButtonStyle(dryRunState.status === "running" || files.length === 0 || !categoryChosen)}
+            >
+              {dryRunState.status === "running"
+                ? "Testing…"
+                : "Test this upload (free — runs locally, nothing is sent to Arweave)"}
+            </button>
+          ) : null}
+        </div>
+        {/* `arweave-upload-dry-run` T3 (design.md acceptance criterion:
+            "reachable from the dry-run button's immediate vicinity") — the
+            SAME documentation page T4 (`arweave-streaming-ui`) links from
+            the Files step, whose own "self-test section" this task fills
+            in; linked again here, right under the button itself, rather
+            than only from a different step. */}
+        {runDryRunUpload ? (
+          <p style={{ margin: "6px 0 0", fontSize: 11, color: "#888" }}>
+            <a
+              href={STREAMING_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="upload-wizard-dry-run-docs-link"
+              style={{ color: ACCENT }}
+            >
+              What does testing an upload actually check?
+            </a>
+          </p>
+        ) : null}
+
+        {/* `arweave-upload-dry-run` T3: a DEDICATED, clearly-separate panel —
+            distinct `data-testid`s from every real-upload element
+            (`upload-wizard-progress`/`upload-wizard-result`/
+            `upload-wizard-bundle-result`/`upload-wizard-upload-route`/
+            `upload-wizard-error`), and never conditioned on `phase` at all
+            (it renders here, inside the Review step's own body, which stays
+            mounted for the whole duration of a dry run since `phase` never
+            changes because of one). */}
+        {dryRunState.status === "running" ? (
+          <div
+            data-testid="upload-wizard-dry-run-running"
+            role="status"
+            style={{
+              marginTop: 16,
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid #262626",
+              backgroundColor: "#111",
+              fontSize: 12,
+              color: "#aaa",
+            }}
+          >
+            Running a local, zero-network rehearsal of this upload…
+          </div>
+        ) : null}
+        {dryRunState.status === "error" ? (
+          <div
+            data-testid="upload-wizard-dry-run-error"
+            role="alert"
+            style={{
+              marginTop: 16,
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid #7f1d1d",
+              backgroundColor: "#1a0a0a",
+              fontSize: 12,
+              color: "#f87171",
+            }}
+          >
+            {dryRunState.message}
+          </div>
+        ) : null}
+        {dryRunState.status === "done" ? (
+          <div
+            data-testid="upload-wizard-dry-run-result"
+            style={{
+              marginTop: 16,
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: `1px solid ${dryRunState.result.success ? ACCENT : "#7f1d1d"}`,
+              backgroundColor: dryRunState.result.success ? `${ACCENT}1a` : "#1a0a0a",
+              fontSize: 12,
+              color: "#d2d3d4",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <p
+              data-testid="upload-wizard-dry-run-success"
+              style={{ margin: 0, fontWeight: 700, color: dryRunState.result.success ? ACCENT : "#f87171" }}
+            >
+              {dryRunState.result.success ? "PASS — this upload should go through cleanly." : "FAIL — do not proceed with the real upload yet."}
+            </p>
+            <p data-testid="upload-wizard-dry-run-files-tested" style={{ margin: 0 }}>
+              Files tested: {dryRunState.result.filesTested}
+            </p>
+            <p data-testid="upload-wizard-dry-run-total-bytes" style={{ margin: 0 }}>
+              Total size tested: {dryRunState.result.totalBytes} bytes
+            </p>
+            <p data-testid="upload-wizard-dry-run-chunks-posted" style={{ margin: 0 }}>
+              Chunks posted (locally): {dryRunState.result.chunksPosted}
+            </p>
+            <p data-testid="upload-wizard-dry-run-resume-tested" style={{ margin: 0 }}>
+              Interrupt-and-resume tested: {dryRunState.result.resumeTested ? "Yes" : "No"}
+            </p>
+            <p data-testid="upload-wizard-dry-run-proofs-valid" style={{ margin: 0 }}>
+              File-integrity proofs valid: {dryRunState.result.proofsValid ? "Yes" : "No"}
+            </p>
+            <p data-testid="upload-wizard-dry-run-decrypt-round-trip" style={{ margin: 0 }}>
+              Decrypt round-trip OK: {yesNoNa(dryRunState.result.decryptRoundTripOk)}
+            </p>
+            <p data-testid="upload-wizard-dry-run-streaming-supported" style={{ margin: 0 }}>
+              Streaming engine available right now: {dryRunState.result.streamingSupported ? "Yes" : "No"}
+            </p>
+            <p data-testid="upload-wizard-dry-run-elapsed-ms" style={{ margin: 0 }}>
+              Took {dryRunState.result.elapsedMs} ms
+            </p>
+            {dryRunState.result.errors.length > 0 ? (
+              <div data-testid="upload-wizard-dry-run-errors" style={{ marginTop: 4, color: "#f87171" }}>
+                {dryRunState.result.errors.map((message, i) => (
+                  <p key={i} style={{ margin: 0 }}>
+                    {message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1400,6 +1852,15 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
       dialogTestId="upload-wizard-modal"
       closeTestId="upload-wizard-close"
     >
+      {/* T3 (`arweave-streaming-ui`): the routing SIGNAL — once known for
+          this upload attempt, stays visible through "uploading" AND the
+          resulting "done"/"error" view (reset only by a fresh Confirm or a
+          Retry), never tied to the "uploading"-only progress block below. */}
+      {uploadRoute ? (
+        <p data-testid="upload-wizard-upload-route" style={{ fontSize: 12, color: "#888", marginTop: 0 }}>
+          {uploadRouteLabel(uploadRoute)}
+        </p>
+      ) : null}
       {phase === "done" && result ? (
         isBundleResult(result) ? (
           <div data-testid="upload-wizard-bundle-result">
@@ -1444,6 +1905,39 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
       ) : (
         <>
           {body}
+          {phase === "uploading" ? (
+            // T3 (`arweave-streaming-ui`): a PERSISTENT element for the
+            // whole duration of the in-flight upload — a static part of the
+            // tree, not a toast/snackbar a stray click could dismiss and
+            // lose track of.
+            <div
+              data-testid="upload-wizard-progress"
+              role="status"
+              style={{
+                marginTop: 16,
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: `1px solid ${ACCENT}`,
+                backgroundColor: `${ACCENT}1a`,
+                fontSize: 12,
+                color: "#d2d3d4",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+              }}
+            >
+              <p data-testid="upload-wizard-progress-stage" style={{ margin: 0 }}>
+                {uploadProgress.status === "active" ? progressStageLabel(uploadProgress.stage) : "Uploading…"}
+              </p>
+              {uploadProgress.status === "active" &&
+              uploadProgress.uploadedChunks !== undefined &&
+              uploadProgress.totalChunks !== undefined ? (
+                <p data-testid="upload-wizard-progress-chunks" style={{ margin: 0, color: "#888" }}>
+                  {uploadProgress.uploadedChunks} / {uploadProgress.totalChunks} chunks
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
             <button
               type="button"

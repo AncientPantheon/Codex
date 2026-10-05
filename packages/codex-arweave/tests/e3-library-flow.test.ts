@@ -40,6 +40,13 @@
  * `tests/upload.test.ts`/`tests/upload-bundle.test.ts` fake pattern.
  */
 
+// T3 (`arweave-streaming-ui`) streaming-routing tests below drive a REAL
+// `StreamingPostResumeStore` — same `fake-indexeddb/auto` side-effect import
+// `streaming-upload-bundle.test.ts` already establishes for the SAME reason
+// (this file's `// @vitest-environment node` pragma means there is no real
+// browser `indexedDB` otherwise).
+import "fake-indexeddb/auto";
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CryptoSeam } from "@ancientpantheon/codex-core";
 
@@ -50,6 +57,9 @@ import {
   type UploadGatewayApi,
   type UploadGatewayApiFactory,
   type ChunkedUploader,
+  type StreamingUploadGatewayApi,
+  type StreamingUploadGatewayApiFactory,
+  type StreamingChunkPostBody,
 } from "@ancientpantheon/arweave-core";
 // Namespace import so `vi.spyOn(arweaveCore, "getTransactionStatus")` in the
 // test intercepts THIS call site: a destructured local binding would capture
@@ -80,6 +90,13 @@ import { decryptWithAccountKey } from "../src/crypto/accountKeyCipher.js";
 // intercepts `flow.ts`'s OWN call site (it imports this module the SAME way,
 // for the SAME reason — see that file's module doc).
 import * as fileEncryption from "../src/crypto/fileEncryption.js";
+import { decryptStream } from "../src/crypto/streamingFileEncryption.js";
+// T3 streaming-routing fakes — the SAME OPFS-assembly-file fake and REAL
+// resume store `streaming-upload-bundle.test.ts` (T2) already established;
+// reused here verbatim, never reinvented.
+import { FakeBundleAssemblyFile } from "../src/library/streaming/fakeBundleAssemblyFile.js";
+import { StreamingPostResumeStore } from "../src/library/streaming/streamingPostResumeStore.js";
+import type { IdbFactoryLike } from "../src/library/types.js";
 
 import {
   throwawayJwk,
@@ -798,7 +815,7 @@ describe("E3 flow — encrypted upload composition (T5, arweave-upload-encryptio
     // export), comparing a found tag's value against it would pass for the
     // WRONG reason (undefined === undefined). Pin against arweave-core's own
     // known current value directly.
-    expect(CODEX_ENCRYPTION_VERSION_CURRENT).toBe("1");
+    expect(CODEX_ENCRYPTION_VERSION_CURRENT).toBe("2");
 
     const { apiFactory, calls } = makeRecordingUploadApi();
 
@@ -817,14 +834,14 @@ describe("E3 flow — encrypted upload composition (T5, arweave-upload-encryptio
     const posted = calls[0];
     const postedTag = posted.tags.find((t) => t.name === "Codex-Encryption-Version");
     expect(postedTag).toBeDefined();
-    expect(postedTag?.value).toBe("1");
+    expect(postedTag?.value).toBe(CODEX_ENCRYPTION_VERSION_CURRENT);
 
     // The locally-appended entry ALSO carries the tag (before any rebuild) —
     // same discipline as Codex-Encryptor above.
     const list = await store.list(OWNER);
     const localTag = list[0].tags.find((t) => t.name === "Codex-Encryption-Version");
     expect(localTag).toBeDefined();
-    expect(localTag?.value).toBe("1");
+    expect(localTag?.value).toBe(CODEX_ENCRYPTION_VERSION_CURRENT);
   });
 
   it("round-trip: the posted bytes (IV-prepended, base64-then-encrypted) decrypt back to the EXACT original plaintext via the same byte layout LibraryArea's decrypt-on-download strips off", async () => {
@@ -920,7 +937,11 @@ describe("E3 flow — encrypted upload composition (T5, arweave-upload-encryptio
     const manifestEntries = list.filter((e) => e.manifest?.isManifest);
     expect(fileEntries).toHaveLength(2);
     expect(
-      fileEntries.every((e) => e.tags.find((t) => t.name === "Codex-Encryption-Version")?.value === "1"),
+      fileEntries.every(
+        (e) =>
+          e.tags.find((t) => t.name === "Codex-Encryption-Version")?.value ===
+          CODEX_ENCRYPTION_VERSION_CURRENT,
+      ),
     ).toBe(true);
     expect(manifestEntries).toHaveLength(1);
     expect(manifestEntries[0].tags.find((t) => t.name === "Codex-Encryption-Version")).toBeUndefined();
@@ -1026,6 +1047,280 @@ describe("E3 flow — encrypted upload composition (T5, arweave-upload-encryptio
 
     expect(calls).toHaveLength(0);
     expect(await store.list(OWNER)).toHaveLength(0);
+  });
+});
+
+/**
+ * T3 (`arweave-streaming-ui`) — the routing branch `uploadAndTrack` gains:
+ * `isStreamingSupported()` is called ONCE per upload action; `true` routes
+ * through T2's `uploadBundleStreaming`/`uploadStreaming` instead of the
+ * classic in-memory `uploadBundle`/`uploadData`; `false` falls through to
+ * EXACTLY the pre-T3 in-memory path, unchanged. `onUploadRouteDecided` is
+ * the UI-facing routing SIGNAL (fired once, synchronously, right after the
+ * decision is made); `onProgress` forwards to the streaming engine's own
+ * chunk-posting progress, never called on the fallback path.
+ */
+describe("E3 flow — streaming routing (T3, arweave-streaming-ui)", () => {
+  let store: MemoryLibraryStore;
+  beforeEach(() => {
+    store = new MemoryLibraryStore();
+  });
+
+  /** A fresh, isolated `StreamingPostResumeStore` — mirrors
+   *  `streaming-upload-bundle.test.ts`'s own `freshResumeStore()` so no two
+   *  tests ever share state. */
+  function freshResumeStore(): Promise<StreamingPostResumeStore> {
+    return StreamingPostResumeStore.open({
+      indexedDB: globalThis.indexedDB as unknown as IdbFactoryLike,
+      databaseName: `codex-flow-streaming-${Math.random().toString(36).slice(2)}`,
+    });
+  }
+
+  /** A fake `StreamingUploadGatewayApiFactory` that captures every posted
+   *  chunk, in order — mirrors `streaming-upload-bundle.test.ts`'s own
+   *  `makeStreamingApiFactory`. */
+  function makeStreamingApiFactory(): {
+    apiFactory: StreamingUploadGatewayApiFactory;
+    postedChunks: StreamingChunkPostBody[];
+  } {
+    const postedChunks: StreamingChunkPostBody[] = [];
+    const apiFactory: StreamingUploadGatewayApiFactory = (): StreamingUploadGatewayApi => ({
+      async getAnchor() {
+        return "abcdEFGHijkLMNopQRSTuvWXyz0123456789_-ABCDEF".slice(0, 43);
+      },
+      async getPrice() {
+        return "1000000000";
+      },
+      async postTransaction() {
+        // Not inspected by this describe block's own assertions.
+      },
+      async postChunk(body) {
+        postedChunks.push(body);
+      },
+    });
+    return { apiFactory, postedChunks };
+  }
+
+  /** Base64url-decodes `value` — the EXACT inverse of
+   *  `buildStreamingChunkBody.ts`'s own local `base64url` encode, mirroring
+   *  `streaming-upload-bundle.test.ts`'s own identically-named helper. */
+  function base64urlDecode(value: string): Uint8Array {
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+    const withPadding = padded + "=".repeat((4 - (padded.length % 4)) % 4);
+    return new Uint8Array(Buffer.from(withPadding, "base64"));
+  }
+
+  function concatBytes(chunks: Uint8Array[]): Uint8Array {
+    const total = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    const out = new Uint8Array(total);
+    let cursor = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, cursor);
+      cursor += chunk.byteLength;
+    }
+    return out;
+  }
+
+  function makeStreamingFiles(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      path: i === 0 ? `file-${i}.bin` : `sub/file-${i}.bin`,
+      data: new TextEncoder().encode(`streamed file body ${i} — ${"x".repeat(2000)}`),
+      contentType: "application/octet-stream",
+    }));
+  }
+
+  it("routes a 2+ file bundle through uploadBundleStreaming (not uploadBundle) when isStreamingSupported resolves true — posts via the STREAMING api factory, never the fallback one, and appends the SAME N+1-entry shape as the fallback path", async () => {
+    const files = makeStreamingFiles(3);
+    const resumeStore = await freshResumeStore();
+    const { apiFactory: streamingApiFactory, postedChunks } = makeStreamingApiFactory();
+    const { apiFactory: fallbackApiFactory, calls: fallbackCalls } = makeRecordingUploadApi();
+
+    const result = await uploadAndTrack(
+      { jwk: throwawayJwk, files, maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        // Deliberately wired but must NEVER be called — proves the
+        // streaming engine, not the fallback one, actually ran.
+        apiFactory: fallbackApiFactory,
+        isStreamingSupported: async () => true,
+        streamingResumeStore: resumeStore,
+        streamingApiFactory,
+        streamingOpenFile: async () => new FakeBundleAssemblyFile(),
+        streamingDeleteFile: async () => {},
+      },
+    );
+
+    expect("manifestId" in result).toBe(true);
+    expect(postedChunks.length).toBeGreaterThan(0);
+    expect(fallbackCalls).toHaveLength(0);
+
+    const list = await store.list(OWNER);
+    expect(list).toHaveLength(4); // 3 files + 1 manifest — same shape as the fallback path
+    const uploadIds = new Set(list.map((e) => e.uploadId));
+    expect(uploadIds.size).toBe(1);
+  });
+
+  it("routes the SAME input through the EXACT in-memory fallback (uploadBundle) when isStreamingSupported resolves false — unchanged pre-T3 behavior", async () => {
+    const files = makeStreamingFiles(3);
+    const { apiFactory: fallbackApiFactory, calls } = makeRecordingUploadApi();
+
+    const result = await uploadAndTrack(
+      { jwk: throwawayJwk, files, maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        apiFactory: fallbackApiFactory,
+        isStreamingSupported: async () => false,
+      },
+    );
+
+    expect("manifestId" in result).toBe(true);
+    expect(calls).toHaveLength(1); // the classic single-transaction in-memory bundle post
+    expect(await store.list(OWNER)).toHaveLength(4);
+  });
+
+  it("fires onUploadRouteDecided with the correct route exactly once, for both the streaming and fallback cases", async () => {
+    const resumeStore = await freshResumeStore();
+    const { apiFactory: streamingApiFactory } = makeStreamingApiFactory();
+    const { apiFactory: fallbackApiFactory } = makeRecordingUploadApi();
+
+    const onRouteStreaming = vi.fn();
+    await uploadAndTrack(
+      { jwk: throwawayJwk, files: makeStreamingFiles(2), maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        apiFactory: fallbackApiFactory,
+        isStreamingSupported: async () => true,
+        streamingResumeStore: resumeStore,
+        streamingApiFactory,
+        streamingOpenFile: async () => new FakeBundleAssemblyFile(),
+        streamingDeleteFile: async () => {},
+        onUploadRouteDecided: onRouteStreaming,
+      },
+    );
+    expect(onRouteStreaming).toHaveBeenCalledTimes(1);
+    expect(onRouteStreaming).toHaveBeenCalledWith("streaming");
+
+    const onRouteFallback = vi.fn();
+    await uploadAndTrack(
+      { jwk: throwawayJwk, files: makeStreamingFiles(2), maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        apiFactory: fallbackApiFactory,
+        isStreamingSupported: async () => false,
+        onUploadRouteDecided: onRouteFallback,
+      },
+    );
+    expect(onRouteFallback).toHaveBeenCalledTimes(1);
+    expect(onRouteFallback).toHaveBeenCalledWith("fallback");
+  });
+
+  it("forwards onProgress through to the streaming engine's real chunk-posting loop — never called on the fallback path", async () => {
+    const resumeStore = await freshResumeStore();
+    const { apiFactory: streamingApiFactory } = makeStreamingApiFactory();
+    const onProgress = vi.fn();
+
+    await uploadAndTrack(
+      { jwk: throwawayJwk, files: makeStreamingFiles(3), maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        isStreamingSupported: async () => true,
+        streamingResumeStore: resumeStore,
+        streamingApiFactory,
+        streamingOpenFile: async () => new FakeBundleAssemblyFile(),
+        streamingDeleteFile: async () => {},
+        onProgress,
+      },
+    );
+    expect(onProgress).toHaveBeenCalled();
+    const [lastUploaded, lastTotal] = onProgress.mock.calls.at(-1)!;
+    expect(lastUploaded).toBe(lastTotal); // the final call reports full completion
+
+    onProgress.mockClear();
+    const { apiFactory: fallbackApiFactory } = makeRecordingUploadApi();
+    await uploadAndTrack(
+      { jwk: throwawayJwk, files: makeStreamingFiles(3), maxRewardWinston: CAP, category: "general-other" },
+      {
+        store,
+        pool: makeUploadPool(),
+        apiFactory: fallbackApiFactory,
+        isStreamingSupported: async () => false,
+        onProgress,
+      },
+    );
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("streaming supported but no streamingResumeStore supplied throws a specific error BEFORE any upload is attempted — never silently falls back", async () => {
+    const { apiFactory: fallbackApiFactory, calls } = makeRecordingUploadApi();
+
+    await expect(
+      uploadAndTrack(
+        { jwk: throwawayJwk, files: makeStreamingFiles(2), maxRewardWinston: CAP, category: "general-other" },
+        {
+          store,
+          pool: makeUploadPool(),
+          apiFactory: fallbackApiFactory,
+          isStreamingSupported: async () => true,
+          // streamingResumeStore deliberately omitted
+        },
+      ),
+    ).rejects.toThrow(/streamingResumeStore/);
+
+    expect(calls).toHaveLength(0);
+    expect(await store.list(OWNER)).toHaveLength(0);
+  });
+
+  it("single-file streaming path (uploadStreaming) passes the SAME already-derived encryption key straight through (never eagerly re-encrypted via encryptFileForUpload) — the posted ciphertext decrypts via decryptStream to the exact original plaintext", async () => {
+    const resumeStore = await freshResumeStore();
+    const { apiFactory: streamingApiFactory, postedChunks } = makeStreamingApiFactory();
+    const bitstring = "1".repeat(800) + "0".repeat(800);
+    const plaintext = "streamed-and-encrypted single file contents, long enough to matter for real";
+
+    const result = await uploadAndTrack(
+      {
+        jwk: throwawayJwk,
+        data: plaintext,
+        contentType: "text/plain",
+        itemId: "stream-enc-1",
+        maxRewardWinston: CAP,
+        category: "general-other",
+      },
+      {
+        store,
+        pool: makeUploadPool(),
+        isStreamingSupported: async () => true,
+        streamingResumeStore: resumeStore,
+        streamingApiFactory,
+        streamingOpenFile: async () => new FakeBundleAssemblyFile(),
+        streamingDeleteFile: async () => {},
+        encryptFor: {
+          accountId: "ouronet-account-stream-1",
+          accountAddress: "DALOS-fake-ouronet-address-stream",
+          revealAccountSecret: async () => bitstring,
+        },
+      },
+    );
+
+    expect("manifestId" in result).toBe(false); // the single-file UploadResult shape, not a bundle
+
+    const key = await deriveAccountAesKey(bitstring);
+    const postedBytes = concatBytes(postedChunks.map((body) => base64urlDecode(body.chunk)));
+    const plaintextBytes = new TextEncoder().encode(plaintext);
+    const decryptedChunks: Uint8Array[] = [];
+    for await (const chunk of decryptStream({
+      read: async (offset, length) => postedBytes.subarray(offset, offset + length),
+      totalCiphertextLength: postedBytes.byteLength,
+      totalPlaintextLength: plaintextBytes.byteLength,
+      key,
+    })) {
+      decryptedChunks.push(chunk);
+    }
+    expect(Buffer.from(concatBytes(decryptedChunks)).equals(Buffer.from(plaintextBytes))).toBe(true);
   });
 });
 
