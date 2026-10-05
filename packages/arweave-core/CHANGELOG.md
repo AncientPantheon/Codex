@@ -2,6 +2,31 @@
 
 All notable changes to `@ancientpantheon/arweave-core`.
 
+## 0.4.0 — 2026-10-05
+
+**MINOR — streaming-upload primitives, fully additive.** Removes the
+library-level ceiling on upload size: `arweave-js`'s own chunking/Merkle
+API (`chunkData`, `generateTransactionChunks`) requires a fully-materialized
+buffer, even though the Arweave protocol itself already works in 256 KiB
+chunks at its core. New `planChunkBoundaries`/`computeStreamingDataRoot`
+port that algorithm to a streaming input — read-as-you-go, one chunk
+resident at a time — verified byte-identical to the library's own
+buffer-based output across every fixture tried (0 bytes, exact chunk
+boundaries, the rebalancing-branch edge case, multi-chunk composites).
+`createStreamingTransaction` builds and signs a transaction directly from
+an already-computed streaming `data_root`, paired with a new
+`StreamingUploadGatewayApi`/`StreamingUploadGatewayApiFactory` seam for
+posting the transaction and its chunks one at a time from any byte
+source. `createLocalDryRunGatewayApiFactory` is a new, production-code
+(not test-only) local/no-op gateway satisfying both the classic
+`UploadGatewayApiFactory` and the new streaming factory — captures every
+posted transaction/chunk in memory, addressed by the chunk's own real
+`offset` (matching how a real gateway treats a retried chunk POST at a
+known offset as an idempotent no-op), with zero network reachability
+anywhere in the module, structurally verified. No breaking changes — the
+native upload engine from 0.3.0 (`uploadData`/`uploadBundle`) is
+untouched and remains the default path.
+
 ## 0.3.0 — 2026-10-02
 
 **MINOR — native upload engine replaces the Turbo bundler.** Uploads now

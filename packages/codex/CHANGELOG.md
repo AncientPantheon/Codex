@@ -2,6 +2,54 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.2.0 — 2026-10-05
+
+**MINOR — streaming (arbitrary-size) Arweave uploads; the 1.1.0 release's
+temporary 1 GiB cap is gone.** The previous release's in-memory upload
+engine (full payload held in memory, roughly twice over, until posted)
+now has a streaming counterpart that assembles each file into an
+OPFS-backed bundle file incrementally, computes its Merkle `data_root` in
+a streaming pass, and posts in bounded 256 KiB windows — all inside a
+dedicated background Worker, since the browser storage APIs this needs
+are Worker-only by spec. Applies to BOTH encrypted and unencrypted
+uploads: encryption is now itself chunked (AES-GCM per chunk, a new
+envelope version), so an encrypted upload no longer needs its whole
+plaintext resident either. Every already-uploaded encrypted item keeps
+decrypting exactly as before — the old envelope is untouched. Interrupted
+uploads persist a resume checkpoint to IndexedDB and continue correctly,
+proven via a full hypothesis-ranked debug investigation after an early
+real-browser test reported an apparent resume-corruption bug; the actual
+root cause turned out to be in the new testing harness's own gateway
+stand-in (recording posted chunks by arrival order instead of by their
+real `offset`, so an idempotent retry looked like a duplicate) — the
+upload engine itself was correct throughout. A second, genuine, narrow
+-window bug (a checkpoint could regress on a network-level retry) was
+found during the same investigation and fixed separately, with its own
+regression test.
+
+The Upload Wizard gains: a persistent, live-updating progress indicator;
+a plain-language disclaimer banner describing the new pipeline, linking
+to a new in-app documentation page; and a second button, **"Test this
+upload (free — runs locally, nothing is sent to Arweave)"** — runs the
+real selected files through the real streaming engine against a
+production-code (not test-only) local no-op gateway with zero network
+reachability, deliberately interrupting and resuming itself to exercise
+the resumability guarantee, then independently verifies the result
+(Merkle-proof validation via `arweave-js`'s own code, a decrypt
+round-trip check for encrypted files) rather than trusting this
+package's own code — proven, via a deliberately-corrupted test input, to
+actually report failure rather than always rubber-stamping success.
+
+Ships a new normative reference document inside this package's own
+tarball: `ARWEAVE_STREAMING_UPLOAD_ARCHITECTURE.md` — a full technical
+walkthrough of how the streaming pipeline is built, for anyone extending
+or auditing it.
+
+See `@ancientpantheon/arweave-core`'s own 0.4.0 changelog entry for the
+new streaming chunk-boundary/Merkle-root/transaction-creation primitives
+this release builds on. `codex-core`/`codex-ui`/`codex-ouronet` are
+unchanged this release.
+
 ## 1.1.0 — 2026-10-02
 
 **MINOR — native Arweave upload, Library, and account-safety engine.**
