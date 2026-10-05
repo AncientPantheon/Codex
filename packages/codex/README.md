@@ -34,6 +34,14 @@ A React app gets the full multi-chain wallet from one dependency; a headless con
 > contract, not a safety mechanism, and explicitly has no role in the
 > Arweave non-removable-account invariant.
 
+> **Extending, auditing, or just curious how the streaming upload engine
+> actually works?** Read
+> [`ARWEAVE_STREAMING_UPLOAD_ARCHITECTURE.md`](./ARWEAVE_STREAMING_UPLOAD_ARCHITECTURE.md)
+> — a full technical walkthrough of how an arbitrary-size, encrypted-or-not
+> Arweave upload is assembled, encrypted, chunked, posted, resumed, and
+> safely dry-run, with the real file layout and the reasoning behind each
+> design decision.
+
 ## Install
 
 ```bash
@@ -50,9 +58,35 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.1.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.2.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.2.0** — Streaming (arbitrary-size) Arweave uploads, replacing the
+previous release's temporary 1 GiB cap entirely. Both encrypted and
+unencrypted uploads now assemble, encrypt (chunked AES-GCM, a new
+envelope version — every already-uploaded encrypted item keeps decrypting
+exactly as before, forever), compute their Merkle `data_root`, and post
+in bounded, disk-backed (OPFS) windows instead of holding the whole
+payload in memory, all running in a dedicated background Worker so the
+UI never blocks and the browser's real storage APIs (Worker-only by
+spec) are actually reachable. Interrupted uploads persist a checkpoint
+and resume correctly — proven by a rigorous, evidence-based debug
+investigation after an early test run surfaced an apparent resume
+corruption that turned out to live in the new testing harness itself,
+not the upload engine, plus a second genuine narrow-window checkpoint
+bug found along the way, both fixed with regression tests and real-browser
+re-verification. The Upload Wizard gains a live progress indicator, a
+persistent plain-language disclaimer, and a second "Test this upload"
+button that runs a real upload through the real engine against a safe,
+zero-network local stand-in gateway before any real AR is spent — proven
+to actually fail on a bad input, not just always report success. Ships a
+new normative reference document inside this package's own tarball,
+`ARWEAVE_STREAMING_UPLOAD_ARCHITECTURE.md`, documenting how the whole
+streaming pipeline is built. See `@ancientpantheon/arweave-core`'s own
+changelog for the new chunking/streaming-transaction primitives this
+release builds on (`codex-core`/`codex-ui`/`codex-ouronet` unchanged this
+release).
 
 **v1.1.0** — Native Arweave upload, Library, and account-safety engine: the Upload Wizard, a redesigned category-grouped/collapsible/paginated Library UI with copyable per-file links, non-removable-account enforcement for any Ouronet account that has ever encrypted a confirmed upload, auto-installed Prime Arweave seeds for seed-words-only restore eligibility, and a session-lifecycle save-reminder layer (`beforeunload` guard + `requestLogout()`, a UX convenience, never a funds/safety mechanism). Ships two new normative reference documents inside this package's own tarball: `ARWEAVE_TAG_SCHEMA.md` and `SESSION_LIFECYCLE_CONTRACT.md`. A 1 GiB total-upload-size cap is enforced pending a streaming/OPFS-based upload architecture for larger sets. See `@ancientpantheon/arweave-core`'s own changelog for the upload-engine detail (`codex-core` unchanged this release).
 
@@ -118,8 +152,8 @@ Version `1.1.0` on public npmjs. The aggregate: the six subpath barrels wired to
 | Member package | Version |
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.5.0` |
-| `@ancientpantheon/codex-ui` | `0.9.1` |
-| `@ancientpantheon/codex-ouronet` | `1.0.0` |
-| `@ancientpantheon/codex-arweave` | `0.4.0` |
-| `@ancientpantheon/arweave-core` | `0.2.0` |
+| `@ancientpantheon/codex-ui` | `0.10.0` |
+| `@ancientpantheon/codex-ouronet` | `1.1.0` |
+| `@ancientpantheon/codex-arweave` | `0.6.0` |
+| `@ancientpantheon/arweave-core` | `0.4.0` |
 <!-- END member-versions -->
