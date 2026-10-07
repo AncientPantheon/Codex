@@ -2,6 +2,31 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.2.1 — 2026-10-08
+
+**PATCH — two real-world wiring gaps fixed, found from an owner bug
+report.** A real attempted upload of a large folder was blocked by a
+false "your browser doesn't support this" message and the old 2 GiB
+fallback cap, on a genuinely capable browser. Root cause: the Upload
+Wizard's own browser-support check (used only to decide what the
+Files-step banner says and whether the fallback cap applies) ran on the
+main document thread, where the underlying storage API is spec'd to
+always throw — so it reported "unsupported" in every browser,
+unconditionally, regardless of real capability. The real upload path
+itself was unaffected (its own equivalent check already correctly ran
+inside a Worker) — only this one UI-level check was missed. Fixed by
+moving it into a dedicated Worker too.
+
+While fixing that, found a second, larger gap: the real app's panel
+component never actually passed the "Test this upload" dry-run feature
+(from 1.2.0) down to the Upload Wizard at all — that button, and the
+corrected browser-support check above, have never been reachable by a
+real user since 1.2.0 shipped, despite being fully built and verified in
+isolation. Both are now wired through and re-verified end to end through
+the real, unmodified app — not a test harness — in a real browser: the
+Test button is visible, a real dry run returns a real pass/fail result,
+and the support banner reflects genuine capability.
+
 ## 1.2.0 — 2026-10-05
 
 **MINOR — streaming (arbitrary-size) Arweave uploads; the 1.1.0 release's

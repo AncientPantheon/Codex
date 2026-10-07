@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.1 — 2026-10-08
+
+**PATCH — two real-world wiring gaps, found from an owner bug report.**
+`isStreamingUploadSupported.ts`'s probe internally calls
+`createSyncAccessHandle()`, which by spec only works inside a dedicated
+Worker — but `UploadWizard.tsx`'s own `useEffect` called it directly on
+the main thread (used only to decide the Files-step banner and whether
+the 2 GiB fallback cap applies), so it always reported "unsupported" in
+every browser, regardless of real capability. New
+`library/streaming/supportProbeWorker.ts` + `SupportProbeRunner.ts` move
+this check into a Worker, mirroring the upload/dry-run paths' own already
+-correct wiring. Separately, `ArweavePanelDeps` (`panel/context.tsx`)
+gained `runDryRunUpload`/`isStreamingUploadSupported` fields — previously
+constructed by the real host adapter but never declared on this
+interface, so `ArweavePanel.tsx` had no way to thread either through to
+`UploadWizard`, meaning the "Test this upload" dry-run button (shipped in
+0.6.0) has never actually been visible to a real user until now. Both
+re-verified end to end through the real, unmodified `ArweavePanel`/host-
+adapter wiring in a real browser.
+
 ## 0.6.0 — 2026-10-05
 
 **MINOR — streaming (arbitrary-size) upload engine.** New `library/streaming/` module tree: `bundleAssemblyFile`/`assembleBundleToFile` (incremental OPFS-backed bundle construction, one file resident at a time), `crypto/streamingFileEncryption` (chunked AES-256-GCM, 256 KiB plaintext windows, a sibling to the existing whole-file `fileEncryption` module which stays untouched — old encrypted uploads keep decrypting exactly as before), `streamingPost`/`streamingPostResumeStore` (chunk-by-chunk posting with IndexedDB-backed resume checkpointing), `isStreamingUploadSupported` (a real OPFS-support probe, not a feature-detect guess), `uploadBundleStreaming` (the streaming-engine-backed drop-in for the classic `uploadBundle`/`uploadData`), and `uploadWorker`/`StreamingUploadRunner` (the dedicated-Worker wiring — OPFS sync-access-handles are Worker-only by spec, so the real upload call chain now runs off the main thread). `library/flow.ts`'s `uploadAndTrack`/`uploadFilesAndTrack` route through streaming automatically when supported; the old in-memory path remains as an honest, explicitly-capped (2 GiB) fallback otherwise. `UploadWizard.tsx` gains a persistent progress indicator, a route-decision indicator, a plain-language disclaimer banner, and a "Test this upload" dry-run button backed by a new `dryRunUpload` engine (`@ancientpantheon/arweave-core`'s new `createLocalDryRunGatewayApiFactory`, zero real network) that self-verifies its own result via an independent Merkle-proof check and a decrypt round-trip, and deliberately exercises the interrupt/resume path. No breaking changes to any existing export.

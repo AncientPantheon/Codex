@@ -58,9 +58,23 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.2.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.2.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.2.1** — Bugfix, no new features. The 1.2.0 streaming-upload release
+shipped with two real-world gaps that weren't visible in isolated
+testing: (1) the Files-step browser-support check ran on the main thread,
+where the OPFS API it depends on is spec'd to always fail, so it reported
+"your browser doesn't support this" and enforced the old 2 GiB fallback
+cap in every browser regardless of actual capability — now runs in a
+dedicated Worker, like the rest of the pipeline; (2) the real app's panel
+never actually passed the "Test this upload" dry-run feature (or the
+corrected support check) down to the Upload Wizard component at all, so
+that button has never been visible to a real user since it was built —
+now wired through. Both found from a real owner report (a genuine large
+upload blocked by the false cap) and verified fixed through the real,
+unmodified app wiring in a real browser, not just in isolation.
 
 **v1.2.0** — Streaming (arbitrary-size) Arweave uploads, replacing the
 previous release's temporary 1 GiB cap entirely. Both encrypted and
@@ -154,6 +168,6 @@ release).
 | `@ancientpantheon/codex-core` | `0.5.0` |
 | `@ancientpantheon/codex-ui` | `0.10.0` |
 | `@ancientpantheon/codex-ouronet` | `1.1.0` |
-| `@ancientpantheon/codex-arweave` | `0.6.0` |
+| `@ancientpantheon/codex-arweave` | `0.6.1` |
 | `@ancientpantheon/arweave-core` | `0.4.0` |
 <!-- END member-versions -->
