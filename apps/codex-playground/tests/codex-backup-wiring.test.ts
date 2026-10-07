@@ -66,6 +66,10 @@ import {
 // `package.json` `exports` subpath either, grounded the identical way.
 import type { StreamingDryRunRunner } from "../../../packages/codex-arweave/src/library/streaming/StreamingDryRunRunner.js";
 import type { DryRunResult } from "../../../packages/codex-arweave/src/library/streaming/dryRunUpload.js";
+// `arweave-streaming-ui-support-probe-worker`: the SAME relative-path
+// convention as the two imports above — neither rides a `package.json`
+// `exports` subpath either, grounded the identical way.
+import { FakeSupportProbeRunner, type SupportProbeRunner } from "../../../packages/codex-arweave/src/library/streaming/SupportProbeRunner.js";
 
 // Network-touching seams `bufferedFeeCap`/`backupCodexToLibrary` reach for in
 // `buildRealPanelDeps().backupCodex` — faked at the MODULE boundary (mirrors
@@ -1030,5 +1034,47 @@ describe("buildRealPanelDeps — runDryRunUpload (arweave-upload-dry-run T3)", (
     await deps.runDryRunUpload([file], { category: "personal-documents" }, ADDRESS_CHOSEN);
 
     expect(estimateFeeMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `arweave-streaming-ui-support-probe-worker` — the fix for the bug report's
+ * confirmed root cause: `UploadWizard.tsx`'s own `isStreamingUploadSupported`
+ * prop defaults to calling T1's `isStreamingUploadSupported()` directly on
+ * the main thread, which ALWAYS resolves `false` in a real browser (that
+ * probe's own `createSyncAccessHandle()` call is Worker-only by spec) —
+ * exactly the owner-reported false "browser doesn't support this" banner/cap
+ * on a genuinely OPFS-capable browser. `buildRealPanelDeps` now constructs a
+ * Worker-backed `isStreamingUploadSupported` override the SAME way it
+ * already constructs `streamingUploadRunner`/`streamingDryRunRunner` — these
+ * specs pin that the override is actually EXPOSED (not the broken main-
+ * thread default UploadWizard would otherwise fall back to) and that an
+ * injected `supportProbeRunner` double is driven correctly, with zero real
+ * Worker (jsdom has none).
+ */
+describe("buildRealPanelDeps — isStreamingUploadSupported wiring (arweave-streaming-ui-support-probe-worker)", () => {
+  it("exposes an isStreamingUploadSupported function — a non-default, Worker-backed override, never left unset", () => {
+    const deps = buildRealPanelDeps({ gatewayUrl: "https://arweave.example.invalid" });
+    expect(typeof deps.isStreamingUploadSupported).toBe("function");
+  });
+
+  it("resolves true when the injected supportProbeRunner reports supported — proves the override, not UploadWizard's own broken main-thread default, decides the answer", async () => {
+    const supportProbeRunner: SupportProbeRunner = new FakeSupportProbeRunner({ supported: true });
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      supportProbeRunner,
+    });
+
+    await expect(deps.isStreamingUploadSupported()).resolves.toBe(true);
+  });
+
+  it("resolves false when the injected supportProbeRunner reports unsupported", async () => {
+    const supportProbeRunner: SupportProbeRunner = new FakeSupportProbeRunner({ supported: false });
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      supportProbeRunner,
+    });
+
+    await expect(deps.isStreamingUploadSupported()).resolves.toBe(false);
   });
 });

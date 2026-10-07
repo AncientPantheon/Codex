@@ -27,6 +27,7 @@ import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 
 import { ArweavePanel } from "../src/panel/ArweavePanel";
 import { ArweavePanelProvider, type ArweavePanelDeps } from "../src/panel/context";
+import type { UploadWizardSelection } from "../src/panel/UploadWizard";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import type { LibraryEntry, LibraryStore } from "../src/library/types";
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
@@ -363,6 +364,87 @@ describe("ArweavePanel — Upload category (arweave-upload-wizard, T3: the wizar
     fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
     await waitFor(() => expect(deps.uploadAndTrack).toHaveBeenCalledTimes(1));
     expect(onAccountUsedForEncryption).toHaveBeenCalledWith("ouro-1");
+  });
+
+  // `arweave-upload-wizard-deps-wiring-gap`: `ArweavePanel.tsx`'s own
+  // `<UploadWizard>` mount never forwarded `deps.runDryRunUpload` — the
+  // "Test this upload" dry-run button (built, unit-tested, and
+  // real-browser-verified in isolation by `arweave-upload-dry-run`) has
+  // therefore never actually been reachable through the real panel, since
+  // `UploadWizard` itself renders that button only when its own
+  // `runDryRunUpload` prop is truthy. This is the SAME class of regression
+  // the `onAccountUsedForEncryption` test above already guards against for
+  // the non-removable-account dead-letter gap: a fake can be fully
+  // type-compatible with `ArweavePanelDeps` while the panel silently never
+  // passes it down to the mounted `UploadWizard`.
+  it("wires the real `runDryRunUpload` from deps into the mounted UploadWizard — the Test button is now visible and clicking it calls the real seam with the selected files/selection/accountId, rendering the dry-run result panel", async () => {
+    const dryRunResult = {
+      success: true,
+      filesTested: 1,
+      totalBytes: 10,
+      chunksPosted: 1,
+      resumeTested: true,
+      proofsValid: true,
+      decryptRoundTripOk: "not-applicable" as const,
+      streamingSupported: true,
+      elapsedMs: 42,
+      errors: [],
+    };
+    const runDryRunUpload = vi.fn(
+      async (_files: File[], _selection: UploadWizardSelection, _accountId: string) => dryRunResult,
+    );
+    const { deps } = renderPanel({ runDryRunUpload });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    fireEvent.click(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category-option-general-other"));
+    fireEvent.click(screen.getByTestId("upload-wizard-mode-public"));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    const file = new File([new Uint8Array(10)], "note.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    const dryRunButton = screen.getByTestId("upload-wizard-dry-run-button");
+    expect(dryRunButton).toBeInTheDocument();
+    fireEvent.click(dryRunButton);
+
+    await waitFor(() => expect(runDryRunUpload).toHaveBeenCalledTimes(1));
+    const [files, selection, accountId] = runDryRunUpload.mock.calls[0];
+    expect((files as File[])[0].name).toBe("note.txt");
+    expect(selection).toMatchObject({ category: "general-other" });
+    expect(accountId).toBe(ARWEAVE_ADDRESS);
+    expect(await screen.findByTestId("upload-wizard-dry-run-result")).toBeInTheDocument();
+    // The real upload path was never touched by a dry run.
+    expect(deps.uploadAndTrack).not.toHaveBeenCalled();
+  });
+
+  it("without `deps.runDryRunUpload` wired, the mounted UploadWizard never renders a 'Test this upload' button (never a disabled dead button)", () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+    fireEvent.click(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    expect(screen.queryByTestId("upload-wizard-dry-run-button")).toBeNull();
+  });
+
+  // `arweave-upload-wizard-deps-wiring-gap`: the sibling bug
+  // (`arweave-streaming-ui-support-probe-worker`) fixed the Worker-backed
+  // OPFS-support probe at its source, but nothing forwarded it through
+  // `ArweavePanel.tsx`'s own `<UploadWizard>` mount — so the real panel kept
+  // calling `UploadWizard`'s DEFAULT (broken, main-thread) probe regardless.
+  it("wires the real `isStreamingUploadSupported` from deps into the mounted UploadWizard — a fake is actually called once per wizard session, confirming it reaches the real mount rather than the component's own default", async () => {
+    const isStreamingUploadSupported = vi.fn(async () => true);
+    renderPanel({ isStreamingUploadSupported });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    await waitFor(() => expect(isStreamingUploadSupported).toHaveBeenCalledTimes(1));
   });
 });
 

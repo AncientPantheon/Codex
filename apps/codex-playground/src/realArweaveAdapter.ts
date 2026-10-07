@@ -91,6 +91,18 @@ import {
   type StreamingDryRunRunner,
 } from "../../../packages/codex-arweave/src/library/streaming/StreamingDryRunRunner.js";
 import type { DryRunResult } from "../../../packages/codex-arweave/src/library/streaming/dryRunUpload.js";
+// `arweave-streaming-ui-support-probe-worker`: the SAME relative-path
+// convention as the two imports above (neither rides a `package.json`
+// `exports` subpath either, grounded the identical way) — the Worker-backed
+// fix for the bug report's confirmed root cause: `UploadWizard.tsx`'s own
+// `isStreamingUploadSupported` prop otherwise defaults to calling T1's probe
+// directly on the main thread, which ALWAYS resolves `false` in a real
+// browser (that probe's `createSyncAccessHandle()` call is Worker-only by
+// spec). See `SupportProbeRunner.ts`'s own doc comment for the full seam.
+import {
+  createWorkerSupportProbeRunner,
+  type SupportProbeRunner,
+} from "../../../packages/codex-arweave/src/library/streaming/SupportProbeRunner.js";
 // TYPE-ONLY (erased at compile time, so this costs nothing at runtime —
 // never a heavy React import of the panel): `UploadWizardUploadCallbacks`/
 // `UploadWizardSelection` aren't re-exported by the `./panel` barrel either,
@@ -237,6 +249,33 @@ export function createStreamingDryRunWorker(): Worker {
   return new Worker(
     new URL(
       "../../../packages/codex-arweave/src/library/streaming/dryRunWorker.ts",
+      import.meta.url,
+    ),
+    { type: "module" },
+  );
+}
+
+/**
+ * The DEFAULT worker factory for the OPFS-streaming-support probe
+ * (`arweave-streaming-ui-support-probe-worker`): the bundler-built Web
+ * Worker for codex-arweave's support-probe entry
+ * (`src/library/streaming/supportProbeWorker.ts`) — the dedicated Worker
+ * `isStreamingUploadSupported()`'s own `createSyncAccessHandle()` call
+ * requires (see `supportProbeWorker.ts`'s own doc comment for the full
+ * finding). Mirrors {@link createStreamingDryRunWorker} exactly, for the
+ * identical reason: a RELATIVE path into the package SOURCE, not a bare
+ * specifier.
+ *
+ * Constructed LAZILY (inside the factory, on the first check) so importing
+ * this module never spawns a worker, and so jsdom (which has no `Worker`
+ * global) only trips over it if a test actually drives a real check instead
+ * of injecting a `supportProbeRunner` (see {@link buildRealPanelDeps}'s own
+ * option of that name).
+ */
+export function createSupportProbeWorker(): Worker {
+  return new Worker(
+    new URL(
+      "../../../packages/codex-arweave/src/library/streaming/supportProbeWorker.ts",
       import.meta.url,
     ),
     { type: "module" },
@@ -431,6 +470,7 @@ export function buildRealPanelDeps({
   workerFactory = createKeygenWorker,
   streamingUploadRunner,
   streamingDryRunRunner,
+  supportProbeRunner,
   getPassword,
   addForeignKey,
   deleteForeignKey,
@@ -477,6 +517,15 @@ export function buildRealPanelDeps({
    * with NO real Worker and no real dry run.
    */
   streamingDryRunRunner?: StreamingDryRunRunner;
+  /**
+   * `arweave-streaming-ui-support-probe-worker`: the off-main-thread OPFS-
+   * streaming-support probe `isStreamingUploadSupported` (below) drives.
+   * Defaults to a real Worker-backed `createWorkerSupportProbeRunner({
+   * workerFactory: createSupportProbeWorker })`. Tests inject a
+   * `FakeSupportProbeRunner` (or any other `SupportProbeRunner`) so
+   * `isStreamingUploadSupported` is exercised with NO real Worker.
+   */
+  supportProbeRunner?: SupportProbeRunner;
   /** The worker the keygen runner drives. Defaults to the real bundler-built
    *  worker; tests inject a fake so the runner is exercised without a real
    *  Web Worker (jsdom has none). */
@@ -582,6 +631,18 @@ export function buildRealPanelDeps({
     selection: UploadWizardSelection,
     accountId: string,
   ) => Promise<DryRunResult>;
+  /**
+   * `arweave-streaming-ui-support-probe-worker`: the REAL, Worker-backed
+   * fix for `UploadWizard`'s own `isStreamingUploadSupported` prop — NOT a
+   * member of `ArweavePanelDeps` itself (`context.tsx`, out of this task's
+   * file scope), so, like `runDryRunUpload` above, it is widened onto this
+   * function's own return type via intersection instead of touching that
+   * interface. Resolves `true`/`false` via the injectable, Worker-backed
+   * `supportProbeRunner`, never by calling T1's `isStreamingUploadSupported`
+   * directly on the main thread (the confirmed root cause of the owner-
+   * reported false "browser doesn't support this" banner/cap).
+   */
+  isStreamingUploadSupported: () => Promise<boolean>;
 } {
   const resolvedPool = resolveRealPool({ gatewayUrl, pool });
   const resolvedAdapter =
@@ -599,6 +660,11 @@ export function buildRealPanelDeps({
   const resolvedStreamingDryRunRunner =
     streamingDryRunRunner ??
     createWorkerStreamingDryRunRunner({ workerFactory: createStreamingDryRunWorker });
+  // `arweave-streaming-ui-support-probe-worker`: the SAME construction
+  // pattern, for `isStreamingUploadSupported` below.
+  const resolvedSupportProbeRunner =
+    supportProbeRunner ??
+    createWorkerSupportProbeRunner({ workerFactory: createSupportProbeWorker });
   // ARMED only when the caller wired the codex password + store action. The
   // seeded flow spends ~6.7 s of CPU per key, so an unarmed build must REFUSE up
   // front rather than resolve a key into a no-op.
@@ -874,6 +940,11 @@ export function buildRealPanelDeps({
 
       return resolvedStreamingDryRunRunner.run(params, resolvedKey, { pool: resolvedPool });
     },
+    // `arweave-streaming-ui-support-probe-worker`: the REAL fix for
+    // `UploadWizard`'s own `isStreamingUploadSupported` prop — see this
+    // function's own return-type doc comment above for why this exists
+    // outside `ArweavePanelDeps` itself.
+    isStreamingUploadSupported: (): Promise<boolean> => resolvedSupportProbeRunner.check(),
     // `arweave-non-removable-account` T5: the dead-letter gap's host-app half
     // — forwarded verbatim to `ArweavePanelDeps.onAccountUsedForEncryption`,
     // which `UploadWizard` calls straight through after a successful

@@ -35,8 +35,17 @@ import type {
   UploadTrackResult,
   UploadBundleTrackResult,
 } from "./UploadArea.js";
-import type { UploadWizardSelection } from "./UploadWizard.js";
+import type {
+  UploadWizardSelection,
+  UploadWizardUploadCallbacks,
+} from "./UploadWizard.js";
 import type { CodexBackupResult } from "./CodexBackupArea.js";
+// `arweave-upload-wizard-deps-wiring-gap`: `DryRunResult` is T2's
+// (`arweave-upload-dry-run`) own plain result shape — not re-exported by any
+// barrel (confirmed by reading `src/panel/index.ts`/`src/library/index.ts` in
+// full), so it rides the SAME relative-path-into-package-source convention
+// `UploadWizard.tsx`'s own import of it already uses.
+import type { DryRunResult } from "../library/streaming/dryRunUpload.js";
 
 /**
  * The subset of the D5 `AddressBookEntry` the Send recipient picker reads. The
@@ -197,6 +206,12 @@ export interface ArweavePanelDeps {
     file: File,
     selection: UploadWizardSelection,
     accountId: string,
+    // `arweave-upload-wizard-deps-wiring-gap`: type-honesty fix, not a
+    // functional one — `UploadWizard.tsx`'s own `onConfirmUpload` already
+    // calls this with a 4th `callbacks` arg (the real underlying
+    // `library/flow.ts` `uploadAndTrack` already accepts it), so this type
+    // now says what every real implementation already does at runtime.
+    callbacks?: UploadWizardUploadCallbacks,
   ) => Promise<UploadTrackResult>;
   /** T7 bundle-aware upload-then-append: uploads 2+ files (or a folder), with
    *  the SAME category selection applied to every item, as one atomic bundle.
@@ -206,6 +221,7 @@ export interface ArweavePanelDeps {
     files: File[],
     selection: UploadWizardSelection,
     accountId: string,
+    callbacks?: UploadWizardUploadCallbacks,
   ) => Promise<UploadBundleTrackResult>;
   /** `arweave-non-removable-account` T4: fired once an Encrypted upload
    *  succeeds through the `UploadWizard` mount, with the ENCRYPTING Ouronet
@@ -220,6 +236,34 @@ export interface ArweavePanelDeps {
    *  — a consumer that omits this leaves the signal unobserved, exactly as
    *  omitting any other optional seam here leaves its own affordance inert. */
   onAccountUsedForEncryption?: (accountId: string) => void;
+  /**
+   * `arweave-upload-wizard-deps-wiring-gap`: the SAME injectable OPFS-support
+   * probe `UploadWizardProps.isStreamingUploadSupported` already declares —
+   * forwarded straight through to the mounted `UploadWizard` so the real,
+   * Worker-backed fix (`arweave-streaming-ui-support-probe-worker`) actually
+   * reaches the real rendered panel instead of falling back to
+   * `UploadWizard`'s own default (a direct, main-thread OPFS call — the
+   * confirmed root cause of the owner-reported false "browser doesn't
+   * support this" banner/2 GiB cap). OPTIONAL, mirroring every other
+   * seam here: an unwired host leaves `UploadWizard` on its own default,
+   * exactly as before this field existed. */
+  isStreamingUploadSupported?: () => Promise<boolean>;
+  /**
+   * `arweave-upload-wizard-deps-wiring-gap`: the SAME `runDryRunUpload` seam
+   * `UploadWizardProps.runDryRunUpload` already declares (identical
+   * `(files, selection, accountId)` call shape, matching
+   * `uploadAndTrack`/`uploadFilesAndTrack` above) — forwarded straight
+   * through to the mounted `UploadWizard` so the "Test this upload" dry-run
+   * button (built, unit-tested, and real-browser-verified in isolation by
+   * `arweave-upload-dry-run`) is actually reachable from the real app.
+   * OPTIONAL and purely additive, mirroring `UploadWizard`'s own prop: an
+   * unwired host leaves the button unrendered (never a disabled dead
+   * button), exactly as before this field existed. */
+  runDryRunUpload?: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+  ) => Promise<DryRunResult>;
   /** E3 list: the owner's Library entries, newest-first. */
   listLibrary: (owner: string) => Promise<LibraryEntry[]>;
   /** E3 openUrl: composes a healthy-gateway URL for an id. */

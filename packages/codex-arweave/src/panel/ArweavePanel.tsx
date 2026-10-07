@@ -1358,6 +1358,15 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
                   // closed — the real seam straight from `deps`, mirroring
                   // `getBalance`/`revealAccountSecret` just above.
                   onAccountUsedForEncryption={deps.onAccountUsedForEncryption}
+                  // `arweave-upload-wizard-deps-wiring-gap`: the SAME
+                  // dead-letter class of gap, closed for two more seams —
+                  // `ArweavePanelDeps` always declared both, but this mount
+                  // never forwarded them, so the real app's "Test this
+                  // upload" button never rendered and the real,
+                  // Worker-backed OPFS-support probe never reached this
+                  // mount either.
+                  runDryRunUpload={deps.runDryRunUpload}
+                  isStreamingUploadSupported={deps.isStreamingUploadSupported}
                   onClose={() => setUploadWizardOpen(false)}
                 />
               ) : null}
