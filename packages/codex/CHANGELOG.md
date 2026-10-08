@@ -2,6 +2,20 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.4.0 — 2026-10-08
+
+**MINOR — "Export Library" button.** The Library view gains an Export
+action that downloads a JSON file listing every item currently in your
+Library — across every configured Arweave account and every page, not
+just what's visible right now — with each item's filename, its real
+Arweave access link (correctly composed for a file that's part of a
+bundled upload, not just a bare manifest link), id, owner address,
+content type, confirmation status, and upload grouping. Built for the
+real workflow of uploading a large batch of files (e.g. NFT images) and
+then needing every filename→link pairing to construct the on-chain
+metadata-update transactions afterward, without manually copying links
+out of a paginated list one at a time.
+
 ## 1.3.0 — 2026-10-08
 
 **MINOR — Codex ID page, and a whole-codex Arweave backup encryption

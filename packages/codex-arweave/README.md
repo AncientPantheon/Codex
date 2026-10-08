@@ -8,9 +8,11 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `0.7.0` — built and in active use. Bundled into `@ancientpantheon/codex`.
+Version `0.8.0` — built and in active use. Bundled into `@ancientpantheon/codex`.
 
 ## Version history
+
+**v0.8.0** — "Export Library" button in `LibraryArea.tsx`: downloads a JSON file (`{exportedAt, itemCount, items}`) covering every Library entry across every configured owner and every page (not just what's currently rendered), with each item's real filename and real access link (manifest-aware for bundled files — a per-file link, not a bare manifest link). Built for constructing NFT metadata-update transactions after a large batch upload.
 
 **v0.7.0** — Codex ID page (eligibility status, backup/migration explainers, the real "back up this codex" action) and the codex-backup dual-key envelope encryption engine (`backupCodexToLibrary` rebuilt: fresh per-upload IDEK/EDEK, two independent default unlock sources, optional Arweave-PIN protection per source, full restore path for both). See `@ancientpantheon/codex`'s own changelog for the full feature description and `ARWEAVE_TAG_SCHEMA.md` for the procedure.
 

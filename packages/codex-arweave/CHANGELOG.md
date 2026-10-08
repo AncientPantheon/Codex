@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 — 2026-10-08
+
+**MINOR — "Export Library" button, additive.** `panel/LibraryArea.tsx`
+gains an Export button alongside the existing Rebuild control: downloads
+a JSON file (`{exportedAt, itemCount, items}`) built from the SAME
+already-loaded `entries` array the paginated UI itself reads (every
+owner, every page — not a per-page export), reusing `openHrefFor`'s real
+link composition (manifest-aware for bundled files) and the existing
+filename-extraction convention verbatim rather than re-deriving either.
+Each item carries `filename`/`link`/`id`/`owner`/`contentType`/`status`/
+`isManifest`/`uploadId`. Reuses the existing `saveBytesAsFile` download
+trigger already used for individual file downloads — no new download
+mechanism. Works cleanly on an empty Library (`items: []`, button never
+disabled/hidden).
+
 ## 0.7.0 — 2026-10-08
 
 **MINOR — Codex ID page + codex-backup dual-key envelope encryption.**

@@ -58,9 +58,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.3.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.4.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.4.0** — "Export Library" button: downloads a JSON file listing every Library item — filename, real access link (manifest-aware for bundled files), id, owner, content type, status, and upload grouping — across every configured owner and every page, not just what's currently visible. Built for constructing NFT metadata-update transactions after a large batch upload (e.g. updating on-chain metadata to point at each image's real Arweave link once uploaded). `arweave-core`/`codex-core`/`codex-ouronet` unchanged this release.
 
 **v1.3.0** — Codex ID page + whole-codex Arweave backup encryption engine.
 A new "Codex ID" page surfaces, in one place: whether this codex is
@@ -206,6 +208,6 @@ release).
 | `@ancientpantheon/codex-core` | `0.6.0` |
 | `@ancientpantheon/codex-ui` | `0.10.0` |
 | `@ancientpantheon/codex-ouronet` | `1.1.1` |
-| `@ancientpantheon/codex-arweave` | `0.7.0` |
+| `@ancientpantheon/codex-arweave` | `0.8.0` |
 | `@ancientpantheon/arweave-core` | `0.5.0` |
 <!-- END member-versions -->
