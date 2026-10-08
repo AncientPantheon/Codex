@@ -91,6 +91,62 @@ tradeoff: whichever of the two secrets is weaker becomes the effective
 protection level, since either one suffices. This was a conscious choice,
 not a default to question.
 
+### The Arweave-PIN wrap path (MOVED IN SCOPE for this build round —
+previously drafted as v2/out-of-scope; owner decision 2026-10-08: build it
+now, in this same construction round, alongside the default paths above)
+
+A third, STRICTLY OPT-IN wrap source, per default source above (so up to
+two additional wrapped-key pairs: Master-Seed-PIN, Standard-Apollo-PIN —
+whichever default sources the user chooses to also PIN-protect): derive an
+RSA-4096 keypair at a user-chosen position (the PIN itself — an integer
+between 6 and 15 digits, deliberately avoiding 16 digits' exact-
+`Number.MAX_SAFE_INTEGER`-ceiling edge case) instead of the scalar's
+*default* position; use the keypair's `p` prime to wrap the IDEK and `q`
+to wrap the EDEK — one PIN, one keygen, both layers covered, same
+one-keygen-covers-both-DEKs economy as the default path's single scalar
+covering both spellings.
+
+**Mutual exclusivity, not additive, per source:** when a PIN path is used
+for a given source (e.g. Master Seed), the corresponding DEFAULT (no-PIN)
+wrap entry for that SAME source is NOT also created — an unprotected
+default path sitting right alongside the PIN'd one would defeat the PIN
+entirely. The OTHER source (if used at all) is independent and may or may
+not itself be PIN'd — each source's PIN-or-default choice is made
+separately.
+
+**Real asymmetry, already reasoned through:** the Arweave-PIN path's
+~6.7-second-per-guess RSA-4096 keygen cost gives genuine brute-force
+resistance even at a 6-digit floor (worst case ~78 days of continuous
+guessing; 8 digits ~21 years) — a real security property, not just an
+inconvenience. (The Stoic-PIN variant — a StoaChain/chainweb derivation
+with no equivalent per-guess cost — remains OUT of scope for this round;
+it would need a materially higher digit floor or may not belong as a
+security-grade option at all. Only the Arweave-PIN variant above is being
+built now.)
+
+Forgetting a PIN is exactly as catastrophic as forgetting the seed words
+themselves — no recovery, ever. The PIN-entry UI must present this with
+equivalent gravity, be strictly opt-in (never nudged-on, never a default),
+and — since this is a UI surface attackers specifically target — should
+be designed with keylogger/shoulder-surfing resistance in mind (e.g. a
+randomized keypad layout) rather than a plain text input, though the exact
+entry-UI mechanics are a build-time decision for whichever task implements
+it, not fully pinned down here.
+
+**Restore-routing mechanic (settled, not a build-time guess):** each
+source needs TWO distinctly-named tag pairs, not one, so whether a PIN is
+needed is known from tag presence alone, never discovered via a failed
+decrypt attempt — e.g. `Codex-Backup-IDEK-MasterSeed-Default` /
+`Codex-Backup-IDEK-MasterSeed-Pin` (the same split mirrored on the EDEK
+side, and independently per source). Restore flow, after resolving typed
+words down to a given source's scalar: (1) `...-Default` tag present →
+unwrap directly, no PIN ever asked; (2) `...-Default` absent,
+`...-Pin` tag present → prompt for the PIN now (known to be needed, not
+guessed blind), derive the RSA keypair at that position, unwrap with
+`p`/`q`; (3) neither tag present → this source was simply not used as a
+wrap path for this particular upload at all — tell the user plainly
+rather than leaving them on a silent/ambiguous failure.
+
 ### No eligibility bypass — this reuses, not replaces, the existing gate
 
 Whether an upload gets this treatment at all is still gated by the
@@ -147,6 +203,14 @@ anything about the other.
       the codex-backup upload path (not left as a parallel/fallback
       scheme) — confirmed via the owner that no real upload under the old
       scheme exists to stay backward-compatible with.
+- [ ] Opting a source into Arweave-PIN protection at upload time posts the
+      `...-Pin` tag pair for that source and NEVER also the `...-Default`
+      pair for the SAME source (mutual exclusivity verified directly, not
+      assumed) — the other (non-PIN'd) source, if used, is unaffected.
+- [ ] Restoring via a PIN'd source with the CORRECT PIN succeeds; with the
+      WRONG PIN fails loudly (never silently wrong); the restore flow
+      knows whether a PIN is needed from tag presence alone, before ever
+      prompting — never discovers the need via a failed blind attempt.
 - [ ] The full procedure is documented, versioned, and shipped in
       `packages/codex/ARWEAVE_TAG_SCHEMA.md` (or a dedicated sibling
       doc), in enough detail to reimplement from the document alone.
@@ -156,41 +220,12 @@ anything about the other.
       planning, it must not silently produce a broken/unencrypted-wrong
       upload).
 
-## Out of scope (v2 — documented here so it isn't lost, not built now)
+## Out of scope (still deferred — not this round)
 
-- **Stoic PIN / Arweave PIN custom wrap positions.** An additional,
-  strictly opt-in wrap source: derive an RSA-4096 keypair at a
-  user-chosen position (the "PIN," an integer between 6 and 15 digits —
-  deliberately avoiding 16 digits' exact-`Number.MAX_SAFE_INTEGER`-ceiling
-  edge case) instead of the default position; use the keypair's `p` prime
-  to wrap the IDEK and `q` to wrap the EDEK — one PIN, one keygen, both
-  layers covered. When a PIN path is used for an upload, the corresponding
-  *default* (no-PIN) wrap entry for that same source must NOT also be
-  created — otherwise the unprotected default path defeats the PIN
-  entirely. Real asymmetry to carry into that design: the Arweave-PIN
-  path's ~6.7s-per-guess RSA keygen cost gives genuine brute-force
-  resistance even at 6 digits (worst case ~78 days; 8 digits ~21 years);
-  a Stoic-PIN (StoaChain/chainweb derivation) path has no equivalent
-  per-guess cost and would need a materially higher digit floor — or
-  should not be offered as a security-grade option at all, TBD when this
-  is actually shaped. Forgetting a PIN is exactly as catastrophic as
-  forgetting the seed words themselves (no recovery, ever) — must be
-  presented with equivalent gravity, strictly opt-in, never nudged-on.
-  Also out of scope for v2 planning until shaped: the secure,
-  randomized/keylogger-resistant PIN-entry UI this would need.
-
-  **Restore-routing mechanic, settled now so it's not lost:** each source
-  needs TWO distinctly-named tags, not one, so whether a PIN is needed is
-  known from tag presence alone, never from a failed decrypt attempt —
-  e.g. `Codex-Backup-IDEK-MasterSeed-Default` and
-  `Codex-Backup-IDEK-MasterSeed-Pin` (same split on the EDEK side, same
-  split per source). Restore flow after resolving typed words down to a
-  given source's scalar: (1) `...-Default` tag present → unwrap directly,
-  no PIN ever asked; (2) absent, `...-Pin` tag present → prompt for the
-  PIN now (known to be needed, not guessed), derive the RSA keypair at
-  that position, unwrap with `p`/`q`; (3) neither tag present → this
-  source was not used as a wrap path for this upload at all — tell the
-  user plainly rather than leaving them on a silent/ambiguous failure.
+- **Stoic PIN** (the StoaChain/chainweb-derivation PIN variant, as opposed
+  to the Arweave-PIN/RSA-keygen variant now IN scope above) — no
+  equivalent per-guess brute-force cost, needs its own security analysis
+  before it could be offered as a security-grade option, TBD when shaped.
 - **Smart Apollo "pause" authority.** The Codex Identity's Smart half is
   reserved for a higher-authority, separate mechanism (e.g. revoking the
   Standard half as a valid wrap source for *future* uploads) — explicitly

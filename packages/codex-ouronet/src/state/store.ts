@@ -893,6 +893,33 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       };
 
       // 8d. Build the CodexPrime Standard Ouronet account.
+      //
+      // `docs/work/codex-backup-bitstring-reveal-bug/`: `IOuroAccount.secret`
+      // holds the representation the account's OWN `originMode` names (see
+      // `OuroOriginMode`'s doc: "Determines how the reveal modal re-derives
+      // the account", and `SpawnAccountModal.tsx`'s canonical
+      // `secret = the original input` / `backup = keyPair.priv` split) —
+      // every consumer re-derives through it (`bitStringOf`/`rebuildFullKey`,
+      // `signApolloOwnership`, `ArweaveSeedsArea`'s Option 2, `LibraryArea`,
+      // `CreateStoaChainSeedModal`). For `fresh-dalos` this records
+      // `originMode: "seedWords"` just below, so `secret` must be the WORDS —
+      // writing `keyPair.priv` there instead (a base-49 scalar) made every one
+      // of those consumers silently re-derive a DIFFERENT key, and crashed the
+      // codex-backup eligibility check outright ("seed bitstring must be
+      // exactly 1024 (APOLLO) or 1600 (DALOS Genesis) characters"). Nothing is
+      // lost: `keyPair.priv` is fully re-derivable from the words through the
+      // same `rebuildFullKey` path, and the account's spending material is the
+      // Duo pure keypairs (F-008), never this field.
+      //
+      // The other three sources keep their existing plaintext — none of them
+      // can reach the Arweave-seed path at all (an Arweave seed is always a
+      // 1600-bit DALOS bitstring, so `kickstartAndInstallPrimeArweaveSeed`
+      // refuses every source but `fresh-dalos`), and their own
+      // `secret`/`originMode` relationship is a separate, untouched question.
+      const primeSecretPlaintext =
+        codexPrimeSeed.source === "fresh-dalos"
+          ? codexPrimeSeed.words
+          : primeKey.keyPair.priv;
       const codexPrime: IOuroAccount = {
         id: newId(),
         version: "2",
@@ -900,7 +927,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         isSmart: false,
         address: primeKey.standardAddress,
         publicKey: primeKey.keyPair.publ,
-        secret: await encryptStringV2(primeKey.keyPair.priv, ck),
+        secret: await encryptStringV2(primeSecretPlaintext, ck),
         guard: primeGuard,
         stoaChainLedger: null,
         originMode:

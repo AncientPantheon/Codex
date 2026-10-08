@@ -57,13 +57,16 @@ const ARWEAVE_ADDRESS = "tzXauR_QBlPW3ZRey3xBzaiDqPqLfiqWk1SWmk2BjM4";
 const fixtureJwk = throwawayKeyfile as unknown as ArweaveJwk;
 const fakePool = { pick: () => ARWEAVE_ADDRESS } as unknown as GatewayPool;
 
-/** The five categories in display order, with the labels the rail renders. */
+/** The categories in display order, with the labels the rail renders.
+ *  `codex-id` added by `codex-id-page` T1 — keep this list in sync with
+ *  `ArweavePanel.tsx`'s own real `CATEGORIES` tuple. */
 const CATEGORIES: ReadonlyArray<readonly [string, string]> = [
   ["seeds", "Seeds"],
   ["pure-keys", "Pure Keys"],
   ["accounts", "Accounts"],
   ["upload", "Upload"],
   ["library", "Library"],
+  ["codex-id", "Codex ID"],
 ];
 
 function makeEntry(overrides: Partial<ForeignKeyEntry> = {}): ForeignKeyEntry {
@@ -575,7 +578,7 @@ describe("ArweavePanel — mobile: icon-only, centered, single-line category row
 
   it("desktop (no CodexUiRoot ancestor) is unaffected — still the wrapping text-pill tablist", () => {
     renderPanel();
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(CATEGORIES.length);
   });
 });
 

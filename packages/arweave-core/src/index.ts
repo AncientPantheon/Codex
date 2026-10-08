@@ -165,6 +165,22 @@ export {
   TAG_CODEX_ENCRYPTOR,
   TAG_CODEX_ENCRYPTION_VERSION,
   CODEX_ENCRYPTION_VERSION_CURRENT,
+  // `codex-backup-envelope-encryption` T3: the dual-key envelope's four
+  // wrapped-key tag names + its own version axis + the codex-shape version
+  // tag — see tags.ts's own doc comments for each.
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+  // `codex-backup-envelope-encryption` T4: the SAME four-tag family's
+  // OPT-IN Arweave-PIN siblings — see tags.ts's own doc comment.
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_BACKUP_ENCRYPTION_VERSION,
+  CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT,
+  TAG_CODEX_FORM_VERSION,
   UPLOAD_CATEGORIES,
   NFT_ASSET_TYPES,
 } from "./upload/tags.js";

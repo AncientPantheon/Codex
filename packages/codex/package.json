@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports. The four internal member packages are bundled in; consumers never resolve them separately.",
   "type": "module",
   "main": "./dist/index.js",
@@ -67,7 +67,7 @@
     "react-dom": "^18 || ^19"
   },
   "dependencies": {
-    "@ancientpantheon/arweave-core": "^0.4.0",
+    "@ancientpantheon/arweave-core": "^0.5.0",
     "@ardrive/turbo-sdk": "^1.42.0",
     "@codemirror/autocomplete": "^6.18.0",
     "@codemirror/language": "^6.12.1",

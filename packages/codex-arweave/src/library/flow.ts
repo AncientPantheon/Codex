@@ -43,6 +43,20 @@ import {
   addressOf,
   buildUploadTags,
   CODEX_ENCRYPTION_VERSION_CURRENT,
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+  // `codex-backup-envelope-encryption` T4: the Arweave-PIN wrap path's own
+  // sibling tag names — see `tags.ts`'s own doc comment.
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_BACKUP_ENCRYPTION_VERSION,
+  CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT,
+  TAG_CODEX_FORM_VERSION,
+  type Tag,
   type UploadParams,
   type UploadResult,
   type UploadBundleParams,
@@ -69,8 +83,25 @@ import * as arweaveCore from "@ancientpantheon/arweave-core";
 // module's own call site to prove derive-ONCE-per-batch, which a destructured
 // binding would defeat.
 import * as fileEncryption from "../crypto/fileEncryption.js";
-import { encryptWithAccountKey } from "../crypto/accountKeyCipher.js";
 import type { CryptoSeam } from "@ancientpantheon/codex-core";
+import { reencryptBackupSecretFields, CODEX_FORM_VERSION } from "@ancientpantheon/codex-core";
+// `codex-backup-envelope-encryption` T3: the dual-key envelope primitives
+// (T1, `crypto/backupEnvelope.ts`) — generates/wraps the IDEK/EDEK this
+// function's own module doc below describes.
+import { generateDek, encryptWithDek, wrapDekWithScalar } from "../crypto/backupEnvelope.js";
+// `codex-backup-envelope-encryption` T5: the SAME module's unwrap/decrypt
+// halves — the restore-side inverse of `wrapDekWithScalar`/`encryptWithDek`
+// above, used by {@link restoreCodexFromBackupEnvelope} below.
+import { unwrapDekWithScalar, decryptWithDek } from "../crypto/backupEnvelope.js";
+// `codex-backup-envelope-encryption` T4: the EXISTING Worker-wrapped
+// keygen-at-position primitive (`src/keygen/KeygenRunner.ts`) — the
+// Arweave-PIN wrap path reuses this UNCHANGED (never a new main-thread RSA
+// keygen call). Imported from its module, not the `src/keygen` barrel,
+// mirroring `derivePrimeSeed.ts`'s own identical import — relative imports
+// stay inside this package's `src/library/**` StoaChain/DALOS-free
+// isolation boundary (`e2-stoachain-isolation.test.ts`) regardless of what
+// `KeygenRunner.ts` itself imports (only TYPE-ONLY, erased at compile time).
+import { runSeededBatch } from "../keygen/KeygenRunner.js";
 
 import { MANIFEST_CONTENT_TYPE } from "./constants.js";
 import type { LibraryEntry, LibraryStore } from "./types.js";
@@ -255,14 +286,6 @@ export interface PerformUploadAndTrackOptions
  *  exported there); duplicated here only for building this module's own LOCAL
  *  optimistic entry tags, never posted to chain by this module. */
 const TAG_CODEX_PATH = "Codex-Path";
-
-/** The app-metadata tag name carrying {@link backupCodexToLibrary}'s
- *  optional encrypted-codex-password recovery payload (T2,
- *  `codex-recovery-backup-tagging`) — see that function's own doc comment
- *  for the full rationale. Not a new entry in arweave-core's `tags.ts`
- *  reserved-name schema: this rides the existing `appMetadata` passthrough
- *  seam exactly like `TAG_CODEX_PATH` above. */
-const TAG_CODEX_BACKUP_RECOVERY_KEY = "Codex-Backup-Recovery-Key";
 
 /**
  * Resolves `encryptFor.accountId`'s plaintext bitstring via
@@ -789,49 +812,121 @@ export interface BackupCodexToLibraryOptions {
   /** Injectable wall clock for the entry's `createdAt`; defaults to `Date.now`. */
   now?: () => number;
   /**
-   * The plaintext password the codex is CURRENTLY unlocked with (T2,
-   * `codex-recovery-backup-tagging`). Opaque to this function, exactly like
-   * `exportJson` already is — NEVER logged, NEVER echoed, and never placed
-   * into an error. Combined with `primeArweaveSeedBitstring` and
-   * `cryptoSeam` (see below) to attach an encrypted recovery copy of this
-   * value to the upload; see {@link backupCodexToLibrary}'s own doc comment.
+   * The plaintext password the codex is CURRENTLY unlocked with
+   * (`codex-backup-envelope-encryption` T3). Opaque to this function, exactly
+   * like `exportJson` already is — NEVER logged, NEVER echoed, and never
+   * placed into an error. REQUIRED: this is how every individual secret
+   * field inside `exportJson` is decrypted (via `cryptoSeam`) before being
+   * re-encrypted under the per-upload IDEK — see {@link backupCodexToLibrary}'s
+   * own doc comment for the full envelope flow. This is NOT the old
+   * `codex-recovery-backup-tagging` usage (that mechanism — a
+   * `Codex-Backup-Recovery-Key` tag encrypting this value itself — is fully
+   * removed); the password is consumed locally, in-memory, and never
+   * persisted or tagged anywhere in this upload.
    */
-  codexPassword?: string;
+  codexPassword: string;
   /**
-   * The Prime Arweave seed's raw 1600-bit `"0"`/`"1"` canonical bitstring
-   * (T2, `codex-recovery-backup-tagging`) — NEVER its base10/base49 spelling
-   * (see `accountKeyCipher.ts`'s own warning). Opaque to this function,
-   * never logged, never echoed.
+   * The Prime Arweave seed's raw 1600-bit `"0"`/`"1"` canonical bitstring —
+   * the "Master Seed" default wrap source (design.md). NEVER its base10/
+   * base49 spelling (see `accountKeyCipher.ts`'s own warning) — this
+   * function derives both spellings itself (`base49` wraps the IDEK,
+   * `base10` wraps the EDEK). Opaque to this function, never logged, never
+   * echoed. REQUIRED: per design.md, eligibility for this envelope scheme
+   * (a Prime Arweave seed existing at all, genuinely restorable from seed
+   * words) is already gated upstream of this function
+   * (`checkArweaveRestoreEligibility`, `codex-seed-restore-activation`) — a
+   * caller that cannot supply this has no business calling this function at
+   * all; see this function's own doc comment for the full degrade-path
+   * reasoning.
    */
-  primeArweaveSeedBitstring?: string;
+  primeArweaveSeedBitstring: string;
   /**
-   * The injected real cipher seam `encryptWithAccountKey` delegates to —
-   * mirrors `keyring/foreignKeys.ts`'s own `cryptoSeam` injection pattern
-   * (this module does not and must not depend on `@stoachain/stoa-core`
-   * directly). Required, together with `codexPassword` and
-   * `primeArweaveSeedBitstring`, for the recovery-key tag to be attached.
+   * The Codex Identity's Standard half's raw 1024-bit `"0"`/`"1"` canonical
+   * bitstring (APOLLO's own S=1024 width) — the "Standard Apollo" default
+   * wrap source (design.md), mirroring `primeArweaveSeedBitstring`'s exact
+   * shape: an OPAQUE, already-resolved string this function neither derives
+   * nor validates the origin of. Resolving it (decrypting
+   * `ICodexIdentity.encryptedStandardBitstring` via whichever seam already
+   * reveals it) is the HOST's job, the same one layer up where
+   * `primeArweaveSeedBitstring` is already resolved today — never this
+   * function's. REQUIRED for the same reason `primeArweaveSeedBitstring` is.
    */
-  cryptoSeam?: CryptoSeam;
+  standardApolloBitstring: string;
+  /**
+   * The injected real V2-cipher seam — used BOTH to decrypt `exportJson`'s
+   * secret fields under `codexPassword` (mirrors `keyring/foreignKeys.ts`'s
+   * own `cryptoSeam` injection pattern) AND to wrap/unwrap the IDEK/EDEK
+   * under each default source's scalar spelling (T1's `wrapDekWithScalar`).
+   * This module does not and must not depend on `@stoachain/stoa-core`
+   * directly. REQUIRED — both uses above are load-bearing, not optional
+   * add-ons.
+   */
+  cryptoSeam: CryptoSeam;
+  /**
+   * `codex-backup-envelope-encryption` T4 — OPT-IN: when supplied, the
+   * Master Seed source is protected by an Arweave-PIN derivation INSTEAD OF
+   * its default scalar wrap — this source's `...-Pin` tag pair is posted
+   * and its `...-Default` pair is NOT (mutual exclusivity, the single most
+   * safety-critical property of this path: an unprotected default sitting
+   * alongside a PIN'd wrap would defeat the PIN entirely). A 6-to-15-digit
+   * numeric string (design.md's own stated bounds); validated BEFORE any
+   * keygen is attempted (see {@link deriveRsaKeypairAtPin}). Independent of
+   * {@link standardApolloPin} — a caller may PIN one source, both, or
+   * neither. REQUIRES {@link pinKeygenWorkerFactory} when supplied.
+   */
+  masterSeedPin?: string;
+  /**
+   * `codex-backup-envelope-encryption` T4 — the SAME opt-in PIN mechanism as
+   * {@link masterSeedPin}, applied to the Standard Apollo source instead —
+   * independently optional, mirroring that field's own doc comment exactly
+   * (mutual exclusivity is per-source: PIN'ing this source never affects
+   * whether Master Seed gets its Pin or Default pair, and vice versa).
+   */
+  standardApolloPin?: string;
+  /**
+   * The INJECTED Worker factory `deriveRsaKeypairAtPin` drives (the SAME
+   * `workerFactory` convention as `deriveArweaveSeedAtPositionZero`/
+   * `runSeededBatch` — never `new Worker(new URL(...))` here). REQUIRED
+   * when EITHER {@link masterSeedPin} or {@link standardApolloPin} is
+   * supplied; a caller using neither PIN never needs this and may omit it
+   * (the pre-T4 default-only path is completely unaffected). A single
+   * factory serves BOTH sources' PIN derivations — each call produces its
+   * own fresh worker, mirroring `runSeededBatch`'s own per-call contract.
+   */
+  pinKeygenWorkerFactory?: () => Worker;
 }
 
 /**
- * Best-effort, FULLY DEFENSIVE derivation of `{ appId, appVersion }` from an
- * opaque `exportJson` string, for {@link backupCodexToLibrary}'s real
- * version-lineage tagging.
+ * Best-effort, FULLY DEFENSIVE derivation of `{ appId }` from an opaque
+ * `exportJson` string, for {@link backupCodexToLibrary}'s real
+ * `Codex-App-Id` lineage tagging. Runs against the ORIGINAL, plaintext-shaped
+ * `exportJson` (never the opaque EDEK-encrypted blob this function ultimately
+ * posts) — `codexIdentity.formatted` is not one of the three documented
+ * secret-ciphertext fields, so reading it here is unaffected by the envelope
+ * re-encryption below.
  *
  * `exportJson` is parsed with `JSON.parse` (returning `unknown`) and read
  * back through narrow, unknown-safe property checks ONLY — this function
  * MUST NOT import any type from `codex-core`/`codex-ouronet`/any other
  * `codex-*` package (this module's own isolation, documented at the top of
  * this file, applies here too). Any parse failure, missing field, or
- * wrong-typed field yields `undefined` for that field rather than throwing —
- * a codex backup must never fail because the export JSON's shape was
- * slightly different than expected.
+ * wrong-typed field yields `undefined` rather than throwing — a MALFORMED
+ * lineage derivation never fails the backup; a genuinely un-parseable
+ * `exportJson` still fails, but later, at {@link reencryptBackupSecretFields}'s
+ * own `deserializeCodex` call, which is the real, sanctioned shape gate for
+ * this envelope (see this function's own doc comment).
  *
  *   - `appId` = `parsed.codexIdentity.formatted` when it is a string.
- *   - `appVersion` = `parsed.lastUpdatedAt` when it is a string.
+ *
+ * `appVersion` is NOT derived here any more (`codex-backup-envelope-
+ * encryption` T3's version-tag fix): the previous convention —
+ * `parsed.lastUpdatedAt`, a timestamp — answered "when was this backup
+ * made," not "what shape is it in." `Codex-Form-Version` (this function's
+ * own `appMetadata`, carrying the real `CODEX_FORM_VERSION` constant) now
+ * answers that correctly; no separate timestamp tag is added (this
+ * function's own choice — see its doc comment).
  */
-function deriveBackupLineage(exportJson: string): { appId?: string; appVersion?: string } {
+function deriveBackupLineage(exportJson: string): { appId?: string } {
   try {
     const parsed: unknown = JSON.parse(exportJson);
 
@@ -852,55 +947,436 @@ function deriveBackupLineage(exportJson: string): { appId?: string; appVersion?:
       }
     }
 
-    let appVersion: string | undefined;
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "lastUpdatedAt" in parsed &&
-      typeof (parsed as { lastUpdatedAt: unknown }).lastUpdatedAt === "string"
-    ) {
-      appVersion = (parsed as { lastUpdatedAt: string }).lastUpdatedAt;
-    }
-
-    return { appId, appVersion };
+    return { appId };
   } catch {
     // Not valid JSON, or some other parse-time throw — no lineage tag this
-    // time, but the backup itself must still proceed.
+    // time; `reencryptBackupSecretFields` below is the real shape gate and
+    // will throw loudly if `exportJson` genuinely cannot be processed.
     return {};
   }
 }
 
 /**
- * Backs up the codex's existing export (`exportJson`, an OPAQUE string this
- * module does not parse or interpret BEYOND the best-effort lineage
- * derivation below) to Arweave under `Codex-Category: codex-backup`, via
- * arweave-core's dedicated `uploadCodexBackup` primitive (T4) — never the
- * classic `uploadData`/`uploadBundle` call sites above, and never the bundle
- * path (a codex backup is always exactly one file).
+ * `@ouronet/dalos-crypto/gen1`'s own base-49 alphabet, reproduced EXACTLY
+ * (same 49-character order) so {@link bigIntToBase49Local}'s output is
+ * byte-identical to the real library's `bigIntToBase49` for the same input —
+ * load-bearing for a later restore flow that re-derives the SAME scalar's
+ * base49 spelling via the real library and must get the IDENTICAL string
+ * back to successfully unwrap what THIS function wrapped.
+ */
+const BASE49_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM";
+
+/**
+ * Reimplements `@ouronet/dalos-crypto/gen1`'s `bigIntToBase49` locally
+ * (same algorithm: positional, most-significant-digit-first, no padding;
+ * `0n` → `"0"`) rather than importing that package here: `src/library/**`
+ * is a StoaChain/DALOS-free isolation boundary
+ * (`tests/e2-stoachain-isolation.test.ts`'s static import-scan allow-lists
+ * only `@ancientpantheon/arweave-core`/`@ancientpantheon/codex-core`/
+ * `arweave`) that this module must stay inside. This is pure number-base
+ * arithmetic, not a cryptographic primitive — duplicating ~10 lines of it
+ * here does not cross that boundary's actual intent (keeping the Arweave
+ * protocol layer free of DALOS/StoaChain-specific code paths), and the
+ * `codex-identity-derivation`/`crypto-backup-envelope` test suites already
+ * exercise the REAL library's own `bigIntToBase49` directly, so a drift
+ * between the two would surface as a cross-suite mismatch, not silently.
+ */
+function bigIntToBase49Local(n: bigint): string {
+  if (n === 0n) return "0";
+  const digits: string[] = [];
+  let x = n;
+  while (x > 0n) {
+    digits.push(BASE49_ALPHABET[Number(x % 49n)]);
+    x = x / 49n;
+  }
+  return digits.reverse().join("");
+}
+
+/** Interprets a raw `"0"`/`"1"` bitstring as an unsigned big-endian binary
+ *  integer — the "scalar" design.md's `base49(scalar)`/`base10(scalar)` wrap
+ *  convention refers to for a default wrap source. Pure math; no DALOS/
+ *  Apollo keygen involved. */
+function bitstringToScalar(bitstring: string): bigint {
+  return BigInt(`0b${bitstring}`);
+}
+
+/** The two wrap-key spellings {@link wrapDekWithScalar} needs for ONE
+ *  source's bitstring — `base49` wraps the IDEK, `base10` wraps the EDEK
+ *  (design.md's fixed pairing, applied identically to both default
+ *  sources). */
+function scalarSpellings(bitstring: string): { base49: string; base10: string } {
+  const scalar = bitstringToScalar(bitstring);
+  return { base49: bigIntToBase49Local(scalar), base10: scalar.toString(10) };
+}
+
+/**
+ * The Arweave-PIN wrap path's digit-length bounds (design.md's "Arweave-PIN
+ * wrap path" section): 6 digits is the floor that section's brute-force-cost
+ * analysis assumes (worst case ~78 days of continuous ~6.7s-per-guess
+ * RSA-4096 keygen at 6 digits; ~21 years at 8); 15 digits is the ceiling,
+ * deliberately one digit short of `Number.MAX_SAFE_INTEGER`'s own 16-digit
+ * ceiling (design.md's own stated reason) so a maximal PIN still parses to
+ * an exact integer with zero floating-point precision loss.
+ */
+const PIN_MIN_DIGITS = 6;
+const PIN_MAX_DIGITS = 15;
+
+/**
+ * Validates `pin`'s shape ONLY (a {@link PIN_MIN_DIGITS}-to-
+ * {@link PIN_MAX_DIGITS}-digit numeric string) — cheap, synchronous, and
+ * run BEFORE any keygen is attempted ({@link deriveRsaKeypairAtPin} calls
+ * this FIRST): a real RSA-4096 keygen-at-position costs ~6.7s per key (and,
+ * since index 0 is force-generated alongside whatever position is
+ * requested, ~13.4s per call), so an already-invalid PIN must never burn
+ * that cost. `label` identifies which option field is being validated
+ * (`"masterSeedPin"`/`"standardApolloPin"`) for a clear error message.
+ */
+function validatePinShape(pin: string, label: string): void {
+  if (!/^[0-9]+$/.test(pin) || pin.length < PIN_MIN_DIGITS || pin.length > PIN_MAX_DIGITS) {
+    throw new Error(
+      `backupCodexToLibrary: "${label}" must be a ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS}-digit ` +
+        `numeric string, got length ${pin.length} — rejected BEFORE any RSA-4096 keygen is attempted.`,
+    );
+  }
+}
+
+/**
+ * The largest index `@ouronet/dalos-crypto/rsa4096`'s keygen-at-position
+ * primitive accepts — matches Go's `uint32` range exactly
+ * (`rsa4096/indexed.js`'s own `MAX_INDEX = 0xffffffff`). Reproduced as a
+ * plain numeric literal rather than imported: this module's own
+ * `src/library/**` StoaChain/DALOS-free isolation boundary
+ * (`e2-stoachain-isolation.test.ts`) allow-lists only
+ * `@ancientpantheon/arweave-core`/`@ancientpantheon/codex-core`/`arweave` as
+ * bare-module imports — a pure numeric bound is not a cryptographic
+ * primitive, mirroring {@link bigIntToBase49Local}'s own
+ * reproduced-not-imported reasoning above.
+ */
+const RSA4096_MAX_INDEX = 0xffffffff;
+
+/**
+ * Maps a (already shape-validated) PIN string to the keygen position
+ * {@link deriveRsaKeypairAtPin} requests — the real design decision
+ * design.md left to whichever task implemented this path.
  *
- * BEFORE uploading, `deriveBackupLineage` best-effort-derives `appId`/
- * `appVersion` from `exportJson` and forwards them to `uploadCodexBackup` —
- * real version lineage across a codex's own backup history. This derivation
- * is FULLY DEFENSIVE: a malformed or non-JSON `exportJson` never throws from
- * this step, it just proceeds with no lineage tags.
+ * A 6-to-15-digit PIN parses to an integer up to 999999999999999 — safely
+ * exact under `Number.MAX_SAFE_INTEGER` (the 15-digit ceiling's own
+ * justification) — but the underlying keygen-at-position primitive only
+ * accepts indices in `[0, RSA4096_MAX_INDEX]` (a uint32), far smaller than a
+ * 15-digit PIN's own range. This function reduces the PIN into that range
+ * via modulo, then adds 1 (equivalently: reduces modulo
+ * {@link RSA4096_MAX_INDEX}, not `RSA4096_MAX_INDEX + 1`, before the +1) so
+ * the result can NEVER be 0 — index 0 is the seed's already-PUBLIC primary
+ * address (`deriveArweaveSeedAtPositionZero`), and a PIN that happened to
+ * reduce to it would silently defeat that PIN's secrecy entirely.
+ *
+ * Two DIFFERENT PINs reducing to the SAME non-zero position does not weaken
+ * either PIN's own brute-force resistance: design.md's ~6.7s-per-guess cost
+ * is paid once per PIN VALUE an attacker tries (this function runs on every
+ * guess, not once per distinct position) — a collision only means some
+ * OTHER, un-entered PIN would also unlock the same wrap, never that the
+ * correct PIN became any cheaper to find.
+ */
+function pinToKeygenPosition(pin: string): number {
+  const asNumber = Number(pin);
+  return 1 + (asNumber % RSA4096_MAX_INDEX);
+}
+
+/**
+ * Derives the RSA-4096 keypair at `pin`'s chosen position from `bitstring`,
+ * via the EXISTING Worker-wrapped keygen-at-position primitive
+ * (`runSeededBatch`, `../keygen/KeygenRunner.js`) — NEVER a direct
+ * main-thread call into the heavy `@ouronet/dalos-crypto/rsa4096` surface
+ * (this module has no dependency on that package at all — see
+ * {@link RSA4096_MAX_INDEX}'s own doc comment). `workerFactory` is
+ * INJECTED, mirroring `deriveArweaveSeedAtPositionZero`'s own convention;
+ * the caller constructs a fresh worker per call (never
+ * `new Worker(new URL(...))` here).
+ *
+ * Validates `pin`'s shape FIRST ({@link validatePinShape}) — an already
+ * invalid PIN never reaches `workerFactory` at all, so a 5-digit or
+ * 16-digit PIN never burns a real keygen's ~6.7-13.4s cost.
+ *
+ * Returns the keypair's `p`/`q` CRT primes verbatim, as their base64url JWK
+ * string encoding (`ArweaveJwk.p`/`.q`) — NOT converted to a bigint. This is
+ * exactly the string shape `wrapDekWithScalar`/`unwrapDekWithScalar`
+ * (`../crypto/backupEnvelope.js`) already accept as `scalarString` (see
+ * this task's own report for the full reasoning): a JWK prime is already a
+ * string, the same password-shaped input those functions were built for,
+ * just sourced from a derived keypair instead of a bitstring — so this task
+ * reuses them AS-IS for the PIN wrap path rather than adding a sibling
+ * "wrap with a raw bigint" function to `backupEnvelope.ts`.
+ *
+ * Exported (not module-private) so a later restore flow (`arweave-seed-
+ * restore`'s own T5, per design.md's settled restore-routing mechanic) can
+ * re-derive the SAME keypair at restore time from a user-entered PIN,
+ * through this SAME function — never a re-implementation of this mapping.
+ */
+export async function deriveRsaKeypairAtPin(
+  bitstring: string,
+  pin: string,
+  label: string,
+  workerFactory: () => Worker,
+): Promise<{ p: string; q: string }> {
+  validatePinShape(pin, label);
+  const position = pinToKeygenPosition(pin);
+
+  let found: { p: string; q: string } | undefined;
+  await runSeededBatch({
+    bits: bitstring,
+    ranges: [{ start: position, end: position }],
+    workerFactory,
+    onKey: (key) => {
+      if (key.index === position) found = { p: key.jwk.p, q: key.jwk.q };
+    },
+  });
+
+  if (found === undefined) {
+    throw new Error(
+      `backupCodexToLibrary: PIN-position keygen for "${label}" delivered no key at index ${position}.`,
+    );
+  }
+  return found;
+}
+
+/**
+ * Builds the two wrapped-key tags for ONE default wrap source — either its
+ * `...-Pin` pair (when `pin` is supplied) or its `...-Default` pair
+ * (otherwise), NEVER both for the SAME source (mutual exclusivity, the
+ * single most safety-critical property of the Arweave-PIN wrap path — an
+ * unprotected default sitting alongside a PIN'd wrap would defeat the PIN
+ * entirely). The PIN branch uses ONE keygen call to cover BOTH DEKs (`p`
+ * wraps the IDEK, `q` wraps the EDEK) — the same one-keygen-covers-both-DEKs
+ * economy as the default branch's single scalar covering both spellings.
+ */
+async function buildSourceWrapTags(args: {
+  bitstring: string;
+  pin: string | undefined;
+  label: string;
+  idek: CryptoKey;
+  edek: CryptoKey;
+  cryptoSeam: CryptoSeam;
+  pinKeygenWorkerFactory: (() => Worker) | undefined;
+  defaultIdekTag: string;
+  defaultEdekTag: string;
+  pinIdekTag: string;
+  pinEdekTag: string;
+}): Promise<Tag[]> {
+  const {
+    bitstring,
+    pin,
+    label,
+    idek,
+    edek,
+    cryptoSeam,
+    pinKeygenWorkerFactory,
+    defaultIdekTag,
+    defaultEdekTag,
+    pinIdekTag,
+    pinEdekTag,
+  } = args;
+
+  if (pin !== undefined) {
+    if (pinKeygenWorkerFactory === undefined) {
+      throw new Error(
+        `backupCodexToLibrary: "pinKeygenWorkerFactory" is required when "${label}" is supplied.`,
+      );
+    }
+    const { p, q } = await deriveRsaKeypairAtPin(bitstring, pin, label, pinKeygenWorkerFactory);
+    const [idekWrapped, edekWrapped] = await Promise.all([
+      wrapDekWithScalar(idek, p, cryptoSeam),
+      wrapDekWithScalar(edek, q, cryptoSeam),
+    ]);
+    return [
+      { name: pinIdekTag, value: idekWrapped },
+      { name: pinEdekTag, value: edekWrapped },
+    ];
+  }
+
+  const { base49, base10 } = scalarSpellings(bitstring);
+  const [idekWrapped, edekWrapped] = await Promise.all([
+    wrapDekWithScalar(idek, base49, cryptoSeam),
+    wrapDekWithScalar(edek, base10, cryptoSeam),
+  ]);
+  return [
+    { name: defaultIdekTag, value: idekWrapped },
+    { name: defaultEdekTag, value: edekWrapped },
+  ];
+}
+
+/** UTF-8-encodes `plaintext` and base64-encodes the IV-then-ciphertext pair
+ *  an {@link encryptWithDek} call produces into ONE string — the shape every
+ *  individual IDEK-reencrypted secret field, and the whole EDEK-encrypted
+ *  opaque blob, are stored/posted as. Mirrors `encryptFileForUpload`'s own
+ *  IV-prepend convention above (this function's sibling for the account-key
+ *  file-encryption path), reusing `bytesToBase64` rather than Node's
+ *  `Buffer` so this stays usable in a real browser bundle, not just Node. */
+async function encryptToIvPrefixedBase64(dek: CryptoKey, plaintext: string): Promise<string> {
+  const { ciphertext, iv } = await encryptWithDek(dek, new TextEncoder().encode(plaintext));
+  const combined = new Uint8Array(iv.byteLength + ciphertext.byteLength);
+  combined.set(iv, 0);
+  combined.set(ciphertext, iv.byteLength);
+  return bytesToBase64(combined);
+}
+
+/** Standard-alphabet base64 DECODE — the exact inverse of {@link bytesToBase64}
+ *  (`atob` + `charCodeAt`), mirroring `panel/LibraryArea.tsx`'s own identical
+ *  `base64ToBytes` helper (duplicated locally there for the same reason this
+ *  one is duplicated here: a tiny, pure, dependency-free primitive, not worth
+ *  a shared-module indirection across two otherwise-unrelated call sites). */
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** AES-GCM IV length in bytes — mirrors `panel/LibraryArea.tsx`'s own
+ *  `IV_BYTE_LENGTH` (itself a reproduction of `fileEncryption.ts`'s private
+ *  constant of the same name): the upload/encrypt side always prepends
+ *  exactly this many IV bytes before the ciphertext ({@link
+ *  encryptToIvPrefixedBase64} above), so this restore-side decrypt strips the
+ *  same fixed length off the front before calling {@link decryptWithDek}. */
+const IV_BYTE_LENGTH = 12;
+
+/**
+ * Inverse of {@link encryptToIvPrefixedBase64}: base64-decodes `encoded`,
+ * splits off the leading {@link IV_BYTE_LENGTH} IV bytes, AES-256-GCM-decrypts
+ * the remainder under `dek` with that IV (T1's `decryptWithDek`, a direct
+ * re-export of `fileEncryption.ts`'s `decryptWithDerivedKey` — an auth-tag
+ * mismatch, e.g. decrypting under the WRONG unwrapped DEK, throws rather than
+ * returning garbage plaintext), and UTF-8-decodes the result back to a
+ * string. Used by {@link restoreCodexFromBackupEnvelope} below for BOTH the
+ * EDEK-encrypted opaque blob and each individual IDEK-reencrypted secret
+ * field — the exact same byte layout, just at two different "layers" of the
+ * envelope (design.md's own restore-order note).
+ */
+async function decryptFromIvPrefixedBase64(dek: CryptoKey, encoded: string): Promise<string> {
+  const combined = base64ToBytes(encoded);
+  const iv = combined.slice(0, IV_BYTE_LENGTH);
+  const ciphertext = combined.slice(IV_BYTE_LENGTH);
+  const plaintextBytes = await decryptWithDek(dek, ciphertext, iv);
+  return new TextDecoder().decode(plaintextBytes);
+}
+
+/**
+ * Throws a specific, named error for the first of
+ * {@link BackupCodexToLibraryOptions}'s 4 envelope-load-bearing fields
+ * (`codexPassword`/`primeArweaveSeedBitstring`/`standardApolloBitstring`/
+ * `cryptoSeam`) that is missing — defense in depth alongside the TypeScript
+ * type (which already marks all 4 required): a caller reaching this
+ * function from plain JS, or constructing `opts` dynamically, still fails
+ * loudly BEFORE any upload is attempted, never silently degrading to an
+ * unwrapped/weaker/wrong-but-claimed-successful backup. See this function's
+ * own doc comment for why these 4 are PRECONDITIONS, not optional add-ons,
+ * in this design.
+ */
+function requireEnvelopeInputs(opts: BackupCodexToLibraryOptions): void {
+  const required: Array<[string, unknown]> = [
+    ["codexPassword", opts.codexPassword],
+    ["primeArweaveSeedBitstring", opts.primeArweaveSeedBitstring],
+    ["standardApolloBitstring", opts.standardApolloBitstring],
+    ["cryptoSeam", opts.cryptoSeam],
+  ];
+  for (const [name, value] of required) {
+    if (value === undefined || value === "") {
+      throw new Error(
+        `backupCodexToLibrary: "${name}" is required — the dual-key envelope ` +
+          "(codex-backup-envelope-encryption) has no degraded/partial mode; " +
+          "an ineligible or un-derivable codex must not call this function at all.",
+      );
+    }
+  }
+}
+
+/**
+ * Backs up the codex's current export (`exportJson`, a plaintext-SHAPED
+ * string whose three documented secret fields are already ciphertext under
+ * `opts.codexPassword` — see `IMPORT_EXPORT_CONTRACT.md` §2) to Arweave under
+ * `Codex-Category: codex-backup`, via arweave-core's dedicated
+ * `uploadCodexBackup` primitive — never the classic `uploadData`/
+ * `uploadBundle` call sites above, and never the bundle path (a codex backup
+ * is always exactly one file).
+ *
+ * `codex-backup-envelope-encryption` T3 rebuilds this function's entire
+ * upload payload as a dual-key envelope, replacing the previous
+ * `Codex-Backup-Recovery-Key` password-tagging mechanism outright (no real
+ * backup was ever made under that scheme — confirmed with the owner — so
+ * this is a full replacement, not an additive parallel path):
+ *
+ *   1. Generate a fresh, independent IDEK and EDEK (T1's `generateDek`,
+ *      called twice — never the same key for both roles).
+ *   2. T2's `reencryptBackupSecretFields` decrypts every one of the three
+ *      documented secret fields under `opts.codexPassword` (via
+ *      `opts.cryptoSeam`) and re-encrypts each under the IDEK — the
+ *      resulting export needs nothing but the IDEK to decrypt its fields,
+ *      never the codex password again.
+ *   3. The WHOLE resulting (IDEK-reencrypted) export string is encrypted
+ *      ONCE MORE, as one opaque blob, under the EDEK — this is what hides
+ *      the backup's shape (field names, keyring counts) from anyone who
+ *      finds the permanent, public transaction.
+ *   4. Both DEKs are wrapped under EACH of `primeArweaveSeedBitstring`
+ *      ("Master Seed") and `standardApolloBitstring` ("Standard Apollo") —
+ *      by DEFAULT, each source's bitstring treated as a scalar with two
+ *      string spellings (`base49` wraps the IDEK, `base10` wraps the EDEK,
+ *      T1's `wrapDekWithScalar`), producing that source's `...-Default` tag
+ *      pair. `codex-backup-envelope-encryption` T4 (the Arweave-PIN wrap
+ *      path): when `opts.masterSeedPin`/`opts.standardApolloPin` is
+ *      supplied for a given source, that source's `...-Pin` pair is posted
+ *      INSTEAD — an RSA-4096 keypair derived (via `opts.pinKeygenWorkerFactory`,
+ *      {@link deriveRsaKeypairAtPin}) at the PIN-chosen position, `p` wraps
+ *      the IDEK and `q` wraps the EDEK (still T1's `wrapDekWithScalar`, the
+ *      JWK prime strings fit its `scalarString` input as-is) — NEVER both a
+ *      source's `-Pin` AND `-Default` pair on the same upload (mutual
+ *      exclusivity, see {@link buildSourceWrapTags}). Either default source
+ *      alone is sufficient to restore (deliberate OR redundancy, design.md);
+ *      a PIN'd source narrows that source's own unlock to the PIN alone.
+ *      Exactly 4 wrapped-key tags total either way (2 per source, Pin-or-
+ *      Default).
+ *   5. The opaque EDEK-encrypted blob (NOT the plaintext-shaped export) is
+ *      posted as `uploadCodexBackup`'s payload, with the 4 wrapped-key tags
+ *      plus `Codex-Backup-Encryption-Version` (a version axis independent of
+ *      the per-file `Codex-Encryption-Version`) attached via `appMetadata`.
+ *
+ * `opts.codexPassword`/`opts.primeArweaveSeedBitstring`/
+ * `opts.standardApolloBitstring`/`opts.cryptoSeam` are all REQUIRED
+ * preconditions (enforced both by the TypeScript type and, defensively, at
+ * runtime by {@link requireEnvelopeInputs}) — there is no degraded/partial
+ * mode. Per design.md, whether a codex is even ELIGIBLE for this scheme (a
+ * Prime Arweave seed existing, genuinely restorable from seed words) is
+ * already gated one layer up, by the existing, already-built
+ * `checkArweaveRestoreEligibility` (`codex-seed-restore-activation`) — the
+ * real app's own `backupCodex` call site only resolves and supplies these 4
+ * inputs when that check reads eligible. This function therefore
+ * legitimately treats eligibility as the CALLER's precondition rather than
+ * re-deriving/re-checking it itself (re-deriving it here would mean a second,
+ * redundant ~6.7s RSA-4096 re-derivation for the same logical action, and
+ * this function has no access to the Ouronet bitstring that check needs
+ * anyway). An ineligible codex's backup action is, per this design, simply
+ * never invoked with a complete `opts` — never silently downgraded to an
+ * unwrapped, partially-wrapped, or wrong-but-claimed-successful upload.
+ *
+ * `Codex-Form-Version` carries the real `CODEX_FORM_VERSION` constant
+ * (`@ancientpantheon/codex-core`) — never a timestamp (the previous, wrong
+ * convention this task also fixes). No separate timestamp tag is added
+ * alongside it (this function's own choice): the Arweave transaction's own
+ * network-recorded block timestamp is already a public, permanent record of
+ * "when," so a duplicate app-level tag would add nothing `Codex-Form-Version`
+ * doesn't already answer correctly ("what shape").
+ *
+ * `exportJson` is parsed via the sanctioned codec path INSIDE
+ * `reencryptBackupSecretFields` (`deserializeCodex`) — a genuinely
+ * un-parseable or non-codec-shaped `exportJson` now throws (there is nothing
+ * for this envelope to opacity-wrap or field-transform if it cannot be read
+ * at all), unlike the pre-T3 "verbatim passthrough" behavior. `appId`
+ * lineage is still best-effort-derived from the ORIGINAL `exportJson` by
+ * {@link deriveBackupLineage}, independently of the envelope steps above.
  *
  * Upload-THEN-append, exactly like {@link uploadAndTrack}: a throwing upload
- * rejects and leaves the store EMPTY (no phantom pending entry) and
- * `onSuccess` is never called. On success, the pending {@link LibraryEntry}
- * is appended FIRST, then `opts.onSuccess?.()` fires — the actual
- * dirty-clearing is the CALLER's job (this module has zero knowledge of
- * `clearDirty()` or any `codex-ouronet` concept).
- *
- * `codex-recovery-backup-tagging` T2: when `opts.codexPassword`,
- * `opts.primeArweaveSeedBitstring`, AND `opts.cryptoSeam` are ALL present,
- * `codexPassword` is encrypted under the Prime Arweave account's bitstring
- * key (`accountKeyCipher.ts`'s `encryptWithAccountKey`) and the resulting
- * ciphertext is attached to the SAME upload as a `Codex-Backup-Recovery-Key`
- * app-metadata tag — so a future restore-by-seed-words flow can recover the
- * codex password from nothing but the same seed words that re-derive this
- * account. If ANY of the three is absent, this step is skipped entirely:
- * no tag, no error, no placeholder value — a codex with no Prime Arweave
- * seed yet still backs up exactly as it does today (regression guard).
+ * (or a throwing envelope-construction step before it) rejects and leaves the
+ * store EMPTY (no phantom pending entry) and `onSuccess` is never called. On
+ * success, the pending {@link LibraryEntry} is appended FIRST, then
+ * `opts.onSuccess?.()` fires — the actual dirty-clearing is the CALLER's job.
  */
 export async function backupCodexToLibrary(
   exportJson: string,
@@ -916,28 +1392,80 @@ export async function backupCodexToLibrary(
     now = Date.now,
     codexPassword,
     primeArweaveSeedBitstring,
+    standardApolloBitstring,
     cryptoSeam,
+    masterSeedPin,
+    standardApolloPin,
+    pinKeygenWorkerFactory,
   } = opts;
 
-  const { appId, appVersion } = deriveBackupLineage(exportJson);
+  requireEnvelopeInputs(opts);
 
-  // T2 (codex-recovery-backup-tagging): all three of codexPassword /
-  // primeArweaveSeedBitstring / cryptoSeam must be present — any one absent
-  // skips this entirely, no tag, no error (a codex with no Prime Arweave
-  // seed yet must still back up normally).
-  const appMetadata =
-    codexPassword !== undefined && primeArweaveSeedBitstring !== undefined && cryptoSeam !== undefined
-      ? [
-          {
-            name: TAG_CODEX_BACKUP_RECOVERY_KEY,
-            value: await encryptWithAccountKey(codexPassword, primeArweaveSeedBitstring, cryptoSeam),
-          },
-        ]
-      : undefined;
+  const { appId } = deriveBackupLineage(exportJson);
+
+  // Step 1: fresh, independent DEKs — never the same key for both roles.
+  const idek = await generateDek();
+  const edek = await generateDek();
+
+  // Step 2: decrypt every secret field under the current codex password,
+  // re-encrypt each under the IDEK.
+  const idekReencryptedJson = await reencryptBackupSecretFields(exportJson, {
+    decryptField: async (ciphertext) => cryptoSeam.decrypt(ciphertext, codexPassword),
+    encryptField: (plaintext) => encryptToIvPrefixedBase64(idek, plaintext),
+  });
+
+  // Step 3: encrypt the WHOLE resulting export, as one opaque blob, under
+  // the EDEK — this is what hides the backup's shape/structure/counts.
+  const opaqueBlob = await encryptToIvPrefixedBase64(edek, idekReencryptedJson);
+
+  // Step 4: wrap both DEKs under EACH source's chosen path — its `...-Pin`
+  // pair (T4, `codex-backup-envelope-encryption`) when that source has a
+  // PIN supplied, else its `...-Default` pair exactly as T3 built it. NEVER
+  // both for the same source (mutual exclusivity — see
+  // `buildSourceWrapTags`'s own doc comment).
+  const [masterSeedTags, standardApolloTags] = await Promise.all([
+    buildSourceWrapTags({
+      bitstring: primeArweaveSeedBitstring,
+      pin: masterSeedPin,
+      label: "masterSeedPin",
+      idek,
+      edek,
+      cryptoSeam,
+      pinKeygenWorkerFactory,
+      defaultIdekTag: TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+      defaultEdekTag: TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+      pinIdekTag: TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+      pinEdekTag: TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+    }),
+    buildSourceWrapTags({
+      bitstring: standardApolloBitstring,
+      pin: standardApolloPin,
+      label: "standardApolloPin",
+      idek,
+      edek,
+      cryptoSeam,
+      pinKeygenWorkerFactory,
+      defaultIdekTag: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+      defaultEdekTag: TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+      pinIdekTag: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+      pinEdekTag: TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+    }),
+  ]);
+
+  // Step 5: post the OPAQUE blob (never the plaintext-shaped export) with
+  // the 4 wrapped-key tags (2 per source, Pin-or-Default) + the fresh
+  // envelope-version axis + the real codex-shape version — all via the
+  // appMetadata passthrough.
+  const appMetadata: Tag[] = [
+    ...masterSeedTags,
+    ...standardApolloTags,
+    { name: TAG_CODEX_BACKUP_ENCRYPTION_VERSION, value: CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT },
+    { name: TAG_CODEX_FORM_VERSION, value: CODEX_FORM_VERSION },
+  ];
 
   const result = await uploadCodexBackup(
     pool,
-    { jwk, exportJson, maxRewardWinston, appId, appVersion, appMetadata },
+    { jwk, exportJson: opaqueBlob, maxRewardWinston, appId, appMetadata },
     { apiFactory },
   );
 
@@ -945,6 +1473,263 @@ export async function backupCodexToLibrary(
   await store.append(entry);
   onSuccess?.();
   return result;
+}
+
+/**
+ * `codex-backup-envelope-encryption` T5 — the restore-side counterpart to
+ * {@link backupCodexToLibrary}: identifies which of the two default wrap
+ * sources ("Master Seed" / "Standard Apollo") a given `bitstring` belongs to,
+ * per {@link RestoreCodexFromBackupEnvelopeOptions.source}. Per source, both
+ * the `...-Default` and `...-Pin` tag pairs it may carry share one naming
+ * family — see `tags.ts`'s own doc comment.
+ */
+export type BackupUnlockSource = "masterSeed" | "standardApollo";
+
+/** Which of a source's two mutually-exclusive wrap pairs (if either) a given
+ *  upload's tags carry — the pure, tag-PRESENCE-only signal {@link
+ *  determineBackupSourceRouting} computes, entirely independent of whether
+ *  the caller's `bitstring`/`pin` are even correct. */
+export type BackupSourceRouting = "default" | "pin" | "absent";
+
+/** The four wrapped-key tag names for ONE {@link BackupUnlockSource} — the
+ *  SAME two name pairs {@link buildSourceWrapTags} builds for the write side,
+ *  looked up by source label so the restore side never re-derives/duplicates
+ *  the naming convention. */
+const BACKUP_SOURCE_TAG_NAMES: Record<
+  BackupUnlockSource,
+  { defaultIdek: string; defaultEdek: string; pinIdek: string; pinEdek: string }
+> = {
+  masterSeed: {
+    defaultIdek: TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+    defaultEdek: TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+    pinIdek: TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+    pinEdek: TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+  },
+  standardApollo: {
+    defaultIdek: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+    defaultEdek: TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+    pinIdek: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+    pinEdek: TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+  },
+};
+
+/**
+ * Thrown by {@link restoreCodexFromBackupEnvelope} when `source`'s tag
+ * presence resolves to `"pin"` (its `...-Default` pair is absent, its
+ * `...-Pin` pair is present) and no `pin` was supplied — thrown BEFORE any
+ * unwrap/keygen is attempted (design.md's settled restore-routing mechanic:
+ * tag presence alone tells a restorer whether a PIN is needed, never a
+ * failed blind decrypt attempt). A caller catching this specific error knows
+ * exactly what to do next: prompt for `source`'s PIN and retry with it.
+ */
+export class BackupPinRequiredError extends Error {
+  constructor(public readonly source: BackupUnlockSource) {
+    super(
+      `restoreCodexFromBackupEnvelope: a PIN is required to unlock the "${source}" source — ` +
+        `its "...-Default" wrap pair is absent and its "...-Pin" wrap pair is present on this ` +
+        "upload's tags. Prompt for the PIN and retry with it; never guess or attempt a blind unwrap.",
+    );
+    this.name = "BackupPinRequiredError";
+  }
+}
+
+/**
+ * Thrown by {@link restoreCodexFromBackupEnvelope} when `source`'s tag
+ * presence resolves to `"absent"` — neither `source`'s `...-Default` nor
+ * `...-Pin` tag pair is present on this upload at all, meaning that source
+ * was simply never used to wrap this particular backup (design.md's own
+ * "tell the user plainly" case, rather than a silent/ambiguous failure).
+ */
+export class BackupSourceNotUsedError extends Error {
+  constructor(public readonly source: BackupUnlockSource) {
+    super(
+      `restoreCodexFromBackupEnvelope: the "${source}" source was not used to wrap this backup — ` +
+        'neither its "...-Default" nor "...-Pin" tag pair is present on this upload\'s tags. ' +
+        "Try the other default source instead.",
+    );
+    this.name = "BackupSourceNotUsedError";
+  }
+}
+
+/**
+ * Determines, from tag PRESENCE ALONE (never attempting a decrypt),
+ * `source`'s wrap routing for this upload: `"default"` when its
+ * `...-Default` IDEK tag is present (unwrap directly, never ask for a PIN);
+ * `"pin"` when `...-Default` is absent but its `...-Pin` IDEK tag is present
+ * (a PIN is known to be needed, before any unwrap is attempted); `"absent"`
+ * when neither is present (this source was never used for this upload at
+ * all). Checks the IDEK tag only — `backupCodexToLibrary`'s own mutual-
+ * exclusivity guarantee (T4) means the paired EDEK tag is always present
+ * alongside it on any upload this package itself produced.
+ *
+ * Exported standalone (not just inlined into {@link
+ * restoreCodexFromBackupEnvelope}) so a caller's UI can decide whether to
+ * show a PIN prompt BEFORE it even has a candidate `bitstring`/`pin` ready —
+ * this check needs only the upload's own tags.
+ */
+export function determineBackupSourceRouting(
+  tags: readonly Tag[],
+  source: BackupUnlockSource,
+): BackupSourceRouting {
+  const { defaultIdek, pinIdek } = BACKUP_SOURCE_TAG_NAMES[source];
+  if (tags.some((t) => t.name === defaultIdek)) return "default";
+  if (tags.some((t) => t.name === pinIdek)) return "pin";
+  return "absent";
+}
+
+/** Reads `name`'s value off `tags`, throwing a specific error if absent —
+ *  only ever called AFTER {@link determineBackupSourceRouting} has already
+ *  confirmed the corresponding tag pair should be present, so a throw here
+ *  means the upload's own tags are malformed (not a routing/caller-input
+ *  mistake), never silently treated as "source absent" a second time. */
+function requireTagValue(tags: readonly Tag[], name: string): string {
+  const tag = tags.find((t) => t.name === name);
+  if (tag === undefined) {
+    throw new Error(
+      `restoreCodexFromBackupEnvelope: expected tag "${name}" to be present (its routing already ` +
+        "confirmed it should be) — this upload's tags are malformed.",
+    );
+  }
+  return tag.value;
+}
+
+/** Options for {@link restoreCodexFromBackupEnvelope}. */
+export interface RestoreCodexFromBackupEnvelopeOptions {
+  /** The posted backup upload's own tags (the same `Tag[]` shape {@link
+   *  backupCodexToLibrary}'s `UploadResult.tags` carries, or whatever a
+   *  chain-query/rebuild path resolves them to) — read ONLY for per-source
+   *  tag-presence routing; never hand-parsed for anything else. */
+  tags: readonly Tag[];
+  /** The posted opaque payload, decoded to the UTF-8 string `uploadCodexBackup`
+   *  actually posted — i.e. exactly what fetching this upload's transaction
+   *  data and UTF-8-decoding the raw bytes yields (the base64 IV-prefixed
+   *  EDEK ciphertext {@link encryptToIvPrefixedBase64} produced at backup
+   *  time). NEVER JSON — see `backupCodexToLibrary`'s own "opaque blob"
+   *  guarantee. */
+  opaqueBlob: string;
+  /** Which of the two default wrap sources `bitstring` belongs to — Master
+   *  Seed's 1600-bit bitstring, or Standard Apollo's 1024-bit bitstring.
+   *  Determines which of the 8 wrapped-key tag names this call reads. */
+  source: BackupUnlockSource;
+  /** The SAME raw `"0"`/`"1"` canonical bitstring `backupCodexToLibrary` was
+   *  given for this exact `source` at backup time — opaque to this function,
+   *  never logged, never echoed (mirrors `BackupCodexToLibraryOptions`'s own
+   *  bitstring fields exactly). A bitstring that does not match the REAL
+   *  value used at backup time fails loudly at the unwrap step below (the
+   *  injected `cryptoSeam`'s own wrong-key behavior), never a
+   *  plausible-looking wrong success. */
+  bitstring: string;
+  /** REQUIRED only when {@link determineBackupSourceRouting} resolves
+   *  `source` to `"pin"` — the user-supplied PIN. Omit entirely to restore a
+   *  `"default"`-routed source. Supplying a `"pin"`-routed source with no
+   *  `pin` throws {@link BackupPinRequiredError} BEFORE any unwrap/keygen is
+   *  attempted — the caller is expected to catch that specific error, prompt
+   *  for the PIN, and retry with it. */
+  pin?: string;
+  /** REQUIRED together with `pin` — the SAME injected Worker factory
+   *  `deriveRsaKeypairAtPin` drives at backup time ({@link
+   *  BackupCodexToLibraryOptions.pinKeygenWorkerFactory}'s own doc comment),
+   *  never a new main-thread RSA call. Unused (may be omitted) when `source`
+   *  is `"default"`-routed. */
+  pinKeygenWorkerFactory?: () => Worker;
+  /** The injected real V2-cipher seam — the SAME seam shape {@link
+   *  wrapDekWithScalar}/{@link unwrapDekWithScalar} already use, here run in
+   *  its DECRYPT direction to unwrap the IDEK/EDEK and to decrypt each
+   *  IDEK-reencrypted secret field. This function never needs (and never
+   *  accepts) the codex's own local password — see this function's own doc
+   *  comment for why. */
+  cryptoSeam: CryptoSeam;
+}
+
+/**
+ * Restores a codex-backup upload's FULLY PLAINTEXT export JSON from its
+ * dual-key envelope — the restore-side counterpart to {@link
+ * backupCodexToLibrary}, replacing the old `Codex-Backup-Recovery-Key`-based
+ * restore step entirely (design.md's own restore-order note).
+ *
+ * Restore order (the exact inverse of the backup order):
+ *   1. {@link determineBackupSourceRouting} reads `opts.source`'s tag
+ *      presence ALONE — `"default"` unwraps directly, no PIN ever asked;
+ *      `"pin"` with no `opts.pin` supplied throws {@link
+ *      BackupPinRequiredError} immediately, before any unwrap/keygen is even
+ *      attempted; `"absent"` throws {@link BackupSourceNotUsedError}
+ *      immediately — this source was never used for this particular upload.
+ *   2. Resolves `source`'s actual unwrap key material: the `"default"`
+ *      route re-derives `opts.bitstring`'s `base49`/`base10` scalar
+ *      spellings ({@link scalarSpellings}, the SAME pairing
+ *      `backupCodexToLibrary` wrapped under); the `"pin"` route re-derives
+ *      the RSA-4096 keypair at the PIN-chosen position ({@link
+ *      deriveRsaKeypairAtPin}, the SAME Worker-wrapped `runSeededBatch`
+ *      pattern backup time used — never a new main-thread RSA call) and
+ *      uses its `p`/`q` CRT primes.
+ *   3. Unwraps the EDEK and the IDEK ({@link unwrapDekWithScalar} — a wrong
+ *      `bitstring`/PIN fails loudly here, the injected `cryptoSeam`'s own
+ *      wrong-key behavior propagating unmodified, never a plausible-looking
+ *      wrong success).
+ *   4. Decrypts `opts.opaqueBlob` under the unwrapped EDEK ({@link
+ *      decryptFromIvPrefixedBase64}) to recover the IDEK-reencrypted export
+ *      JSON string.
+ *   5. Calls `reencryptBackupSecretFields` with `decryptField` set to decrypt
+ *      each of the three documented secret fields under the unwrapped IDEK
+ *      ({@link decryptFromIvPrefixedBase64} again — the SAME byte layout, a
+ *      different "layer"), and `encryptField` set to a NO-OP passthrough
+ *      (`async (plaintext) => plaintext`). `reencryptBackupSecretFields` was
+ *      built generically as decrypt-then-encrypt (T2,
+ *      `codex-backup-envelope-encryption`); feeding it a passthrough
+ *      `encryptField` is the deliberate, minimal way to reuse that exact
+ *      function for a decrypt-ONLY pass here, rather than writing a second,
+ *      parallel field-walker — the three documented secret-field paths stay
+ *      owned by exactly one function, never duplicated.
+ *
+ * The result is the FULLY plaintext codex export JSON — no password of any
+ * kind (old or new) is consulted anywhere in this function; `opts` has no
+ * `codexPassword`-shaped field at all, architecturally, not just
+ * incidentally. Per design.md's own restore-order note, the caller is
+ * expected to hand this plaintext JSON to the existing "prompt for a new
+ * password, encrypt locally, inject into the browser" tail — this function's
+ * own job ends at producing fully-decrypted plaintext, matching {@link
+ * backupCodexToLibrary}'s own symmetric scope (that function's job begins
+ * AFTER eligibility is already established upstream; this one's ends BEFORE
+ * a new password is chosen downstream).
+ */
+export async function restoreCodexFromBackupEnvelope(
+  opts: RestoreCodexFromBackupEnvelopeOptions,
+): Promise<string> {
+  const { tags, opaqueBlob, source, bitstring, pin, pinKeygenWorkerFactory, cryptoSeam } = opts;
+  const { defaultIdek, defaultEdek, pinIdek, pinEdek } = BACKUP_SOURCE_TAG_NAMES[source];
+
+  const routing = determineBackupSourceRouting(tags, source);
+
+  let idek: CryptoKey;
+  let edek: CryptoKey;
+
+  if (routing === "absent") {
+    throw new BackupSourceNotUsedError(source);
+  } else if (routing === "pin") {
+    if (pin === undefined) {
+      throw new BackupPinRequiredError(source);
+    }
+    if (pinKeygenWorkerFactory === undefined) {
+      throw new Error(
+        'restoreCodexFromBackupEnvelope: "pinKeygenWorkerFactory" is required to restore the ' +
+          `PIN'd "${source}" source.`,
+      );
+    }
+    const { p, q } = await deriveRsaKeypairAtPin(bitstring, pin, `${source}Pin`, pinKeygenWorkerFactory);
+    idek = await unwrapDekWithScalar(requireTagValue(tags, pinIdek), p, cryptoSeam);
+    edek = await unwrapDekWithScalar(requireTagValue(tags, pinEdek), q, cryptoSeam);
+  } else {
+    const { base49, base10 } = scalarSpellings(bitstring);
+    idek = await unwrapDekWithScalar(requireTagValue(tags, defaultIdek), base49, cryptoSeam);
+    edek = await unwrapDekWithScalar(requireTagValue(tags, defaultEdek), base10, cryptoSeam);
+  }
+
+  const idekReencryptedJson = await decryptFromIvPrefixedBase64(edek, opaqueBlob);
+
+  return reencryptBackupSecretFields(idekReencryptedJson, {
+    decryptField: (ciphertext) => decryptFromIvPrefixedBase64(idek, ciphertext),
+    encryptField: async (plaintext) => plaintext,
+  });
 }
 
 /**

@@ -144,6 +144,83 @@ export const TAG_CODEX_ENCRYPTION_VERSION = "Codex-Encryption-Version";
  *  unchanged and still what every `"1"`-tagged item depends on forever). */
 export const CODEX_ENCRYPTION_VERSION_CURRENT = "2";
 
+/**
+ * `codex-backup-envelope-encryption` T3: the four wrapped-key tag names a
+ * codex-backup upload's dual-key envelope carries by default — one pair
+ * (IDEK + EDEK) per default wrap source (the Prime Arweave seed's "Master
+ * Seed" bitstring; the Codex Identity's Standard-half "Standard Apollo"
+ * bitstring). Each name ends `-Default` so a later PIN-variant sibling (e.g.
+ * `Codex-Backup-IDEK-MasterSeed-Pin`) can exist alongside it under the SAME
+ * per-source/per-DEK naming family without a name collision — the design
+ * doc's own settled restore-routing convention (tag PRESENCE alone tells a
+ * restorer whether a PIN is needed, never a failed blind decrypt attempt).
+ * These ride `codex-arweave`'s `backupCodexToLibrary` → `uploadCodexBackup`'s
+ * `appMetadata` passthrough exactly like `Codex-Backup-Recovery-Key` (the
+ * mechanism this topic replaces) did — not added to `RESERVED_NAMES` below,
+ * mirroring that same precedent (a feature-specific metadata tag, not part
+ * of the universal required/reserved tag schema).
+ */
+export const TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT = "Codex-Backup-IDEK-MasterSeed-Default";
+export const TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT = "Codex-Backup-EDEK-MasterSeed-Default";
+export const TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT =
+  "Codex-Backup-IDEK-StandardApollo-Default";
+export const TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT =
+  "Codex-Backup-EDEK-StandardApollo-Default";
+
+/**
+ * `codex-backup-envelope-encryption` T4: the four wrapped-key tag names for
+ * the OPT-IN Arweave-PIN wrap path — the SAME per-source/per-DEK naming
+ * family as the four `...-Default` names above, just ending `-Pin` instead
+ * (the design doc's own settled restore-routing convention: tag PRESENCE
+ * alone tells a restorer whether a PIN is needed, never a failed blind
+ * decrypt attempt). For a GIVEN source, exactly one of its `-Default`/`-Pin`
+ * pairs is ever posted on a single upload — NEVER both (mutual exclusivity;
+ * an unprotected default sitting alongside a PIN'd wrap would defeat the PIN
+ * entirely) — enforced by `codex-arweave`'s `backupCodexToLibrary`, not by
+ * this module. Ride the same `appMetadata` passthrough as the `-Default`
+ * names; not added to `RESERVED_NAMES` below, same precedent.
+ */
+export const TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN = "Codex-Backup-IDEK-MasterSeed-Pin";
+export const TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN = "Codex-Backup-EDEK-MasterSeed-Pin";
+export const TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN = "Codex-Backup-IDEK-StandardApollo-Pin";
+export const TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN = "Codex-Backup-EDEK-StandardApollo-Pin";
+
+/**
+ * Codex-Backup-Encryption-Version tag key — the dual-key ENVELOPE procedure
+ * version for a codex-backup upload (`codex-backup-envelope-encryption` T3).
+ * A FRESH version axis, independent of `Codex-Encryption-Version` above: that
+ * tag versions the per-FILE `fileEncryption.ts` procedure (a single
+ * already-raw-key AES-GCM blob); this one versions the codex-backup-specific
+ * dual-DEK scheme (IDEK re-encrypts every secret field, EDEK then encrypts
+ * the whole resulting export as one opaque blob, both DEKs wrapped under
+ * each default source's base49/base10 scalar spelling) — a genuinely
+ * different procedure protecting a genuinely different payload shape, so it
+ * must be able to evolve (e.g. the Arweave-PIN wrap path) without implying
+ * anything about the per-file procedure's own version.
+ */
+export const TAG_CODEX_BACKUP_ENCRYPTION_VERSION = "Codex-Backup-Encryption-Version";
+/** The current codex-backup envelope-procedure version value — a PINNED
+ *  constant, never caller-supplied directly, mirroring
+ *  `CODEX_ENCRYPTION_VERSION_CURRENT`'s own pattern. Version `"1"` is the
+ *  two-default-source (Master Seed + Standard Apollo) scheme this task
+ *  built; a later PIN-variant addition is additive to the SAME tag family
+ *  (see the four wrapped-key tag names above) and may or may not warrant its
+ *  own version bump when it lands — not decided here. */
+export const CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT = "1";
+
+/**
+ * Codex-Form-Version tag key — carries `@ancientpantheon/codex-core`'s
+ * `CODEX_FORM_VERSION` constant (the real product-facing "shape of the
+ * codex" version) on a codex-backup upload. `arweave-core` has and must keep
+ * zero dependency on `codex-core`, so this module owns only the tag NAME;
+ * the caller (`codex-arweave`'s `backupCodexToLibrary`) supplies the real
+ * value. Replaces the previous (incorrect) convention of deriving
+ * `Codex-App-Version` from the export's `lastUpdatedAt` timestamp for a
+ * codex-backup upload — a reader of THAT tag learned *when* a backup was
+ * made, not *what shape* it is in.
+ */
+export const TAG_CODEX_FORM_VERSION = "Codex-Form-Version";
+
 /** The `itemType` enum `buildUploadTags` accepts for `Codex-Item-Type`. */
 export type UploadItemType = "file" | "manifest";
 const VALID_ITEM_TYPES: ReadonlySet<string> = new Set<UploadItemType>(["file", "manifest"]);

@@ -58,6 +58,7 @@ import {
   useAddressBook,
   useCodex,
   useCodexAuth,
+  useCodexIdentity,
   useOuroAccounts,
   useStoaChainSeeds,
   useWatchList,
@@ -66,6 +67,7 @@ import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { curveOf } from "@ancientpantheon/codex-ouronet/codex-identity";
 import type {
   AddressBookEntry,
+  ICodexIdentity,
   IOuroAccount,
   IStoaChainSeed,
 } from "@ancientpantheon/codex-ouronet/types";
@@ -356,6 +358,37 @@ export function createRevealArweaveSeedSecret({
     try {
       // `getPassword()` throws on a locked codex — inside the try on purpose.
       return await smartDecrypt(seed.secret, getPassword());
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Build the Codex Identity's Standard half's ON-DEMAND plaintext-bitstring
+ * reveal seam (`codex-backup-envelope-encryption`'s new "Standard Apollo"
+ * default wrap source — `BackupCodexToLibraryOptions.standardApolloBitstring`).
+ * Mirrors {@link createRevealArweaveSeedSecret}'s exact shape/failure
+ * contract, EXCEPT there is only ever ONE Codex Identity per codex, so this
+ * seam takes NO id argument (unlike the seed-keyed reveal above).
+ *
+ * `identity` is the SAME `codexIdentity` slice `useCodexIdentity()` exposes
+ * — a codex with no Codex Identity yet (`identity === null`) resolves
+ * `null`, never a throw. Same failure contract otherwise: a locked codex /
+ * wrong password both fold into "cannot read this right now".
+ */
+export function createRevealStandardApolloBitstring({
+  identity,
+  getPassword,
+}: {
+  identity: ICodexIdentity | null;
+  getPassword: () => string;
+}): () => Promise<string | null> {
+  return async (): Promise<string | null> => {
+    if (identity === null) return null;
+    try {
+      // `getPassword()` throws on a locked codex — inside the try on purpose.
+      return await smartDecrypt(identity.encryptedStandardBitstring, getPassword());
     } catch {
       return null;
     }
@@ -703,6 +736,13 @@ export interface BuildArweaveWiringOptions {
    *  reveal the seed's own bits for the recovery-tag cipher without a
    *  second decrypt path. */
   revealArweaveSeedSecret?: (seedId: string) => Promise<string | null>;
+  /** `codex-backup-envelope-encryption`: the Codex Identity's Standard
+   *  half's ON-DEMAND plaintext-bitstring reveal seam
+   *  ({@link createRevealStandardApolloBitstring}) — threaded into
+   *  `buildRealPanelDeps` (real mode only) alongside
+   *  `revealArweaveSeedSecret` above, so `backupCodex` can supply the
+   *  envelope's second default wrap source without a second decrypt path. */
+  revealStandardApolloBitstring?: () => Promise<string | null>;
   /** The seed → keys delete cascade ({@link createSeedKeyDeleter}). */
   onDeleteSeed?: (request: ArweaveSeedDeletionRequest) => Promise<void>;
   /** The seeded-keygen worker factory. Defaults to the app's real bundler-built
@@ -786,6 +826,7 @@ export function buildArweaveWiring({
   chainwebSeeds = [],
   revealSeedWords,
   revealArweaveSeedSecret,
+  revealStandardApolloBitstring,
   onDeleteSeed,
   workerFactory = createKeygenWorker,
   getPassword,
@@ -864,9 +905,17 @@ export function buildArweaveWiring({
       // `isDefault` carve-out for the Prime Ouronet account; the codex's
       // `isPrime` Arweave seed) — never a second "find the prime" query.
       primeOuronetAccountId: ouronetAccounts.find((a) => a.isDefault === true)?.id,
+      // `docs/work/codex-backup-bitstring-reveal-bug/`: the ACCOUNT itself,
+      // not just its id — `revealAccountSecret` resolves the account's stored
+      // `secret` representation, which only becomes a bitstring once run
+      // through `bitStringOf(account, plaintext)` (it needs the account's
+      // `originMode`/`originCurve`). From the SAME `isDefault` entry the id
+      // above comes from, so the two can never disagree.
+      primeOuronetAccount: ouronetAccounts.find((a) => a.isDefault === true)?.account,
       revealAccountSecret,
       primeArweaveSeedId: arweaveSeeds.find((s) => s.isPrime === true)?.id,
       revealArweaveSeedSecret,
+      revealStandardApolloBitstring,
     });
   } else {
     // The mock path (the default, funds-safe, offline). No network, no real keys.
@@ -1145,6 +1194,21 @@ export function ForeignChainsWiring({
     [storedArweaveSeeds, getCurrentPassword],
   );
 
+  // `codex-backup-envelope-encryption`: the envelope's second default wrap
+  // source — the Codex Identity's Standard half's own plaintext bitstring,
+  // revealed ON DEMAND (never eagerly) for `backupCodex`'s own one-off need,
+  // the SAME shape/failure-contract discipline as `revealArweaveSeedSecret`
+  // just above.
+  const { identity: codexIdentity } = useCodexIdentity();
+  const revealStandardApolloBitstring = useMemo(
+    () =>
+      createRevealStandardApolloBitstring({
+        identity: codexIdentity,
+        getPassword: getCurrentPassword,
+      }),
+    [codexIdentity, getCurrentPassword],
+  );
+
   const onSeedDefined = useMemo(
     () =>
       createArweaveSeedPersistence({
@@ -1225,6 +1289,7 @@ export function ForeignChainsWiring({
         chainwebSeeds,
         revealSeedWords,
         revealArweaveSeedSecret,
+        revealStandardApolloBitstring,
         onDeleteSeed,
         // The persist path: encrypt-at-rest under the codex password, then into
         // the REAL foreign-key slice — which is what makes a generated key
@@ -1258,6 +1323,7 @@ export function ForeignChainsWiring({
       chainwebSeeds,
       revealSeedWords,
       revealArweaveSeedSecret,
+      revealStandardApolloBitstring,
       onDeleteSeed,
       getCurrentPassword,
       actions,

@@ -41,6 +41,11 @@ export {
   type PureKeypairEntry,
 } from "./codex/pureKeypairs.js";
 
+export {
+  reencryptBackupSecretFields,
+  type ReencryptBackupSecretFieldsOptions,
+} from "./codex/backupReencryption.js";
+
 // ----- 1-bit "key bitmap" BMP codec -----
 
 export {

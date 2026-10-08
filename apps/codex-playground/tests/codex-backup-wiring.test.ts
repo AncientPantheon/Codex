@@ -409,13 +409,26 @@ describe("buildArweaveWiring (real mode) — the panel's owner address resolves 
       getExportJson: async () => '{"codex":"export"}',
     });
 
-    // Before the fix this rejects with the exact reported message; after the
-    // fix it resolves (the faked network seams above stand in for the live
-    // gateway, so this proves the OWNER-ADDRESS resolution, not the network).
-    await expect(panelDeps.backupCodex('{"codex":"export"}')).resolves.toEqual({
-      id: "fake-backup-id",
-    });
-    expect(backupCodexToLibraryMock).toHaveBeenCalledTimes(1);
+    // FLAGGED BEHAVIOR CHANGE (`codex-backup-envelope-encryption` T3's real
+    // `BackupCodexToLibraryOptions` now REQUIRES codexPassword/
+    // primeArweaveSeedBitstring/standardApolloBitstring/cryptoSeam
+    // unconditionally — see `arweave-restore-eligibility-wiring.test.ts`'s
+    // own "INELIGIBLE" test for the full reasoning). This codex wires no
+    // eligibility seams at all (no `ouronetAccounts`/`arweaveSeeds`), so it
+    // is correctly BLOCKED now, not a successful upload — the regression
+    // THIS test actually guards against (the reported bug: `ownerAddress`
+    // unconditionally `""`, so `findEntryForAddress` threw "No Arweave key
+    // found for the selected address \"\"" regardless of how many keys the
+    // codex held) is instead proven by asserting the rejection is the NEW,
+    // correct "ineligible" refusal rather than that exact old wrong-address
+    // error — before the owner-address fix, THIS codex's one real key would
+    // never even be reached, and the old wrong message would surface first.
+    // A regex matcher proves BOTH directions at once: the rejection carries
+    // the NEW "ineligible" wording, which it could not if the OLD bug (the
+    // unconditional `""` owner address, surfacing as "No Arweave key found
+    // for the selected address \"\"") had resurfaced instead.
+    await expect(panelDeps.backupCodex('{"codex":"export"}')).rejects.toThrow(/eligible/i);
+    expect(backupCodexToLibraryMock).not.toHaveBeenCalled();
   });
 
   it("the exact reported symptom — Confirm & Upload — a codex with exactly ONE configured Arweave key no longer reports 'No Arweave key found for the selected address \"\"' on uploadAndTrack", async () => {

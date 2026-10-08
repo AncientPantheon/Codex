@@ -47,12 +47,26 @@
 // browser `indexedDB` otherwise).
 import "fake-indexeddb/auto";
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { CryptoSeam } from "@ancientpantheon/codex-core";
+import { CODEX_FORM_VERSION } from "@ancientpantheon/codex-core";
+import { bigIntToBase49 } from "@ouronet/dalos-crypto/gen1";
 
 import {
   DEFAULT_CONFIRMATION_DEPTH,
   CODEX_ENCRYPTION_VERSION_CURRENT,
+  CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT,
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+  // T4 (`codex-backup-envelope-encryption`): the Arweave-PIN wrap path's own
+  // sibling tag names.
+  TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+  TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+  TAG_CODEX_FORM_VERSION,
   createGatewayPool,
   type UploadGatewayApi,
   type UploadGatewayApiFactory,
@@ -60,6 +74,7 @@ import {
   type StreamingUploadGatewayApi,
   type StreamingUploadGatewayApiFactory,
   type StreamingChunkPostBody,
+  type Tag,
 } from "@ancientpantheon/arweave-core";
 // Namespace import so `vi.spyOn(arweaveCore, "getTransactionStatus")` in the
 // test intercepts THIS call site: a destructured local binding would capture
@@ -82,10 +97,20 @@ import {
   pollStatus,
   openUrl,
   backupCodexToLibrary,
+  deriveRsaKeypairAtPin,
+  // T5 (`codex-backup-envelope-encryption`): the restore-side counterpart.
+  restoreCodexFromBackupEnvelope,
+  determineBackupSourceRouting,
+  BackupPinRequiredError,
+  BackupSourceNotUsedError,
 } from "../src/library/flow.js";
+// TYPE-ONLY — the test's own real-RSA fake worker (see `RealRsaFakeWorker`
+// below) narrows its `postMessage` payload against this protocol, erased at
+// compile time (never a runtime import of the heavy keygen seam itself).
+import type { KeygenWorkerMsg } from "../src/keygen/KeygenRunner.js";
 import { MANIFEST_CONTENT_TYPE as LIB_MANIFEST_CT } from "../src/library/constants.js";
 import { deriveAccountAesKey, decryptWithDerivedKey } from "../src/crypto/fileEncryption.js";
-import { decryptWithAccountKey } from "../src/crypto/accountKeyCipher.js";
+import { unwrapDekWithScalar, decryptWithDek } from "../src/crypto/backupEnvelope.js";
 // Namespace import so `vi.spyOn(fileEncryption, "deriveAccountAesKey")` below
 // intercepts `flow.ts`'s OWN call site (it imports this module the SAME way,
 // for the SAME reason — see that file's module doc).
@@ -169,6 +194,83 @@ function makeFakeUploadApiFactory(
  *  real sleeps between pool retries. */
 function makeUploadPool() {
   return createGatewayPool({ endpoints: ["https://a.example"], sleep: async () => {} });
+}
+
+/**
+ * T4 (`codex-backup-envelope-encryption`) — a FAKE `Worker` the Arweave-PIN
+ * tests inject as `pinKeygenWorkerFactory`, used ONLY by those tests below.
+ * UNLIKE `e5-seeded-batch.test.ts`'s own `FakeWorker` (which the test itself
+ * drives message-by-message with a SCRIPTED fixture JWK), this one performs
+ * REAL RSA-4096 keygen-at-position: `postMessage({kind:"start-seeded"})`
+ * dynamically imports `@ouronet/dalos-crypto/rsa4096` (the SAME heavy
+ * primitive the real `src/keygen/worker.ts` lazy-imports) and calls its real
+ * `generateFromBitStringAtRangesAsync`, posting back genuine `key`/
+ * `batch-done`/`error` messages. This is necessary — not gratuitous — for
+ * this task's "real functional unwrap, never a plausible-looking wrong
+ * success" bar (mirrors T3's own `crypto-backup-envelope.test.ts` rigor):
+ * only a REAL keypair's `p`/`q` can prove a real wrap/unwrap round-trip or a
+ * real wrong-PIN decrypt failure. `backupCodexToLibrary` itself still only
+ * ever reaches this through the SAME `runSeededBatch`/`workerFactory` seam
+ * production code uses (never a direct main-thread call) — this fake stands
+ * in for the OFF-MAIN-THREAD Worker boundary only; jsdom/node has no real
+ * `Worker`, so there is no way to prove this without an in-process stand-in
+ * somewhere in the test harness.
+ *
+ * Real RSA-4096 generation costs ~6.7s PER KEY, and `generateFromBit
+ * StringAtRangesAsync` ALWAYS force-generates index 0 alongside whatever
+ * position is requested (`rsa4096/ranges.js`'s own `const seen = new
+ * Set([0])`) — so every call through this worker costs ~13.4s, not ~6.7s.
+ * The PIN tests below are deliberately structured (see each describe
+ * block's own comment) to spend the smallest realistic number of these
+ * calls that still honestly proves each required property.
+ */
+class RealRsaFakeWorker {
+  onmessage: ((ev: { data: KeygenWorkerMsg }) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  terminate(): void {
+    // No real thread to tear down — this fake never spawns one.
+  }
+  postMessage(msg: unknown): void {
+    const m = msg as { kind?: unknown; bits?: string; ranges?: { start: number; end: number }[] };
+    if (m.kind !== "start-seeded") return;
+    void (async () => {
+      try {
+        const { generateFromBitStringAtRangesAsync } = await import(
+          "@ouronet/dalos-crypto/rsa4096"
+        );
+        await generateFromBitStringAtRangesAsync(
+          m.bits as string,
+          m.ranges as { start: number; end: number }[],
+          undefined,
+          (index, result) => {
+            this.onmessage?.({
+              data: {
+                kind: "key",
+                index,
+                jwk: result.jwk as unknown as import("@ancientpantheon/arweave-core").ArweaveJwk,
+                address: result.address,
+              },
+            });
+          },
+        );
+        this.onmessage?.({ data: { kind: "batch-done" } });
+      } catch (err) {
+        this.onmessage?.({
+          data: {
+            kind: "error",
+            message: err instanceof Error ? err.message : "real seeded keygen failed",
+          },
+        });
+      }
+    })();
+  }
+}
+
+/** A fresh `pinKeygenWorkerFactory` — one new {@link RealRsaFakeWorker} per
+ *  call, mirroring the real `workerFactory` convention (never a shared/
+ *  reused worker instance across calls). */
+function makeRealPinWorkerFactory(): () => Worker {
+  return () => new RealRsaFakeWorker() as unknown as Worker;
 }
 
 describe("E3 flow — upload-succeeds-THEN-append-pending (E-07, FIX-6)", () => {
@@ -543,22 +645,231 @@ describe("E3 flow — bundle-aware uploadAndTrack (T7)", () => {
   });
 });
 
-describe("E3 flow — backupCodexToLibrary (T5)", () => {
+describe("E3 flow — backupCodexToLibrary dual-key envelope (T3, codex-backup-envelope-encryption)", () => {
   let store: MemoryLibraryStore;
   beforeEach(() => {
     store = new MemoryLibraryStore();
   });
 
-  it("uploads the export JSON verbatim, tags Codex-Category:codex-backup, appends a pending entry, and calls onSuccess ONLY after the upload resolves", async () => {
-    const { factory } = makeFakeUploadApiFactory();
-    const onSuccess = vi.fn();
+  /** A real 1600-bit "Master Seed" bitstring (the Prime Arweave seed's own
+   *  shape — matches `resolveSeedBitString.ts`'s `SEED_BIT_LENGTH`). */
+  const MASTER_SEED_BITSTRING = "1".repeat(800) + "0".repeat(800);
+  /** A real 1024-bit "Standard Apollo" bitstring (APOLLO's own S=1024 shape —
+   *  matches `codex-identity/derivation.ts`'s `APOLLO_BITS_PER_HALF`). */
+  const STANDARD_APOLLO_BITSTRING = "1".repeat(512) + "0".repeat(512);
+  const CODEX_PASSWORD = "the codex's own current unlock password";
+  const ORIGINAL_SECRET_PLAINTEXT = "arweave-seed-secret-plaintext-words";
 
-    const result = await backupCodexToLibrary("export-json-payload", {
+  /** A deterministic, KEY-AWARE fake `CryptoSeam` — mirrors
+   *  `crypto-account-key-cipher.test.ts`'s/`crypto-backup-envelope.test.ts`'s
+   *  own fake exactly, so a wrong-key decrypt genuinely throws rather than
+   *  silently ignoring the key. */
+  const keyAwareFakeSeam: CryptoSeam = {
+    encrypt: (plaintext: string, key: string) => `${key}::${plaintext}`,
+    decrypt: (ciphertext: string, key: string) => {
+      const prefix = `${key}::`;
+      if (!ciphertext.startsWith(prefix)) {
+        throw new Error("wrong key — auth-tag-equivalent failure");
+      }
+      return ciphertext.slice(prefix.length);
+    },
+  };
+
+  /** A minimal, REAL "1.3" codex export (`deserializeCodex`'s own required
+   *  top-level shape) carrying exactly one `arweaveSeeds[].secret` entry,
+   *  already "encrypted" under `CODEX_PASSWORD` via `keyAwareFakeSeam`'s own
+   *  deterministic convention — the exact ciphertext shape
+   *  `reencryptBackupSecretFields`'s `decryptField` must successfully
+   *  decrypt back to `ORIGINAL_SECRET_PLAINTEXT`. */
+  function buildMinimalExportJson(): string {
+    return JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-09-30T00:00:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {},
+      arweaveSeeds: [
+        {
+          id: "seed-1",
+          secret: `${CODEX_PASSWORD}::${ORIGINAL_SECRET_PLAINTEXT}`,
+          createdAt: "2026-09-30T00:00:00.000Z",
+        },
+      ],
+    });
+  }
+
+  function baseEnvelopeOptions(apiFactory: UploadGatewayApiFactory) {
+    return {
       store,
       pool: makeUploadPool(),
       jwk: throwawayJwk,
       maxRewardWinston: CAP,
-      apiFactory: factory,
+      apiFactory,
+      codexPassword: CODEX_PASSWORD,
+      primeArweaveSeedBitstring: MASTER_SEED_BITSTRING,
+      standardApolloBitstring: STANDARD_APOLLO_BITSTRING,
+      cryptoSeam: keyAwareFakeSeam,
+    };
+  }
+
+  it("posts a genuinely OPAQUE blob: JSON.parse throws, and neither the original field names/shape nor the plaintext secret survive", async () => {
+    const { apiFactory, calls } = makeRecordingUploadApi();
+
+    await backupCodexToLibrary(
+      buildMinimalExportJson(),
+      baseEnvelopeOptions(apiFactory),
+    );
+
+    expect(calls).toHaveLength(1);
+    const postedText = Buffer.from(calls[0].data).toString("utf8");
+    // A real regression this guards against: the OLD mechanism posted the
+    // export close to as-is, so field names/counts ("43 accounts, 10
+    // seeds") were plaintext-readable on a permanent, public transaction —
+    // the exact leak design.md's Problem #1 names.
+    expect(() => JSON.parse(postedText)).toThrow();
+    expect(postedText).not.toContain("arweaveSeeds");
+    expect(postedText).not.toContain("kadenaWallets");
+    expect(postedText).not.toContain(ORIGINAL_SECRET_PLAINTEXT);
+    expect(postedText).not.toContain(CODEX_PASSWORD);
+  });
+
+  it("posts exactly 4 correctly-named wrapped-key tags, each a REAL functional wrap — unwrapping the SAME DEK via EITHER default source yields a key that decrypts the SAME ciphertext (either source alone suffices)", async () => {
+    const { apiFactory, calls } = makeRecordingUploadApi();
+
+    const result = await backupCodexToLibrary(
+      buildMinimalExportJson(),
+      baseEnvelopeOptions(apiFactory),
+    );
+    // Exactly ONE upload action — the opaque blob, posted once (never a
+    // separate call per wrapped key).
+    expect(calls).toHaveLength(1);
+    const tags = (result as { tags: { name: string; value: string }[] }).tags;
+
+    const wrappedTagNames = [
+      TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+      TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+      TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+      TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+    ];
+    const wrappedTags = wrappedTagNames.map((name) => tags.find((t) => t.name === name));
+    wrappedTags.forEach((tag, i) => {
+      expect(tag, `expected tag "${wrappedTagNames[i]}" to be posted`).toBeDefined();
+    });
+
+    // base49 wraps the IDEK, base10 wraps the EDEK (design.md's fixed
+    // pairing) — the SAME scalar, spelled two ways, per source.
+    const masterScalar = BigInt(`0b${MASTER_SEED_BITSTRING}`);
+    const apolloScalar = BigInt(`0b${STANDARD_APOLLO_BITSTRING}`);
+    const masterBase49 = bigIntToBase49(masterScalar);
+    const masterBase10 = masterScalar.toString(10);
+    const apolloBase49 = bigIntToBase49(apolloScalar);
+    const apolloBase10 = apolloScalar.toString(10);
+
+    const idekViaMasterSeed = await unwrapDekWithScalar(
+      wrappedTags[0]!.value,
+      masterBase49,
+      keyAwareFakeSeam,
+    );
+    const idekViaStandardApollo = await unwrapDekWithScalar(
+      wrappedTags[2]!.value,
+      apolloBase49,
+      keyAwareFakeSeam,
+    );
+
+    // Real proof, not byte-equality: both unwraps decrypt the SAME posted
+    // blob's ciphertext — only the EDEK differs between the two sources'
+    // pairs, so decrypt the IDEK-reencrypted field instead by round-tripping
+    // through a value THIS test controls directly — encrypt a probe under
+    // one unwrapped IDEK and decrypt it under the other.
+    const probe = new TextEncoder().encode("either-source-unlocks-the-same-idek");
+    const { encryptWithDek } = await import("../src/crypto/backupEnvelope.js");
+    const probeEncrypted = await encryptWithDek(idekViaMasterSeed, probe);
+    const probeDecrypted = await decryptWithDek(
+      idekViaStandardApollo,
+      probeEncrypted.ciphertext,
+      probeEncrypted.iv,
+    );
+    expect(new TextDecoder().decode(probeDecrypted)).toBe(
+      "either-source-unlocks-the-same-idek",
+    );
+
+    // Same proof for the EDEK pair (tags[1]/tags[3], base10-wrapped).
+    const edekViaMasterSeed = await unwrapDekWithScalar(
+      wrappedTags[1]!.value,
+      masterBase10,
+      keyAwareFakeSeam,
+    );
+    const edekViaStandardApollo = await unwrapDekWithScalar(
+      wrappedTags[3]!.value,
+      apolloBase10,
+      keyAwareFakeSeam,
+    );
+    const edekProbe = new TextEncoder().encode("either-source-unlocks-the-same-edek");
+    const edekProbeEncrypted = await encryptWithDek(edekViaMasterSeed, edekProbe);
+    const edekProbeDecrypted = await decryptWithDek(
+      edekViaStandardApollo,
+      edekProbeEncrypted.ciphertext,
+      edekProbeEncrypted.iv,
+    );
+    expect(new TextDecoder().decode(edekProbeDecrypted)).toBe(
+      "either-source-unlocks-the-same-edek",
+    );
+
+    // Unwrapping with the WRONG scalar (base10 where base49 was used to
+    // wrap) fails loudly — the V2-cipher's own wrong-key behavior.
+    await expect(
+      unwrapDekWithScalar(wrappedTags[0]!.value, masterBase10, keyAwareFakeSeam),
+    ).rejects.toThrow();
+
+    // The locally-appended entry ALSO carries all 4 tags (before any rebuild).
+    const list = await store.list(OWNER);
+    wrappedTagNames.forEach((name) => {
+      expect(list[0].tags.find((t) => t.name === name)).toBeDefined();
+    });
+  });
+
+  it("tags Codex-Form-Version with the REAL CODEX_FORM_VERSION constant, never a timestamp, and Codex-Backup-Encryption-Version with the pinned envelope-procedure version", async () => {
+    // Sanity guard against a tautological pass (same discipline the
+    // existing CODEX_ENCRYPTION_VERSION_CURRENT guard above uses).
+    expect(CODEX_FORM_VERSION.length).toBeGreaterThan(0);
+    expect(CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT).toBe("1");
+
+    const { apiFactory } = makeRecordingUploadApi();
+
+    const result = await backupCodexToLibrary(
+      buildMinimalExportJson(),
+      baseEnvelopeOptions(apiFactory),
+    );
+    const tags = (result as { tags: { name: string; value: string }[] }).tags;
+
+    expect(tags.find((t) => t.name === TAG_CODEX_FORM_VERSION)?.value).toBe(CODEX_FORM_VERSION);
+    // Never the export's lastUpdatedAt-derived timestamp (the old, wrong
+    // convention design.md's Problem #3 names) — no tag carries that value.
+    expect(tags.some((t) => t.value === "2026-09-30T00:00:00.000Z")).toBe(false);
+    expect(tags.find((t) => t.name === "Codex-Backup-Encryption-Version")?.value).toBe(
+      CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT,
+    );
+  });
+
+  it("NEVER posts the OLD Codex-Backup-Recovery-Key tag, under any input (positive regression guard — the mechanism this topic replaces is fully gone)", async () => {
+    const { apiFactory } = makeRecordingUploadApi();
+
+    const result = await backupCodexToLibrary(
+      buildMinimalExportJson(),
+      baseEnvelopeOptions(apiFactory),
+    );
+    const tags = (result as { tags: { name: string; value: string }[] }).tags;
+
+    expect(tags.find((t) => t.name === "Codex-Backup-Recovery-Key")).toBeUndefined();
+  });
+
+  it("appends a pending entry and calls onSuccess ONLY after the upload resolves", async () => {
+    const { apiFactory } = makeRecordingUploadApi();
+    const onSuccess = vi.fn();
+
+    const result = await backupCodexToLibrary(buildMinimalExportJson(), {
+      ...baseEnvelopeOptions(apiFactory),
       onSuccess,
     });
 
@@ -571,79 +882,13 @@ describe("E3 flow — backupCodexToLibrary (T5)", () => {
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it("derives appId/appVersion from a well-formed exportJson (codexIdentity.formatted / lastUpdatedAt) and tags the upload with them", async () => {
-    const { factory } = makeFakeUploadApiFactory();
-    const exportJson = JSON.stringify({
-      codexIdentity: { formatted: "my-codex-id" },
-      lastUpdatedAt: "2026-09-30T00:00:00.000Z",
-    });
-
-    const result = await backupCodexToLibrary(exportJson, {
-      store,
-      pool: makeUploadPool(),
-      jwk: throwawayJwk,
-      maxRewardWinston: CAP,
-      apiFactory: factory,
-    });
-
-    const tags = (result as { tags: { name: string; value: string }[] }).tags;
-    expect(tags.find((t) => t.name === "Codex-App-Id")?.value).toBe("my-codex-id");
-    expect(tags.find((t) => t.name === "Codex-App-Version")?.value).toBe(
-      "2026-09-30T00:00:00.000Z",
-    );
-  });
-
-  it("a malformed-but-valid-JSON exportJson (missing/wrong-typed fields) still succeeds with no lineage tags", async () => {
-    const { factory } = makeFakeUploadApiFactory();
-    const exportJson = JSON.stringify({
-      codexIdentity: { formatted: 12345 }, // wrong type — not a string
-      // lastUpdatedAt omitted entirely
-    });
-
-    const result = await backupCodexToLibrary(exportJson, {
-      store,
-      pool: makeUploadPool(),
-      jwk: throwawayJwk,
-      maxRewardWinston: CAP,
-      apiFactory: factory,
-    });
-
-    const tags = (result as { tags: { name: string; value: string }[] }).tags;
-    expect(tags.find((t) => t.name === "Codex-App-Id")).toBeUndefined();
-    expect(tags.find((t) => t.name === "Codex-App-Version")).toBeUndefined();
-  });
-
-  it("a completely invalid (non-JSON) exportJson still succeeds with no lineage tags — the parse step never throws", async () => {
-    const { factory } = makeFakeUploadApiFactory();
-    const exportJson = "not valid json at all {{{";
-
-    const result = await backupCodexToLibrary(exportJson, {
-      store,
-      pool: makeUploadPool(),
-      jwk: throwawayJwk,
-      maxRewardWinston: CAP,
-      apiFactory: factory,
-    });
-
-    const tags = (result as { tags: { name: string; value: string }[] }).tags;
-    expect(tags.find((t) => t.name === "Codex-App-Id")).toBeUndefined();
-    expect(tags.find((t) => t.name === "Codex-App-Version")).toBeUndefined();
-    const list = await store.list(OWNER);
-    expect(list).toHaveLength(1);
-    expect(list[0].status).toBe("pending");
-  });
-
   it("a throwing backup upload rejects, leaves the store EMPTY, and never calls onSuccess (upload-then-append, no phantom entry)", async () => {
     const { factory } = makeFakeUploadApiFactory({ anchorFails: true });
     const onSuccess = vi.fn();
 
     await expect(
-      backupCodexToLibrary("export-json-payload", {
-        store,
-        pool: makeUploadPool(),
-        jwk: throwawayJwk,
-        maxRewardWinston: CAP,
-        apiFactory: factory,
+      backupCodexToLibrary(buildMinimalExportJson(), {
+        ...baseEnvelopeOptions(factory),
         onSuccess,
       }),
     ).rejects.toBeTruthy();
@@ -651,20 +896,107 @@ describe("E3 flow — backupCodexToLibrary (T5)", () => {
     expect(await store.list(OWNER)).toHaveLength(0);
     expect(onSuccess).not.toHaveBeenCalled();
   });
-});
 
-describe("E3 flow — backupCodexToLibrary recovery-key tagging (T2, codex-recovery-backup-tagging)", () => {
-  let store: MemoryLibraryStore;
-  beforeEach(() => {
-    store = new MemoryLibraryStore();
+  it("a non-codec-shaped exportJson throws clearly BEFORE any upload is attempted — the envelope cannot opacity-wrap/field-transform what it cannot parse", async () => {
+    const { apiFactory, calls } = makeRecordingUploadApi();
+
+    await expect(
+      backupCodexToLibrary("not valid json at all {{{", baseEnvelopeOptions(apiFactory)),
+    ).rejects.toBeTruthy();
+
+    expect(calls).toHaveLength(0);
+    expect(await store.list(OWNER)).toHaveLength(0);
   });
 
-  const BITSTRING = "1".repeat(800) + "0".repeat(800);
-  const CODEX_PASSWORD = "the codex's own current unlock password";
+  describe("degrade path (step 8): the envelope's 4 real inputs are REQUIRED preconditions, never silently optional", () => {
+    /** Each omission below bypasses the compile-time requirement via `as
+     *  any` — proving the RUNTIME guard also fails loudly (defense in depth
+     *  for a caller that reaches this function from plain JS, or that
+     *  constructs the options object dynamically) — never silently
+     *  degrading to an unwrapped/weaker/wrong-but-claimed-successful
+     *  upload, per design.md's own acceptance criterion. */
+    it("omitting codexPassword throws a specific error and attempts no upload", async () => {
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const opts = baseEnvelopeOptions(apiFactory) as Record<string, unknown>;
+      delete opts.codexPassword;
 
-  /** A deterministic, KEY-AWARE fake `CryptoSeam` — mirrors
-   *  `crypto-account-key-cipher.test.ts`'s own fake exactly, so a wrong-key
-   *  decrypt genuinely throws rather than silently ignoring the key. */
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), opts as never),
+      ).rejects.toThrow(/codexPassword/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("omitting primeArweaveSeedBitstring (the Master Seed wrap source) throws a specific error and attempts no upload", async () => {
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const opts = baseEnvelopeOptions(apiFactory) as Record<string, unknown>;
+      delete opts.primeArweaveSeedBitstring;
+
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), opts as never),
+      ).rejects.toThrow(/primeArweaveSeedBitstring/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("omitting standardApolloBitstring (the Standard Apollo wrap source) throws a specific error and attempts no upload", async () => {
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const opts = baseEnvelopeOptions(apiFactory) as Record<string, unknown>;
+      delete opts.standardApolloBitstring;
+
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), opts as never),
+      ).rejects.toThrow(/standardApolloBitstring/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("omitting cryptoSeam throws a specific error and attempts no upload", async () => {
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const opts = baseEnvelopeOptions(apiFactory) as Record<string, unknown>;
+      delete opts.cryptoSeam;
+
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), opts as never),
+      ).rejects.toThrow(/cryptoSeam/);
+      expect(calls).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * E3 flow — the Arweave-PIN wrap path (T4, `codex-backup-envelope-
+ * encryption`). Extends T3's dual-key envelope with an OPT-IN, per-source
+ * PIN protection: a source's `...-Default` wrap pair is replaced by its
+ * `...-Pin` pair (NEVER both for the same source — mutual exclusivity, the
+ * single most safety-critical property here), while the OTHER source (left
+ * un-PIN'd) is completely unaffected.
+ *
+ * REAL RSA-4096 keygen is ~6.7s/key (~13.4s per call, since index 0 is
+ * force-generated alongside the requested position every time — see
+ * `RealRsaFakeWorker`'s own doc comment above) — this file budgets exactly
+ * 4 real keygen calls across the whole suite below:
+ *   1. "mutual exclusivity" describe, test 1 (Master Seed PIN'd).
+ *   2. "mutual exclusivity" describe, test 2 (Standard Apollo PIN'd).
+ *   3. "restore-side correctness" describe's `beforeAll` (ONE real PIN'd
+ *      backup, shared by BOTH its `it`s below via a module-level fixture —
+ *      saves a 4th backup-time call).
+ *   4. "restore-side correctness" describe, the correct-PIN `it` (one
+ *      restore-side re-derivation).
+ * …and a 5th for the wrong-PIN `it` (a re-derivation at a DIFFERENT
+ * position) — 5 calls total, ~67s of real CPU, the smallest set that still
+ * honestly proves: mixed-configuration coexistence, mutual exclusivity in
+ * BOTH directions, a real functional unwrap, and a real wrong-PIN failure.
+ * The PIN-shape-validation and no-PIN-non-regression describes below spend
+ * ZERO real keygen calls (validation must reject before any keygen is
+ * attempted; the no-PIN path never touches the PIN machinery at all).
+ */
+describe("E3 flow — Arweave-PIN wrap path (T4, codex-backup-envelope-encryption)", () => {
+  /** Mirrors the T3 describe block's own fixtures above (duplicated per this
+   *  file's established per-describe convention — see e.g. the "encrypted
+   *  upload composition" describe's own independently-declared `BITSTRING`). */
+  const MASTER_SEED_BITSTRING = "1".repeat(800) + "0".repeat(800);
+  const STANDARD_APOLLO_BITSTRING = "1".repeat(512) + "0".repeat(512);
+  const CODEX_PASSWORD = "the codex's own current unlock password";
+  const ORIGINAL_SECRET_PLAINTEXT = "arweave-seed-secret-plaintext-words";
+
   const keyAwareFakeSeam: CryptoSeam = {
     encrypt: (plaintext: string, key: string) => `${key}::${plaintext}`,
     decrypt: (ciphertext: string, key: string) => {
@@ -676,83 +1008,549 @@ describe("E3 flow — backupCodexToLibrary recovery-key tagging (T2, codex-recov
     },
   };
 
-  it("given both codexPassword and primeArweaveSeedBitstring (and a cryptoSeam), posts a Codex-Backup-Recovery-Key tag whose value decrypts back to the EXACT original password", async () => {
-    const { factory } = makeFakeUploadApiFactory();
+  function buildMinimalExportJson(): string {
+    return JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-09-30T00:00:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {},
+      arweaveSeeds: [
+        {
+          id: "seed-1",
+          secret: `${CODEX_PASSWORD}::${ORIGINAL_SECRET_PLAINTEXT}`,
+          createdAt: "2026-09-30T00:00:00.000Z",
+        },
+      ],
+    });
+  }
 
-    const result = await backupCodexToLibrary("export-json-payload", {
+  function baseOptions(apiFactory: UploadGatewayApiFactory, store: MemoryLibraryStore) {
+    return {
       store,
       pool: makeUploadPool(),
       jwk: throwawayJwk,
       maxRewardWinston: CAP,
-      apiFactory: factory,
+      apiFactory,
       codexPassword: CODEX_PASSWORD,
-      primeArweaveSeedBitstring: BITSTRING,
+      primeArweaveSeedBitstring: MASTER_SEED_BITSTRING,
+      standardApolloBitstring: STANDARD_APOLLO_BITSTRING,
       cryptoSeam: keyAwareFakeSeam,
+    };
+  }
+
+  describe("mutual exclusivity + mixed configuration (REAL RSA-4096 keygen)", () => {
+    let store: MemoryLibraryStore;
+    beforeEach(() => {
+      store = new MemoryLibraryStore();
     });
 
-    const tags = (result as { tags: { name: string; value: string }[] }).tags;
-    const recoveryTag = tags.find((t) => t.name === "Codex-Backup-Recovery-Key");
-    expect(recoveryTag).toBeDefined();
+    it(
+      "Master Seed PIN'd (Standard Apollo left default): posts ONLY the Pin pair for Master Seed — NEVER its Default pair — while Standard Apollo's Default pair posts normally, unaffected",
+      async () => {
+        const { apiFactory } = makeRecordingUploadApi();
 
-    const decrypted = await decryptWithAccountKey(recoveryTag!.value, BITSTRING, keyAwareFakeSeam);
-    expect(decrypted).toBe(CODEX_PASSWORD);
+        const result = await backupCodexToLibrary(buildMinimalExportJson(), {
+          ...baseOptions(apiFactory, store),
+          masterSeedPin: "123456789",
+          pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+        });
+        const tags = (result as { tags: Tag[] }).tags;
 
-    // The locally-appended entry ALSO carries the tag (before any rebuild).
-    const list = await store.list(OWNER);
-    expect(list[0].tags.find((t) => t.name === "Codex-Backup-Recovery-Key")?.value).toBe(
-      recoveryTag!.value,
+        // Master Seed: Pin pair present, Default pair ABSENT (the whole
+        // point — a stray Default alongside a Pin'd wrap would defeat it).
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN)).toBeDefined();
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN)).toBeDefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT),
+        ).toBeUndefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT),
+        ).toBeUndefined();
+
+        // Standard Apollo: unaffected — its normal Default pair, no Pin pair.
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT),
+        ).toBeDefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT),
+        ).toBeDefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN),
+        ).toBeUndefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN),
+        ).toBeUndefined();
+
+        // Exactly 4 wrapped-key tags total (2 Pin + 2 Default) — never 8.
+        const allWrapTagNames = [
+          TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+          TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+          TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+          TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+        ];
+        const present = tags.filter((t) =>
+          [
+            TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+            TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+            TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+            TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+            TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+            TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+            TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+            TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+          ].includes(t.name),
+        );
+        expect(present.map((t) => t.name).sort()).toEqual([...allWrapTagNames].sort());
+      },
+      30_000,
+    );
+
+    it(
+      "the REVERSE: Standard Apollo PIN'd (Master Seed left default) — posts ONLY the Pin pair for Standard Apollo, never its Default pair, while Master Seed's Default pair posts normally, unaffected",
+      async () => {
+        const { apiFactory } = makeRecordingUploadApi();
+
+        const result = await backupCodexToLibrary(buildMinimalExportJson(), {
+          ...baseOptions(apiFactory, store),
+          standardApolloPin: "246813579",
+          pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+        });
+        const tags = (result as { tags: Tag[] }).tags;
+
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN)).toBeDefined();
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN)).toBeDefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT),
+        ).toBeUndefined();
+        expect(
+          tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT),
+        ).toBeUndefined();
+
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT)).toBeDefined();
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT)).toBeDefined();
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN)).toBeUndefined();
+        expect(tags.find((t) => t.name === TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN)).toBeUndefined();
+      },
+      30_000,
     );
   });
 
-  it("given codexPassword WITHOUT primeArweaveSeedBitstring, posts NO recovery-key tag and the rest of the tag set is unchanged from a plain backup", async () => {
-    const { factory } = makeFakeUploadApiFactory();
+  describe("restore-side correctness (REAL RSA-4096 keygen, re-deriving the keypair with NO stored key material)", () => {
+    /** ONE real PIN'd backup, shared by both `it`s below (via `beforeAll`) —
+     *  saves a 4th real keygen call versus giving each `it` its own backup. */
+    let postedTags: Tag[];
+    const PIN = "987654321";
+    const WRONG_PIN = "123456789";
 
-    const withPasswordOnly = await backupCodexToLibrary("export-json-payload", {
-      store,
-      pool: makeUploadPool(),
-      jwk: throwawayJwk,
-      maxRewardWinston: CAP,
-      apiFactory: factory,
-      codexPassword: CODEX_PASSWORD,
-      cryptoSeam: keyAwareFakeSeam,
-    });
-    const tagsWithPasswordOnly = (withPasswordOnly as { tags: { name: string; value: string }[] }).tags;
-    expect(tagsWithPasswordOnly.find((t) => t.name === "Codex-Backup-Recovery-Key")).toBeUndefined();
+    beforeAll(async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory } = makeRecordingUploadApi();
 
-    const baselineStore = new MemoryLibraryStore();
-    const baseline = await backupCodexToLibrary("export-json-payload", {
-      store: baselineStore,
-      pool: makeUploadPool(),
-      jwk: throwawayJwk,
-      maxRewardWinston: CAP,
-      apiFactory: factory,
-    });
-    const baselineTags = (baseline as { tags: { name: string; value: string }[] }).tags;
+      const result = await backupCodexToLibrary(buildMinimalExportJson(), {
+        ...baseOptions(apiFactory, store),
+        masterSeedPin: PIN,
+        pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+      });
+      postedTags = (result as { tags: Tag[] }).tags;
+    }, 30_000);
 
-    // Regression guard: the exact same tag NAMES as an entirely plain backup.
-    expect(tagsWithPasswordOnly.map((t) => t.name).sort()).toEqual(
-      baselineTags.map((t) => t.name).sort(),
+    it(
+      "the CORRECT PIN re-derives the SAME keypair: its p/q unwrap the real posted IDEK/EDEK, and the unwrapped IDEK/EDEK genuinely decrypt (not just byte-compare) a probe each encrypted",
+      async () => {
+        const idekWrapped = postedTags.find(
+          (t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+        )!.value;
+        const edekWrapped = postedTags.find(
+          (t) => t.name === TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+        )!.value;
+
+        const { p, q } = await deriveRsaKeypairAtPin(
+          MASTER_SEED_BITSTRING,
+          PIN,
+          "masterSeedPin",
+          makeRealPinWorkerFactory(),
+        );
+
+        const idek = await unwrapDekWithScalar(idekWrapped, p, keyAwareFakeSeam);
+        const edek = await unwrapDekWithScalar(edekWrapped, q, keyAwareFakeSeam);
+
+        const { encryptWithDek } = await import("../src/crypto/backupEnvelope.js");
+
+        const idekProbe = new TextEncoder().encode("pin-unlocks-the-real-idek");
+        const idekEnc = await encryptWithDek(idek, idekProbe);
+        const idekDec = await decryptWithDek(idek, idekEnc.ciphertext, idekEnc.iv);
+        expect(new TextDecoder().decode(idekDec)).toBe("pin-unlocks-the-real-idek");
+
+        const edekProbe = new TextEncoder().encode("pin-unlocks-the-real-edek");
+        const edekEnc = await encryptWithDek(edek, edekProbe);
+        const edekDec = await decryptWithDek(edek, edekEnc.ciphertext, edekEnc.iv);
+        expect(new TextDecoder().decode(edekDec)).toBe("pin-unlocks-the-real-edek");
+      },
+      30_000,
+    );
+
+    it(
+      "the WRONG PIN re-derives a DIFFERENT keypair at a DIFFERENT position: its p fails to unwrap the real posted IDEK — a real decrypt failure, never a plausible-looking wrong success",
+      async () => {
+        const idekWrapped = postedTags.find(
+          (t) => t.name === TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+        )!.value;
+
+        const { p: wrongP } = await deriveRsaKeypairAtPin(
+          MASTER_SEED_BITSTRING,
+          WRONG_PIN,
+          "masterSeedPin",
+          makeRealPinWorkerFactory(),
+        );
+
+        await expect(
+          unwrapDekWithScalar(idekWrapped, wrongP, keyAwareFakeSeam),
+        ).rejects.toThrow();
+      },
+      30_000,
     );
   });
 
-  it("given primeArweaveSeedBitstring WITHOUT codexPassword, posts NO recovery-key tag — no error, backup still succeeds", async () => {
-    const { factory } = makeFakeUploadApiFactory();
+  describe("PIN shape validation — rejected BEFORE any keygen is attempted (cheap validation first; a real keygen costs ~6.7-13.4s)", () => {
+    it("a 5-digit PIN throws and NEVER invokes the keygen worker factory", async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory } = makeRecordingUploadApi();
+      const workerFactory = vi.fn(() => new RealRsaFakeWorker() as unknown as Worker);
 
-    const result = await backupCodexToLibrary("export-json-payload", {
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), {
+          ...baseOptions(apiFactory, store),
+          masterSeedPin: "12345",
+          pinKeygenWorkerFactory: workerFactory,
+        }),
+      ).rejects.toThrow();
+
+      expect(workerFactory).not.toHaveBeenCalled();
+    });
+
+    it("a 16-digit PIN throws and NEVER invokes the keygen worker factory", async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory } = makeRecordingUploadApi();
+      const workerFactory = vi.fn(() => new RealRsaFakeWorker() as unknown as Worker);
+
+      await expect(
+        backupCodexToLibrary(buildMinimalExportJson(), {
+          ...baseOptions(apiFactory, store),
+          masterSeedPin: "1234567890123456",
+          pinKeygenWorkerFactory: workerFactory,
+        }),
+      ).rejects.toThrow();
+
+      expect(workerFactory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("neither source PIN'd — non-regression (T3's existing default-only behavior, unchanged)", () => {
+    it("posts exactly the normal 4 Default tags, no Pin tags at all, with no pinKeygenWorkerFactory supplied", async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory } = makeRecordingUploadApi();
+
+      const result = await backupCodexToLibrary(
+        buildMinimalExportJson(),
+        baseOptions(apiFactory, store),
+      );
+      const tags = (result as { tags: Tag[] }).tags;
+
+      [
+        TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT,
+        TAG_CODEX_BACKUP_EDEK_MASTERSEED_DEFAULT,
+        TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT,
+        TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_DEFAULT,
+      ].forEach((name) => expect(tags.find((t) => t.name === name)).toBeDefined());
+
+      [
+        TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN,
+        TAG_CODEX_BACKUP_EDEK_MASTERSEED_PIN,
+        TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_PIN,
+        TAG_CODEX_BACKUP_EDEK_STANDARDAPOLLO_PIN,
+      ].forEach((name) => expect(tags.find((t) => t.name === name)).toBeUndefined());
+    });
+  });
+});
+
+/**
+ * E3 flow — `restoreCodexFromBackupEnvelope` (T5, `codex-backup-envelope-
+ * encryption`) — the restore-side counterpart to T3/T4's `backupCodexToLibrary`.
+ *
+ * Real-RSA-4096-keygen budget (same `RealRsaFakeWorker` cost discipline as
+ * the T4 describe block above — ~13.4s per call, index 0 always
+ * force-generated alongside the requested position): this block spends
+ * exactly 3 real keygen calls total, all inside ONE shared `beforeAll`-backed
+ * mixed-configuration upload (Master Seed PIN'd, Standard Apollo left
+ * default):
+ *   1. the shared `beforeAll`'s own backup-time PIN wrap.
+ *   2. the correct-PIN restore (also proves the full mixed-config round-trip
+ *      together with the Standard Apollo default restore, which costs zero
+ *      keygen calls).
+ *   3. the wrong-PIN restore (a real decrypt failure, never a
+ *      plausible-looking wrong success).
+ * Every other test below (routing determination, PIN-required signaling,
+ * the two-pure-default round-trip, the wrong-bitstring case) spends zero
+ * real keygen calls.
+ */
+describe("E3 flow — restoreCodexFromBackupEnvelope (T5, codex-backup-envelope-encryption)", () => {
+  const MASTER_SEED_BITSTRING = "1".repeat(800) + "0".repeat(800);
+  const STANDARD_APOLLO_BITSTRING = "1".repeat(512) + "0".repeat(512);
+  const CODEX_PASSWORD = "the codex's own current unlock password";
+  const ORIGINAL_SECRET_PLAINTEXT = "arweave-seed-secret-plaintext-words";
+
+  const keyAwareFakeSeam: CryptoSeam = {
+    encrypt: (plaintext: string, key: string) => `${key}::${plaintext}`,
+    decrypt: (ciphertext: string, key: string) => {
+      const prefix = `${key}::`;
+      if (!ciphertext.startsWith(prefix)) {
+        throw new Error("wrong key — auth-tag-equivalent failure");
+      }
+      return ciphertext.slice(prefix.length);
+    },
+  };
+
+  function buildMinimalExportJson(): string {
+    return JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-09-30T00:00:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {},
+      arweaveSeeds: [
+        {
+          id: "seed-1",
+          secret: `${CODEX_PASSWORD}::${ORIGINAL_SECRET_PLAINTEXT}`,
+          createdAt: "2026-09-30T00:00:00.000Z",
+        },
+      ],
+    });
+  }
+
+  function baseOptions(apiFactory: UploadGatewayApiFactory, store: MemoryLibraryStore) {
+    return {
       store,
       pool: makeUploadPool(),
       jwk: throwawayJwk,
       maxRewardWinston: CAP,
-      apiFactory: factory,
-      primeArweaveSeedBitstring: BITSTRING,
+      apiFactory,
+      codexPassword: CODEX_PASSWORD,
+      primeArweaveSeedBitstring: MASTER_SEED_BITSTRING,
+      standardApolloBitstring: STANDARD_APOLLO_BITSTRING,
       cryptoSeam: keyAwareFakeSeam,
+    };
+  }
+
+  /** Decodes a {@link makeRecordingUploadApi} call's posted bytes back to the
+   *  UTF-8 string `restoreCodexFromBackupEnvelope`'s own `opaqueBlob` input
+   *  expects — exactly what fetching the real transaction's data would yield. */
+  function postedOpaqueBlob(calls: { data: Uint8Array }[]): string {
+    return Buffer.from(calls[0].data).toString("utf8");
+  }
+
+  describe("two default sources — either alone restores, both reach the SAME plaintext, with zero password ever consulted", () => {
+    let tags: Tag[];
+    let opaqueBlob: string;
+
+    beforeAll(async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const result = await backupCodexToLibrary(
+        buildMinimalExportJson(),
+        baseOptions(apiFactory, store),
+      );
+      tags = (result as { tags: Tag[] }).tags;
+      opaqueBlob = postedOpaqueBlob(calls);
     });
 
-    const tags = (result as { tags: { name: string; value: string }[] }).tags;
-    expect(tags.find((t) => t.name === "Codex-Backup-Recovery-Key")).toBeUndefined();
-    const list = await store.list(OWNER);
-    expect(list).toHaveLength(1);
-    expect(list[0].status).toBe("pending");
+    it("Master Seed's bitstring ALONE restores the real secret plaintext, with NO password string ever appearing anywhere in the result", async () => {
+      const restoredJson = await restoreCodexFromBackupEnvelope({
+        tags,
+        opaqueBlob,
+        source: "masterSeed",
+        bitstring: MASTER_SEED_BITSTRING,
+        cryptoSeam: keyAwareFakeSeam,
+      });
+
+      expect(restoredJson).toContain(ORIGINAL_SECRET_PLAINTEXT);
+      // architecturally never consulted: `opts` has no password-shaped field
+      // at all, and the restored plaintext itself never carries the old
+      // password string (the field is now a bare secret, not `pw::secret`).
+      expect(restoredJson).not.toContain(CODEX_PASSWORD);
+      const parsed = JSON.parse(restoredJson) as { arweaveSeeds: { secret: string }[] };
+      expect(parsed.arweaveSeeds[0].secret).toBe(ORIGINAL_SECRET_PLAINTEXT);
+    });
+
+    it("Standard Apollo's bitstring ALONE restores identically, independent of Master Seed", async () => {
+      const restoredJson = await restoreCodexFromBackupEnvelope({
+        tags,
+        opaqueBlob,
+        source: "standardApollo",
+        bitstring: STANDARD_APOLLO_BITSTRING,
+        cryptoSeam: keyAwareFakeSeam,
+      });
+
+      const parsed = JSON.parse(restoredJson) as { arweaveSeeds: { secret: string }[] };
+      expect(parsed.arweaveSeeds[0].secret).toBe(ORIGINAL_SECRET_PLAINTEXT);
+    });
+
+    it("the two DEFAULT restore paths produce the SAME final plaintext codex, byte-for-byte — proving both unlock paths genuinely reach the same content", async () => {
+      const viaMasterSeed = await restoreCodexFromBackupEnvelope({
+        tags,
+        opaqueBlob,
+        source: "masterSeed",
+        bitstring: MASTER_SEED_BITSTRING,
+        cryptoSeam: keyAwareFakeSeam,
+      });
+      const viaStandardApollo = await restoreCodexFromBackupEnvelope({
+        tags,
+        opaqueBlob,
+        source: "standardApollo",
+        bitstring: STANDARD_APOLLO_BITSTRING,
+        cryptoSeam: keyAwareFakeSeam,
+      });
+
+      expect(viaMasterSeed).toBe(viaStandardApollo);
+    });
+
+    it("restoring with a WRONG bitstring entirely (matching neither real source) fails loudly — never a plausible-looking wrong success", async () => {
+      const wrongBitstring = "0".repeat(800) + "1".repeat(800); // same shape, wrong value
+      await expect(
+        restoreCodexFromBackupEnvelope({
+          tags,
+          opaqueBlob,
+          source: "masterSeed",
+          bitstring: wrongBitstring,
+          cryptoSeam: keyAwareFakeSeam,
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("tag-presence-based routing — determined BEFORE any unwrap attempt, never guessed blind", () => {
+    it('determineBackupSourceRouting resolves "default" when only the Default IDEK tag is present', () => {
+      const tags: Tag[] = [{ name: TAG_CODEX_BACKUP_IDEK_MASTERSEED_DEFAULT, value: "x" }];
+      expect(determineBackupSourceRouting(tags, "masterSeed")).toBe("default");
+    });
+
+    it('determineBackupSourceRouting resolves "pin" when only the Pin IDEK tag is present', () => {
+      const tags: Tag[] = [{ name: TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN, value: "x" }];
+      expect(determineBackupSourceRouting(tags, "masterSeed")).toBe("pin");
+    });
+
+    it('determineBackupSourceRouting resolves "absent" when neither tag is present for that source (a DIFFERENT source\'s tags present is irrelevant)', () => {
+      const tags: Tag[] = [{ name: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT, value: "x" }];
+      expect(determineBackupSourceRouting(tags, "masterSeed")).toBe("absent");
+    });
+
+    it("restoring an ABSENT source throws BackupSourceNotUsedError, naming the source, before touching cryptoSeam/bitstring at all", async () => {
+      const tags: Tag[] = [{ name: TAG_CODEX_BACKUP_IDEK_STANDARDAPOLLO_DEFAULT, value: "x" }];
+      let thrown: unknown;
+      try {
+        await restoreCodexFromBackupEnvelope({
+          tags,
+          opaqueBlob: "irrelevant",
+          source: "masterSeed",
+          bitstring: MASTER_SEED_BITSTRING,
+          cryptoSeam: keyAwareFakeSeam,
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(BackupSourceNotUsedError);
+      expect((thrown as BackupSourceNotUsedError).source).toBe("masterSeed");
+    });
+
+    it('restoring a "pin"-routed source with NO pin supplied throws BackupPinRequiredError BEFORE invoking pinKeygenWorkerFactory at all (never a failed blind unwrap attempt)', async () => {
+      const tags: Tag[] = [{ name: TAG_CODEX_BACKUP_IDEK_MASTERSEED_PIN, value: "x" }];
+      const workerFactory = vi.fn(() => new RealRsaFakeWorker() as unknown as Worker);
+
+      let thrown: unknown;
+      try {
+        await restoreCodexFromBackupEnvelope({
+          tags,
+          opaqueBlob: "irrelevant",
+          source: "masterSeed",
+          bitstring: MASTER_SEED_BITSTRING,
+          cryptoSeam: keyAwareFakeSeam,
+          pinKeygenWorkerFactory: workerFactory,
+        });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(BackupPinRequiredError);
+      expect((thrown as BackupPinRequiredError).source).toBe("masterSeed");
+      expect(workerFactory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("mixed configuration (Master Seed PIN'd, Standard Apollo default) — REAL RSA-4096 keygen full round-trip", () => {
+    let tags: Tag[];
+    let opaqueBlob: string;
+    const PIN = "135791357";
+    const WRONG_PIN = "975313579";
+
+    beforeAll(async () => {
+      const store = new MemoryLibraryStore();
+      const { apiFactory, calls } = makeRecordingUploadApi();
+      const result = await backupCodexToLibrary(buildMinimalExportJson(), {
+        ...baseOptions(apiFactory, store),
+        masterSeedPin: PIN,
+        pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+      });
+      tags = (result as { tags: Tag[] }).tags;
+      opaqueBlob = postedOpaqueBlob(calls);
+    }, 30_000);
+
+    it(
+      "restoring the PIN'd Master Seed source with the CORRECT PIN succeeds, and reaches the SAME plaintext as restoring the same upload's un-PIN'd Standard Apollo default source",
+      async () => {
+        const viaMasterSeedPin = await restoreCodexFromBackupEnvelope({
+          tags,
+          opaqueBlob,
+          source: "masterSeed",
+          bitstring: MASTER_SEED_BITSTRING,
+          pin: PIN,
+          pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+          cryptoSeam: keyAwareFakeSeam,
+        });
+        const viaStandardApolloDefault = await restoreCodexFromBackupEnvelope({
+          tags,
+          opaqueBlob,
+          source: "standardApollo",
+          bitstring: STANDARD_APOLLO_BITSTRING,
+          cryptoSeam: keyAwareFakeSeam,
+        });
+
+        const parsed = JSON.parse(viaMasterSeedPin) as { arweaveSeeds: { secret: string }[] };
+        expect(parsed.arweaveSeeds[0].secret).toBe(ORIGINAL_SECRET_PLAINTEXT);
+        // Full round-trip proof: BOTH applicable paths of this mixed-config
+        // upload reach byte-identical final plaintext.
+        expect(viaMasterSeedPin).toBe(viaStandardApolloDefault);
+      },
+      30_000,
+    );
+
+    it(
+      "restoring the PIN'd Master Seed source with the WRONG PIN fails loudly (a real decrypt failure, never a plausible-looking wrong success)",
+      async () => {
+        await expect(
+          restoreCodexFromBackupEnvelope({
+            tags,
+            opaqueBlob,
+            source: "masterSeed",
+            bitstring: MASTER_SEED_BITSTRING,
+            pin: WRONG_PIN,
+            pinKeygenWorkerFactory: makeRealPinWorkerFactory(),
+            cryptoSeam: keyAwareFakeSeam,
+          }),
+        ).rejects.toThrow();
+      },
+      30_000,
+    );
   });
 });
 

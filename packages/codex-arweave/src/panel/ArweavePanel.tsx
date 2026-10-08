@@ -70,6 +70,8 @@ import { LibraryAutoRebuildProgress } from "./LibraryAutoRebuildProgress.js";
 import { CodexBackupArea } from "./CodexBackupArea.js";
 import { CodexBackupHistoryArea } from "./CodexBackupHistoryArea.js";
 import { ArweaveRestoreEligibilityStatus } from "./ArweaveRestoreEligibilityStatus.js";
+import { CodexBackupInformatics } from "./CodexBackupInformatics.js";
+import { CodexMigrationInformatics } from "./CodexMigrationInformatics.js";
 import {
   ArweaveSeedsArea,
   type ArweaveSeedDeletion,
@@ -134,8 +136,13 @@ interface ArweaveWatchListSeams {
 const EMPTY_WATCHED_ENTRIES: WatchListEntry[] = [];
 
 
-/** The Arweave chain's declared categories, in display order. */
-const CATEGORIES = ["seeds", "pure-keys", "accounts", "upload", "library"] as const;
+/** The Arweave chain's declared categories, in display order. `codex-id`
+ *  (`codex-id-page` T1) is the dedicated, standalone home for the codex's
+ *  whole permaweb posture — live restore-eligibility status plus (Wave 2)
+ *  the "make eligible" / "back up this codex" entry points — distinct from
+ *  `library`'s own Codex tab, which stays the backup/restore WORKING area
+ *  (upload + history), not the explanatory/status one. */
+const CATEGORIES = ["seeds", "pure-keys", "accounts", "upload", "library", "codex-id"] as const;
 type CategoryId = (typeof CATEGORIES)[number];
 
 /** Human labels for the category strip. */
@@ -145,6 +152,7 @@ const CATEGORY_LABELS: Record<CategoryId, string> = {
   accounts: "Accounts",
   upload: "Upload",
   library: "Library",
+  "codex-id": "Codex ID",
 };
 
 
@@ -180,6 +188,11 @@ const UploadGlyph: Glyph = ({ style }) => (
 const LibraryGlyph: Glyph = ({ style }) => (
   <svg {...svgBase} style={style}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></svg>
 );
+/** The "Codex ID" category's own glyph (`codex-id-page` T1) — a plain ID
+ *  badge, distinct from every other category's icon. */
+const CodexIdGlyph: Glyph = ({ style }) => (
+  <svg {...svgBase} style={style}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M7 16a2 2 0 0 1 4 0" /><path d="M14 9h4" /><path d="M14 13h4" /></svg>
+);
 /** The Accounts category's relocated refresh button — same glyph
  *  `ArweaveAccountsArea.tsx`'s own `RefreshGlyph` uses (module JSDoc: this
  *  module stays self-contained, so it is duplicated rather than imported). */
@@ -212,6 +225,7 @@ const CATEGORY_META: Record<CategoryId, { Icon: Glyph; color: string }> = {
   accounts: { Icon: AccountsGlyph, color: "#ceac5f" },
   upload: { Icon: UploadGlyph, color: "#38bdf8" },
   library: { Icon: LibraryGlyph, color: "#f472b6" },
+  "codex-id": { Icon: CodexIdGlyph, color: "#2dd4bf" },
 };
 
 /** Category-button height. Matches the chain rail's row height in codex-ui's
@@ -496,6 +510,50 @@ const EMPTY_STYLE: React.CSSProperties = {
   fontSize: 13,
 };
 
+/** The "Codex ID" page shell (`codex-id-page` T1) — eligibility status up
+ *  top, then the composition points Wave 2 (T2's informatics, T3's action
+ *  buttons) slot into below. */
+const CODEX_ID_PAGE_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+  maxWidth: 560,
+};
+
+/** The Codex ID page's two action buttons, stacked (`codex-id-page` T3). */
+const CODEX_ID_ACTIONS_WRAP_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+/** Each action's own honest "what/why" copy, directly under its disabled
+ *  button — the task's "title/tooltip or adjacent text" requirement is
+ *  satisfied with BOTH: the `title` tooltip mirrors the existing Upload
+ *  category convention, and this paragraph makes the same explanation
+ *  visible without hovering. */
+const CODEX_ID_ACTION_EXPLANATION_STYLE: React.CSSProperties = {
+  margin: "6px 0 0 0",
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: "#888",
+};
+
+/** The "already eligible" confirmation note that REPLACES the disabled
+ *  "Make this codex eligible" button once eligibility resolves true — a
+ *  disabled no-op button would be a confusing dead affordance for a codex
+ *  that needs no migration at all. Green-accented (matches
+ *  `ArweaveRestoreEligibilityStatus`'s own `eligible` dot colour), unlike
+ *  the gold eligibility-status pill above it, so the two visually agree. */
+const CODEX_ID_ALREADY_ELIGIBLE_STYLE: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid #22c55e40",
+  backgroundColor: "#22c55e1a",
+  color: "#d2d3d4",
+  fontSize: 13,
+};
+
 /** The Upload category's own entry-point buttons (`arweave-upload-wizard`,
  *  T3) — replaces the old always-visible flat `UploadArea` form. */
 const UPLOAD_ENTRY_WRAP_STYLE: React.CSSProperties = {
@@ -766,6 +824,42 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
   // which throws): a consumer that has not wired the provider yet still gets a
   // working read-only panel rather than a crash.
   const deps = useContext(ArweavePanelContext);
+
+  /**
+   * `codex-id-page` T3 — gates the "Make this codex eligible" button's
+   * PRESENCE: hidden once the codex resolves truly eligible (a disabled
+   * no-op button at that point would be a confusing dead affordance),
+   * shown otherwise (not-eligible, still checking, errored, or no seam
+   * wired at all — "unknown" defaults to showing it, since the honest
+   * default is "you may still need this", never a silent hide).
+   *
+   * This calls the exact SAME host-injected `checkArweaveRestoreEligibility`
+   * seam `ArweaveRestoreEligibilityStatus` below already calls — NOT a
+   * second implementation of the underlying derivation (that still lives
+   * entirely on the host side). `ArweaveRestoreEligibilityStatus` is reused
+   * unmodified (its own module doc/T1's decision) and exposes no result
+   * callback of its own, so there is no way to read its resolved phase
+   * without either modifying it (out of this task's file scope) or calling
+   * the same seam again here, purely for this button's visibility.
+   */
+  type CodexIdEligibilityPhase = "unknown" | "checking" | "eligible" | "not-eligible" | "error";
+  const [codexIdEligibility, setCodexIdEligibility] = useState<CodexIdEligibilityPhase>("unknown");
+  useEffect(() => {
+    if (active !== "codex-id" || deps?.checkArweaveRestoreEligibility === undefined) return;
+    let cancelled = false;
+    setCodexIdEligibility("checking");
+    deps
+      .checkArweaveRestoreEligibility()
+      .then((eligible) => {
+        if (!cancelled) setCodexIdEligibility(eligible ? "eligible" : "not-eligible");
+      })
+      .catch(() => {
+        if (!cancelled) setCodexIdEligibility("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, deps?.checkArweaveRestoreEligibility]);
 
   /** The host's store-backed seed seams (see {@link ArweaveSeedStoreSeams}). */
   const seedSeams = deps as (typeof deps & ArweaveSeedStoreSeams) | null;
@@ -1454,6 +1548,100 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
               )}
             </div>
           )
+        ) : active === "codex-id" ? (
+          // `codex-id-page` T1/T3 — the dedicated, standalone home for the
+          // codex's permaweb posture. The eligibility status is REUSED
+          // directly from `ArweaveRestoreEligibilityStatus` (the SAME
+          // component already mounted in the Library tab's Codex sub-tab)
+          // rather than a second implementation of the same check — it is
+          // already a self-contained, optional-seam-aware status pill, so
+          // it fits this standalone page context with no changes needed.
+          //
+          // Below it (T3): the "Make this codex eligible" action — hidden
+          // in favour of a plain confirmation once `codexIdEligibility`
+          // resolves `"eligible"`, otherwise a disabled "coming soon"
+          // button (its destination, the `legacy-prime-migration` wizard,
+          // doesn't exist yet; still mirrors the Upload category's own
+          // disabled-button convention exactly —
+          // `UPLOAD_ENTRY_BUTTON_DISABLED_STYLE`, visible + a `title`
+          // tooltip — plus a visible, always-rendered explanation
+          // paragraph). The "Back up this codex to Arweave" action is now
+          // REAL for the default (no-PIN) path — `backupCodexToLibrary`
+          // (`codex-backup-envelope-encryption`) is fully built — and
+          // reuses `CodexBackupArea` unmodified, same as the Library tab's
+          // own mount (see that component's render branch just below for
+          // why mounting it a second time on this page is safe).
+          // PIN-protecting a backup still needs its own PIN-entry UI, not
+          // built here. Finally, T2's two static informatics explainers.
+          <div data-testid="arweave-codex-id-page" style={CODEX_ID_PAGE_STYLE}>
+            <ArweaveRestoreEligibilityStatus
+              checkArweaveRestoreEligibility={deps?.checkArweaveRestoreEligibility}
+            />
+            <div style={CODEX_ID_ACTIONS_WRAP_STYLE}>
+              {codexIdEligibility === "eligible" ? (
+                <div
+                  data-testid="arweave-codex-id-already-eligible"
+                  role="status"
+                  style={CODEX_ID_ALREADY_ELIGIBLE_STYLE}
+                >
+                  Already eligible — this codex does not need migration.
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    disabled
+                    data-testid="arweave-codex-id-make-eligible"
+                    title="Make This Codex Eligible (coming soon) — opens the migration wizard, once it exists"
+                    style={UPLOAD_ENTRY_BUTTON_DISABLED_STYLE}
+                  >
+                    Make This Codex Eligible (coming soon)
+                  </button>
+                  <p style={CODEX_ID_ACTION_EXPLANATION_STYLE}>
+                    Opens a guided wizard that re-aligns your codex&apos;s Arweave recovery
+                    words with your Ouronet identity, so seed-words-only restore becomes
+                    possible. Coming soon — the migration wizard (legacy-prime-migration)
+                    has not been built yet.
+                  </p>
+                </div>
+              )}
+              <div>
+                {/* The backup action is now REAL for the default (no-PIN)
+                    path — `backupCodexToLibrary` (codex-backup-envelope-
+                    encryption) is fully built. `CodexBackupArea` is REUSED
+                    directly, unmodified, rather than a second parallel
+                    implementation: it holds no singleton/global state (just
+                    local `useState` per instance), and this page's
+                    `active === "codex-id"` branch is mutually exclusive
+                    with the Library tab's own `CodexBackupArea` mount
+                    (ternary chain above — only one is ever in the DOM at a
+                    time), so mounting it a second time here is safe. Same
+                    `deps.getExportJson`/`deps.backupCodex`/`deps.openUrl`
+                    seams the Library mount already uses, verbatim.
+                    PIN-protecting a backup still needs its own PIN-entry UI
+                    (not built — out of scope here; this only makes the
+                    plain, default-protected path real). */}
+                {deps === null ? (
+                  <div data-testid="arweave-codex-id-backup-unavailable" style={EMPTY_STYLE}>
+                    Codex backup is not available until the Arweave upload seam is wired.
+                  </div>
+                ) : (
+                  <CodexBackupArea
+                    getExportJson={deps.getExportJson}
+                    backupCodex={deps.backupCodex}
+                    openUrl={(id) => deps.openUrl(id, { pool: deps.pool })}
+                  />
+                )}
+                <p style={CODEX_ID_ACTION_EXPLANATION_STYLE}>
+                  Uploads your whole encrypted codex to Arweave for safekeeping, protected
+                  under your Master Seed and/or Codex Identity. PIN protection is not yet
+                  available here — this backs up with the default (no-PIN) protection only.
+                </p>
+              </div>
+            </div>
+            <CodexBackupInformatics />
+            <CodexMigrationInformatics />
+          </div>
         ) : active !== "seeds" ? (
           <div data-testid={`arweave-category-empty-${active}`} style={EMPTY_STYLE}>
             {`${CATEGORY_LABELS[active]} — not wired yet.`}

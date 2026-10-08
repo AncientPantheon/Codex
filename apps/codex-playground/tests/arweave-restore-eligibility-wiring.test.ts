@@ -45,7 +45,7 @@ import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk } from "@ancientpantheon/arweave-core";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 import type { KeygenWorkerMsg } from "@ancientpantheon/codex-arweave/keygen";
-import type { IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { ICodexIdentity, IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
 
 const { backupCodexToLibraryMock } = vi.hoisted(() => {
   return { backupCodexToLibraryMock: vi.fn() };
@@ -73,6 +73,7 @@ const { buildRealPanelDeps } = await import("../src/realArweaveAdapter");
 const {
   buildArweaveWiring,
   createRevealArweaveSeedSecret,
+  createRevealStandardApolloBitstring,
   ARWEAVE_WIRING_MODE_REAL,
 } = await import("../src/ForeignChainsWiring");
 
@@ -80,11 +81,42 @@ const TEST_PASSWORD = "correct horse battery staple";
 const OURONET_BITSTRING = "1".repeat(1600);
 const WRONG_BITSTRING = "0".repeat(1600);
 const PRIME_ARWEAVE_SEED_BITSTRING = "1".repeat(800) + "0".repeat(800);
+const STANDARD_APOLLO_BITSTRING = "1".repeat(400) + "0".repeat(624);
 const DERIVED_ADDRESS = "derived-arweave-address-0";
 const STORED_PRIME_ARWEAVE_ADDRESS = DERIVED_ADDRESS;
 const WRONG_STORED_ADDRESS = "some-other-stored-address";
 const OWNER_ADDRESS = "test-arweave-owner-address";
 const FAKE_JWK = { kty: "RSA", n: "fake", e: "AQAB" };
+
+/**
+ * The Prime Ouronet (CodexPrime) account `checkArweaveRestoreEligibility`
+ * needs in order to turn `revealAccountSecret`'s plaintext into a bitstring
+ * at all.
+ *
+ * `docs/work/codex-backup-bitstring-reveal-bug/`: `revealAccountSecret` does
+ * NOT resolve a bitstring (`IOuroAccount.secret` holds the representation the
+ * account's own `originMode` names), so `buildRealPanelDeps` now requires the
+ * ACCOUNT alongside its id and runs the plaintext through
+ * `bitStringOf(account, plaintext)`. These suites' `OURONET_BITSTRING` fake is
+ * kept as-is — their `makeFakeWorker` answers with a CONSTANT address, so what
+ * they lock is the WIRING, not the bitstring's value. The real round trip
+ * (which a constant-address fake can never check) is locked separately by
+ * `arweave-restore-eligibility-real-roundtrip.test.ts`.
+ */
+const FAKE_PRIME_ACCOUNT: IOuroAccount = {
+  id: "ouro-prime",
+  version: "2",
+  isSmart: false,
+  address: "test-prime-ouronet-address",
+  guard: null,
+  stoaChainLedger: null,
+  publicKey: "fake-pub",
+  secret: "fake-ciphertext",
+  backup: "",
+  isPrime: true,
+  originMode: "seedWords",
+  originCurve: "dalos",
+};
 
 /** A fake `Worker` that replies ASYNCHRONOUSLY from `postMessage` (a
  *  microtask after the message is posted) rather than requiring the caller
@@ -145,6 +177,7 @@ beforeEach(() => {
       opts: {
         codexPassword?: string;
         primeArweaveSeedBitstring?: string;
+        standardApolloBitstring?: string;
         cryptoSeam?: { encrypt: typeof encryptStringV2; decrypt: typeof smartDecrypt };
       },
     ) => {
@@ -170,6 +203,7 @@ describe("buildRealPanelDeps — checkArweaveRestoreEligibility", () => {
       gatewayUrl: "https://arweave.example.invalid",
       foreignKeys: [primeSeedIndexZeroEntry(STORED_PRIME_ARWEAVE_ADDRESS)],
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async (id) => (id === "ouro-prime" ? OURONET_BITSTRING : null),
       primeArweaveSeedId: "seed-prime",
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
@@ -183,6 +217,7 @@ describe("buildRealPanelDeps — checkArweaveRestoreEligibility", () => {
       gatewayUrl: "https://arweave.example.invalid",
       foreignKeys: [primeSeedIndexZeroEntry(WRONG_STORED_ADDRESS)],
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async (id) => (id === "ouro-prime" ? WRONG_BITSTRING : null),
       primeArweaveSeedId: "seed-prime",
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
@@ -208,6 +243,7 @@ describe("buildRealPanelDeps — checkArweaveRestoreEligibility", () => {
       gatewayUrl: "https://arweave.example.invalid",
       foreignKeys: [],
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async () => OURONET_BITSTRING,
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
     });
@@ -220,6 +256,7 @@ describe("buildRealPanelDeps — checkArweaveRestoreEligibility", () => {
       gatewayUrl: "https://arweave.example.invalid",
       foreignKeys: [],
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async () => OURONET_BITSTRING,
       primeArweaveSeedId: "seed-prime",
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
@@ -229,8 +266,8 @@ describe("buildRealPanelDeps — checkArweaveRestoreEligibility", () => {
   });
 });
 
-describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params", () => {
-  it("ELIGIBLE: calls backupCodexToLibrary with codexPassword/primeArweaveSeedBitstring/cryptoSeam, and the posted recovery tag decrypts back to the exact codex password", async () => {
+describe("buildRealPanelDeps().backupCodex — eligibility-gated envelope inputs", () => {
+  it("ELIGIBLE: calls backupCodexToLibrary with codexPassword/primeArweaveSeedBitstring/standardApolloBitstring/cryptoSeam, and the posted recovery tag decrypts back to the exact codex password", async () => {
     const entry = await makeEntry();
     const deps = buildRealPanelDeps({
       gatewayUrl: "https://arweave.example.invalid",
@@ -239,10 +276,12 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
       getPassword: () => TEST_PASSWORD,
       getExportJson: async () => '{"codex":"export"}',
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async (id) => (id === "ouro-prime" ? OURONET_BITSTRING : null),
       primeArweaveSeedId: "seed-prime",
       revealArweaveSeedSecret: async (id) =>
         id === "seed-prime" ? PRIME_ARWEAVE_SEED_BITSTRING : null,
+      revealStandardApolloBitstring: async () => STANDARD_APOLLO_BITSTRING,
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
     });
 
@@ -254,11 +293,13 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
       {
         codexPassword?: string;
         primeArweaveSeedBitstring?: string;
+        standardApolloBitstring?: string;
         cryptoSeam?: { encrypt: typeof encryptStringV2; decrypt: typeof smartDecrypt };
       },
     ];
     expect(opts.codexPassword).toBe(TEST_PASSWORD);
     expect(opts.primeArweaveSeedBitstring).toBe(PRIME_ARWEAVE_SEED_BITSTRING);
+    expect(opts.standardApolloBitstring).toBe(STANDARD_APOLLO_BITSTRING);
     expect(opts.cryptoSeam).toBeDefined();
 
     const result = backupCodexToLibraryMock.mock.results[0]!.value as Promise<{
@@ -271,7 +312,21 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
     expect(decrypted).toBe(TEST_PASSWORD);
   });
 
-  it("INELIGIBLE: calls backupCodexToLibrary with NONE of the three new params — byte-identical to pre-this-task behavior", async () => {
+  // FLAGGED BEHAVIOR CHANGE (`codex-backup-envelope-encryption` T3's own
+  // real `BackupCodexToLibraryOptions` now REQUIRES codexPassword/
+  // primeArweaveSeedBitstring/standardApolloBitstring/cryptoSeam
+  // unconditionally — the old "ineligible codex still calls
+  // backupCodexToLibrary, just with none of the new params" fallback is no
+  // longer a valid shape (it would be a straight runtime throw inside
+  // backupCodexToLibrary itself). Per the parent design doc's own
+  // acceptance criterion ("must not silently produce a broken/unencrypted-
+  // wrong upload") and that topic's T3 task text (the backup action is
+  // simply unavailable/blocked upstream for an ineligible codex), the
+  // correct replacement behavior is: `backupCodex` REFUSES with a clear,
+  // named error and `backupCodexToLibrary` is NEVER called at all — this
+  // test is updated to assert exactly that, rather than a successful call
+  // with a reduced options shape.
+  it("INELIGIBLE: backupCodex refuses with a clear error and backupCodexToLibrary is never called", async () => {
     const entry = await makeEntry();
     const deps = buildRealPanelDeps({
       gatewayUrl: "https://arweave.example.invalid",
@@ -285,19 +340,16 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
     });
 
-    await deps.backupCodex('{"codex":"export"}');
+    await expect(deps.backupCodex('{"codex":"export"}')).rejects.toThrow(/eligible/i);
 
-    expect(backupCodexToLibraryMock).toHaveBeenCalledTimes(1);
-    const [, opts] = backupCodexToLibraryMock.mock.calls[0] as [string, Record<string, unknown>];
-    expect(Object.keys(opts).sort()).toEqual(
-      ["jwk", "maxRewardWinston", "onSuccess", "pool", "store"].sort(),
-    );
-    expect(opts.codexPassword).toBeUndefined();
-    expect(opts.primeArweaveSeedBitstring).toBeUndefined();
-    expect(opts.cryptoSeam).toBeUndefined();
+    expect(backupCodexToLibraryMock).not.toHaveBeenCalled();
   });
 
-  it("ELIGIBLE but the seed's own plaintext bits cannot be read: falls back to the no-new-params shape instead of posting a broken tag", async () => {
+  // FLAGGED BEHAVIOR CHANGE — see the INELIGIBLE test's own comment just
+  // above for the full reasoning: a reveal that resolves `null` now blocks
+  // the backup action entirely (there is no reduced-shape call left to fall
+  // back to), rather than silently posting the no-envelope base shape.
+  it("ELIGIBLE but the seed's own plaintext bits cannot be read: refuses rather than posting a broken/degraded envelope", async () => {
     const entry = await makeEntry();
     const deps = buildRealPanelDeps({
       gatewayUrl: "https://arweave.example.invalid",
@@ -306,19 +358,18 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
       getPassword: () => TEST_PASSWORD,
       getExportJson: async () => '{"codex":"export"}',
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async (id) => (id === "ouro-prime" ? OURONET_BITSTRING : null),
       primeArweaveSeedId: "seed-prime",
-      // Reveal refuses (e.g. a race against a re-lock) — must not crash the backup.
+      // Reveal refuses (e.g. a race against a re-lock) — must not crash the
+      // process, but must also not post a degraded upload.
       revealArweaveSeedSecret: async () => null,
+      revealStandardApolloBitstring: async () => STANDARD_APOLLO_BITSTRING,
       workerFactory: () => makeFakeWorker(DERIVED_ADDRESS),
     });
 
-    await deps.backupCodex('{"codex":"export"}');
-
-    const [, opts] = backupCodexToLibraryMock.mock.calls[0] as [string, Record<string, unknown>];
-    expect(opts.codexPassword).toBeUndefined();
-    expect(opts.primeArweaveSeedBitstring).toBeUndefined();
-    expect(opts.cryptoSeam).toBeUndefined();
+    await expect(deps.backupCodex('{"codex":"export"}')).rejects.toThrow();
+    expect(backupCodexToLibraryMock).not.toHaveBeenCalled();
   });
 
   it("checks eligibility exactly ONCE per backupCodex call (never two RSA re-derivations for one logical action)", async () => {
@@ -331,9 +382,11 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
       getPassword: () => TEST_PASSWORD,
       getExportJson: async () => '{"codex":"export"}',
       primeOuronetAccountId: "ouro-prime",
+      primeOuronetAccount: FAKE_PRIME_ACCOUNT,
       revealAccountSecret: async () => OURONET_BITSTRING,
       primeArweaveSeedId: "seed-prime",
       revealArweaveSeedSecret: async () => PRIME_ARWEAVE_SEED_BITSTRING,
+      revealStandardApolloBitstring: async () => STANDARD_APOLLO_BITSTRING,
       workerFactory,
     });
 
@@ -344,21 +397,6 @@ describe("buildRealPanelDeps().backupCodex — eligibility-gated recovery params
 });
 
 describe("buildArweaveWiring (real mode) — threads the Prime identity + reveal seams into buildRealPanelDeps", () => {
-  const FAKE_PRIME_ACCOUNT: IOuroAccount = {
-    id: "ouro-prime",
-    version: "2",
-    isSmart: false,
-    address: "test-prime-ouronet-address",
-    guard: null,
-    stoaChainLedger: null,
-    publicKey: "fake-pub",
-    secret: "fake-ciphertext",
-    backup: "",
-    isPrime: true,
-    originMode: "seedWords",
-    originCurve: "dalos",
-  };
-
   it("derives primeOuronetAccountId from ouronetAccounts' isDefault entry and primeArweaveSeedId from arweaveSeeds' isPrime entry, reaching a real eligible result end to end", async () => {
     const { panelDeps } = buildArweaveWiring({
       mode: ARWEAVE_WIRING_MODE_REAL,
@@ -415,5 +453,56 @@ describe("createRevealArweaveSeedSecret — the Prime Arweave seed's on-demand p
     });
 
     await expect(reveal("seed-prime")).resolves.toBeNull();
+  });
+});
+
+describe("createRevealStandardApolloBitstring — the Codex Identity's Standard half on-demand plaintext-bits reveal seam", () => {
+  function fullIdentity(encryptedStandardBitstring: string): ICodexIdentity {
+    return {
+      formatted: "₱.fake-standard:Π.fake-smart",
+      standardPublicKey: "fake-standard-pub",
+      smartPublicKey: "fake-smart-pub",
+      encryptedSeedWords: "enc-seed-words",
+      encryptedStandardBitstring,
+      encryptedSmartBitstring: "enc-smart-bits",
+      encryptedStandardBase10: "enc-std-b10",
+      encryptedSmartBase10: "enc-smart-b10",
+      encryptedStandardBase49: "enc-std-b49",
+      encryptedSmartBase49: "enc-smart-b49",
+      totalWordCount: 6,
+      splitIndex: 3,
+      createdAt: "2026-05-29T00:00:00.000Z",
+    };
+  }
+
+  it("decrypts the Codex Identity's Standard-half bitstring under the current codex password", async () => {
+    const encryptedStandardBitstring = await encryptStringV2(STANDARD_APOLLO_BITSTRING, TEST_PASSWORD);
+    const reveal = createRevealStandardApolloBitstring({
+      identity: fullIdentity(encryptedStandardBitstring),
+      getPassword: () => TEST_PASSWORD,
+    });
+
+    await expect(reveal()).resolves.toBe(STANDARD_APOLLO_BITSTRING);
+  });
+
+  it("resolves null (never throws) when the codex has no Codex Identity yet", async () => {
+    const reveal = createRevealStandardApolloBitstring({
+      identity: null,
+      getPassword: () => TEST_PASSWORD,
+    });
+
+    await expect(reveal()).resolves.toBeNull();
+  });
+
+  it("resolves null (never throws) when the decrypt fails (locked codex / wrong password)", async () => {
+    const encryptedStandardBitstring = await encryptStringV2(STANDARD_APOLLO_BITSTRING, TEST_PASSWORD);
+    const reveal = createRevealStandardApolloBitstring({
+      identity: fullIdentity(encryptedStandardBitstring),
+      getPassword: () => {
+        throw new Error("locked");
+      },
+    });
+
+    await expect(reveal()).resolves.toBeNull();
   });
 });

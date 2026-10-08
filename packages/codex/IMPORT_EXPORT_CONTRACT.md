@@ -258,3 +258,74 @@ A change that touches only some of these files is incomplete, even if it
 compiles and its own unit tests pass — the earlier incident on
 `StoaChainSeedType` compiled fine and passed its own tests too; it broke a
 different consumer entirely, silently, at a distance.
+
+## 6. Backup-upload secret-field re-encryption — `reencryptBackupSecretFields`
+
+`codex-backup-envelope-encryption` (T2) added
+`reencryptBackupSecretFields(exportJson, { decryptField, encryptField })`,
+exported from `@ancientpantheon/codex-core`'s root barrel
+(`packages/codex-core/src/codex/backupReencryption.ts`). It exists for
+exactly one caller class: a codex-backup upload that needs to swap every
+individual secret-ciphertext field in an export from one encryption key
+(today, the user's local codex password) to another (a per-upload DEK),
+before the whole export is encrypted again as one opaque blob.
+
+**MUST NOT be read as a license to hand-parse.** This function reaches into
+the same known secret-field paths §1 protects — which is exactly why it is
+**exempt from §1's "MUST NOT hand-parse" rule for one reason only**: it does
+not reimplement the parse/validate step, it calls the real
+`deserializeCodex` for it. The real version gate, the real unknown-
+top-level-field rejection, and the real per-entry shape validation (§3/§4)
+all run exactly as they do for any other caller of `deserializeCodex` —
+this function only walks field paths that `deserializeCodex`'s own return
+type already proves exist. No other function outside `codex-core` gets this
+exemption; it exists here, and only here, because it reuses the codec
+internally rather than guessing at the shape from outside it.
+
+**The exact three fields, never a fourth, never fewer** (matching §2's
+table exactly):
+
+| Field | Entry array |
+|---|---|
+| `arweaveSeeds[].secret` | `arweaveSeeds` (bare array) |
+| `foreignKeys.keys[].encryptedKeyfile` | `foreignKeys.keys` (inside the block) |
+| `pureKeypairs[].encryptedPrivateKey` | `pureKeypairs` (bare array) |
+
+If a future change adds a fourth secret-ciphertext field anywhere in the
+envelope (per §5's Extension protocol), **this function's own three-path
+list is now part of that protocol too** — step 6 of §5 ("this document")
+extends to adding a row here, and `backupReencryption.ts` itself must gain a
+matching `reencrypt<Field>` helper in the same change, or a future backup
+upload silently leaves that new field under the old key.
+
+**Order does not matter.** The three fields are independent of one another;
+the current implementation processes `arweaveSeeds`, then
+`foreignKeys.keys`, then `pureKeypairs`, but no caller may depend on that
+order.
+
+**Per-field contract.** For every secret field actually present,
+`opts.decryptField` is called exactly once on the existing ciphertext, then
+`opts.encryptField` is called exactly once on the PLAINTEXT `decryptField`
+returned (never on the original ciphertext directly). A keyring the backup
+omits entirely (a valid, documented state — §2's "Omitted when" column) is
+left omitted on the output, with zero calls to either callback for it.
+
+**NOT idempotent.** Calling this function twice with the same `opts`
+double-transforms the fields: the second call's `decryptField` receives the
+FIRST call's `encryptField` output, not the original ciphertext, and will
+typically fail (or silently produce garbage) unless the caller's
+`decryptField` happens to also understand that shape. A caller invokes this
+function exactly once per backup-upload operation.
+
+**Every other field, including `version` and `exportedAt`, is byte-for-byte
+unchanged.** This is why the write side of this function does NOT call
+`buildCodexExport`/`serializeCodex` — those build a FRESH export from a
+live, in-memory source and always stamp a brand-new `exportedAt` and the
+CURRENT `foreignKeys` block schema version, which would silently change
+fields nobody asked to change. Because this function only ever mutates the
+three ciphertext leaves in place, the already-`deserializeCodex`-validated
+structure is re-serialized directly; a "1.2" envelope (which predates all
+three fields) is returned completely unchanged. As a self-check, the
+function re-runs its own output through `deserializeCodex` once more before
+returning, so a shape bug here fails loudly at the source rather than at a
+later restore.

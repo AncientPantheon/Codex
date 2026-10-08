@@ -40,6 +40,8 @@ import { encryptStringV2, smartDecrypt } from "@stoachain/stoa-core/crypto";
 import type { CryptoSeam, ForeignChainAdapter, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { ARWEAVE_CHAIN_ID } from "@ancientpantheon/codex-arweave/address-book";
 import { createWorkerKeygenRunner } from "@ancientpantheon/codex-arweave/keygen";
+import { bitStringOf } from "@ancientpantheon/codex-ouronet/codex-identity";
+import type { BitStringAccount } from "@ancientpantheon/codex-ouronet/codex-identity";
 import {
   createArweaveAdapter,
   MemoryLibraryStore,
@@ -478,9 +480,11 @@ export function buildRealPanelDeps({
   onBackupSuccess,
   onAccountUsedForEncryption,
   primeOuronetAccountId,
+  primeOuronetAccount,
   revealAccountSecret,
   primeArweaveSeedId,
   revealArweaveSeedSecret,
+  revealStandardApolloBitstring,
 }: {
   gatewayUrl: string;
   address?: string;
@@ -581,9 +585,35 @@ export function buildRealPanelDeps({
    *  throwing — a codex with no Prime Ouronet account yet is simply not
    *  eligible, not an error. */
   primeOuronetAccountId?: string;
+  /**
+   * The Prime Ouronet (CodexPrime) account ITSELF — needed because an Ouronet
+   * account's decrypted `secret` is NOT a bitstring (see
+   * `revealAccountSecret`'s own doc comment below): turning it into one
+   * requires the account's `originMode`/`originCurve`, which is exactly what
+   * `bitStringOf` reads. Reached by `ForeignChainsWiring.tsx` from the SAME
+   * `ouronetAccounts` list `primeOuronetAccountId` above comes from (its
+   * `isDefault` entry's `.account`). Omitted (or no such account) means
+   * `checkArweaveRestoreEligibility` resolves `false` rather than throwing,
+   * exactly like a missing `primeOuronetAccountId`.
+   */
+  primeOuronetAccount?: BitStringAccount;
   /** `codex-seed-restore-activation` T3: unlock-gated reveal of an Ouronet
-   *  account's decrypted secret — for a `dalos`-curve account this IS its
-   *  1600-bit bitstring. The SAME seam `ForeignChainsWiring.tsx` already
+   *  account's decrypted secret.
+   *
+   *  NOT a bitstring — `docs/work/codex-backup-bitstring-reveal-bug/`: this
+   *  prop's doc comment used to claim "for a `dalos`-curve account this IS
+   *  its 1600-bit bitstring", and `checkArweaveRestoreEligibility` passed the
+   *  plaintext straight into the RSA-4096 keygen on that premise. It is
+   *  false. `IOuroAccount.secret` holds the representation the account's own
+   *  `originMode` names (`SpawnAccountModal.tsx`; `backup` holds the private
+   *  key), so for the kickstarted CodexPrime account the plaintext is a
+   *  286-character base-49 scalar and the keygen died with "seed bitstring
+   *  must be exactly 1024 (APOLLO) or 1600 (DALOS Genesis) characters".
+   *  Every consumer must run it through `bitStringOf(account, plaintext)`
+   *  first — as `ArweaveSeedsArea.tsx`/`LibraryArea.tsx` already do, and as
+   *  `resolveRestoreEligibility` below now does.
+   *
+   *  The SAME seam `ForeignChainsWiring.tsx` already
    *  builds via `createRevealAccountSecret` for Option 2 of the define-seed
    *  flow and `LibraryArea`'s decrypt-on-download; reused here verbatim,
    *  never a second decrypt path. `null`/a thrown-then-caught failure both
@@ -613,6 +643,23 @@ export function buildRealPanelDeps({
    *  (unknown seed id, locked codex, wrong password) is folded into "cannot
    *  attach a recovery tag this time", never a thrown error. */
   revealArweaveSeedSecret?: (seedId: string) => Promise<string | null>;
+  /**
+   * `codex-backup-envelope-encryption` T3's new "Standard Apollo" default
+   * wrap source: unlock-gated, on-demand reveal of the Codex Identity's
+   * Standard half's own plaintext 1024-bit bitstring
+   * (`ICodexIdentity.encryptedStandardBitstring`, decrypted under the
+   * current codex password). Mirrors `revealArweaveSeedSecret`'s exact
+   * shape/failure contract EXCEPT there is only ever ONE Codex Identity per
+   * codex, so this seam takes NO id argument. Built via
+   * `ForeignChainsWiring.tsx`'s `createRevealStandardApolloBitstring`.
+   * `null` (no Codex Identity yet, locked codex, wrong password) folds into
+   * "cannot supply this envelope input right now", never a thrown error —
+   * `backupCodex` below treats it exactly like a missing/null
+   * `revealArweaveSeedSecret` resolve: the envelope has no degraded mode,
+   * so the backup action refuses rather than calling
+   * `backupCodexToLibrary` with an incomplete, no-longer-valid options
+   * shape (see that closure's own doc comment). */
+  revealStandardApolloBitstring?: () => Promise<string | null>;
 }): ArweavePanelDeps & {
   /**
    * `arweave-upload-dry-run` T3: the REAL wiring behind `UploadWizard`'s
@@ -708,6 +755,7 @@ export function buildRealPanelDeps({
   const resolveRestoreEligibility = async (): Promise<boolean> => {
     if (
       primeOuronetAccountId === undefined ||
+      primeOuronetAccount === undefined ||
       revealAccountSecret === undefined ||
       primeArweaveSeedId === undefined
     ) {
@@ -718,7 +766,15 @@ export function buildRealPanelDeps({
     )?.address;
     if (primeArweaveAddress === undefined) return false;
 
-    const ouronetBitstring = await revealAccountSecret(primeOuronetAccountId);
+    const secretPlaintext = await revealAccountSecret(primeOuronetAccountId);
+    if (secretPlaintext === null || secretPlaintext === "") return false;
+
+    // The decrypted `secret` is NOT a bitstring — see `revealAccountSecret`'s
+    // own doc comment. `bitStringOf` is the canonical conversion (the SAME one
+    // `ArweaveSeedsArea.tsx`/`LibraryArea.tsx`/`kickstartPrimeArweaveSeed.ts`
+    // already use); `null` means the plaintext could not be rebuilt under this
+    // account's own origin mode, which is "not eligible", never a throw.
+    const ouronetBitstring = bitStringOf(primeOuronetAccount, secretPlaintext);
     if (ouronetBitstring === null || ouronetBitstring === "") return false;
 
     return deriveRestoreEligibility({
@@ -985,38 +1041,77 @@ export function buildRealPanelDeps({
         new TextEncoder().encode(payload).byteLength,
       );
 
-      // T3: the base options are EXACTLY what `backupCodex` has always
-      // passed — the eligibility-gated recovery params below are ADDED on
-      // top only when the codex is genuinely eligible AND the seed's own
-      // bits are actually readable right now; an ineligible/unreadable
-      // codex gets the identical call it always got (no new keys at all,
-      // not even `undefined`-valued ones — an explicit regression guard).
+      // `codex-backup-envelope-encryption` T3 removed `backupCodexToLibrary`'s
+      // old degraded/partial mode outright — `BackupCodexToLibraryOptions` now
+      // REQUIRES `codexPassword`/`primeArweaveSeedBitstring`/
+      // `standardApolloBitstring`/`cryptoSeam` unconditionally (its own
+      // `requireEnvelopeInputs` throws if any is missing). The pre-T3
+      // "ineligible codex gets the identical call it always got, just with no
+      // new keys" regression guard can therefore no longer hold AS STATED —
+      // that call would now be a straight runtime throw inside
+      // `backupCodexToLibrary` itself (or, with the TypeScript type applied
+      // here, a compile error). The deliberate, GROUNDED replacement (per
+      // `docs/work/codex-backup-envelope-encryption/design.md`'s own
+      // acceptance criterion — "An ineligible codex's codex-backup upload ...
+      // must not silently produce a broken/unencrypted-wrong upload" — and
+      // that topic's T3 task text, which already concluded the backup action
+      // is simply unavailable/blocked upstream for an ineligible codex): EVERY
+      // required envelope input is resolved and validated BEFORE
+      // `backupOptions` is even constructed, and a missing/unreadable one
+      // throws a specific, named error HERE — never a partial `backupOptions`
+      // object. This is the SAME "unarmed seam refuses loudly" convention
+      // this closure's own `getExportJson` guard above already follows (and
+      // `CodexBackupArea`'s existing catch -> `errorMessage` UI path already
+      // surfaces it) — not a new convention invented for this fix.
+      //
+      // ONE eligibility check per backup call — never a second RSA-4096
+      // re-derivation for the same logical action (see
+      // `resolveRestoreEligibility`'s own doc comment).
+      const eligible = await resolveRestoreEligibility();
+      if (
+        !eligible ||
+        primeArweaveSeedId === undefined ||
+        revealArweaveSeedSecret === undefined ||
+        revealStandardApolloBitstring === undefined ||
+        getPassword === undefined
+      ) {
+        throw new Error(
+          "Real codex backup requires this codex to be eligible for the seed-" +
+            "restorable envelope (a Prime Arweave seed sharing origin words " +
+            "with Prime Ouronet) and the Standard Apollo reveal seam to be " +
+            "wired — back up is unavailable until both are set up.",
+        );
+      }
+
+      const [primeArweaveSeedBitstring, standardApolloBitstring] = await Promise.all([
+        revealArweaveSeedSecret(primeArweaveSeedId),
+        revealStandardApolloBitstring(),
+      ]);
+      if (
+        primeArweaveSeedBitstring === null ||
+        primeArweaveSeedBitstring === "" ||
+        standardApolloBitstring === null ||
+        standardApolloBitstring === ""
+      ) {
+        throw new Error(
+          "Real codex backup could not read this codex's envelope-wrap " +
+            "secrets right now (a locked codex or a transient reveal " +
+            "failure) — try again once the codex is unlocked.",
+        );
+      }
+
+      const cryptoSeam: CryptoSeam = { encrypt: encryptStringV2, decrypt: smartDecrypt };
       const backupOptions: Parameters<typeof backupCodexToLibrary>[1] = {
         store,
         pool: resolvedPool,
         jwk,
         maxRewardWinston,
         onSuccess: onBackupSuccess,
+        codexPassword: getPassword(),
+        primeArweaveSeedBitstring,
+        standardApolloBitstring,
+        cryptoSeam,
       };
-
-      // ONE eligibility check per backup call — never a second RSA-4096
-      // re-derivation for the same logical action (see
-      // `resolveRestoreEligibility`'s own doc comment).
-      const eligible = await resolveRestoreEligibility();
-      if (
-        eligible &&
-        primeArweaveSeedId !== undefined &&
-        revealArweaveSeedSecret !== undefined &&
-        getPassword !== undefined
-      ) {
-        const primeArweaveSeedBitstring = await revealArweaveSeedSecret(primeArweaveSeedId);
-        if (primeArweaveSeedBitstring !== null && primeArweaveSeedBitstring !== "") {
-          const cryptoSeam: CryptoSeam = { encrypt: encryptStringV2, decrypt: smartDecrypt };
-          backupOptions.codexPassword = getPassword();
-          backupOptions.primeArweaveSeedBitstring = primeArweaveSeedBitstring;
-          backupOptions.cryptoSeam = cryptoSeam;
-        }
-      }
 
       const result = await backupCodexToLibrary(payload, backupOptions);
       return { id: result.id };
