@@ -214,3 +214,255 @@ procedure change ships as a new `## Version N` subsection here, a bumped
 `CODEX_ENCRYPTION_VERSION_CURRENT`, and a decrypt path that branches on the
 posted `Codex-Encryption-Version` tag to run the correct historical
 procedure, never only the current one.
+
+## 4. The codex-backup dual-key envelope procedure (`Codex-Backup-Encryption-Version`)
+
+A codex-backup upload (`Codex-Category: codex-backup`) is encrypted under a
+genuinely different, independently-versioned procedure from §3 above —
+`Codex-Backup-Encryption-Version` is a SEPARATE axis from
+`Codex-Encryption-Version`, protecting a different payload shape (a whole
+codex export, not one file) with a different goal (hiding the export's
+*shape* — field names, keyring counts — not just its values, which were
+already ciphertext under the codex's local password even before this
+procedure existed). Grounded directly against
+`packages/codex-arweave/src/crypto/backupEnvelope.ts`,
+`packages/codex-core/src/codex/backupReencryption.ts`, and
+`packages/codex-arweave/src/library/flow.ts`'s `backupCodexToLibrary`/
+`restoreCodexFromBackupEnvelope` (read directly while writing this
+section), in enough detail to reimplement the whole scheme from this
+document alone.
+
+### Version 1
+
+`Codex-Backup-Encryption-Version: "1"` identifies the following scheme.
+
+#### The two DEKs
+
+A fresh, random 256-bit AES-GCM key (`crypto.subtle.generateKey`,
+extractable) is generated TWICE, per upload, independently — never the same
+key for both roles:
+
+- **IDEK** ("internal DEK"): re-encrypts every one of the export's three
+  documented secret-ciphertext fields (`arweaveSeeds[].secret`,
+  `foreignKeys.keys[].encryptedKeyfile`, `pureKeypairs[].encryptedPrivateKey`
+  — `IMPORT_EXPORT_CONTRACT.md` §2) from "ciphertext under the codex's local
+  password" to "ciphertext under the IDEK." After this step the export needs
+  nothing but the IDEK to decrypt its individual secret fields — never the
+  codex password again, at any point, forever.
+- **EDEK** ("external DEK"): encrypts the WHOLE resulting (IDEK-reencrypted)
+  export JSON string, ONCE MORE, as a single opaque blob. This is what hides
+  the export's shape: the bytes actually posted to chain are undifferentiated
+  ciphertext — no field name, no array length, nothing about structure
+  survives (`JSON.parse` on the posted bytes throws).
+
+Neither DEK is ever discarded: each is immediately WRAPPED (encrypted, under
+one or more real keys — see below) and the wrapped result stored as a small
+tag alongside the upload. This is the standard envelope-encryption pattern:
+one copy of the (potentially large) content, arbitrarily many small
+wrapped-key tags, one per recognized unlock path.
+
+#### Step-by-step wrap order (backup time)
+
+1. Generate IDEK, generate EDEK (two independent `generateDek()` calls).
+2. For each of the three documented secret fields present in the export:
+   decrypt its existing ciphertext under the codex's current local password
+   (the same cipher the field was already encrypted with), then
+   AES-256-GCM-encrypt the resulting plaintext under the IDEK (plain
+   already-raw-key AES-GCM, `encryptWithDek` — no PBKDF2/derivation step;
+   see §3's own "two genuinely different operations" distinction, which
+   applies here identically: wrapping a DEK is password-shaped cipher use,
+   encrypting CONTENT under an already-raw DEK is plain AES-GCM). Write the
+   result back in place, in the SAME field path, so the export's shape is
+   otherwise completely unchanged (`reencryptBackupSecretFields`,
+   `codex-core`'s own sanctioned field-transform — the only function
+   permitted to walk these three field paths, per `IMPORT_EXPORT_CONTRACT.md`
+   §1's "never hand-parse" rule).
+3. AES-256-GCM-encrypt the WHOLE resulting (IDEK-reencrypted) export JSON
+   string, as raw UTF-8 bytes, under the EDEK — one single opaque blob.
+4. Byte layout for BOTH step 2's per-field ciphertext and step 3's whole-blob
+   ciphertext (the SAME layout, reused at two different "layers"): a fresh
+   12-byte AES-GCM IV (`crypto.getRandomValues`, never reused), AES-GCM-
+   encrypt, then compose `IV (12 bytes) ‖ ciphertext`, base64-encode the
+   whole combined buffer (standard alphabet). This is the posted/stored
+   STRING form in every case.
+5. Wrap both DEKs under each wrap source actually in use for this upload
+   (see "Wrap sources" below) — producing that source's two wrapped-key
+   tags (one for IDEK, one for EDEK).
+6. Post the step-3 opaque blob (the base64 string from step 4, UTF-8-encoded
+   to bytes) as the upload's data payload, `Content-Type: application/json`,
+   `Codex-Category: codex-backup`, together with every wrapped-key tag from
+   step 5 plus `Codex-Backup-Encryption-Version: "1"` and `Codex-Form-Version`
+   (carrying `@ancientpantheon/codex-core`'s real `CODEX_FORM_VERSION`
+   constant — the product-facing "shape of the codex" version, NOT a
+   timestamp; a prior, now-removed convention derived this tag from the
+   export's `lastUpdatedAt`, which answered "when," not "what shape").
+
+#### Wrap sources
+
+Wrapping a DEK means: export its raw 32 bytes (`crypto.subtle.exportKey
+("raw", dek)`), base64-encode them into a plaintext string, and encrypt that
+STRING via the injected `CryptoSeam` (the real PBKDF2-SHA512/600k-iteration
+AES-256-GCM V2 envelope, `encryptStringV2`/`smartDecrypt` — the same cipher
+§3 above and `accountKeyCipher.ts` already use) keyed by a password-shaped
+string specific to the wrap source below. Unwrapping is the exact inverse:
+seam-decrypt the wrapped string back to the base64 plaintext, base64-decode
+it, re-import the raw bytes as an AES-256-GCM `CryptoKey`.
+
+**Two DEFAULT sources, always present unless that source is PIN-protected
+instead (see below) — EITHER alone is sufficient to restore (deliberate OR
+redundancy, an explicitly accepted tradeoff: whichever secret is weaker
+becomes the effective protection level):**
+
+1. **Master Seed** — the Prime Arweave seed's raw 1600-bit `"0"`/`"1"`
+   canonical bitstring, interpreted as an unsigned big-endian binary integer
+   ("the scalar": `BigInt("0b" + bitstring)`).
+2. **Standard Apollo** — the Codex Identity's Standard half's raw 1024-bit
+   `"0"`/`"1"` canonical bitstring (APOLLO's own S=1024 width), the SAME
+   scalar interpretation, independently.
+
+For EACH of the two sources above, the SAME scalar is wrapped under TWO
+different string spellings, one per DEK — different spellings of the same
+number are different strings to the cipher, so they produce different
+wrapped ciphertext even though they protect the same underlying value:
+
+- `base49(scalar)` (the same 49-character alphabet as
+  `@ouronet/dalos-crypto/gen1`'s `bigIntToBase49`, positional,
+  most-significant-digit-first, no padding, `0n → "0"`) wraps the **IDEK**.
+- `base10(scalar)` (`scalar.toString(10)`) wraps the **EDEK**.
+
+This yields exactly 4 wrapped-key tags when BOTH default sources are in
+play (2 sources × 2 DEKs), carried as:
+
+| Tag name | Wraps | Source | Scalar spelling |
+|---|---|---|---|
+| `Codex-Backup-IDEK-MasterSeed-Default` | IDEK | Master Seed | `base49(scalar)` |
+| `Codex-Backup-EDEK-MasterSeed-Default` | EDEK | Master Seed | `base10(scalar)` |
+| `Codex-Backup-IDEK-StandardApollo-Default` | IDEK | Standard Apollo | `base49(scalar)` |
+| `Codex-Backup-EDEK-StandardApollo-Default` | EDEK | Standard Apollo | `base10(scalar)` |
+
+**The Arweave-PIN wrap path — a STRICTLY OPT-IN third option, per source,
+MUTUALLY EXCLUSIVE with that source's own Default pair:**
+
+A user may additionally (or instead) protect either default source with a
+PIN: a 6-to-15-digit numeric string (6 is the brute-force-cost floor the
+design accepts — ~78 days of continuous ~6.7s-per-guess RSA-4096 keygen at
+worst case, ~21 years at 8 digits; 15 is the ceiling, one digit short of
+`Number.MAX_SAFE_INTEGER`'s own 16-digit boundary so a maximal PIN still
+parses to an exact integer with zero floating-point precision loss). PIN
+shape is validated BEFORE any keygen is attempted — a real RSA-4096
+keygen-at-position costs ~6.7s per key, and the underlying primitive always
+force-generates index 0 alongside whatever position is requested (so ~13.4s
+per call), making cheap validation-first mandatory.
+
+Deriving the keygen position from the PIN: `position = 1 + (Number(pin) %
+RSA4096_MAX_INDEX)`, where `RSA4096_MAX_INDEX = 0xffffffff` (the
+`@ouronet/dalos-crypto/rsa4096` keygen-at-position primitive's own uint32
+index ceiling). The `+ 1` guarantees the result is NEVER `0` — index 0 is
+the seed's already-PUBLIC primary address, and a PIN reducing to it would
+silently defeat that PIN's own secrecy entirely. (Two different PINs
+reducing to the same non-zero position does not weaken either PIN's
+brute-force resistance — the ~6.7s cost is paid once per PIN VALUE an
+attacker tries, not once per distinct position.)
+
+An RSA-4096 keypair is then derived at that position from the SAME source
+bitstring (Master Seed's or Standard Apollo's), via the existing
+Worker-wrapped keygen-at-position primitive (`runSeededBatch` /
+`generateFromBitStringAtRangesAsync`) — never a main-thread RSA call. The
+keypair's CRT primes wrap the two DEKs (the SAME `wrapDekWithScalar`/
+`unwrapDekWithScalar` functions as the default path — a JWK prime string
+fits their `scalarString` input as-is, no separate "wrap with a raw bigint"
+function needed):
+
+- `p` (the keypair's first CRT prime, as its base64url JWK string encoding)
+  wraps the **IDEK**.
+- `q` (the second CRT prime, same encoding) wraps the **EDEK**.
+
+**Mutual exclusivity (the single most safety-critical property of this
+path):** when a source is PIN-protected, that source's `...-Pin` tag pair
+is posted and its `...-Default` pair is NEVER also posted — an unprotected
+default sitting alongside a PIN'd wrap would defeat the PIN entirely. The
+OTHER source (if used at all) is completely independent and may be
+PIN-protected, left at its default, or (in a future, not-yet-built variant)
+omitted — each source's choice is made separately. The 4 sibling PIN tag
+names (replacing their `-Default` counterpart one-for-one, per source, when
+that source is PIN'd):
+
+| Tag name | Wraps | Source | Prime |
+|---|---|---|---|
+| `Codex-Backup-IDEK-MasterSeed-Pin` | IDEK | Master Seed | `p` |
+| `Codex-Backup-EDEK-MasterSeed-Pin` | EDEK | Master Seed | `q` |
+| `Codex-Backup-IDEK-StandardApollo-Pin` | IDEK | Standard Apollo | `p` |
+| `Codex-Backup-EDEK-StandardApollo-Pin` | EDEK | Standard Apollo | `q` |
+
+Exactly 4 wrapped-key tags are posted on any upload either way — 2 per
+source, Default-or-Pin, never both for the same source, never 8.
+
+#### Restore routing (tag-presence-based, never a failed blind attempt)
+
+Because each source has two DISTINCTLY-named tag pairs rather than one,
+whether a PIN is needed is known from tag PRESENCE ALONE, before any
+unwrap/keygen is even attempted — checking the IDEK tag name is sufficient
+(the EDEK tag of the same pair is always present alongside it, by the
+mutual-exclusivity guarantee above, on any upload this scheme itself
+produced):
+
+1. That source's `...-Default` IDEK tag is present → unwrap directly with
+   the default scalar spellings; no PIN is ever asked.
+2. `...-Default` is absent, that source's `...-Pin` IDEK tag is present →
+   a PIN is known to be needed; prompt for it now, then derive the RSA
+   keypair at its position and unwrap with `p`/`q`.
+3. Neither tag is present → this source was simply never used to wrap this
+   particular upload; tell the restorer plainly (try the other source)
+   rather than leaving them on a silent/ambiguous failure.
+
+#### Restore order (the exact inverse of the wrap order)
+
+Given a candidate source's bitstring (and its PIN, if routing step 2 above
+applies):
+
+1. Resolve the unwrap key material for the chosen route — the default
+   scalar's `base49`/`base10` spellings, or the PIN-derived keypair's `p`/`q`.
+2. Unwrap the EDEK tag, then the IDEK tag, via the seam's decrypt direction
+   (a wrong bitstring or wrong PIN fails loudly here — an AES-GCM auth-tag
+   mismatch or the V2 cipher's own wrong-key failure, never a
+   plausible-looking wrong success).
+3. Base64-decode the posted opaque blob, split off its leading 12-byte IV,
+   AES-256-GCM-decrypt the remainder under the unwrapped EDEK — recovering
+   the IDEK-reencrypted export JSON string.
+4. For each of the three documented secret fields present: base64-decode,
+   split IV, AES-256-GCM-decrypt under the unwrapped IDEK (the SAME byte
+   layout as step 3, a different "layer") — recovering the field's TRUE
+   plaintext, with no password of any kind involved at any point in this
+   whole restore procedure.
+5. The result is the fully plaintext codex export JSON. From here, restore
+   hands off to the existing "prompt for a brand-new password, encrypt
+   locally, inject into the browser" step — the old, now-fully-removed
+   password ciphertext is never reconstructed and never reused as the
+   go-forward password.
+
+#### Degrade path
+
+A codex that is not ELIGIBLE for this scheme at all (no Prime Arweave seed
+sharing origin words with Prime Ouronet — `checkArweaveRestoreEligibility`)
+simply never has its backup action invoked with this envelope's 4 required
+inputs (`codexPassword`, the Master Seed bitstring, the Standard Apollo
+bitstring, a `CryptoSeam`) — there is no degraded/partial envelope mode; an
+ineligible codex's backup path is gated entirely upstream of the upload
+function itself, never silently downgraded to an unwrapped, partially
+wrapped, or wrong-but-claimed-successful upload.
+
+#### The now-fully-removed prior mechanism
+
+This version-1 envelope REPLACES, outright, the previous
+`Codex-Backup-Recovery-Key` tag (which encrypted the codex's local password
+under the Prime Arweave seed's key and tagged it alongside the backup). No
+real backup was ever made under that mechanism, so there is no
+backward-compatibility reader for it — a codex-backup upload NEVER carries
+a `Codex-Backup-Recovery-Key` tag under this or any later version.
+
+**Future versions.** Version `1`'s unwrap/decrypt logic must never be
+removed once shipped. A future envelope-procedure change ships as a new
+`## Version N` subsection here, a bumped
+`CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT`, and a restore path that branches
+on the posted `Codex-Backup-Encryption-Version` tag to run the correct
+historical procedure, never only the current one.

@@ -8,7 +8,11 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `0.2.0` — built and in active use (imported by codex-ui, codex-ouronet, codex-arweave, and the aggregator). Bundled into `@ancientpantheon/codex`.
+Version `0.6.0` — built and in active use (imported by codex-ui, codex-ouronet, codex-arweave, and the aggregator). Bundled into `@ancientpantheon/codex`.
+
+## Version history
+
+**v0.6.0** — New `codex/backupReencryption.ts`: `reencryptBackupSecretFields`, a sanctioned function (per `IMPORT_EXPORT_CONTRACT.md`'s own extension protocol) that walks an export's three known secret-ciphertext fields, re-encrypting each under caller-supplied `decryptField`/`encryptField` callbacks, reusing the existing sanctioned codec parse/serialize path internally rather than hand-parsing the wire shape. Backs `@ancientpantheon/codex-arweave`'s new whole-codex Arweave backup encryption engine — see that package's and the aggregator's own changelogs.
 
 ## Version history
 

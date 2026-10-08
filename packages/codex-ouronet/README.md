@@ -8,7 +8,26 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `0.5.0` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
+Version `1.1.1` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
+
+## Version history
+
+**v1.1.1** — Bugfix: `kickstartCodex`'s `fresh-dalos` path stored the
+CodexPrime account's private scalar in its `secret` field while labelling
+`originMode: "seedWords"` — mismatching the convention every bitstring
+re-derivation consumer (`bitStringOf`, `rebuildFullKey`, and others) relies
+on, which made real bitstring re-derivation silently produce the wrong
+value for any freshly-kickstarted `fresh-dalos` codex. Root-caused via a
+disciplined, evidence-based investigation (real reproduction, ranked
+hypotheses, a real round-trip regression test using an address-derived-
+from-bits fake so a wrong *value*, not just a wrong length, would be
+caught) after it broke a new downstream feature
+(`@ancientpantheon/codex-arweave`'s whole-codex Arweave backup). Fixed at
+the source: `fresh-dalos` now stores the origin words in `secret`,
+matching its declared `originMode`. A codex kickstarted before this fix
+now fails any affected re-derivation with a clean, non-crashing result
+rather than a confusing error — restoring such a codex to full
+correctness is a separate, not-yet-built migration step.
 
 ## Version history
 
