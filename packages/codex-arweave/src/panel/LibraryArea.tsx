@@ -325,6 +325,60 @@ function saveBytesAsFile(bytes: Uint8Array<ArrayBuffer>, filename: string, conte
   URL.revokeObjectURL(url);
 }
 
+/** One exported Library item — see `buildExportPayload`'s own doc comment
+ *  for the exact field-by-field provenance of every value below. */
+interface LibraryExportItem {
+  filename: string;
+  link: string;
+  id: string;
+  owner: string;
+  contentType: string;
+  status: LibraryStatus;
+  isManifest: boolean;
+  uploadId?: string;
+}
+
+/** The exported JSON's top-level shape — an ISO export timestamp, a
+ *  redundant `itemCount` (so a consumer can sanity-check `items.length`
+ *  without counting), and the full item list. */
+interface LibraryExportPayload {
+  exportedAt: string;
+  itemCount: number;
+  items: LibraryExportItem[];
+}
+
+/**
+ * Maps EVERY entry in `entries` (the full, already-loaded, unfiltered
+ * dataset across every owner — NOT a page slice) to one exported item each.
+ * `filename`/`link` reuse the EXACT SAME conventions `EntryRow` already
+ * renders (`tagValue(entry.tags, TAG_CODEX_PATH) ?? entry.itemId`, and
+ * `openHrefFor` for the manifest-aware link) so an exported row always
+ * matches what that row's own "Open"/link-box would show — no separate,
+ * divergent derivation. No pre-filtering: a manifest entry is included
+ * (flagged via `isManifest`) rather than silently dropped.
+ */
+function buildExportPayload(
+  entries: readonly LibraryEntry[],
+  openUrl: (id: string, opts: { pool: GatewayPool }) => string,
+  pool: GatewayPool,
+): LibraryExportPayload {
+  const items: LibraryExportItem[] = entries.map((entry) => ({
+    filename: tagValue(entry.tags, TAG_CODEX_PATH) ?? entry.itemId,
+    link: openHrefFor(entry, entries, openUrl, pool),
+    id: entry.id,
+    owner: entry.owner,
+    contentType: entry.contentType,
+    status: entry.status,
+    isManifest: entry.manifest?.isManifest === true,
+    ...(entry.uploadId !== undefined ? { uploadId: entry.uploadId } : {}),
+  }));
+  return {
+    exportedAt: new Date().toISOString(),
+    itemCount: items.length,
+    items,
+  };
+}
+
 /** Resolves the `Codex-Encryptor` tag's address back to the `ArweaveSeedAccountSource`
  *  this codex actually holds for it, or `undefined` when none matches — the
  *  "no account in this codex holds this address" case `downloadEntry` turns
@@ -1092,6 +1146,20 @@ export function LibraryArea(props: LibraryAreaProps): React.ReactElement {
     }
   }
 
+  /**
+   * Exports EVERY entry currently held in `entries` — the full, aggregated,
+   * unpaginated dataset — as a downloaded JSON file (see
+   * `buildExportPayload`'s own doc comment). Always available, including
+   * against an empty Library (`items: []` is a valid export, not an error).
+   */
+  function onExport(): void {
+    const payload = buildExportPayload(entries, openUrl, pool);
+    const json = JSON.stringify(payload, null, 2);
+    const bytes = new TextEncoder().encode(json);
+    const dateOnly = payload.exportedAt.slice(0, 10);
+    saveBytesAsFile(bytes, `codex-library-export-${dateOnly}.json`, "application/json");
+  }
+
   function renderRow(entry: LibraryEntry): React.ReactElement {
     return (
       <EntryRow
@@ -1177,6 +1245,14 @@ export function LibraryArea(props: LibraryAreaProps): React.ReactElement {
         style={secondaryButtonStyle}
       >
         Rebuild from chain
+      </button>
+      <button
+        type="button"
+        data-testid="library-export"
+        onClick={onExport}
+        style={secondaryButtonStyle}
+      >
+        Export Library
       </button>
       {rebuildError ? (
         <div data-testid="library-rebuild-error" role="alert">

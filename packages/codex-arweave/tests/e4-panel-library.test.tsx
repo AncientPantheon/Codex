@@ -970,6 +970,198 @@ describe("LibraryArea — compact two-line row with 3 square icon buttons", () =
   });
 });
 
+/* ───────────── arweave-library-export: "Export Library" button ─────────────
+ *
+ * The owner is about to upload ~6.8GB of NFT images; every filename→link
+ * pairing needs to leave the app as data to construct on-chain metadata-
+ * update transactions afterward, not be copied one paginated row at a time.
+ */
+describe("LibraryArea — Export Library", () => {
+  function parseExportedJson(capture: { blobs: Blob[] }): Promise<{
+    exportedAt: string;
+    itemCount: number;
+    items: Array<Record<string, unknown>>;
+  }> {
+    return capture.blobs[0]!.text().then((text) => JSON.parse(text));
+  }
+
+  it("exports EVERY entry across every owner and every page, not just the current page", async () => {
+    // 30 units (> LIBRARY_PAGE_SIZE of 25) spread across two owners, so a
+    // current-page-only or single-owner-only bug would under-count.
+    const OWNER_2 = "secondOwnerAddressSecondOwnerAddressSecond_x";
+    const owner1Entries = Array.from({ length: 20 }, (_, i) =>
+      makeEntry({
+        id: `o1Entry${String(i).padStart(2, "0")}o1Entryo1Entryo1Entrypad`.slice(0, 43),
+        owner: OWNER,
+        createdAt: 1000 - i,
+      }),
+    );
+    const owner2Entries = Array.from({ length: 11 }, (_, i) =>
+      makeEntry({
+        id: `o2Entry${String(i).padStart(2, "0")}o2Entryo2Entryo2Entrypad`.slice(0, 43),
+        owner: OWNER_2,
+        createdAt: 500 - i,
+      }),
+    );
+    const listLibrary = vi.fn(async (owner: string): Promise<LibraryEntry[]> => {
+      if (owner === OWNER) return owner1Entries;
+      if (owner === OWNER_2) return owner2Entries;
+      return [];
+    });
+    const props = makeProps({ owners: [OWNER, OWNER_2], listLibrary });
+    const capture = stubBrowserDownload();
+
+    try {
+      render(<LibraryArea {...props} />);
+      await screen.findAllByTestId("library-entry");
+      // Confirm pagination is genuinely in play (more than one page of units).
+      expect(screen.getByTestId("library-pager")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("library-export"));
+
+      await waitFor(() => expect(capture.blobs).toHaveLength(1));
+      const exported = await parseExportedJson(capture);
+      expect(exported.itemCount).toBe(31);
+      expect(exported.items).toHaveLength(31);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("each exported item's filename/link matches exactly what that entry's own rendered row shows", async () => {
+    const props = makeProps({
+      listLibrary: vi.fn(async (): Promise<LibraryEntry[]> => [
+        makeEntry({
+          id: ID_PUBLIC,
+          createdAt: 200,
+          tags: [{ name: "Codex-Path", value: "photos/sunset.png" }],
+        }),
+        makeEntry({ id: ID_OLD, itemId: "item-old", createdAt: 100, tags: [] }),
+      ]),
+    });
+    const capture = stubBrowserDownload();
+
+    try {
+      render(<LibraryArea {...props} />);
+      const rows = await screen.findAllByTestId("library-entry");
+      const linkBoxes = rows.map((r) => within(r).getByTestId("library-link-box").textContent);
+
+      fireEvent.click(screen.getByTestId("library-export"));
+
+      await waitFor(() => expect(capture.blobs).toHaveLength(1));
+      const exported = await parseExportedJson(capture);
+
+      const tagged = exported.items.find((i) => i.id === ID_PUBLIC)!;
+      expect(tagged.filename).toBe("photos/sunset.png");
+      expect(tagged.link).toBe(linkBoxes[0]);
+
+      const untagged = exported.items.find((i) => i.id === ID_OLD)!;
+      // No Codex-Path tag → falls back to the entry's itemId, same as the
+      // row's own label convention.
+      expect(untagged.filename).toBe("item-old");
+      expect(untagged.link).toBe(linkBoxes[1]);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("a bundled file's exported link is the real manifest-aware per-file URL, not a bare manifest link", async () => {
+    const bundleFixture: LibraryEntry[] = [
+      makeEntry({
+        id: ID_MANIFEST,
+        createdAt: 300,
+        contentType: "application/x.arweave-manifest+json",
+        manifest: { isManifest: true },
+        uploadId: "upload-1",
+      }),
+      makeEntry({
+        id: ID_FILE_A,
+        createdAt: 300,
+        uploadId: "upload-1",
+        tags: [{ name: "Codex-Path", value: "Set_Bunny_RGB_Big.png" }],
+      }),
+    ];
+    const props = makeProps({ listLibrary: vi.fn(async () => bundleFixture) });
+    const capture = stubBrowserDownload();
+
+    try {
+      render(<LibraryArea {...props} />);
+      await screen.findByTestId("library-bundle-group");
+
+      fireEvent.click(screen.getByTestId("library-export"));
+
+      await waitFor(() => expect(capture.blobs).toHaveLength(1));
+      const exported = await parseExportedJson(capture);
+
+      const manifestItem = exported.items.find((i) => i.id === ID_MANIFEST)!;
+      // Manifest-aware composition: <manifestId>/<siblingPath>, not a bare id.
+      expect(manifestItem.link).toBe(
+        `${HEALTHY_ENDPOINT}/${ID_MANIFEST}/Set_Bunny_RGB_Big.png`,
+      );
+      expect(manifestItem.isManifest).toBe(true);
+
+      const fileItem = exported.items.find((i) => i.id === ID_FILE_A)!;
+      expect(fileItem.link).toBe(`${HEALTHY_ENDPOINT}/${ID_FILE_A}`);
+      expect(fileItem.isManifest).toBe(false);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("an empty Library still exports a valid, empty-but-well-formed JSON file via a present, functional button", async () => {
+    const props = makeProps({ listLibrary: vi.fn(async (): Promise<LibraryEntry[]> => []) });
+    const capture = stubBrowserDownload();
+
+    try {
+      render(<LibraryArea {...props} />);
+      await screen.findByTestId("library-empty");
+
+      const exportButton = screen.getByTestId("library-export");
+      expect(exportButton).not.toBeDisabled();
+
+      fireEvent.click(exportButton);
+
+      await waitFor(() => expect(capture.blobs).toHaveLength(1));
+      const exported = await parseExportedJson(capture);
+      expect(exported.items).toEqual([]);
+      expect(exported.itemCount).toBe(0);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("the exported JSON's top-level shape is structurally correct: itemCount matches items.length, exportedAt is a valid ISO timestamp", async () => {
+    const props = makeProps({
+      listLibrary: vi.fn(async (): Promise<LibraryEntry[]> => [
+        makeEntry({ id: ID_NEW, createdAt: 200 }),
+        makeEntry({ id: ID_OLD, createdAt: 100 }),
+      ]),
+    });
+    const capture = stubBrowserDownload();
+
+    try {
+      render(<LibraryArea {...props} />);
+      await screen.findAllByTestId("library-entry");
+
+      fireEvent.click(screen.getByTestId("library-export"));
+
+      await waitFor(() => expect(capture.blobs).toHaveLength(1));
+      const exported = await parseExportedJson(capture);
+
+      expect(exported.itemCount).toBe(exported.items.length);
+      expect(exported.itemCount).toBe(2);
+      expect(new Date(exported.exportedAt).toISOString()).toBe(exported.exportedAt);
+
+      // The download itself uses the same saveBytesAsFile mechanism, with a
+      // JSON content type and an anchor download name carrying the date.
+      expect(capture.blobs[0]!.type).toBe("application/json");
+      expect(capture.anchors[0]!.download).toMatch(/^codex-library-export-\d{4}-\d{2}-\d{2}\.json$/);
+    } finally {
+      capture.restore();
+    }
+  });
+});
+
 describe("LibraryArea — collapsible categories", () => {
   function twoCategoryProps() {
     return makeProps({
