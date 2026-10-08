@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0 — 2026-10-08
+
+**MINOR — Codex ID page + codex-backup dual-key envelope encryption.**
+New `panel/ArweavePanel.tsx` "Codex ID" tab: live eligibility status
+(reusing `checkArweaveRestoreEligibility`), two new explainer components
+(`CodexBackupInformatics.tsx`, `CodexMigrationInformatics.tsx`), and a
+real "back up this codex" action (reusing the existing `CodexBackupArea`
+mount). `library/flow.ts`'s `backupCodexToLibrary` is rebuilt around a
+new `crypto/backupEnvelope.ts` (DEK generation, AES-GCM content
+encryption, scalar-wrapped DEK export/import): a fresh IDEK re-encrypts
+every secret field (via `@ancientpantheon/codex-core`'s new
+`reencryptBackupSecretFields`), a fresh EDEK seals the whole result as
+one opaque blob, both wrapped under the Master Seed and/or Standard
+Apollo bitstrings, either optionally PIN-protected (RSA-4096 keygen at a
+PIN-chosen position, reusing the existing Worker-wrapped keygen
+primitive — never a new main-thread RSA call). New
+`restoreCodexFromBackupEnvelope` + `determineBackupSourceRouting` handle
+the inverse, tag-presence-routed, for both default and PIN'd sources. The
+old `Codex-Backup-Recovery-Key` password-tag mechanism is fully removed.
+`Codex-Form-Version` (the real codex-shape constant) replaces a
+timestamp-derived tag on backup uploads.
+
+Also: fixed a real-browser-discovered bug (not in this package) in how a
+freshly-kickstarted codex's secret was stored upstream, which made the
+new backup feature's bitstring-reveal chain fail for any new codex — see
+`@ancientpantheon/codex-ouronet`'s own changelog.
+
 ## 0.6.1 — 2026-10-08
 
 **PATCH — two real-world wiring gaps, found from an owner bug report.**

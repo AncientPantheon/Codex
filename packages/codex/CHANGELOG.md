@@ -2,6 +2,72 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.3.0 — 2026-10-08
+
+**MINOR — Codex ID page, and a whole-codex Arweave backup encryption
+engine.**
+
+A new "Codex ID" page/tab in the Arweave panel: live eligibility status
+(reusing the existing seed-words-restore eligibility detector), two
+plain-language explainer sections (how the backup/encryption/PIN system
+works; what the migration wizard will do and why), and the real "back up
+this codex to Arweave" action.
+
+The backup mechanism itself is rebuilt as a dual-key envelope, replacing
+the previous password-recovery-tag scheme entirely (no real backup was
+ever made under the old scheme, so this is a full replacement):
+
+- A fresh, random, one-time key ("IDEK") re-encrypts every individual
+  secret in the export. A second fresh, random, one-time key ("EDEK")
+  then encrypts the *entire* re-encrypted result as one single opaque
+  block — so the public, permanent Arweave record reveals nothing about
+  the backup's shape (how many accounts, how many seeds), not just the
+  individual secret values.
+- Either of two independent real secrets unlocks it: your **Master Seed**
+  words, or your **Codex Identity**'s Standard half. Either alone is
+  sufficient — losing access to one doesn't lock you out if you still
+  have the other.
+- Either source can additionally be protected with an optional, strictly
+  opt-in **Arweave-PIN** (a 6-to-15-digit number deriving a real RSA-4096
+  keypair at your chosen position — a real brute-force-resistance
+  property, ~6.7 seconds per guess, not just an inconvenience). A PIN'd
+  source never also carries its unprotected default wrap — the PIN is
+  not optional-on-top, it replaces the default for that source. Forgetting
+  a PIN is exactly as unrecoverable as losing your seed words: no reset,
+  ever, and the UI says so plainly.
+- The restore side determines whether a PIN is needed from the upload's
+  own tags, before ever prompting — never discovered via a failed blind
+  attempt.
+- `Codex-Form-Version` (the codex's real shape-version constant) replaces
+  a timestamp-derived tag on backup uploads specifically.
+- The full procedure — both keys, both default sources, the PIN path, all
+  8 wrapped-key tags, the exact wrap/unwrap order — is documented to
+  reimplementable detail in `ARWEAVE_TAG_SCHEMA.md`.
+
+**A real, separate bug was found and fixed** while verifying the above
+end to end in a real browser (not just at the unit-test level, where
+every existing test injected an already-correctly-shaped fake bitstring
+and so never caught this): a codex kickstarted with fresh custom words
+stored the wrong secret representation internally, under a mismatched
+label, which made every real bitstring re-derivation downstream —
+including this new backup feature, but also anything else relying on the
+same derivation — fail outright for a freshly-created codex. Root-caused
+via a disciplined evidence-based investigation (not a guess) and fixed at
+the source; a codex kickstarted before this fix now gets a clean
+"not eligible" result instead of a crash (never a silently wrong or
+undecryptable backup) — restoring such a codex to full eligibility is
+its own, separate, not-yet-built migration step.
+
+**Known gap, not yet built, flagged honestly**: there is still no UI to
+*restore* a codex from one of these Arweave backups — only to create one.
+The underlying decrypt/restore function is built and tested; the "type
+your seed words, set a new password" UI flow to reach it does not exist
+yet anywhere in this codebase.
+
+`codex-ui` unchanged this release. See `arweave-core`/`codex-core`/
+`codex-ouronet`/`codex-arweave`'s own changelogs for implementation
+detail.
+
 ## 1.2.1 — 2026-10-08
 
 **PATCH — two real-world wiring gaps fixed, found from an owner bug

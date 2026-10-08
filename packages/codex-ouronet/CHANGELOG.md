@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.1.1 — 2026-10-08
+
+**PATCH — real bug fix, found via a disciplined debug investigation, not
+a guess.** `state/store.ts`'s `kickstartCodex`, `fresh-dalos` path: stored
+the CodexPrime account's private scalar (`keyPair.priv`) in the entry's
+`secret` field while recording `originMode: "seedWords"` — every other
+consumer in this codebase (`bitStringOf`/`rebuildFullKey` and everything
+built on them) treats `secret` as "the original input matching
+`originMode`," so this mismatch made real bitstring re-derivation
+silently reconstruct the wrong value for any freshly-kickstarted
+`fresh-dalos` codex. Invisible to every existing test, all of which inject
+an already-correctly-shaped fake bitstring directly rather than exercising
+the real kickstart→store→reveal→re-derive round trip. Found when it broke
+a new downstream feature (`@ancientpantheon/codex-arweave`'s whole-codex
+Arweave backup, whose real-browser verification was the first thing to
+actually exercise this real path end to end). Root-caused via a full
+reproduce→hypothesize→evidence-chain investigation: confirmed via direct
+probing that `bitStringOf(account, priv)` does not reproduce the real
+1600-bit bitstring while `bitStringOf(account, words)` does. Fixed by
+storing the words in `secret` for `fresh-dalos`, matching its own declared
+`originMode`. Regression-tested with a real kickstart + real encrypt/
+decrypt round trip and a keygen fake whose derived address depends on the
+actual bitstring value (not just its length), so a wrong *value* — not
+only a wrong length — would be caught.
+
+A codex kickstarted before this fix keeps its old, mismatched `secret` —
+downstream consumers now get a clean, non-crashing "not eligible"/wrong-
+value result for that codex rather than the confusing crash this bug
+previously caused; restoring such a codex to full correctness needs its
+own, separate, not-yet-built migration step (the original words are
+still recoverable from the same codex's own backing seed material).
+
 ## 1.0.0 — 2026-09-28
 
 **MAJOR — real Kadena mainnet sends, working end to end, for the first

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 — 2026-10-08
+
+**MINOR — new sanctioned backup-secret-field re-encryption function,
+additive.** `codex/backupReencryption.ts`'s `reencryptBackupSecretFields(
+exportJson, {decryptField, encryptField})` walks exactly the three
+documented secret-ciphertext fields from `IMPORT_EXPORT_CONTRACT.md` §2
+(`arweaveSeeds[].secret`, `foreignKeys.keys[].encryptedKeyfile`,
+`pureKeypairs[].encryptedPrivateKey`), transforms each via the supplied
+callbacks, and re-serializes — reusing the existing sanctioned
+`deserializeCodex` parse path internally (never a second hand-rolled
+parser), self-checking its own output by re-parsing it before returning.
+Deliberately does NOT use `buildCodexExport`/`serializeCodex` for the
+write side (those stamp a fresh `exportedAt` and re-wrap `foreignKeys`
+under the current schema version regardless of source, which would
+silently mutate fields this function's own contract requires to stay
+byte-for-byte unchanged). `IMPORT_EXPORT_CONTRACT.md` gained a new §6
+documenting this function's contract and why it's exempt from the
+document's own "never hand-parse the wire shape" rule. Built for, and
+consumed by, `@ancientpantheon/codex-arweave`'s new whole-codex Arweave
+backup encryption engine.
+
 ## 0.5.0 — 2026-09-27
 
 **MINOR — fix `StoaChainSeedType`/`SeedType` divergence that broke every

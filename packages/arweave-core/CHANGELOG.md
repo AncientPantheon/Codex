@@ -2,6 +2,25 @@
 
 All notable changes to `@ancientpantheon/arweave-core`.
 
+## 0.5.0 — 2026-10-08
+
+**MINOR — codex-backup dual-key envelope tag schema, fully additive.**
+New tag-name constants backing `@ancientpantheon/codex`'s whole-codex
+Arweave backup feature: `TAG_CODEX_BACKUP_{IDEK,EDEK}_{MASTERSEED,
+STANDARDAPOLLO}_{DEFAULT,PIN}` (8 total — two default unlock sources,
+each either plainly wrapped or protected behind an optional 6-to-15-digit
+Arweave-PIN, mutually exclusive per source), `TAG_CODEX_BACKUP_
+ENCRYPTION_VERSION`/`CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT` (a version
+axis dedicated to this envelope procedure, independent of the existing
+per-file `Codex-Encryption-Version`), and `TAG_CODEX_FORM_VERSION` (the
+codex's real shape-version constant, replacing the previous timestamp-
+derived `Codex-App-Version` tag on a codex-backup upload specifically).
+No behavior change in this package itself — these are tag-name constants
+only; the actual envelope-building logic lives in
+`@ancientpantheon/codex-arweave`. See that package's changelog and
+`@ancientpantheon/codex`'s `ARWEAVE_TAG_SCHEMA.md` for the full,
+reimplementable procedure.
+
 ## 0.4.0 — 2026-10-05
 
 **MINOR — streaming-upload primitives, fully additive.** Removes the
