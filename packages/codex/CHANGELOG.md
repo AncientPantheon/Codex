@@ -2,6 +2,15 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.4.1 — 2026-10-12
+
+**PATCH — critical fix, bundled from `@ancientpantheon/codex-ouronet`
+1.1.2.** Rotate Payment Key and Rotate Guard both failed on every real
+attempt ("Simulation failed... Keyset failure"). Root cause: both modals
+signed with an unresolved local guard reference instead of the real
+on-chain keyset. See `codex-ouronet`'s own changelog entry for the full
+evidence chain. Fixed; both actions now sign correctly.
+
 ## 1.4.0 — 2026-10-08
 
 **MINOR — "Export Library" button.** The Library view gains an Export

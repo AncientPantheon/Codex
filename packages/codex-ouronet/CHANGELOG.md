@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.1.2 — 2026-10-12
+
+**PATCH — critical live bug fix: Rotate Payment Key and Rotate Guard both
+failed on every real attempt** (`Simulation failed during Rotate Payment
+Key: Keyset failure`), reproduced identically against both this package's
+own local code and the already-published consumer app, confirming the
+bug predated this session. Root-caused by reading the real deployed
+Ouronet Pact contracts directly: `C_RotateStoa`/`C_RotateGuard` authorize
+purely via `enforce-guard` against the account's guard read fresh from
+on-chain state — "Keyset failure" is Pact's own native message for that
+check failing, fired during the unsigned simulation step, meaning the
+locally-declared signer public keys never matched the real on-chain
+keyset.
+
+`zbom/modals/RotatePaymentKeyModal.tsx` and `zbom/modals/
+RotateGuardModal.tsx` were each using the account's local `.guard` field
+RAW — but that field, as held in local Codex state, is an UNRESOLVED
+keyset-reference object, not the real `{pred, keys}` shape (every other
+sibling modal in this same file family already knew this and resolved it
+via a live `getStoaChainAccountGuard` chain read first; these two modals
+were simply the two that never received that fix). With zero real keys,
+`analyzeGuard`'s threshold computation trivially reports "satisfied" —
+which is why the Execute button was clickable at all — and the built
+transaction ends up with no real ownership signer, which the chain
+correctly rejects.
+
+Fixed by adding the same live guard-resolution step every sibling modal
+already uses, gating the Execute button on that resolution completing,
+and signing with the resolved (real) guard. Also fixed the shared
+`SigningZone`'s displayed signing-requirements, which read the same raw
+unresolved field independently. Regression-tested against a deliberately
+unresolved guard shape, asserting the real chain call receives the
+resolved keys, not the raw reference, for both modals.
+
 ## 1.1.1 — 2026-10-08
 
 **PATCH — real bug fix, found via a disciplined debug investigation, not

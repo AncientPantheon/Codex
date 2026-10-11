@@ -8,7 +8,7 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `1.1.1` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
+Version `1.1.2` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
 
 ## Version history
 
