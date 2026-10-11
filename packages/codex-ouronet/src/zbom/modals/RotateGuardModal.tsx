@@ -33,7 +33,7 @@ import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
-import { getIgnisBalance } from "../debouncer/monitoredReads.js";
+import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { rotateGuard } from "@ouronet/ouronet-core/interactions/guardFunctions";
 import { getRotateGuardInfoLive as getRotateGuardInfo } from "../ouroSelectorReads.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
@@ -55,6 +55,7 @@ function toNum(v: any): number {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PatronMode = "prime" | "resident" | "custom";
+type Guard = { keys: string[]; pred: string } | null;
 
 interface Props {
   open: boolean; onClose: () => void;
@@ -91,6 +92,19 @@ export default function RotateGuardModal({
   const [isProcessing,       setIsProcessing]       = useState(false);
   const [resolvedManualKeys, setResolvedManualKeys] = useState<Record<string, string>>({});
   const [, setManualKeys]         = useState<Record<string, string>>({});
+
+  // ── Resolved on-chain guards for patron + account ──
+  // `patronAccount?.guard` / `account?.guard` as carried in LOCAL account
+  // state are UNRESOLVED keyset-reference objects (e.g. `{keysetref:{ns,ksn}}`),
+  // not the real `{pred,keys}` shape — `analyzeGuard` on the raw field
+  // trivially reports `satisfied: true` with a threshold of 0 (no `.keys`),
+  // so zero real signing keys get collected and the on-chain
+  // `enforce-guard` (which reads the REAL guard fresh from chain) rejects
+  // the tx. Mirrors `RevokeDualLinkModal`'s `resolveGuard` pattern.
+  const [patronGuardResolved,  setPatronGuardResolved]  = useState<Guard>(null);
+  const [accountGuardResolved, setAccountGuardResolved] = useState<Guard>(null);
+  const [patronGuardLoaded,    setPatronGuardLoaded]    = useState(false);
+  const [accountGuardLoaded,   setAccountGuardLoaded]   = useState(false);
 
   // ── Derived accounts ──
   const primeAccount = accounts[0] ?? null;
@@ -140,8 +154,14 @@ export default function RotateGuardModal({
     () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
     [kadenaSeeds, stoaChainAccounts],
   );
-  const patronAnalysis   = useMemo(() => analyzeGuard(patronAccount?.guard, codexPubs, resolvedManualKeys), [patronAccount?.guard, codexPubs, resolvedManualKeys]);
-  const accountAnalysis  = useMemo(() => analyzeGuard(account?.guard, codexPubs, resolvedManualKeys), [account?.guard, codexPubs, resolvedManualKeys]);
+  // `newGuardForSigning` (below) is NOT fed through resolution — it's the
+  // PROPOSED new guard the user just typed into GuardEntryInput (or the
+  // already-resolved `{resolvedKeys,resolvedPred}` from an on-chain
+  // keyset-ref lookup `GuardEntryInput` itself already performed), never a
+  // local account's unresolved `.guard` field, so it carries no
+  // keyset-reference to resolve.
+  const patronAnalysis   = useMemo(() => analyzeGuard(patronGuardResolved ?? patronAccount?.guard, codexPubs, resolvedManualKeys), [patronGuardResolved, patronAccount?.guard, codexPubs, resolvedManualKeys]);
+  const accountAnalysis  = useMemo(() => analyzeGuard(accountGuardResolved ?? account?.guard, codexPubs, resolvedManualKeys), [accountGuardResolved, account?.guard, codexPubs, resolvedManualKeys]);
   const newGuardAnalysis = useMemo(() => newGuardForSigning ? analyzeGuard(newGuardForSigning.guard, codexPubs, resolvedManualKeys) : null, [newGuardForSigning, codexPubs, resolvedManualKeys]);
 
   const pureSigningPubs = useMemo(() => {
@@ -163,7 +183,9 @@ export default function RotateGuardModal({
     && gasStationPub !== undefined
     && hasEnoughIgnis
     && !loadingInfo
-    && infoData !== null;
+    && infoData !== null
+    && patronGuardLoaded
+    && accountGuardLoaded;
 
   // ── Effects ──
   useEffect(() => {
@@ -171,6 +193,33 @@ export default function RotateGuardModal({
     setPatronIgnisBalance(null);
     getIgnisBalance(patronAccount.address).then(v => setPatronIgnisBalance(v ? parseFloat(v) : 0));
   }, [open, patronAccount?.address]);
+
+  // ── Resolve the patron + account guards from chain (see `Guard` doc
+  //    comment on the state above for why the raw `.guard` field can't be
+  //    used directly). ──
+  useEffect(() => {
+    if (!open || !patronAccount?.address) { setPatronGuardResolved(null); setPatronGuardLoaded(false); return; }
+    let aborted = false;
+    setPatronGuardResolved(null);
+    setPatronGuardLoaded(false);
+    getStoaChainAccountGuard(patronAccount.address)
+      .then((g) => { if (!aborted) setPatronGuardResolved(((g as unknown) as Guard) ?? null); })
+      .catch(() => { if (!aborted) setPatronGuardResolved(null); })
+      .finally(() => { if (!aborted) setPatronGuardLoaded(true); });
+    return () => { aborted = true; };
+  }, [open, patronAccount?.address]);
+
+  useEffect(() => {
+    if (!open || !account?.address) { setAccountGuardResolved(null); setAccountGuardLoaded(false); return; }
+    let aborted = false;
+    setAccountGuardResolved(null);
+    setAccountGuardLoaded(false);
+    getStoaChainAccountGuard(account.address)
+      .then((g) => { if (!aborted) setAccountGuardResolved(((g as unknown) as Guard) ?? null); })
+      .catch(() => { if (!aborted) setAccountGuardResolved(null); })
+      .finally(() => { if (!aborted) setAccountGuardLoaded(true); });
+    return () => { aborted = true; };
+  }, [open, account?.address]);
 
   useEffect(() => {
     if (!open || !patronAccount?.address || !account?.address) return;
@@ -355,10 +404,15 @@ export default function RotateGuardModal({
           />
         </Zone2Wrapper>
 
-        {/* ── Zone 3 — Signing ── */}
+        {/* ── Zone 3 — Signing ──
+            SigningZone runs its OWN internal analyzeGuard on whatever
+            `.guard` it receives — pass synthetic accounts with the
+            RESOLVED guard spread in (falling back to the raw unresolved
+            guard only while resolution is still in flight), exactly like
+            RevokeDualLinkModal's SigningZone call site. */}
         <SigningZone
-          patronAccount={patronAccount}
-          accountAccount={account}
+          patronAccount={patronAccount ? ({ ...patronAccount, guard: (patronGuardResolved ?? patronAccount.guard) } as any) : null}
+          accountAccount={{ ...account, guard: (accountGuardResolved ?? account.guard) } as any}
           additionalGuards={additionalGuards}
         />
 

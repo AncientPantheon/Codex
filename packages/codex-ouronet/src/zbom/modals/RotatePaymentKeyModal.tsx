@@ -38,7 +38,7 @@ import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { usePatronSelectionDefaults } from "../patron/usePatronSelectionDefaults.js";
 import { toast } from "sonner";
 import { txPending } from "../toast/toastManager.js";
-import { getIgnisBalance } from "../debouncer/monitoredReads.js";
+import { getIgnisBalance, getStoaChainAccountGuard } from "../debouncer/monitoredReads.js";
 import { getRotateStoaChainInfoLive as getRotateStoaChainInfo } from "../ouroSelectorReads.js";
 import { rotateStoaChainPaymentKeyLive as rotateStoaChainPaymentKey } from "../rotatePaymentKeyLive.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
@@ -71,6 +71,7 @@ function toNum(v: any): number {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PatronMode = "prime" | "resident" | "custom";
+type Guard = { keys: string[]; pred: string } | null;
 
 interface Props {
   open: boolean; onClose: () => void;
@@ -106,6 +107,23 @@ export default function RotatePaymentKeyModal({
   const [resolvedManualKeys, setResolvedManualKeys] = useState<Record<string, string>>({});
   const [, setManualKeys] = useState<Record<string, string>>({});
 
+  // ── Resolved guard state ──
+  // `account.guard`/`patronAccount.guard` off an IOuroAccount is an
+  // UNRESOLVED keyset-ref object (e.g. `{ keysetref: { ns, ksn } }`), not the
+  // real `{ pred, keys }` shape — mirrors RevokeDualLinkModal's own
+  // `stdGuard`/`patronGuard` + `*Loaded` pattern (its own doc comment states
+  // the same fact). Resolving via `getStoaChainAccountGuard` before feeding
+  // `analyzeGuard` / the chain call fixes BOTH the zero-threshold
+  // false-positive `satisfied: true` (an unresolved ref carries no `.keys`,
+  // so `computeThreshold`'s `keyCount === 0` short-circuit trivially passes)
+  // and the final tx's `patronGuard`/`accountGuard` data slots, which the
+  // live `C_RotateStoa` contract's `enforce-guard` checks against the REAL
+  // on-chain guard regardless of what this tx declares.
+  const [resolvedPatronGuard,  setResolvedPatronGuard]  = useState<Guard>(null);
+  const [resolvedAccountGuard, setResolvedAccountGuard] = useState<Guard>(null);
+  const [patronGuardLoaded,  setPatronGuardLoaded]  = useState(false);
+  const [accountGuardLoaded, setAccountGuardLoaded] = useState(false);
+
   // ── Derived accounts ──
   const primeAccount = accounts[0] ?? null;
 
@@ -131,8 +149,8 @@ export default function RotatePaymentKeyModal({
     () => buildCodexPubSet(kadenaSeeds, stoaChainAccounts),
     [kadenaSeeds, stoaChainAccounts],
   );
-  const patronAnalysis  = useMemo(() => analyzeGuard(patronAccount?.guard, codexPubs, resolvedManualKeys), [patronAccount?.guard, codexPubs, resolvedManualKeys]);
-  const accountAnalysis = useMemo(() => analyzeGuard(account?.guard, codexPubs, resolvedManualKeys), [account?.guard, codexPubs, resolvedManualKeys]);
+  const patronAnalysis  = useMemo(() => analyzeGuard(resolvedPatronGuard, codexPubs, resolvedManualKeys), [resolvedPatronGuard, codexPubs, resolvedManualKeys]);
+  const accountAnalysis = useMemo(() => analyzeGuard(resolvedAccountGuard, codexPubs, resolvedManualKeys), [resolvedAccountGuard, codexPubs, resolvedManualKeys]);
 
   const pureSigningPubs = useMemo(() => {
     const set = new Set<string>();
@@ -146,6 +164,8 @@ export default function RotatePaymentKeyModal({
   const gasStationPub = capsKey.key;
 
   const canExecute = newPaymentKey.trim().length > 0
+    && patronGuardLoaded
+    && accountGuardLoaded
     && patronAnalysis.satisfied
     && accountAnalysis.satisfied
     && gasStationPub !== undefined
@@ -169,11 +189,38 @@ export default function RotatePaymentKeyModal({
       .finally(() => setLoadingInfo(false));
   }, [open, patronAccount?.address, account?.address]);
 
+  // Resolve the patron's + the account's keyset-ref guards from chain —
+  // mirrors RevokeDualLinkModal's own `resolveGuard` helper byte-for-byte in
+  // spirit (reset to null + loaded=false before each resolve, abort-safe).
+  useEffect(() => {
+    if (!open || !patronAccount?.address) { setResolvedPatronGuard(null); setPatronGuardLoaded(false); return; }
+    let aborted = false;
+    setResolvedPatronGuard(null); setPatronGuardLoaded(false);
+    getStoaChainAccountGuard(patronAccount.address)
+      .then((g) => { if (!aborted) setResolvedPatronGuard(((g as unknown) as Guard) ?? null); })
+      .catch(() => { if (!aborted) setResolvedPatronGuard(null); })
+      .finally(() => { if (!aborted) setPatronGuardLoaded(true); });
+    return () => { aborted = true; };
+  }, [open, patronAccount?.address]);
+
+  useEffect(() => {
+    if (!open || !account?.address) { setResolvedAccountGuard(null); setAccountGuardLoaded(false); return; }
+    let aborted = false;
+    setResolvedAccountGuard(null); setAccountGuardLoaded(false);
+    getStoaChainAccountGuard(account.address)
+      .then((g) => { if (!aborted) setResolvedAccountGuard(((g as unknown) as Guard) ?? null); })
+      .catch(() => { if (!aborted) setResolvedAccountGuard(null); })
+      .finally(() => { if (!aborted) setAccountGuardLoaded(true); });
+    return () => { aborted = true; };
+  }, [open, account?.address]);
+
   useEffect(() => {
     if (open) {
       setPatronMode(initialPatronMode); setSelectedCustomAccount(null);
       setNewPaymentKey("");
       setManualKeys({}); setResolvedManualKeys({}); setIsProcessing(false);
+      setResolvedPatronGuard(null); setResolvedAccountGuard(null);
+      setPatronGuardLoaded(false); setAccountGuardLoaded(false);
     }
     // initialPatronMode intentionally captured per-open — a Redux setting change
     // while the modal is closed should take effect on next open, not mid-open.
@@ -227,8 +274,8 @@ export default function RotatePaymentKeyModal({
         gasStationKey,
         patronSignKeys,
         accountSignKeys,
-        patronAccount!.guard,
-        account.guard,
+        resolvedPatronGuard,
+        resolvedAccountGuard,
       );
 
       _tx.submitted(result?.requestKey ?? "");
@@ -343,9 +390,15 @@ export default function RotatePaymentKeyModal({
         </Zone2Wrapper>
 
         {/* ── Zone 3 — Signing ── */}
+        {/* SigningZone runs its OWN internal analyzeGuard on whatever
+            `.guard` it's handed — passing the raw (possibly still-unresolved
+            keyset-ref) accounts would show the SAME wrong guard-satisfaction
+            UI the execute path had. Mirrors RevokeDualLinkModal's own
+            call-site override: a synthetic account with the resolved guard
+            spread in, falling back to the raw guard while still loading. */}
         <SigningZone
-          patronAccount={patronAccount}
-          accountAccount={account}
+          patronAccount={patronAccount ? ({ ...patronAccount, guard: (resolvedPatronGuard ?? patronAccount.guard) } as any) : null}
+          accountAccount={account ? ({ ...account, guard: (resolvedAccountGuard ?? account.guard) } as any) : null}
         />
 
       </ZbomLayout>
