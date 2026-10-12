@@ -34,6 +34,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 
 import { CodexBackupInformatics } from "../src/panel/CodexBackupInformatics";
+import { CodexEncryptionInformatics } from "../src/panel/CodexEncryptionInformatics";
 import { CodexMigrationInformatics } from "../src/panel/CodexMigrationInformatics";
 
 afterEach(() => {
@@ -68,9 +69,13 @@ describe("CodexBackupInformatics — what gets backed up", () => {
   });
 });
 
-describe("CodexBackupInformatics — the encryption, in plain terms", () => {
+describe("CodexEncryptionInformatics — the encryption, in plain terms", () => {
+  // MOVED (owner correction, 2026-10-12): encryption mechanics split out
+  // of CodexBackupInformatics into their own dedicated tab/component —
+  // "maybe a third [tab] explaining the encryption process of the codex
+  // upload". Content/wording unchanged, only its component home moved.
   it("describes a fresh, one-time, per-backup key used to re-encrypt everything inside", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     // design.md: "A fresh, random 256-bit AES key is generated per
     // upload" (IDEK) — plain-language: fresh/random/one-time, generated
     // just for THIS backup, re-encrypts everything inside it.
@@ -79,7 +84,7 @@ describe("CodexBackupInformatics — the encryption, in plain terms", () => {
   });
 
   it("states that one-time key is itself locked ('wrapped') under the user's own real secrets, never stored directly usable", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     // design.md: "each is immediately wrapped (encrypted) under one or
     // more real keys" — plain language: locked/wrapped under YOUR OWN real
     // secrets, never stored anywhere in a directly-usable form.
@@ -89,7 +94,7 @@ describe("CodexBackupInformatics — the encryption, in plain terms", () => {
   });
 
   it("states the whole backup is sealed again as ONE opaque block, hiding the SHAPE itself (not just the values)", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     // design.md gap #1: "the JSON shape itself... is plaintext-readable";
     // the fix seals the whole export as one opaque blob so "nothing about
     // field names or array lengths survives" — a reader of the permanent
@@ -100,9 +105,9 @@ describe("CodexBackupInformatics — the encryption, in plain terms", () => {
   });
 });
 
-describe("CodexBackupInformatics — the two independent restore paths", () => {
+describe("CodexEncryptionInformatics — the two independent restore paths", () => {
   it("names BOTH restore paths explicitly and states either alone suffices", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const masterSeed = screen.getByText(/Master Seed words/i, { selector: "li, p" });
     expect(masterSeed).toBeInTheDocument();
     // design.md: "Standard Apollo (the Codex Identity's Standard half —
@@ -129,7 +134,7 @@ describe("CodexBackupInformatics — the two independent restore paths", () => {
   // one-time key, so either one can later unlock it on its own, and losing
   // ONE of them does not lock you out as long as the other still exists.
   it("explains WHY either path alone suffices — both independently lock the same one-time key, so losing one doesn't lock you out", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const mechanism = screen.getByText(/independently lock/i, { selector: "p" });
     expect(mechanism.textContent).toMatch(/the very same one-time key/i);
     expect(mechanism.textContent).toMatch(/does not lock you out/i);
@@ -137,9 +142,9 @@ describe("CodexBackupInformatics — the two independent restore paths", () => {
   });
 });
 
-describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warning", () => {
+describe("CodexEncryptionInformatics — the optional Arweave-PIN, unmissable warning", () => {
   it("describes the PIN as an optional 6-to-15-digit extra lock on EITHER restore path", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const pinDesc = screen.getByText(/6-to-15-digit/i, { selector: "p" });
     expect(pinDesc.textContent).toMatch(/optional/i);
   });
@@ -153,7 +158,7 @@ describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warnin
   // vagueness) AND that it replaces the normal lock for that path rather than
   // stacking a third lock on top, AND that the OTHER path is unaffected.
   it("explains the PIN mechanism: a real second key is generated from the PIN's digits, and it replaces (not stacks atop) that path's ordinary lock", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const pinMechanism = screen.getByText(/generates a real, second key/i, { selector: "p" });
     expect(pinMechanism.textContent).toMatch(/from the pin's digits/i);
     expect(pinMechanism.textContent).toMatch(/takes the place of/i);
@@ -163,7 +168,7 @@ describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warnin
   });
 
   it("renders the PIN-unrecoverable warning as genuinely visible (not inside a collapsed/closed disclosure, no [hidden])", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const warning = screen.getByTestId("pin-unrecoverable-warning");
     expect(warning).toBeVisible();
     // Never buried in a <details> at all for this specific warning — it
@@ -177,11 +182,16 @@ describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warnin
   });
 
   it("states the PIN is opt-in and never presented as a recommended default", () => {
-    render(<CodexBackupInformatics />);
+    render(<CodexEncryptionInformatics />);
     const optIn = screen.getByText(/opt-in/i, { selector: "p" });
     expect(optIn.textContent).toMatch(/never.*default/i);
   });
+});
 
+// Stayed on CodexBackupInformatics (the "How Backup Works" tab) rather than
+// moving to CodexEncryptionInformatics — this is about the backup FEATURE's
+// behavior over time, not the encryption mechanics themselves.
+describe("CodexBackupInformatics — multiple independent backups", () => {
   // NEW (owner correction, 2026-10-12): a backup taken before a Codex
   // Identity existed only ever has the Master Seed unlock path — adding a
   // Codex Identity later does not retroactively add it to that already-

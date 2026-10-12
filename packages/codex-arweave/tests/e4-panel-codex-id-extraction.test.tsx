@@ -125,28 +125,51 @@ describe("CodexIdPage — standalone, direct mount (no ArweavePanel tab bar invo
     expect(makeEligible).toHaveTextContent(/coming soon/i);
   });
 
-  it("the real backup trigger is enabled and wired to the injected getExportJson/backupCodex seams", async () => {
+  it("the real backup trigger opens a popup wired to the injected getExportJson/backupCodex seams, once eligible", async () => {
     const exportJson = '{"labels":["seed-1"]}';
     const resultId = "aXcDefGhIjKlMnOpQrStUvWxYz0123456789_-ABCDE";
     const getExportJson = vi.fn(async () => exportJson);
     const backupCodex = vi.fn(async (_json: string) => ({ id: resultId }));
-    render(<CodexIdPage deps={makeDeps({ getExportJson, backupCodex })} />);
+    render(
+      <CodexIdPage
+        deps={makeDeps({
+          getExportJson,
+          backupCodex,
+          checkArweaveRestoreEligibility: vi.fn(async () => true),
+        })}
+      />,
+    );
 
     const page = screen.getByTestId("arweave-codex-id-page");
-    const trigger = within(page).getByTestId("codex-backup-start");
-    expect(trigger).toBeEnabled();
+    const trigger = await within(page).findByTestId("codex-backup-wizard-open");
+    await waitFor(() => expect(trigger).toBeEnabled());
 
     fireEvent.click(trigger);
-    fireEvent.click(await within(page).findByTestId("codex-backup-permanence-accept"));
+    const modal = screen.getByTestId("codex-backup-wizard-modal");
+    fireEvent.click(within(modal).getByTestId("codex-backup-start"));
+    fireEvent.click(await within(modal).findByTestId("codex-backup-permanence-accept"));
     await waitFor(() => expect(backupCodex).toHaveBeenCalledWith(exportJson));
 
-    const result = await within(page).findByTestId("codex-backup-result");
+    const result = await within(modal).findByTestId("codex-backup-result");
     expect(result.textContent).toContain(resultId);
   });
 
-  it("renders both informatics sections (T2's components), composed unmodified", () => {
+  it("the backup trigger is disabled until eligible — the real backend throws otherwise", async () => {
+    render(
+      <CodexIdPage deps={makeDeps({ checkArweaveRestoreEligibility: vi.fn(async () => false) })} />,
+    );
+    const page = screen.getByTestId("arweave-codex-id-page");
+    await waitFor(() =>
+      expect(within(page).getByTestId("codex-backup-wizard-open")).toBeDisabled(),
+    );
+  });
+
+  it("renders all three informatics tabs (T2's components, now split), composed unmodified", () => {
     render(<CodexIdPage deps={makeDeps()} />);
     expect(screen.getByTestId("codex-backup-informatics")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-encryption"));
+    expect(screen.getByTestId("codex-encryption-informatics")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-migration"));
     expect(screen.getByTestId("codex-migration-informatics")).toBeInTheDocument();
   });
 

@@ -60,10 +60,16 @@ describe("Desktop '.cxpg-viewtabs' row — the new 'Codex ID' tab", () => {
     expect(screen.queryByRole("tab", { name: /blockchain accounts/i })).toBeNull();
   });
 
-  it("the Codex ID page's own informatics content (Part 1's expanded copy) is present", async () => {
+  it("the Codex ID page's own informatics content is present, now split across three tabs", async () => {
     await mountDashboard();
     fireEvent.click(screen.getByRole("tab", { name: "Codex ID" }));
+    // Default informatics tab ("How Backup Works") shows immediately; the
+    // other two are a click away (owner correction, 2026-10-12: split the
+    // single growing wall of text into tabs).
     expect(screen.getByTestId("codex-backup-informatics")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-encryption"));
+    expect(screen.getByTestId("codex-encryption-informatics")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-migration"));
     expect(screen.getByTestId("codex-migration-informatics")).toBeInTheDocument();
   });
 

@@ -161,13 +161,26 @@ describe("ArweavePanel — the 'Codex ID' tab", () => {
     expect(screen.queryByText(ARWEAVE_RESTORE_ELIGIBLE_MESSAGE)).not.toBeInTheDocument();
   });
 
-  it("the page is fully composed now (T3) — T1's generic placeholder is gone, replaced by T2's real informatics content", () => {
+  it("the page is fully composed now (T3) — T1's generic placeholder is gone, replaced by T2's real informatics content, now split across tabs", () => {
     renderPanel();
     fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
 
     expect(screen.queryByTestId("arweave-codex-id-coming-soon")).toBeNull();
+    // Default tab ("How Backup Works") shows immediately; the others are a
+    // click away, not stacked all at once (owner correction, 2026-10-12:
+    // the page read as one undifferentiated wall even after a visual-only
+    // re-style — split into tabs).
     expect(screen.getByTestId("codex-backup-informatics")).toBeInTheDocument();
+    expect(screen.queryByTestId("codex-encryption-informatics")).toBeNull();
+    expect(screen.queryByTestId("codex-migration-informatics")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-encryption"));
+    expect(screen.getByTestId("codex-encryption-informatics")).toBeInTheDocument();
+    expect(screen.queryByTestId("codex-backup-informatics")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("codex-id-informatics-tab-migration"));
     expect(screen.getByTestId("codex-migration-informatics")).toBeInTheDocument();
+    expect(screen.queryByTestId("codex-encryption-informatics")).toBeNull();
   });
 
   it("the 'make this codex eligible' action is present and genuinely disabled (not eligible / unknown eligibility — the default)", () => {
@@ -201,10 +214,13 @@ describe("ArweavePanel — the 'Codex ID' tab", () => {
       expect(screen.getByTestId("arweave-codex-id-already-eligible")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("arweave-codex-id-make-eligible")).toBeNull();
-    // The real backup trigger stays enabled regardless of eligibility — a
-    // different (now-built) engine gates it, not the migration status.
+    // Owner correction (2026-10-12): the real backend (`buildRealPanelDeps`'s
+    // `backupCodex` closure) unconditionally REQUIRES eligibility — clicking
+    // backup on an ineligible codex was always going to throw. The trigger
+    // is now gated the same way: enabled ONLY once eligible, matching reality
+    // instead of a guaranteed-to-fail click.
     const page = screen.getByTestId("arweave-codex-id-page");
-    expect(within(page).getByTestId("codex-backup-start")).toBeEnabled();
+    expect(within(page).getByTestId("codex-backup-wizard-open")).toBeEnabled();
   });
 
   it("a NOT-eligible codex (resolved, not just default/unknown) still shows the disabled 'make eligible' button, not the 'already eligible' note", async () => {
@@ -218,6 +234,22 @@ describe("ArweavePanel — the 'Codex ID' tab", () => {
     expect(screen.queryByTestId("arweave-codex-id-already-eligible")).toBeNull();
   });
 
+  it("a NOT-eligible codex shows the backup trigger DISABLED, with an honest explanation — the real backend throws for anything short of eligible", async () => {
+    renderPanel({ checkArweaveRestoreEligibility: vi.fn(async () => false) });
+    fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
+
+    await waitFor(() =>
+      expect(screen.getByText(ARWEAVE_RESTORE_NOT_ELIGIBLE_MESSAGE)).toBeInTheDocument(),
+    );
+    const trigger = screen.getByTestId("codex-backup-wizard-open");
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent(/not yet eligible/i);
+    expect(screen.getByText(/requires this codex to be eligible first/i)).toBeInTheDocument();
+    // A disabled button fires no click handler — the wizard modal never opens.
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId("codex-backup-wizard-modal")).toBeNull();
+  });
+
   it("the 'back up this codex' coming-soon button is GONE — the backup action is real now, not disabled/coming-soon (arweave-codex-id-backup-live)", () => {
     renderPanel();
     fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
@@ -227,32 +259,67 @@ describe("ArweavePanel — the 'Codex ID' tab", () => {
     expect(screen.queryByText(/Back Up This Codex To Arweave \(coming soon\)/i)).toBeNull();
   });
 
-  it("a real, functional backup trigger (the reused CodexBackupArea's own 'Back up codex to Arweave' button) is present and enabled on the Codex ID page", () => {
-    renderPanel();
+  it("a real, functional backup trigger (opens a popup wrapping the reused CodexBackupArea) is present and enabled on an ELIGIBLE Codex ID page", async () => {
+    renderPanel({ checkArweaveRestoreEligibility: vi.fn(async () => true) });
     fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
 
+    await waitFor(() =>
+      expect(screen.getByTestId("arweave-codex-id-already-eligible")).toBeInTheDocument(),
+    );
     const page = screen.getByTestId("arweave-codex-id-page");
-    const trigger = within(page).getByTestId("codex-backup-start");
+    const trigger = within(page).getByTestId("codex-backup-wizard-open");
     expect(trigger).toBeEnabled();
+
+    // Owner correction (2026-10-12): the backup action opens as a real
+    // popup (CodexModalShell — the same modal chrome every other
+    // write-action in this app uses) rather than rendering inline.
+    expect(screen.queryByTestId("codex-backup-wizard-modal")).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("codex-backup-wizard-modal")).toBeInTheDocument();
+    expect(within(screen.getByTestId("codex-backup-wizard-modal")).getByTestId("codex-backup-start")).toBeInTheDocument();
   });
 
-  it("clicking the real backup trigger and confirming calls the injected getExportJson/backupCodex seams and shows the resulting link — mirrors CodexBackupArea's own e4-panel-codex-backup.test.tsx assertion style", async () => {
+  it("clicking the backup trigger, opening the popup, and confirming calls the injected getExportJson/backupCodex seams and shows the resulting link — mirrors CodexBackupArea's own e4-panel-codex-backup.test.tsx assertion style", async () => {
     const exportJson = '{"labels":["seed-1"],"ciphertext":"opaque-blob"}';
     const resultId = "aXcDefGhIjKlMnOpQrStUvWxYz0123456789_-ABCDE";
     const getExportJson = vi.fn(async () => exportJson);
     const backupCodex = vi.fn(async (_json: string) => ({ id: resultId }));
-    renderPanel({ getExportJson, backupCodex });
+    renderPanel({
+      getExportJson,
+      backupCodex,
+      checkArweaveRestoreEligibility: vi.fn(async () => true),
+    });
     fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
 
     const page = screen.getByTestId("arweave-codex-id-page");
-    fireEvent.click(within(page).getByTestId("codex-backup-start"));
-    fireEvent.click(await within(page).findByTestId("codex-backup-permanence-accept"));
+    await waitFor(() =>
+      expect(within(page).getByTestId("codex-backup-wizard-open")).toBeEnabled(),
+    );
+    fireEvent.click(within(page).getByTestId("codex-backup-wizard-open"));
+
+    const modal = screen.getByTestId("codex-backup-wizard-modal");
+    fireEvent.click(within(modal).getByTestId("codex-backup-start"));
+    fireEvent.click(await within(modal).findByTestId("codex-backup-permanence-accept"));
 
     await waitFor(() => expect(backupCodex).toHaveBeenCalledWith(exportJson));
     expect(getExportJson).toHaveBeenCalledTimes(1);
 
-    const result = await within(page).findByTestId("codex-backup-result");
+    const result = await within(modal).findByTestId("codex-backup-result");
     expect(result.textContent).toContain(resultId);
+  });
+
+  it("closing the backup popup (×) dismisses it without losing the page", async () => {
+    renderPanel({ checkArweaveRestoreEligibility: vi.fn(async () => true) });
+    fireEvent.click(screen.getByTestId("arweave-subtab-codex-id"));
+    await waitFor(() =>
+      expect(screen.getByTestId("codex-backup-wizard-open")).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByTestId("codex-backup-wizard-open"));
+    expect(screen.getByTestId("codex-backup-wizard-modal")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("codex-backup-wizard-close"));
+    expect(screen.queryByTestId("codex-backup-wizard-modal")).toBeNull();
+    expect(screen.getByTestId("arweave-codex-id-page")).toBeInTheDocument();
   });
 
   it("the 'make this codex eligible' disabled/coming-soon button is UNCHANGED by this task (regression guard)", () => {
