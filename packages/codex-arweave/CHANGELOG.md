@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.9.1 — 2026-10-13
+
+**PATCH — the Codex ID page, finalized (three rounds of owner-reported
+UX fixes on top of 0.9.0's first build).**
+
+1. **Informatics tabbed, not stacked.** The backup/migration explainers
+   still read as one undifferentiated wall even after a visual-only
+   re-style — split into three tabs ("How Backup Works" / "Encryption" /
+   "Migration"), mirroring the Arweave panel's own established pill-tab
+   pattern. Encryption mechanics (the one-time key, the two independent
+   unlock paths, the PIN) now live in their own dedicated
+   `CodexEncryptionInformatics` component/tab.
+2. **Backup gated on eligibility, for real.** The real backend
+   (`backupCodex`) already unconditionally requires the codex to be
+   eligible — the button just never reflected that. It's now visibly
+   disabled with honest copy until eligibility resolves true, instead of
+   letting a click reach a guaranteed thrown error.
+3. **Backup opens as a real popup.** Uses the same modal chrome
+   (`CodexModalShell`) every other write-action in this app already
+   uses, instead of rendering its confirm/progress/result states inline
+   on the page.
+4. **Eligibility explanation corrected, twice**, after direct
+   owner clarification: the real historical cause (Koala was what
+   onboarding has always used, not the only possible mechanism; most
+   codexes also derived their Ouronet Account from the same words;
+   Arweave support simply came later) replaces an earlier, wrong
+   "wallet-imported vs. fresh words" framing. Added the previously-missing
+   explanation of what migration is actually FOR and why a Master Seed
+   matters: one seed generating the Ouronet Account, Chainweb keys, and
+   Prime Arweave Seed together is what lets seed-words-only restore
+   locate an Arweave backup of everything else a codex holds.
+5. **Full width.** The page and its informatics cards no longer impose
+   an artificial reading-width cap that left real empty space on wide
+   viewports — both now fill their container.
+
 ## 0.9.0 — 2026-10-12
 
 **MINOR — arbitrarily-large folder uploads, finished end to end; plus two

@@ -2,6 +2,16 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.5.1 — 2026-10-13
+
+**PATCH — bundled from `@ancientpantheon/codex-arweave` 0.9.1.** The
+Codex ID page, finalized: its explainers are now three tabs instead of
+one long wall, the backup action is correctly gated on eligibility and
+opens as a real popup, the eligibility explanation is corrected against
+direct owner clarification, and the page now fills the available width.
+See `codex-arweave`'s own changelog for full detail. `arweave-core`/
+`codex-core`/`codex-ouronet` unchanged this release.
+
 ## 1.5.0 — 2026-10-12
 
 **MINOR — bundled from `@ancientpantheon/codex-arweave` 0.9.0.**
