@@ -8,9 +8,11 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `0.8.0` — built and in active use. Bundled into `@ancientpantheon/codex`.
+Version `0.9.0` — built and in active use. Bundled into `@ancientpantheon/codex`.
 
 ## Version history
+
+**v0.9.0** — Arbitrarily-large folder uploads, finished end to end: an over-budget selection now automatically splits into the minimum number of sequential bundle uploads, resumes correctly after a real interruption, and shows whole-sequence progress — proven in a real browser, including a real bug found and fixed (resumability was silently unreachable through the production host wiring). Two new in-app informatics sections (Upload page mechanics; expanded Codex ID backup-encryption explainer). `CodexIdPage` is now a standalone, independently mountable export, not only reachable through the Arweave panel's internal tabs. See `CHANGELOG.md` for full detail.
 
 **v0.8.0** — "Export Library" button in `LibraryArea.tsx`: downloads a JSON file (`{exportedAt, itemCount, items}`) covering every Library entry across every configured owner and every page (not just what's currently rendered), with each item's real filename and real access link (manifest-aware for bundled files — a per-file link, not a bare manifest link). Built for constructing NFT metadata-update transactions after a large batch upload.
 

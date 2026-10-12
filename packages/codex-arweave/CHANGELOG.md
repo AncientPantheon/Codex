@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.9.0 — 2026-10-12
+
+**MINOR — arbitrarily-large folder uploads, finished end to end; plus two
+new in-app informatics pages; plus the Codex ID page promoted to a
+top-level tab on both desktop and mobile.**
+
+**Split-bundle upload, now genuinely reachable (not just built).** A
+folder selection too large to fit in available disk space is no longer
+blocked or demanding impossible free space — it automatically splits
+into the minimum number of sequential bundle uploads that each fit a
+computed safe byte budget (`checkAvailableStorageBudget`/
+`planSplitBundles`), tied together by one shared manifest covering every
+file across every bundle. Runs strictly sequentially (never concurrently)
+through the existing, unmodified per-bundle engine; a plan is persisted
+before the first bundle starts so an interruption resumes correctly —
+completed bundles are never re-signed or re-posted, the in-flight bundle
+resumes from its own real checkpoint. The Upload Wizard shows the
+computed plan before starting ("this N GB selection will upload as K
+bundles of about M GB each") and a whole-sequence progress view that
+never resets at a bundle boundary. The common (fits-in-one-bundle) case
+is provably unchanged — same call, same arguments, same result shape.
+
+Like every other real upload in this package, the split-bundle engine
+runs its disk-staging work in a dedicated Worker (`splitUploadWorker.ts`
++ `SplitUploadRunner.ts`, mirroring the existing single-bundle
+`uploadWorker.ts`/`StreamingUploadRunner.ts` pair exactly) — a hard
+browser requirement (`createSyncAccessHandle()` only works off the main
+thread), not a design choice. Real files cross the Worker boundary
+directly (never pre-read on the main thread — for a multi-GB folder that
+would defeat the whole point); the gateway pool and both persistence
+stores are reconstructed fresh inside the Worker rather than sent across.
+
+Found and fixed via real-browser verification (not merely unit tests):
+the original host wiring minted a brand-new upload id on every call,
+silently defeating the resumability a real interrupted upload depends
+on — confirmed live (a killed mid-upload Worker, retried, re-signed and
+re-posted an already-completed bundle under a new transaction id).
+Fixed by persisting the pending upload id per account + selection
+fingerprint, cleared only on genuine completion.
+
+**New: an in-app informatics section on the Upload page**, explaining
+the real upload mechanics in plain language — why a bundle has to be
+fully assembled before it can be posted (one Merkle tree, one
+signature), the 256 KiB chunking, why local disk space is needed and
+roughly how much, and how an oversized selection now becomes multiple
+sequential bundles automatically.
+
+**Expanded: the Codex ID page's backup-encryption informatics**, now
+explaining the mechanism in more depth — why either unlock path (Master
+Seed words or the Codex Identity's Standard half) works alone (both
+independently unlock the very same one-time key, not two different
+keys), and what a PIN actually does mechanically (a real second key
+generated from the PIN's digits REPLACES that path's ordinary lock,
+rather than stacking on top of it).
+
+**Codex ID, now independently mountable.** Previously reachable only 3
+clicks deep (Blockchain Accounts → Arweave → a Codex ID tab inside that
+panel), which had already caused real user confusion. The Codex ID page
+content is extracted into its own standalone component, `CodexIdPage`
+(new export, `panel` subpath), taking the same `ArweavePanelDeps` seam
+every other panel component already reads — renderable both from its
+original deep-link location (unchanged, still reachable the old way)
+and directly, as its own top-level destination, wherever a host
+chooses to mount it. The bundled standalone demo app (not part of this
+package's own published surface) now does exactly that, as a reference
+implementation — see its own source for the pattern.
+
 ## 0.8.0 — 2026-10-08
 
 **MINOR — "Export Library" button, additive.** `panel/LibraryArea.tsx`

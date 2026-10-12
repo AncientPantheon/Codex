@@ -2,6 +2,25 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.5.0 — 2026-10-12
+
+**MINOR — bundled from `@ancientpantheon/codex-arweave` 0.9.0.**
+Arbitrarily-large folder uploads now work end to end in a real browser,
+not just in tests: a selection too big for available disk space
+automatically splits into the minimum number of sequential bundle
+uploads, resumes correctly after a real interruption, and shows a
+whole-sequence progress view. Two new in-app informatics sections (one
+on the Upload page explaining the upload mechanics, one expanding the
+Codex ID page's backup-encryption explainer with the real dual-unlock-
+path and PIN mechanics). `CodexIdPage` is now a standalone, independently
+mountable export (`@ancientpantheon/codex/arweave`'s `panel` surface),
+so a consuming host can give it its own top-level entry point instead of
+only reaching it through the Arweave panel's internal tabs. See
+`codex-arweave`'s own changelog for the full detail, including a real
+bug found and fixed via real-browser verification (resumability was
+silently unreachable through the production host wiring). `arweave-core`/
+`codex-core`/`codex-ouronet` unchanged this release.
+
 ## 1.4.1 — 2026-10-12
 
 **PATCH — critical fix, bundled from `@ancientpantheon/codex-ouronet`

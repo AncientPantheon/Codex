@@ -58,9 +58,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.4.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.5.0` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
 
 ## Version history
+
+**v1.5.0** — Bundled from `codex-arweave` 0.9.0: arbitrarily-large folder uploads now work end to end in a real browser (automatic sequential bundle-splitting, real resume-after-interruption, whole-sequence progress), two new in-app informatics sections, and `CodexIdPage` as a standalone, independently mountable export. `arweave-core`/`codex-core`/`codex-ouronet` unchanged this release.
 
 **v1.4.1** — Critical fix, bundled from `codex-ouronet` 1.1.2: Rotate Payment Key and Rotate Guard both failed on every real attempt ("Simulation failed... Keyset failure"), reproducing identically both locally and on the already-published consumer app. Root-caused by reading the real deployed Ouronet Pact contracts directly — both modals signed with an unresolved local keyset reference instead of the real on-chain guard (every sibling modal in the same file family already resolved it; these two were the ones that hadn't). Fixed by adding the same live guard-resolution step the sibling modals use, for both the signing path and the shared signing-requirements display. `arweave-core`/`codex-core`/`codex-arweave` unchanged this release.
 
@@ -210,6 +212,6 @@ release).
 | `@ancientpantheon/codex-core` | `0.6.0` |
 | `@ancientpantheon/codex-ui` | `0.10.0` |
 | `@ancientpantheon/codex-ouronet` | `1.1.2` |
-| `@ancientpantheon/codex-arweave` | `0.8.0` |
+| `@ancientpantheon/codex-arweave` | `0.9.0` |
 | `@ancientpantheon/arweave-core` | `0.5.0` |
 <!-- END member-versions -->
