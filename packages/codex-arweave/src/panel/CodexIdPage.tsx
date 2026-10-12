@@ -62,12 +62,17 @@ import { CodexMigrationInformatics } from "./CodexMigrationInformatics.js";
 import { INFORMATICS_ACCENT } from "./informaticsStyles.js";
 
 /** The "Codex ID" page shell — eligibility status up top, then the two
- *  action buttons, then the informatics tab group. */
+ *  action buttons, then the informatics tab group. Fills the available
+ *  container width (owner correction, 2026-10-12: a fixed maxWidth here
+ *  left real empty space on wide viewports even after the tab split —
+ *  the informatics CARDS keep their own comfortable reading width via
+ *  `informaticsStyles.ts`, this outer shell no longer artificially caps
+ *  the page itself). */
 const CODEX_ID_PAGE_STYLE: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 20,
-  maxWidth: 820,
+  width: "100%",
 };
 
 /** The Codex ID page's two action buttons, stacked. */

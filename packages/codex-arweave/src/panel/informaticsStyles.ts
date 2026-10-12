@@ -24,12 +24,13 @@ import * as React from "react";
 export const INFORMATICS_ACCENT = "#ceac5f";
 
 /** The outer card every informatics component wraps its whole content in.
- *  Owns its own comfortable reading width (760px — well inside the ~60-80
- *  character ideal line length at this font size) so it looks intentional
- *  regardless of how wide its parent container happens to be, rather than
- *  stretching edge-to-edge or depending on an ancestor to constrain it. */
+ *  Fills the available container width (owner correction, 2026-10-12: a
+ *  fixed 760px reading-width cap left real empty space on wide viewports —
+ *  "why isn't it using the whole width" — so this now stretches to its
+ *  parent's full width instead of imposing its own cap). */
 export const INFORMATICS_CARD_STYLE: React.CSSProperties = {
-  maxWidth: 760,
+  width: "100%",
+  boxSizing: "border-box",
   borderRadius: 12,
   border: "1px solid #262626",
   backgroundColor: "#111111",
