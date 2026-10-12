@@ -46,6 +46,11 @@ import type { CodexBackupResult } from "./CodexBackupArea.js";
 // full), so it rides the SAME relative-path-into-package-source convention
 // `UploadWizard.tsx`'s own import of it already uses.
 import type { DryRunResult } from "../library/streaming/dryRunUpload.js";
+// `arweave-split-bundle-upload` T5b: `StorageBudget` is T1's own plain
+// result shape (`checkAvailableStorageBudget`'s return type) — not
+// re-exported by any barrel either (confirmed the same way as `DryRunResult`
+// above), so it rides the SAME relative-path-into-package-source convention.
+import type { StorageBudget } from "../library/streaming/planSplitBundles.js";
 
 /**
  * The subset of the D5 `AddressBookEntry` the Send recipient picker reads. The
@@ -264,6 +269,41 @@ export interface ArweavePanelDeps {
     selection: UploadWizardSelection,
     accountId: string,
   ) => Promise<DryRunResult>;
+  /**
+   * `arweave-split-bundle-upload` T5b: the SAME `uploadFilesAndTrackSplit`
+   * seam `UploadWizardProps.uploadFilesAndTrackSplit` already declares
+   * (identical `(files, selection, accountId, callbacks?)` call shape,
+   * matching `uploadFilesAndTrack` above) — forwarded straight through to
+   * the mounted `UploadWizard` so a bundle selection too large for a safe
+   * storage budget actually routes to the real, Worker-backed multi-bundle
+   * orchestrator (`runSplitBundleUpload`, via `SplitUploadRunner.ts`)
+   * instead of either failing outright or never being reachable from the
+   * real app at all. OPTIONAL and purely additive, mirroring
+   * `runDryRunUpload`'s own precedent immediately above: an unwired host
+   * leaves `UploadWizard` on its own unchanged in-budget-only behavior —
+   * the budget check itself is never even performed when this is absent
+   * (see `UploadWizard.tsx`'s own doc comment on this prop). */
+  uploadFilesAndTrackSplit?: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+    callbacks?: UploadWizardUploadCallbacks,
+  ) => Promise<UploadBundleTrackResult>;
+  /**
+   * `arweave-split-bundle-upload` T5b: the SAME injectable
+   * `checkAvailableStorageBudget` seam `UploadWizardProps.
+   * checkAvailableStorageBudget` already declares — mirrors
+   * `isStreamingUploadSupported`'s own injection convention exactly.
+   * OPTIONAL: a real host never needs to supply this (`UploadWizard`'s own
+   * default already calls the real T1 `checkAvailableStorageBudget`,
+   * which reaches the real `navigator.storage.estimate()` directly — no
+   * Worker needed for that call, unlike the OPFS-touching probes above).
+   * Exists on this bundle purely so a host (or test) that genuinely needs
+   * to override the budget check — e.g. to exercise the split path
+   * end-to-end without a real multi-gigabyte selection — has a real seam to
+   * do it through, the SAME reason `isStreamingUploadSupported` is
+   * injectable here despite real production never overriding it either. */
+  checkAvailableStorageBudget?: () => Promise<StorageBudget>;
   /** E3 list: the owner's Library entries, newest-first. */
   listLibrary: (owner: string) => Promise<LibraryEntry[]>;
   /** E3 openUrl: composes a healthy-gateway URL for an id. */

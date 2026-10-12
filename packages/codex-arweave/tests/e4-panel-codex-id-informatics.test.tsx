@@ -117,6 +117,21 @@ describe("CodexBackupInformatics — the two independent restore paths", () => {
       screen.getByText(/either one alone is enough/i, { selector: "p" }),
     ).toBeInTheDocument();
   });
+
+  // ARWEAVE_TAG_SCHEMA.md §4 "Wrap sources": both default sources wrap BOTH
+  // DEKs independently — i.e. each one on its own is sufficient to unlock the
+  // backup. A reader who only sees "either one is enough" as a bare claim
+  // has no way to tell that from a design flaw (e.g. a weaker fallback path)
+  // — this asserts the WHY is actually explained: both paths lock the SAME
+  // one-time key, so either one can later unlock it on its own, and losing
+  // ONE of them does not lock you out as long as the other still exists.
+  it("explains WHY either path alone suffices — both independently lock the same one-time key, so losing one doesn't lock you out", () => {
+    render(<CodexBackupInformatics />);
+    const mechanism = screen.getByText(/independently lock/i, { selector: "p" });
+    expect(mechanism.textContent).toMatch(/the very same one-time key/i);
+    expect(mechanism.textContent).toMatch(/does not lock you out/i);
+    expect(mechanism.textContent).toMatch(/as long as you still have the other/i);
+  });
 });
 
 describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warning", () => {
@@ -124,6 +139,24 @@ describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warnin
     render(<CodexBackupInformatics />);
     const pinDesc = screen.getByText(/6-to-15-digit/i, { selector: "p" });
     expect(pinDesc.textContent).toMatch(/optional/i);
+  });
+
+  // ARWEAVE_TAG_SCHEMA.md §4 "The Arweave-PIN wrap path": turning on a PIN
+  // derives a REAL, second RSA-4096 keypair from the PIN's digits, and that
+  // new key WRAPS the same one-time key in place of — not alongside — that
+  // source's ordinary (Default) wrap. "Mutual exclusivity" is the section's
+  // own stated "single most safety-critical property", so the plain-language
+  // explainer must say a real key is generated (not just "extra protection"
+  // vagueness) AND that it replaces the normal lock for that path rather than
+  // stacking a third lock on top, AND that the OTHER path is unaffected.
+  it("explains the PIN mechanism: a real second key is generated from the PIN's digits, and it replaces (not stacks atop) that path's ordinary lock", () => {
+    render(<CodexBackupInformatics />);
+    const pinMechanism = screen.getByText(/generates a real, second key/i, { selector: "p" });
+    expect(pinMechanism.textContent).toMatch(/from the pin's digits/i);
+    expect(pinMechanism.textContent).toMatch(/takes the place of/i);
+    expect(pinMechanism.textContent).toMatch(/not.*on top of it/i);
+    expect(pinMechanism.textContent).toMatch(/other (restore )?path/i);
+    expect(pinMechanism.textContent).toMatch(/keeps working/i);
   });
 
   it("renders the PIN-unrecoverable warning as genuinely visible (not inside a collapsed/closed disclosure, no [hidden])", () => {

@@ -70,6 +70,12 @@ import type { DryRunResult } from "../../../packages/codex-arweave/src/library/s
 // convention as the two imports above — neither rides a `package.json`
 // `exports` subpath either, grounded the identical way.
 import { FakeSupportProbeRunner, type SupportProbeRunner } from "../../../packages/codex-arweave/src/library/streaming/SupportProbeRunner.js";
+// `arweave-split-bundle-upload` T5b: the SAME relative-path convention as
+// every import above — `SplitUploadRunner`/`RunSplitBundleUploadResult`
+// ride no `package.json` `exports` subpath either, grounded the identical
+// way.
+import type { SplitUploadRunner } from "../../../packages/codex-arweave/src/library/streaming/SplitUploadRunner.js";
+import type { RunSplitBundleUploadResult } from "../../../packages/codex-arweave/src/library/streaming/runSplitBundleUpload.js";
 
 // Network-touching seams `bufferedFeeCap`/`backupCodexToLibrary` reach for in
 // `buildRealPanelDeps().backupCodex` — faked at the MODULE boundary (mirrors
@@ -1089,5 +1095,217 @@ describe("buildRealPanelDeps — isStreamingUploadSupported wiring (arweave-stre
     });
 
     await expect(deps.isStreamingUploadSupported()).resolves.toBe(false);
+  });
+});
+
+/**
+ * `arweave-split-bundle-upload` T5b: `buildRealPanelDeps`'s new
+ * `uploadFilesAndTrackSplit` — the host-adapter half of the flagged gap:
+ * `runSplitBundleUpload` (T4) runs its OPFS work on the main thread, which
+ * throws in a real browser (`createSyncAccessHandle()` is Worker-only, the
+ * identical hard platform fact `uploadAndTrack`/`uploadFilesAndTrack` were
+ * already fixed for). Mirrors `uploadFilesAndTrack`'s own established
+ * pattern (decrypt the PASSED-IN `accountId`'s key, resolve `encryptFor`
+ * into a `CryptoKey` via the SAME `resolveEncryptionKey`), but routes into
+ * an INJECTABLE `splitUploadRunner` (default: a real Worker-backed
+ * `createWorkerSplitUploadRunner`) instead of `streamingUploadRunner`.
+ */
+describe("buildRealPanelDeps — uploadFilesAndTrackSplit (arweave-split-bundle-upload T5b)", () => {
+  const TEST_PASSWORD = "correct horse battery staple";
+  const ADDRESS_CHOSEN = "split-test-address-chosen";
+  const ADDRESS_DEFAULT = "split-test-address-default";
+  const FAKE_JWK_CHOSEN = { kty: "RSA", n: "chosen-fake-n", e: "AQAB" };
+  const FAKE_JWK_DEFAULT = { kty: "RSA", n: "default-fake-n", e: "AQAB" };
+
+  async function makeEntries(): Promise<ForeignKeyEntry[]> {
+    const chosen = await encryptStringV2(JSON.stringify(FAKE_JWK_CHOSEN), TEST_PASSWORD);
+    const fallback = await encryptStringV2(JSON.stringify(FAKE_JWK_DEFAULT), TEST_PASSWORD);
+    return [
+      { id: ADDRESS_DEFAULT, chainId: ARWEAVE_CHAIN_ID, encryptedKeyfile: fallback, address: ADDRESS_DEFAULT },
+      { id: ADDRESS_CHOSEN, chainId: ARWEAVE_CHAIN_ID, encryptedKeyfile: chosen, address: ADDRESS_CHOSEN },
+    ];
+  }
+
+  /** A `SplitUploadRunner` test double that CAPTURES every `.run()` call —
+   *  mirrors `makeCapturingStreamingUploadRunner`/`makeCapturingStreamingDryRunRunner`
+   *  above. */
+  function makeCapturingSplitUploadRunner(result: RunSplitBundleUploadResult): {
+    runner: SplitUploadRunner;
+    calls: Parameters<SplitUploadRunner["run"]>[];
+  } {
+    const calls: Parameters<SplitUploadRunner["run"]>[] = [];
+    const runner: SplitUploadRunner = {
+      async run(params, opts) {
+        calls.push([params, opts]);
+        return result;
+      },
+    };
+    return { runner, calls };
+  }
+
+  const FAKE_SPLIT_RESULT: RunSplitBundleUploadResult = {
+    manifestId: "split-manifest-id",
+    bundleResults: [
+      {
+        manifestId: "unused-per-bundle-manifest-id",
+        fileIds: [
+          { path: "a.txt", id: "a-id" },
+          { path: "b.txt", id: "b-id" },
+        ],
+        uploadId: "unused-per-bundle-upload-id",
+      },
+    ],
+  };
+
+  it("decrypts and signs-for with the PASSED-IN accountId's key, not the construction-time default address", async () => {
+    const entries = await makeEntries();
+    const { runner, calls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      address: ADDRESS_DEFAULT,
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: runner,
+    });
+    const files = [
+      new File(["a"], "a.txt", { type: "text/plain" }),
+      new File(["b"], "b.txt", { type: "text/plain" }),
+    ];
+
+    await deps.uploadFilesAndTrackSplit!(files, { category: "personal-documents" }, ADDRESS_CHOSEN);
+
+    expect(calls).toHaveLength(1);
+    const [params] = calls[0]!;
+    expect(params.jwk).toEqual(FAKE_JWK_CHOSEN);
+  });
+
+  it("hands the runner the REAL File objects directly — never pre-reads their bytes on the main thread", async () => {
+    const entries = await makeEntries();
+    const { runner, calls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: runner,
+    });
+    const fileA = new File(["a"], "a.txt", { type: "text/plain" });
+    const fileB = new File(["b"], "b.txt", { type: "text/plain" });
+
+    await deps.uploadFilesAndTrackSplit!([fileA, fileB], { category: "personal-documents" }, ADDRESS_CHOSEN);
+
+    const [params] = calls[0]!;
+    expect(params.files).toHaveLength(2);
+    expect(params.files[0]!.file).toBe(fileA);
+    expect(params.files[1]!.file).toBe(fileB);
+    expect(params.files[0]!.path).toBe("a.txt");
+    expect(params.files[0]!.size).toBe(fileA.size);
+  });
+
+  it("resolves selection.encryptFor into a real CryptoKey (and drives encrypted/encryptorAddress/encryptionVersion), and omits it for a Public selection", async () => {
+    const entries = await makeEntries();
+    const BITSTRING = "1".repeat(1600);
+    const revealAccountSecret = async (): Promise<string> => BITSTRING;
+
+    const { runner: encryptedRunner, calls: encryptedCalls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const encryptedDeps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: encryptedRunner,
+    });
+    const files = [new File(["a"], "a.txt", { type: "text/plain" }), new File(["b"], "b.txt", { type: "text/plain" })];
+
+    await encryptedDeps.uploadFilesAndTrackSplit!(
+      files,
+      {
+        category: "personal-documents",
+        encryptFor: {
+          accountId: "ouro-encryptor-account",
+          accountAddress: "ouro-encryptor-address",
+          revealAccountSecret,
+        },
+      },
+      ADDRESS_CHOSEN,
+    );
+    const [encryptedParams] = encryptedCalls[0]!;
+    expect(encryptedParams.encryptionKey).toBeInstanceOf(CryptoKey);
+    expect(encryptedParams.encrypted).toBe(true);
+    expect(encryptedParams.encryptorAddress).toBe("ouro-encryptor-address");
+    expect(encryptedParams.encryptionVersion).toBe("2");
+
+    const { runner: publicRunner, calls: publicCalls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const publicDeps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: publicRunner,
+    });
+    await publicDeps.uploadFilesAndTrackSplit!(files, { category: "personal-documents" }, ADDRESS_CHOSEN);
+    const [publicParams] = publicCalls[0]!;
+    expect(publicParams.encryptionKey).toBeUndefined();
+    expect(publicParams.encrypted).toBe(false);
+    expect(publicParams.encryptorAddress).toBeUndefined();
+  });
+
+  it("calls the runner with the SAME resolved pool this adapter instance was built against", async () => {
+    const entries = await makeEntries();
+    const pool = createGatewayPool({ endpoints: ["https://split-pool.example"], sleep: async () => {} });
+    const { runner, calls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      pool,
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: runner,
+    });
+    const files = [new File(["a"], "a.txt", { type: "text/plain" }), new File(["b"], "b.txt", { type: "text/plain" })];
+
+    await deps.uploadFilesAndTrackSplit!(files, { category: "personal-documents" }, ADDRESS_CHOSEN);
+
+    const [, opts] = calls[0]!;
+    expect(opts.pool).toBe(pool);
+  });
+
+  it("forwards callbacks.onOverallProgress straight into the runner's own onOverallProgress option", async () => {
+    const entries = await makeEntries();
+    const { runner, calls } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: runner,
+    });
+    const files = [new File(["a"], "a.txt", { type: "text/plain" }), new File(["b"], "b.txt", { type: "text/plain" })];
+    const onOverallProgress = vi.fn();
+
+    await deps.uploadFilesAndTrackSplit!(files, { category: "personal-documents" }, ADDRESS_CHOSEN, {
+      onOverallProgress,
+    });
+
+    const [, opts] = calls[0]!;
+    opts.onOverallProgress?.(0, 2, 1, 2, 5, 20);
+    expect(onOverallProgress).toHaveBeenCalledWith(0, 2, 1, 2, 5, 20);
+  });
+
+  it("converts the RunSplitBundleUploadResult into the SAME UploadBundleTrackResult shape uploadFilesAndTrack resolves — manifestId, flattened fileIds across every bundle, and a generated uploadId", async () => {
+    const entries = await makeEntries();
+    const { runner } = makeCapturingSplitUploadRunner(FAKE_SPLIT_RESULT);
+    const deps = buildRealPanelDeps({
+      gatewayUrl: "https://arweave.example.invalid",
+      foreignKeys: entries,
+      getPassword: () => TEST_PASSWORD,
+      splitUploadRunner: runner,
+    });
+    const files = [new File(["a"], "a.txt", { type: "text/plain" }), new File(["b"], "b.txt", { type: "text/plain" })];
+
+    const result = await deps.uploadFilesAndTrackSplit!(files, { category: "personal-documents" }, ADDRESS_CHOSEN);
+
+    expect(result.manifestId).toBe("split-manifest-id");
+    expect(result.fileIds).toEqual([
+      { path: "a.txt", id: "a-id" },
+      { path: "b.txt", id: "b-id" },
+    ]);
+    expect(typeof result.uploadId).toBe("string");
+    expect(result.uploadId.length).toBeGreaterThan(0);
   });
 });

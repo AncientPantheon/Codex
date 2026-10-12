@@ -125,6 +125,18 @@ import { isStreamingUploadSupported as defaultIsStreamingUploadSupported } from 
 // re-exported by this package's own barrel (checked directly: neither
 // `src/panel/index.ts` nor `src/library/index.ts` names it).
 import type { DryRunResult } from "../library/streaming/dryRunUpload.js";
+// `arweave-split-bundle-upload` T5: T1's real free-space check + pure
+// splitting planner — the SAME relative-path-into-`library/streaming`
+// convention `isStreamingUploadSupported`/`DryRunResult` above already use
+// (neither is re-exported by this package's own barrel either, confirmed the
+// same way). `checkAvailableStorageBudget` is the ONE real I/O touch
+// (injectable below, mirrors `isStreamingUploadSupported`'s own seam);
+// `planSplitBundles` is PURE — called directly, no injection needed.
+import {
+  checkAvailableStorageBudget as defaultCheckAvailableStorageBudget,
+  planSplitBundles,
+  type StorageBudget,
+} from "../library/streaming/planSplitBundles.js";
 import type { ArweaveSeedAccountSource } from "./ArweaveSeedsArea.js";
 import {
   CATEGORY_GROUPS,
@@ -168,6 +180,22 @@ export interface UploadWizardUploadCallbacks {
    *  this upload, `"fallback"` when the classic in-memory path is. Mirrors
    *  `library/flow.ts`'s own `UploadAndTrackOptions.onUploadRouteDecided`. */
   onRouteDecided?: (route: "streaming" | "fallback") => void;
+  /** `arweave-split-bundle-upload` T5: whole-sequence progress for a SPLIT
+   *  (multi-bundle) upload — forwarded verbatim from T4's
+   *  `runSplitBundleUpload`'s own `onOverallProgress` option. Only ever
+   *  wired on the callbacks object passed to
+   *  {@link UploadWizardProps.uploadFilesAndTrackSplit} — the common
+   *  `uploadAndTrack`/`uploadFilesAndTrack` call path's own callbacks object
+   *  never includes this key at all (not merely "never called"), so that
+   *  path's shape stays byte-identical to before this task. */
+  onOverallProgress?: (
+    bundleIndex: number,
+    totalBundles: number,
+    bundleUploadedChunks: number,
+    bundleTotalChunks: number,
+    overallBytesUploaded: number,
+    overallTotalBytes: number,
+  ) => void;
 }
 
 export interface UploadWizardProps {
@@ -295,6 +323,42 @@ export interface UploadWizardProps {
     selection: UploadWizardSelection,
     accountId: string,
   ) => Promise<DryRunResult>;
+  /**
+   * `arweave-split-bundle-upload` T5: OPTIONAL, additive routing seam for a
+   * multi-file (`isBundle`) selection whose total exceeds a safe storage
+   * budget — mirrors every other OPTIONAL "host does the real work, this
+   * component only renders what comes back" seam in this file
+   * (`runDryRunUpload`/`getBalance`/`ensureCodexUnlocked`). OMITTED (every
+   * pre-this-task test, and every host that hasn't wired T4's
+   * `runSplitBundleUpload` yet): the budget check below is NEVER even
+   * performed — `onConfirmUpload`'s call into `uploadFilesAndTrack` is
+   * untouched, byte-identical to before this task. SUPPLIED: an over-budget
+   * selection routes HERE instead of `uploadFilesAndTrack`; an in-budget
+   * selection still calls `uploadFilesAndTrack` exactly as before (the
+   * budget check itself changes nothing about THAT call — see
+   * `onConfirmUpload`). Returns the SAME `UploadBundleTrackResult` shape
+   * `uploadFilesAndTrack` does — the ONE shared manifest (T2) covering every
+   * bundle's files — so the "done" view renders it identically, with zero
+   * new result-rendering code needed.
+   */
+  uploadFilesAndTrackSplit?: (
+    files: File[],
+    selection: UploadWizardSelection,
+    accountId: string,
+    callbacks?: UploadWizardUploadCallbacks,
+  ) => Promise<UploadBundleTrackResult>;
+  /**
+   * `arweave-split-bundle-upload` T5: injectable seam for T1's real
+   * `checkAvailableStorageBudget` — mirrors `isStreamingUploadSupported`'s
+   * own injection convention exactly, including defaulting to the real T1
+   * export (a real caller never supplies this). Tests inject a fake so the
+   * budget check never touches a real `navigator.storage.estimate()`. Only
+   * ever CALLED when `uploadFilesAndTrackSplit` is supplied AND the current
+   * selection is a bundle (2+ files) — see `onConfirmUpload` below; never
+   * called at all otherwise, so every pre-this-task test (which supplies
+   * neither prop) is completely untouched by this check.
+   */
+  checkAvailableStorageBudget?: () => Promise<StorageBudget>;
 }
 
 type UploadMode = "" | "public" | "encrypted";
@@ -322,6 +386,16 @@ type UploadProgressState =
       stage: "assembling" | "computing-root" | "posting" | "resuming";
       uploadedChunks?: number;
       totalChunks?: number;
+      /** `arweave-split-bundle-upload` T5: present ONLY during a SPLIT
+       *  (multi-bundle) upload — whole-sequence position/progress, fed by
+       *  `onOverallProgress`. Absent for the common single-bundle path
+       *  (never set, so the progress panel never renders a bundle/overall
+       *  line for it). `uploadedChunks`/`totalChunks` above still carry the
+       *  CURRENT bundle's own chunk counts in this case — never replaced. */
+      bundleIndex?: number;
+      totalBundles?: number;
+      overallBytesUploaded?: number;
+      overallTotalBytes?: number;
     }
   | { status: "done" };
 type CostState =
@@ -345,6 +419,13 @@ type AccountBalanceState = { status: "loading" } | { status: "ready"; balance: b
  * informative dry-run FAILURE, rendered in the SAME `"done"` panel as a
  * pass, never this `"error"` state).
  */
+/** `arweave-split-bundle-upload` T5: the pre-upload split-plan info shown
+ *  plainly BEFORE the real upload call runs (design.md §4) — computed once,
+ *  right as Confirm is processed, from T1's real `planSplitBundles` output;
+ *  `null` whenever a selection doesn't split (the common case, or
+ *  `uploadFilesAndTrackSplit` not supplied at all). */
+type SplitPlanInfo = { totalBundles: number; perBundleBytes: number; totalBytes: number };
+
 type DryRunState =
   | { status: "idle" }
   | { status: "running" }
@@ -791,6 +872,36 @@ function progressStageLabel(
   }
 }
 
+/** `arweave-split-bundle-upload` T5: a byte count as a one-decimal-place
+ *  decimal GB string (e.g. `"48.0 GB"`) — the SAME plain, honest-numbers
+ *  tone `totalSizeCapMessage` above already uses (states the real figure,
+ *  never rounds away the magnitude). */
+function formatGigabytes(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+}
+
+/** `arweave-split-bundle-upload` T5: the pre-upload split-plan message —
+ *  shown plainly BEFORE the real upload call runs (design.md §4), mirroring
+ *  that doc's own suggested copy ("your N GB selection will upload as K
+ *  bundles of about M GB each, based on your available storage") in this
+ *  file's own established plain-factual tone (same register as
+ *  `totalSizeCapMessage`/`STREAMING_DISCLAIMER_TEXT` above — never an
+ *  alarming "warning"-style message). */
+function splitPlanMessage(info: SplitPlanInfo): string {
+  return (
+    `This ${formatGigabytes(info.totalBytes)} selection will upload as ${info.totalBundles} bundles of about ` +
+    `${formatGigabytes(info.perBundleBytes)} each, based on your available storage.`
+  );
+}
+
+/** `arweave-split-bundle-upload` T5: the whole-sequence "N% of total
+ *  upload" figure — `0` when `overallTotalBytes` is `0` (nothing to divide
+ *  by; never `NaN`/`Infinity`), clamped to `[0, 100]` as a safety backstop. */
+function overallUploadPercent(overallBytesUploaded: number, overallTotalBytes: number): number {
+  if (overallTotalBytes <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((overallBytesUploaded / overallTotalBytes) * 100)));
+}
+
 /** `arweave-upload-dry-run` T3: plain-language "Yes"/"No"/"N/A" for a
  *  {@link DryRunResult} boolean-or-"not-applicable" field. */
 function yesNoNa(value: boolean | "not-applicable"): string {
@@ -824,6 +935,8 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     onAccountUsedForEncryption,
     isStreamingUploadSupported = defaultIsStreamingUploadSupported,
     runDryRunUpload,
+    uploadFilesAndTrackSplit,
+    checkAvailableStorageBudget = defaultCheckAvailableStorageBudget,
   } = props;
 
   const [step, setStep] = useState(0);
@@ -851,6 +964,11 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
   // call into `uploadAndTrack`/`uploadFilesAndTrack` below.
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState>({ status: "idle" });
   const [uploadRoute, setUploadRoute] = useState<"streaming" | "fallback" | null>(null);
+  // `arweave-split-bundle-upload` T5: `null` whenever this upload attempt
+  // didn't split (the common case, or `uploadFilesAndTrackSplit` wasn't
+  // supplied at all) — set, BEFORE the real split call starts, only once
+  // T1's real planner reports more than one bundle for this selection.
+  const [splitPlan, setSplitPlan] = useState<SplitPlanInfo | null>(null);
   // T3: `null` (not yet known) until the ONE per-session probe below
   // resolves — treated as "not supported" by the cap checks (never
   // optimistically unblocked before the real answer is in).
@@ -1171,6 +1289,7 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     // route from a previous attempt.
     setUploadProgress({ status: "active", stage: "assembling" });
     setUploadRoute(null);
+    setSplitPlan(null);
     try {
       const selection = buildSelection();
       const callbacks: UploadWizardUploadCallbacks = {
@@ -1181,13 +1300,69 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
           setUploadRoute(route);
         },
       };
+
+      // `arweave-split-bundle-upload` T5: the budget check below runs ONLY
+      // when the host actually wired `uploadFilesAndTrackSplit` AND this is
+      // a bundle (2+ files) selection — every pre-this-task caller (which
+      // supplies neither) never reaches this branch at all, so the
+      // `uploadFilesAndTrack` call further down stays byte-identical. An
+      // in-budget result (the common case, `plan.bundles.length <= 1`)
+      // falls through to that SAME unchanged call too — the check itself
+      // decides nothing about how `callbacks` is built for it.
+      let splitPlanInfo: SplitPlanInfo | null = null;
+      if (isBundle && uploadFilesAndTrackSplit) {
+        const budget = await checkAvailableStorageBudget();
+        const plan = planSplitBundles(
+          fileEntries.map((e) => ({ path: e.path, size: e.file.size })),
+          budget.safeBudgetBytes,
+        );
+        if (plan.bundles.length > 1) {
+          splitPlanInfo = {
+            totalBundles: plan.bundles.length,
+            perBundleBytes: Math.ceil(totalByteSize / plan.bundles.length),
+            totalBytes: totalByteSize,
+          };
+        }
+      }
+
       // Owner-reported Bug 1: thread the Account step's OWN chosen id
       // through verbatim — this is what makes the real signing/paying key
       // actually track the wizard's selection instead of whatever identity
       // the host's deps were constructed with.
-      const res = isBundle
-        ? await uploadFilesAndTrack(files, selection, accountId, callbacks)
-        : await uploadAndTrack(files[0], selection, accountId, callbacks);
+      let res: UploadTrackResult | UploadBundleTrackResult;
+      if (splitPlanInfo) {
+        // Shown plainly BEFORE the real call below even starts (design.md
+        // §4) — a SEPARATE, additive callbacks object, so the common path's
+        // own `callbacks` above never gains an `onOverallProgress` key.
+        setSplitPlan(splitPlanInfo);
+        const splitCallbacks: UploadWizardUploadCallbacks = {
+          ...callbacks,
+          onOverallProgress: (
+            bundleIndex,
+            totalBundles,
+            bundleUploadedChunks,
+            bundleTotalChunks,
+            overallBytesUploaded,
+            overallTotalBytes,
+          ) => {
+            setUploadProgress({
+              status: "active",
+              stage: "posting",
+              uploadedChunks: bundleUploadedChunks,
+              totalChunks: bundleTotalChunks,
+              bundleIndex,
+              totalBundles,
+              overallBytesUploaded,
+              overallTotalBytes,
+            });
+          },
+        };
+        res = await uploadFilesAndTrackSplit!(files, selection, accountId, splitCallbacks);
+      } else if (isBundle) {
+        res = await uploadFilesAndTrack(files, selection, accountId, callbacks);
+      } else {
+        res = await uploadAndTrack(files[0], selection, accountId, callbacks);
+      }
       setResult(res);
       setPhase("done");
       setUploadProgress({ status: "done" });
@@ -1238,6 +1413,7 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
     setErrorMessage(null);
     setUploadProgress({ status: "idle" });
     setUploadRoute(null);
+    setSplitPlan(null);
   }
 
   function goNext(): void {
@@ -1861,6 +2037,16 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
           {uploadRouteLabel(uploadRoute)}
         </p>
       ) : null}
+      {/* `arweave-split-bundle-upload` T5: shown plainly BEFORE the real
+          split upload call starts (design.md §4) — stays visible through
+          "uploading" AND the resulting "done"/"error" view, same lifecycle
+          as the routing signal above, reset only by a fresh Confirm or a
+          Retry. */}
+      {splitPlan ? (
+        <p data-testid="upload-wizard-split-plan-message" style={{ fontSize: 12, color: "#888", marginTop: 0 }}>
+          {splitPlanMessage(splitPlan)}
+        </p>
+      ) : null}
       {phase === "done" && result ? (
         isBundleResult(result) ? (
           <div data-testid="upload-wizard-bundle-result">
@@ -1934,6 +2120,27 @@ export function UploadWizard(props: UploadWizardProps): React.ReactElement {
               uploadProgress.totalChunks !== undefined ? (
                 <p data-testid="upload-wizard-progress-chunks" style={{ margin: 0, color: "#888" }}>
                   {uploadProgress.uploadedChunks} / {uploadProgress.totalChunks} chunks
+                </p>
+              ) : null}
+              {/* `arweave-split-bundle-upload` T5: present ONLY during a
+                  SPLIT upload (see `UploadProgressState`'s own doc comment)
+                  — a single, unified indicator spanning the WHOLE sequence
+                  (design.md §4), never a bar that resets at a bundle
+                  boundary: `overallBytesUploaded`/`overallTotalBytes` come
+                  straight from T4's own whole-sequence aggregation. */}
+              {uploadProgress.status === "active" &&
+              uploadProgress.bundleIndex !== undefined &&
+              uploadProgress.totalBundles !== undefined ? (
+                <p data-testid="upload-wizard-progress-bundle" style={{ margin: 0, color: "#888" }}>
+                  Bundle {uploadProgress.bundleIndex + 1} of {uploadProgress.totalBundles}
+                </p>
+              ) : null}
+              {uploadProgress.status === "active" &&
+              uploadProgress.overallBytesUploaded !== undefined &&
+              uploadProgress.overallTotalBytes !== undefined ? (
+                <p data-testid="upload-wizard-progress-overall" style={{ margin: 0, color: "#888" }}>
+                  {overallUploadPercent(uploadProgress.overallBytesUploaded, uploadProgress.overallTotalBytes)}% of
+                  total upload
                 </p>
               ) : null}
             </div>

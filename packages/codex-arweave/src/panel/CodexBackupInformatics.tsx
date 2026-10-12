@@ -25,13 +25,23 @@
  *   specifically (NOT the combined identity, NOT the "Smart" half —
  *   design.md's "Out of scope" section is explicit that the Smart half is
  *   reserved for a separate, higher-authority mechanism and is never
- *   itself an access-granting wrap source).
+ *   itself an access-granting wrap source). Grounded against
+ *   `packages/codex/ARWEAVE_TAG_SCHEMA.md` §4 "Wrap sources": both default
+ *   sources wrap the SAME two one-time keys independently, which is WHY
+ *   either one alone suffices — the plain-language copy says this
+ *   explicitly (losing one does not lock you out as long as the other
+ *   remains), not just the bare claim.
  * - The optional Arweave-PIN wrap path (moved in scope, owner decision
  *   2026-10-08): an opt-in extra lock on EITHER default path above, with
  *   an unmissable (always-rendered, never collapsed) warning that
  *   forgetting it is exactly as unrecoverable as losing the seed words —
  *   there is no reset, ever — and that it is never the recommended
- *   default.
+ *   default. Grounded against ARWEAVE_TAG_SCHEMA.md §4's "Arweave-PIN
+ *   wrap path" / "Mutual exclusivity" subsections: a PIN mechanically
+ *   generates a REAL second key from the PIN's digits (plain-language for
+ *   the design's PIN-derived RSA-4096 keypair), and that key REPLACES —
+ *   never supplements — the path's own default lock, per source,
+ *   independently of the other path.
  *
  * This component takes no props and performs no data fetching — it is
  * pure static content, composed into the real page by a later task
@@ -127,12 +137,25 @@ export function CodexBackupInformatics(): React.ReactElement {
             identity, and not the &quot;Smart&quot; half).
           </li>
         </ul>
+        <p style={BODY_STYLE}>
+          Both of these independently lock the very same one-time key described above — not two
+          different keys, one for each. That is why either one works alone: whichever one you
+          use, it unlocks that same key by itself. In practice, this means losing one of them
+          does not lock you out of your backup, as long as you still have the other.
+        </p>
       </section>
 
       <section style={SECTION_STYLE}>
         <p style={BODY_STYLE}>
           You can add an optional PIN — a 6-to-15-digit number that only you know — as an extra
           lock on top of either restore path above.
+        </p>
+        <p style={BODY_STYLE}>
+          Turning on a PIN for one of these two paths generates a real, second key from the
+          PIN&apos;s digits, and that new key takes the place of that path&apos;s ordinary lock
+          — it is not an extra lock added on top of it, it stands in for it. The other restore
+          path, if you leave it without a PIN, is unaffected and keeps working exactly as before
+          on its own.
         </p>
         <div data-testid="pin-unrecoverable-warning" role="alert" style={PIN_WARNING_STYLE}>
           Warning: forgetting this PIN is exactly as unrecoverable as losing your seed words —

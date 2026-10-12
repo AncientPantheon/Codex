@@ -39,6 +39,7 @@ import {
 import {
   ArweavePanel,
   ArweavePanelProvider,
+  CodexIdPage,
   type ArweavePanelDeps,
   type PanelAddressBookEntry,
 } from "@ancientpantheon/codex-arweave/panel";
@@ -1025,6 +1026,17 @@ export interface ForeignChainsWiringProps {
   /** Called after a codex-backup upload resolves — typically the caller's
    *  own `useCodexBackup().clearDirty`. Forwarded to `buildArweaveWiring`. */
   onBackupSuccess?: () => void;
+  /**
+   * `"tabs"` (default): the normal `CodexTabs` shell. `"codex-id"`: renders
+   * ONLY `CodexIdPage`, fed the SAME `providerDeps` this component already
+   * assembles for `CodexTabs` — no parallel wiring path, no second deps
+   * assembly. This is what the top-level "Codex ID" nav entry (`App.tsx`'s
+   * `.cxpg-viewtabs` third button / `OuronetShellMock`'s tier-2 menu item)
+   * mounts, so that direct entry point gets the SAME live eligibility/
+   * backup data the deep-link path (Blockchain Accounts → Arweave →
+   * Codex ID tab) already has, instead of a degraded `deps={null}` page.
+   */
+  view?: "tabs" | "codex-id";
 }
 
 /**
@@ -1059,6 +1071,7 @@ export function ForeignChainsWiring({
   fullScreenPortalTarget,
   getExportJson,
   onBackupSuccess,
+  view = "tabs",
 }: ForeignChainsWiringProps = {}): ReactElement {
   // The REAL codex address book (never a fake): mapped into the panel seam so a
   // saved Arweave address is selectable as a Send recipient.
@@ -1394,6 +1407,15 @@ export function ForeignChainsWiring({
     () => ({ ...panelDeps, libraryAutoRebuildProgress: autoRebuildProgress }),
     [panelDeps, autoRebuildProgress],
   );
+
+  // `view === "codex-id"`: the top-level "Codex ID" nav entry. Reuses the
+  // SAME `providerDeps` just assembled above — no second wiring path, no
+  // duplicated hook chain. `CodexIdPage` takes `deps` as a plain prop (not
+  // context), so it's rendered directly, without the `ArweavePanelProvider`/
+  // `CodexTabs` shell the `"tabs"` view below needs.
+  if (view === "codex-id") {
+    return <CodexIdPage deps={providerDeps} />;
+  }
 
   return (
     <ArweavePanelProvider deps={providerDeps}>

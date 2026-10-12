@@ -33,6 +33,7 @@ import {
   createGatewayPool,
   estimateFee,
   importKeyfile,
+  CODEX_ENCRYPTION_VERSION_CURRENT,
   type ArweaveJwk,
   type GatewayPool,
 } from "@ancientpantheon/arweave-core";
@@ -105,6 +106,16 @@ import {
   createWorkerSupportProbeRunner,
   type SupportProbeRunner,
 } from "../../../packages/codex-arweave/src/library/streaming/SupportProbeRunner.js";
+// `arweave-split-bundle-upload` T5b: the SAME relative-path convention as
+// every import above (neither rides a `package.json` `exports` subpath
+// either, grounded the identical way) — the Worker-backed wrapper that
+// closes T5's own flagged gap: `runSplitBundleUpload` (T4) runs its OPFS
+// work on the main thread, which throws in a real browser exactly like
+// `uploadAndTrack`/`uploadFilesAndTrack` did before `StreamingUploadRunner`.
+import {
+  createWorkerSplitUploadRunner,
+  type SplitUploadRunner,
+} from "../../../packages/codex-arweave/src/library/streaming/SplitUploadRunner.js";
 // TYPE-ONLY (erased at compile time, so this costs nothing at runtime —
 // never a heavy React import of the panel): `UploadWizardUploadCallbacks`/
 // `UploadWizardSelection` aren't re-exported by the `./panel` barrel either,
@@ -226,6 +237,36 @@ export function createStreamingUploadWorker(): Worker {
   return new Worker(
     new URL(
       "../../../packages/codex-arweave/src/library/streaming/uploadWorker.ts",
+      import.meta.url,
+    ),
+    { type: "module" },
+  );
+}
+
+/**
+ * The DEFAULT worker factory for real-mode SPLIT (multi-bundle) streaming
+ * uploads (`arweave-split-bundle-upload` T5b): the bundler-built Web Worker
+ * for codex-arweave's split-upload entry
+ * (`src/library/streaming/splitUploadWorker.ts`) — the dedicated Worker
+ * every one of `runSplitBundleUpload`'s K per-bundle engine calls requires,
+ * for the identical hard platform fact {@link createStreamingUploadWorker}'s
+ * own doc comment already documents.
+ *
+ * Mirrors {@link createStreamingUploadWorker} exactly, for the identical
+ * reason: a RELATIVE path into the package SOURCE, not a bare specifier —
+ * `library/streaming/splitUploadWorker.ts` has no `package.json` `exports`
+ * subpath of its own (it is a bundler worker entry, not a library symbol).
+ *
+ * Constructed LAZILY (inside the factory, on the first real split upload) so
+ * importing this module never spawns a worker, and so jsdom (which has no
+ * `Worker` global) only trips over it if a test actually drives a real
+ * split upload instead of injecting a `splitUploadRunner` (see
+ * {@link buildRealPanelDeps}'s own option of that name).
+ */
+export function createSplitUploadWorker(): Worker {
+  return new Worker(
+    new URL(
+      "../../../packages/codex-arweave/src/library/streaming/splitUploadWorker.ts",
       import.meta.url,
     ),
     { type: "module" },
@@ -454,6 +495,70 @@ function findEntryForAddress(
 }
 
 /**
+ * `arweave-split-bundle-upload` T6 (real-browser finding, fixed here): the
+ * PENDING `uploadId` for an in-flight (or crashed/abandoned mid-flight)
+ * split upload, persisted per `accountId` in `localStorage` — survives a
+ * page reload/crash, unlike a plain in-memory variable would.
+ * `runSplitBundleUpload`'s own resumability (T4) is keyed ENTIRELY on
+ * reusing the SAME `uploadId` across calls (its own `SplitUploadPlanStore`
+ * lookup, by that id); minting a brand-new id on every call — this seam's
+ * ORIGINAL behaviour — defeated that outright for every real caller through
+ * it. Confirmed real-browser (T6): forcibly killing the split-upload
+ * Worker mid-bundle-1, then retrying the IDENTICAL selection through the
+ * real Upload Wizard, re-signed and re-posted bundle 0 under a brand-new
+ * transaction id and permanently orphaned the interrupted bundle's own
+ * partially-posted chunks — directly contradicting `arweave-split-bundle-
+ * upload/design.md`'s own "completed bundles are never re-signed/re-posted"
+ * acceptance criterion.
+ *
+ * Scoped per `accountId` (a different signing key is a genuinely different
+ * upload action) and guarded by a cheap selection FINGERPRINT (file count +
+ * total bytes, from {@link resolveSplitUploadId}'s own caller) so a stale
+ * pending id left behind by an entirely different, abandoned selection is
+ * never reused for an unrelated one — a fingerprint mismatch simply mints a
+ * fresh id, exactly like the pre-fix behaviour. A mismatched RESUME attempt
+ * (same account, matching fingerprint, but genuinely different file paths)
+ * still fails safely and visibly: `runSplitBundleUpload`'s own per-file
+ * `filesByPath.get(...)` lookup throws a named error rather than silently
+ * mixing content, per that function's own doc comment.
+ */
+function pendingSplitUploadStorageKey(accountId: string): string {
+  return `codex-arweave-split-upload-pending-id:${accountId}`;
+}
+
+/**
+ * Resolves the `uploadId` a split-upload call should use: a previously
+ * persisted pending id for this EXACT `accountId` + `fingerprint` pair, or a
+ * freshly minted one (persisted immediately, before any pool attempt) when
+ * none matches. Never clears anything itself — see
+ * {@link clearPendingSplitUploadId}, called only on genuine success.
+ */
+function resolveSplitUploadId(accountId: string, fingerprint: string): string {
+  const key = pendingSplitUploadStorageKey(accountId);
+  const stored = localStorage.getItem(key);
+  if (stored !== null) {
+    const sep = stored.indexOf("|");
+    const storedId = sep === -1 ? stored : stored.slice(0, sep);
+    const storedFingerprint = sep === -1 ? "" : stored.slice(sep + 1);
+    if (storedId.length > 0 && storedFingerprint === fingerprint) {
+      return storedId;
+    }
+  }
+  const freshId = globalThis.crypto.randomUUID();
+  localStorage.setItem(key, `${freshId}|${fingerprint}`);
+  return freshId;
+}
+
+/** Clears the pending id for `accountId` — called ONLY once a split upload
+ *  genuinely completes (the shared manifest has posted). Left SET on any
+ *  failure/abandonment (a thrown error, a killed Worker, a crashed tab) so
+ *  the next call for the SAME account + selection resumes it instead of
+ *  starting over. */
+function clearPendingSplitUploadId(accountId: string): void {
+  localStorage.removeItem(pendingSplitUploadStorageKey(accountId));
+}
+
+/**
  * Assemble the E4 `ArweavePanelDeps` wired to the REAL adapter + E3 upload/
  * Library seams against the resolved gateway pool. The keyring seams surface the
  * ciphertext entries the app supplies (no plaintext JWK); the send seam runs the
@@ -473,6 +578,7 @@ export function buildRealPanelDeps({
   streamingUploadRunner,
   streamingDryRunRunner,
   supportProbeRunner,
+  splitUploadRunner,
   getPassword,
   addForeignKey,
   deleteForeignKey,
@@ -530,6 +636,17 @@ export function buildRealPanelDeps({
    * `isStreamingUploadSupported` is exercised with NO real Worker.
    */
   supportProbeRunner?: SupportProbeRunner;
+  /**
+   * `arweave-split-bundle-upload` T5b: the off-main-thread SPLIT (multi-
+   * bundle) upload seam `uploadFilesAndTrackSplit` (below) drives — closes
+   * T5's own flagged gap (`runSplitBundleUpload`'s OPFS work is Worker-only
+   * in a real browser, exactly like the single-bundle path). Defaults to a
+   * real Worker-backed `createWorkerSplitUploadRunner({ workerFactory:
+   * createSplitUploadWorker })`. Tests inject a `FakeSplitUploadRunner` (or
+   * any other `SplitUploadRunner`) so `uploadFilesAndTrackSplit` is
+   * exercised with NO real Worker and no real split upload.
+   */
+  splitUploadRunner?: SplitUploadRunner;
   /** The worker the keygen runner drives. Defaults to the real bundler-built
    *  worker; tests inject a fake so the runner is exercised without a real
    *  Web Worker (jsdom has none). */
@@ -712,6 +829,12 @@ export function buildRealPanelDeps({
   const resolvedSupportProbeRunner =
     supportProbeRunner ??
     createWorkerSupportProbeRunner({ workerFactory: createSupportProbeWorker });
+  // `arweave-split-bundle-upload` T5b: the SAME construction pattern, for
+  // `uploadFilesAndTrackSplit` below — see the `splitUploadRunner`
+  // parameter's own doc comment.
+  const resolvedSplitUploadRunner =
+    splitUploadRunner ??
+    createWorkerSplitUploadRunner({ workerFactory: createSplitUploadWorker });
   // ARMED only when the caller wired the codex password + store action. The
   // seeded flow spends ~6.7 s of CPU per key, so an unarmed build must REFUSE up
   // front rather than resolve a key into a no-op.
@@ -949,6 +1072,92 @@ export function buildRealPanelDeps({
         throw new Error("Unexpected single-file result from a bundle upload.");
       }
       return result;
+    },
+    // `arweave-split-bundle-upload` T5b: the real wiring behind a too-large
+    // (over-budget) bundle selection — `UploadWizard`'s own
+    // `uploadFilesAndTrackSplit` prop. Mirrors `uploadFilesAndTrack` just
+    // above STRUCTURALLY (JWK resolution for the PASSED-IN `accountId`,
+    // `bufferedFeeCap`, `encryptFor`/`resolveEncryptionKey` handling) but:
+    //   - hands the runner the REAL `File` objects directly (never eagerly
+    //     reads every file's bytes into memory first, unlike
+    //     `uploadFilesAndTrack`'s own `file.arrayBuffer()` above) — for a
+    //     multi-GB folder, reading everything up front on the main thread
+    //     would defeat the entire point of this feature. Each file's
+    //     `readData()` is reconstructed LAZILY, inside the Worker, from its
+    //     own `File` reference (see `splitUploadWorker.ts`'s own doc
+    //     comment).
+    //   - computes `encrypted`/`encryptorAddress`/`encryptionVersion`
+    //     itself from the resolved key/`encryptFor`, the SAME way
+    //     `library/flow.ts`'s own `performUploadAndTrack` already does
+    //     internally — `runSplitBundleUpload`'s lower-level params type
+    //     requires these explicitly (it sits one layer below
+    //     `UploadAndTrackParams`, which computes them FOR its caller).
+    //   - resolves the shared `uploadId` via {@link resolveSplitUploadId}
+    //     (never inside the runner/worker) so this closure can report it
+    //     back in the `UploadBundleTrackResult` shape the wizard already
+    //     renders — REUSES a previously-interrupted run's own id for the
+    //     SAME account + selection fingerprint (T6 fix: see that function's
+    //     own doc comment for the real-browser finding this closes), rather
+    //     than always minting a fresh one.
+    //   - flattens `RunSplitBundleUploadResult.bundleResults[].fileIds`
+    //     across every bundle this call actually ran — correct for BOTH a
+    //     fresh call (every bundle freshly run) and a resumed one
+    //     (`runSplitBundleUpload`'s own `bundleResults` already omits any
+    //     bundle it skipped as already-complete, per that function's own
+    //     doc comment — this closure never re-derives anything for one).
+    uploadFilesAndTrackSplit: async (
+      files: File[],
+      selection: UploadWizardSelection,
+      accountId: string,
+      callbacks?: UploadWizardUploadCallbacks,
+    ) => {
+      const jwk = await decryptArweaveKey(findEntryForAddress(foreignKeys, accountId));
+      const splitFiles = files.map((file) => ({
+        path: file.webkitRelativePath || file.name,
+        size: file.size,
+        contentType: file.type || "application/octet-stream",
+        file,
+      }));
+      const totalBytes = splitFiles.reduce((sum, f) => sum + f.size, 0);
+      const maxRewardWinston = await bufferedFeeCap(resolvedPool, totalBytes);
+      const { encryptFor, ...selectionRest } = selection;
+      const resolvedKey = encryptFor ? await resolveEncryptionKey(encryptFor) : undefined;
+      const encrypted = resolvedKey !== undefined;
+      const encryptorAddress = encryptFor?.accountAddress;
+      const encryptionVersion = encrypted ? CODEX_ENCRYPTION_VERSION_CURRENT : undefined;
+      const uploadId = resolveSplitUploadId(accountId, `${splitFiles.length}:${totalBytes}`);
+
+      const result = await resolvedSplitUploadRunner.run(
+        {
+          jwk,
+          files: splitFiles,
+          maxRewardWinston,
+          category: selectionRest.category,
+          assetType: selectionRest.assetType,
+          appId: selectionRest.appId,
+          appVersion: selectionRest.appVersion,
+          encrypted,
+          encryptorAddress,
+          encryptionVersion,
+          encryptionKey: resolvedKey,
+        },
+        {
+          pool: resolvedPool,
+          uploadId,
+          onOverallProgress: callbacks?.onOverallProgress,
+        },
+      );
+
+      // Reached ONLY on success (the manifest genuinely posted) — a thrown
+      // failure above leaves the pending id SET, so the NEXT call for this
+      // account + selection resumes it instead of starting over.
+      clearPendingSplitUploadId(accountId);
+
+      return {
+        manifestId: result.manifestId,
+        fileIds: result.bundleResults.flatMap((r) => r.fileIds),
+        uploadId,
+      };
     },
     // `arweave-upload-dry-run` T3: the "Test this upload" button's real
     // wiring — mirrors `uploadAndTrack`/`uploadFilesAndTrack`'s own JWK/

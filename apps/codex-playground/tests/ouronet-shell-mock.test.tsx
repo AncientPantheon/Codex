@@ -74,7 +74,7 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
     expect(screen.queryByRole("menuitem", { name: "Export" })).toBeNull();
   });
 
-  it("tapping Codex opens the menu with all four items", () => {
+  it("tapping Codex opens the menu with all five items", () => {
     render(
       <ControlsProvider>
         <OuronetShellMock {...shellProps()} />
@@ -82,9 +82,51 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByRole("menuitem", { name: "Codex UI" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Codex ID" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Export" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Import" })).toBeInTheDocument();
+  });
+
+  // The "Codex ID" page was previously reachable only 3 clicks deep (Codex UI
+  // -> Blockchain Accounts -> Arweave -> Codex ID category tab) — real,
+  // reported user confusion. This pins the fix: it's a direct tier-2 menu
+  // item, mirroring "Codex UI"/"Settings"'s own icon+label+aria-current
+  // markup pattern exactly (not a bespoke shape for the new item).
+  it("selecting 'Codex ID' calls onSelectView('codex-id') and closes the menu", () => {
+    const onSelectView = vi.fn();
+    render(
+      <ControlsProvider>
+        <OuronetShellMock {...shellProps({ onSelectView })} />
+      </ControlsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Codex ID" }));
+    expect(onSelectView).toHaveBeenCalledWith("codex-id");
+    expect(screen.queryByRole("menuitem", { name: "Codex ID" })).toBeNull();
+  });
+
+  it("marks 'Codex ID' active (aria-current) when activeView is 'codex-id', and the others not", () => {
+    render(
+      <ControlsProvider>
+        <OuronetShellMock {...shellProps({ activeView: "codex-id" })} />
+      </ControlsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.getByRole("menuitem", { name: "Codex ID" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("menuitem", { name: "Codex UI" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("menuitem", { name: "Settings" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("the 'Codex ID' menu item has its own icon (an icon+label cell, same pattern as every other item)", () => {
+    render(
+      <ControlsProvider>
+        <OuronetShellMock {...shellProps()} />
+      </ControlsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    const item = screen.getByRole("menuitem", { name: "Codex ID" });
+    expect(item.querySelector("svg")).not.toBeNull();
   });
 
   it("omits the Import item when onImport isn't provided (nothing loaded to replace yet)", () => {

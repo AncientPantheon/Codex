@@ -106,7 +106,7 @@ import { setActiveKadenaNodeUrl } from "@ancientpantheon/codex-ouronet/connectio
 // wired, so the mobile view is exercised EMBEDDED (a constrained rectangle),
 // not just full-viewport standalone — the case that actually matters in
 // production, per docs/work/codex-ui-mobile/design.md §1/§6.
-import { OuronetShellMock, useOuronetMockMobile } from "./OuronetShellMock";
+import { OuronetShellMock, useOuronetMockMobile, type CodexPlaygroundView } from "./OuronetShellMock";
 import "./app.css";
 
 // Injected by vite.config `define` from @ancientpantheon/codex-ouronet's version.
@@ -305,9 +305,15 @@ function DashboardBody({
     [],
   );
 
-  // The Codex UI / Codex UI Settings view toggle (consumer-composed — CodexUiRoot
-  // is only a token-scope boundary; the split is the app's to build).
-  const [activeView, setActiveView] = useState<"ui" | "settings">("ui");
+  // The Codex UI / Codex UI Settings / Codex ID view toggle (consumer-composed
+  // — CodexUiRoot is only a token-scope boundary; the split is the app's to
+  // build). `"codex-id"` promotes `ArweavePanel.tsx`'s own `"codex-id"`
+  // category (previously reachable only 3 clicks deep: Codex UI -> Blockchain
+  // Accounts -> Arweave -> Codex ID — real, reported user confusion) to a
+  // top-level view, mirroring `OuronetShellMock.tsx`'s own
+  // `CodexPlaygroundView` widening (the SAME string, one vocabulary for the
+  // same page on both desktop and mobile).
+  const [activeView, setActiveView] = useState<CodexPlaygroundView>("ui");
 
   // Mobile (docs/work/codex-ui-mobile/design.md §8): the localhost-only
   // "Export codex to JSON" / "Load a different codex" buttons, AND the
@@ -562,6 +568,21 @@ function DashboardBody({
                     getExportJson={exportForCloud}
                     onBackupSuccess={clearDirty}
                   />
+                ) : activeView === "codex-id" ? (
+                  // Follow-up fix applied: `ForeignChainsWiring` now accepts
+                  // `view="codex-id"` and renders `CodexIdPage` fed the SAME
+                  // `providerDeps` it already assembles for `CodexTabs` — no
+                  // second wiring path, no duplicated hook chain. This mount
+                  // now gets real, live eligibility/backup data, same as the
+                  // deep-link `ArweavePanel.tsx` tab (still unchanged,
+                  // still reachable the old way too).
+                  <ForeignChainsWiring
+                    view="codex-id"
+                    mode={arweaveMode}
+                    gatewayUrl={gatewayUrl}
+                    getExportJson={exportForCloud}
+                    onBackupSuccess={clearDirty}
+                  />
                 ) : (
                 <CodexSettingsSection
                   consumerName="Codex Playground"
@@ -629,6 +650,21 @@ function DashboardBody({
                 >
                   Codex UI Settings
                 </button>
+                {/* Promotes `ArweavePanel.tsx`'s own `"codex-id"` category
+                    to a top-level view (owner ask) — previously reachable
+                    only 3 clicks deep (Codex UI -> Blockchain Accounts ->
+                    Arweave -> Codex ID), real reported user confusion.
+                    Mirrors the two buttons above EXACTLY — same markup/aria
+                    pattern, no bespoke shape for the new tab. */}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeView === "codex-id"}
+                  className={`cxpg-viewtab${activeView === "codex-id" ? " cxpg-viewtab--active" : ""}`}
+                  onClick={() => setActiveView("codex-id")}
+                >
+                  Codex ID
+                </button>
               </div>
             </div>
             <div className="cxpg-topbar-right">
@@ -675,6 +711,18 @@ function DashboardBody({
                    sits on this view any more; it lives in Settings → Network
                    instead, alongside the gateway URL field it edits. */
                 <ForeignChainsWiring
+                  mode={arweaveMode}
+                  gatewayUrl={gatewayUrl}
+                  getExportJson={exportForCloud}
+                  onBackupSuccess={clearDirty}
+                />
+              ) : activeView === "codex-id" ? (
+                // Same follow-up fix as the mobile Zone 3 branch above:
+                // `ForeignChainsWiring`'s `view="codex-id"` reuses its own
+                // already-assembled `providerDeps` — real, live data, no
+                // second wiring path.
+                <ForeignChainsWiring
+                  view="codex-id"
                   mode={arweaveMode}
                   gatewayUrl={gatewayUrl}
                   getExportJson={exportForCloud}

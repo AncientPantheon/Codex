@@ -15,6 +15,12 @@
  */
 
 export { ArweavePanel } from "./ArweavePanel.js";
+// `CodexIdPage` — the extracted "Codex ID" page content (same markup
+// `ArweavePanel.tsx`'s own `active === "codex-id"` branch renders), exposed
+// here so a host can mount it DIRECTLY from a top-level nav entry, outside
+// `ArweavePanel`'s own tab-bar machinery, without duplicating any markup.
+export { CodexIdPage } from "./CodexIdPage.js";
+export type { CodexIdPageProps } from "./CodexIdPage.js";
 export {
   ArweavePanelProvider,
   ArweavePanelContext,

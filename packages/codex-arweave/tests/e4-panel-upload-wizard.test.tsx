@@ -1496,3 +1496,163 @@ describe("UploadWizard — T3 (arweave-upload-dry-run): the 'Test this upload' b
     expect(props.uploadFilesAndTrack).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `arweave-split-bundle-upload` T5: UI wiring for an over-budget bundle
+ * selection. Regression this guards against: a naive implementation that
+ * (a) always runs the budget check (breaking every pre-existing bundle test
+ * that never injected `checkAvailableStorageBudget`/`uploadFilesAndTrackSplit`
+ * and would otherwise crash reaching a real, jsdom-absent
+ * `navigator.storage`), (b) silently changes what `uploadFilesAndTrack`
+ * is called with even for an in-budget selection once the new props exist,
+ * or (c) resets the whole-sequence progress figure to 0% at a bundle
+ * boundary (the owner's own explicit "no reset" requirement, design.md §4).
+ *
+ * `checkAvailableStorageBudget` is injected (mirrors `isStreamingUploadSupported`'s
+ * own seam) so these specs never touch a real `navigator.storage.estimate()`;
+ * `planSplitBundles` itself is the REAL, already-tested T1 pure function —
+ * never re-mocked here, only fed a deterministic `safeBudgetBytes`.
+ */
+describe("UploadWizard — T5 (arweave-split-bundle-upload): split-aware bundle routing", () => {
+  it("an in-budget bundle selection calls uploadFilesAndTrack with the EXACT same arguments/callbacks shape as before, never uploadFilesAndTrackSplit, even when the new split props ARE supplied", async () => {
+    const checkAvailableStorageBudget = vi.fn(async () => ({ availableBytes: 1_000_000, safeBudgetBytes: 1_000_000 }));
+    const uploadFilesAndTrackSplit = vi.fn(
+      async (_files: File[], _selection: UploadWizardSelection, _accountId: string, _callbacks?: unknown) => ({
+        manifestId: MANIFEST_ID,
+        fileIds: [],
+        uploadId: "unused",
+      }),
+    );
+    const uploadFilesAndTrack = vi.fn(
+      async (
+        _files: File[],
+        _selection: UploadWizardSelection,
+        _accountId: string,
+        _callbacks?: Record<string, unknown>,
+      ) => ({
+        manifestId: MANIFEST_ID,
+        fileIds: [
+          { path: "a.txt", id: "aAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa" },
+          { path: "b.txt", id: "bBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb" },
+        ],
+        uploadId: "shared-batch-upload-id",
+      }),
+    );
+    const props = makeProps({ checkAvailableStorageBudget, uploadFilesAndTrackSplit, uploadFilesAndTrack });
+    render(<UploadWizard {...props} />);
+    advanceToFiles();
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("a.txt", 10)] } });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("b.txt", 10)] } });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() => expect(uploadFilesAndTrack).toHaveBeenCalledTimes(1));
+
+    // The budget check DID run (the new prop was supplied) but changed
+    // NOTHING about the real call: same files, same selection, and a
+    // callbacks object with the EXACT same key set as the pre-T5 call
+    // shape — no stray `onOverallProgress` leaking into the unchanged path.
+    expect(checkAvailableStorageBudget).toHaveBeenCalledTimes(1);
+    const [calledFiles, calledSelection, calledAccountId, calledCallbacks] = uploadFilesAndTrack.mock.calls[0];
+    expect(calledFiles).toHaveLength(2);
+    expect(calledSelection).toMatchObject({ category: "general-other" });
+    expect(calledAccountId).toBe(ACCOUNT_A);
+    expect(Object.keys(calledCallbacks!).sort()).toEqual(["onProgress", "onRouteDecided"]);
+
+    expect(uploadFilesAndTrackSplit).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("upload-wizard-split-plan-message")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("upload-wizard-bundle-result")).toBeInTheDocument();
+  });
+
+  it("an over-budget bundle selection shows the pre-upload split-plan message and routes through uploadFilesAndTrackSplit instead of uploadFilesAndTrack", async () => {
+    // budget=12 bytes, two 10-byte files (total 20) -> T1's REAL planner
+    // produces exactly 2 roughly-equal bundles (proven directly in
+    // streaming-plan-split-bundles.test.ts; not re-proven here).
+    const checkAvailableStorageBudget = vi.fn(async () => ({ availableBytes: 20, safeBudgetBytes: 12 }));
+    const uploadFilesAndTrackSplit = vi.fn(
+      async (_files: File[], _selection: UploadWizardSelection, _accountId: string, _callbacks?: unknown) => ({
+        manifestId: MANIFEST_ID,
+        fileIds: [
+          { path: "a.txt", id: "aAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa" },
+          { path: "b.txt", id: "bBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb" },
+        ],
+        uploadId: "split-upload-id",
+      }),
+    );
+    const props = makeProps({ checkAvailableStorageBudget, uploadFilesAndTrackSplit });
+    render(<UploadWizard {...props} />);
+    advanceToFiles();
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("a.txt", 10)] } });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("b.txt", 10)] } });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+
+    // Shown BEFORE the upload resolves — plain, factual, naming the real
+    // bundle count (never an alarming tone).
+    const message = await screen.findByTestId("upload-wizard-split-plan-message");
+    expect(message.textContent).toContain("2 bundles");
+    expect(message.textContent?.toLowerCase()).toContain("gb");
+
+    await waitFor(() => expect(uploadFilesAndTrackSplit).toHaveBeenCalledTimes(1));
+    expect(props.uploadFilesAndTrack).not.toHaveBeenCalled();
+    const [calledFiles, calledSelection, calledAccountId] = uploadFilesAndTrackSplit.mock.calls[0];
+    expect(calledFiles).toHaveLength(2);
+    expect(calledSelection).toMatchObject({ category: "general-other" });
+    expect(calledAccountId).toBe(ACCOUNT_A);
+
+    expect(await screen.findByTestId("upload-wizard-bundle-result")).toBeInTheDocument();
+  });
+
+  it("the whole-sequence progress UI shows bundle-index/total and an overall percentage that only ever increases across a simulated two-bundle sequence, never resetting at the bundle boundary", async () => {
+    const checkAvailableStorageBudget = vi.fn(async () => ({ availableBytes: 20, safeBudgetBytes: 12 }));
+    // Captured directly from the real call — driven by the TEST itself, one
+    // step at a time (never a microtask chain the test can't deterministically
+    // observe mid-sequence), so each intermediate render is actually checked.
+    let capturedOnOverallProgress:
+      | ((b: number, t: number, buc: number, btc: number, obu: number, otb: number) => void)
+      | undefined;
+    let resolveSplit: (value: { manifestId: string; fileIds: { path: string; id: string }[]; uploadId: string }) => void = () => {};
+    const uploadFilesAndTrackSplit = vi.fn(
+      (
+        _files: File[],
+        _selection: UploadWizardSelection,
+        _accountId: string,
+        callbacks?: { onOverallProgress?: (b: number, t: number, buc: number, btc: number, obu: number, otb: number) => void },
+      ) => {
+        capturedOnOverallProgress = callbacks?.onOverallProgress;
+        return new Promise((resolve) => {
+          resolveSplit = resolve;
+        });
+      },
+    );
+    const props = makeProps({ checkAvailableStorageBudget, uploadFilesAndTrackSplit });
+    render(<UploadWizard {...props} />);
+    advanceToFiles();
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("a.txt", 10)] } });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), { target: { files: [makeFile("b.txt", 10)] } });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+    await waitFor(() => expect(uploadFilesAndTrackSplit).toHaveBeenCalledTimes(1));
+
+    // Bundle 0 of 2: 50% in-flight.
+    act(() => capturedOnOverallProgress!(0, 2, 1, 2, 5, 20));
+    expect(screen.getByTestId("upload-wizard-progress-bundle").textContent).toContain("Bundle 1 of 2");
+    expect(screen.getByTestId("upload-wizard-progress-overall").textContent).toContain("25%"); // 5/20
+
+    // Bundle 0 of 2: fully complete.
+    act(() => capturedOnOverallProgress!(0, 2, 2, 2, 10, 20));
+    expect(screen.getByTestId("upload-wizard-progress-overall").textContent).toContain("50%"); // 10/20
+
+    // Bundle 1 of 2: starts fresh at ITS OWN 1/2 chunks, but the overall
+    // byte figure keeps climbing from bundle 0's own completed total —
+    // never drops back toward 0% just because a new bundle started.
+    act(() => capturedOnOverallProgress!(1, 2, 1, 2, 15, 20));
+    expect(screen.getByTestId("upload-wizard-progress-bundle").textContent).toContain("Bundle 2 of 2");
+    expect(screen.getByTestId("upload-wizard-progress-overall").textContent).toContain("75%"); // 15/20
+
+    resolveSplit({ manifestId: MANIFEST_ID, fileIds: [], uploadId: "split-upload-id" });
+    expect(await screen.findByTestId("upload-wizard-bundle-result")).toBeInTheDocument();
+  });
+});

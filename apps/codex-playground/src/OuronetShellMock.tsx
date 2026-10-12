@@ -37,6 +37,7 @@ import {
   Settings2,
   Settings,
   LayoutGrid,
+  IdCard,
   Download,
   Upload,
   ChevronUp,
@@ -112,7 +113,16 @@ function ControlsRiser() {
   );
 }
 
-export type CodexPlaygroundView = "ui" | "settings";
+/**
+ * `"codex-id"` added (owner ask: promote `ArweavePanel.tsx`'s own
+ * `"codex-id"` category — previously reachable only 3 clicks deep, Codex UI
+ * -> Blockchain Accounts -> Arweave -> Codex ID — to a top-level view,
+ * reachable directly from here on mobile and from `App.tsx`'s
+ * `.cxpg-viewtabs` row on desktop). The string matches `ArweavePanel.tsx`'s
+ * own existing `"codex-id"` category id verbatim — one vocabulary for the
+ * same page, not a second spelling.
+ */
+export type CodexPlaygroundView = "ui" | "settings" | "codex-id";
 
 export interface OuronetShellMockProps {
   children: ReactNode;
@@ -200,6 +210,16 @@ function CodexTierTwoMenu({
       >
         <LayoutGrid size={19} strokeWidth={1.5} aria-hidden="true" />
         <span>Codex UI</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        aria-current={activeView === "codex-id" ? "true" : undefined}
+        className={activeView === "codex-id" ? "cxpg-osm-codex-menu-item cxpg-osm-codex-menu-item--active" : "cxpg-osm-codex-menu-item"}
+        onClick={() => { onSelectView("codex-id"); onClose(); }}
+      >
+        <IdCard size={19} strokeWidth={1.5} aria-hidden="true" />
+        <span>Codex ID</span>
       </button>
       <button
         type="button"

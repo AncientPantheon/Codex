@@ -256,6 +256,22 @@ describe("ArweavePanel — Upload category (arweave-upload-wizard, T3: the wizar
     expect(screen.getByTestId("arweave-upload-backup-codex")).toBeInTheDocument();
   });
 
+  // `arweave-split-bundle-upload` T5b, Part 2: the Upload page's own static
+  // explainer section — always-visible plain content (mirrors the Codex ID
+  // page's own `CodexBackupInformatics`/`CodexMigrationInformatics`
+  // pattern), present regardless of whether the wizard modal is open.
+  it("shows the always-visible upload informatics section, with real content, both before and after opening the wizard", () => {
+    renderPanel();
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    const before = screen.getByTestId("upload-informatics");
+    expect(before).toBeInTheDocument();
+    expect(before.textContent).toContain("256 KiB");
+    expect(before.textContent?.toLowerCase()).toContain("free disk space");
+
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+    expect(screen.getByTestId("upload-informatics")).toBeInTheDocument();
+  });
+
   it('clicking "Start Upload" opens the UploadWizard modal wired from this panel\'s own deps/state (accounts, ouronetAccounts, pool)', () => {
     const ouronetAccounts = [
       { id: "ouro-1", label: "Ouro One", account: { address: "Ѻ.ouro-one-address" } },
@@ -448,6 +464,53 @@ describe("ArweavePanel — Upload category (arweave-upload-wizard, T3: the wizar
     fireEvent.click(screen.getByTestId("arweave-upload-start"));
 
     await waitFor(() => expect(isStreamingUploadSupported).toHaveBeenCalledTimes(1));
+  });
+
+  // `arweave-split-bundle-upload` T5b: the SAME class of dead-letter gap
+  // `runDryRunUpload`/`isStreamingUploadSupported` above already guard
+  // against — `UploadWizard`'s own split-routing logic (T5, fully covered at
+  // the component level by `e4-panel-upload-wizard.test.tsx`) is worthless in
+  // the real app unless `ArweavePanel.tsx`'s own mount actually forwards
+  // `deps.uploadFilesAndTrackSplit`/`deps.checkAvailableStorageBudget` down
+  // to it. This proves the forwarding is real, through the REAL panel mount,
+  // not just present on `ArweavePanelDeps`'s type.
+  it("wires the real `uploadFilesAndTrackSplit`/`checkAvailableStorageBudget` from deps into the mounted UploadWizard — an over-budget bundle selection routes through the real split seam, never uploadFilesAndTrack", async () => {
+    // budget=12 bytes, two 10-byte files (total 20) -> T1's REAL planner
+    // (never re-mocked) produces exactly 2 roughly-equal bundles — proven
+    // directly in `streaming-plan-split-bundles.test.ts`, reused here only
+    // to force the split path deterministically.
+    const checkAvailableStorageBudget = vi.fn(async () => ({ availableBytes: 20, safeBudgetBytes: 12 }));
+    const uploadFilesAndTrackSplit = vi.fn(async () => ({
+      manifestId: "split-manifest-id",
+      fileIds: [
+        { path: "a.txt", id: "aAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa" },
+        { path: "b.txt", id: "bBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb" },
+      ],
+      uploadId: "split-upload-id",
+    }));
+    const { deps } = renderPanel({ checkAvailableStorageBudget, uploadFilesAndTrackSplit });
+    fireEvent.click(screen.getByTestId("arweave-subtab-upload"));
+    fireEvent.click(screen.getByTestId("arweave-upload-start"));
+
+    fireEvent.click(screen.getByTestId(`upload-wizard-account-${ARWEAVE_ADDRESS}`));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category"));
+    fireEvent.click(screen.getByTestId("upload-wizard-category-option-general-other"));
+    fireEvent.click(screen.getByTestId("upload-wizard-mode-public"));
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [new File([new Uint8Array(10)], "a.txt", { type: "text/plain" })] },
+    });
+    fireEvent.change(screen.getByTestId("upload-wizard-add-file-input"), {
+      target: { files: [new File([new Uint8Array(10)], "b.txt", { type: "text/plain" })] },
+    });
+    fireEvent.click(screen.getByTestId("upload-wizard-next"));
+
+    fireEvent.click(screen.getByTestId("upload-wizard-confirm-upload"));
+
+    await waitFor(() => expect(checkAvailableStorageBudget).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(uploadFilesAndTrackSplit).toHaveBeenCalledTimes(1));
+    expect(deps.uploadFilesAndTrack).not.toHaveBeenCalled();
   });
 });
 
