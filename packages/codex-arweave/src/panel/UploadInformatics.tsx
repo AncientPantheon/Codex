@@ -1,12 +1,12 @@
 /**
  * UploadInformatics — the Upload page's own static explainer section
- * (`arweave-split-bundle-upload` T5b addendum, Part 2).
+ * (`arweave-split-bundle-upload` T5b addendum, Part 2; re-styled per an
+ * explicit owner correction after shipping — see `informaticsStyles.ts`'s
+ * own doc comment for why).
  *
  * A static, presentational, plain-language explainer of HOW an Arweave
  * upload actually works — written for a non-engineer end user (no internal
- * type/function/variable names anywhere below, same discipline
- * `CodexBackupInformatics.tsx`/`CodexMigrationInformatics.tsx` already
- * follow for the Codex ID page). Content is adapted from
+ * type/function/variable names anywhere below). Content is adapted from
  * `packages/codex/ARWEAVE_STREAMING_UPLOAD_ARCHITECTURE.md` (the full
  * technical walkthrough already shipped), shortened and plained for an
  * in-app reader rather than reproducing every implementation byte-layout
@@ -31,42 +31,27 @@
  *   under a single shared result.
  *
  * This component takes no props and performs no data fetching — pure
- * static content. Styled with this package's own gold-accent convention
- * (`ACCENT`), matching `CodexBackupInformatics.tsx`/`CodexMigrationInformatics.tsx`
- * exactly (each informatics component is deliberately self-contained —
- * see those files' own doc comments — so this one duplicates the same
- * local style constants rather than sharing them).
+ * static content. Styled with `informaticsStyles.ts`'s shared card/section
+ * treatment, matching `CodexBackupInformatics.tsx`/
+ * `CodexMigrationInformatics.tsx` exactly.
  */
 
 import * as React from "react";
-
-const ACCENT = "#ceac5f";
-
-const SECTION_STYLE: React.CSSProperties = {
-  marginBottom: 16,
-};
-
-const HEADING_STYLE: React.CSSProperties = {
-  margin: "0 0 6px 0",
-  fontSize: 14,
-  fontWeight: 700,
-  color: ACCENT,
-};
-
-const BODY_STYLE: React.CSSProperties = {
-  margin: "0 0 6px 0",
-  fontSize: 13,
-  lineHeight: 1.5,
-  color: "#d2d3d4",
-};
+import {
+  INFORMATICS_BODY_LAST_STYLE,
+  INFORMATICS_CARD_STYLE,
+  INFORMATICS_HEADING_STYLE,
+  INFORMATICS_LAST_SECTION_STYLE,
+  INFORMATICS_SECTION_STYLE,
+} from "./informaticsStyles.js";
 
 export function UploadInformatics(): React.ReactElement {
   return (
-    <div data-testid="upload-informatics">
-      <h3 style={HEADING_STYLE}>How an Arweave upload works</h3>
+    <div data-testid="upload-informatics" style={INFORMATICS_CARD_STYLE}>
+      <h3 style={INFORMATICS_HEADING_STYLE}>How an Arweave upload works</h3>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           When you upload two or more files (or a whole folder) in one go, they are combined
           into a single bundle before anything is sent. This is necessary, not just convenient:
           every file in the bundle shares one combined fingerprint and one signature, so the
@@ -76,8 +61,8 @@ export function UploadInformatics(): React.ReactElement {
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           Underneath, Arweave moves data in small, fixed-size pieces — 256 KiB (about a quarter
           of a megabyte) at a time — regardless of how large your overall upload is. This is
           what makes an upload resumable: if your connection drops partway through, only the
@@ -86,8 +71,8 @@ export function UploadInformatics(): React.ReactElement {
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           While a bundle is being put together, it is staged in a private area of your own
           device&apos;s storage, set aside for this app and inaccessible to other sites — never
           held entirely in your browser tab&apos;s working memory. Staging this way means your
@@ -96,8 +81,8 @@ export function UploadInformatics(): React.ReactElement {
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_LAST_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           If a selection is larger than your currently available free space, it no longer fails
           or asks for space you don&apos;t have. It automatically becomes several smaller,
           roughly equal-sized uploads instead, sent one after another — never at the same time,

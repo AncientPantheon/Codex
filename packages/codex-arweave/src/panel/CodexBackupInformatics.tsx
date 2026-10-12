@@ -1,6 +1,7 @@
 /**
  * CodexBackupInformatics — "Codex ID" page informatics, part 1
- * (`codex-id-page` T2).
+ * (`codex-id-page` T2; re-styled + extended per an explicit owner
+ * correction after shipping — see the two notes below).
  *
  * A static, presentational, plain-language explainer of HOW a whole-codex
  * backup to Arweave works — written for a non-engineer end user (no
@@ -28,95 +29,67 @@
  *   itself an access-granting wrap source). Grounded against
  *   `packages/codex/ARWEAVE_TAG_SCHEMA.md` §4 "Wrap sources": both default
  *   sources wrap the SAME two one-time keys independently, which is WHY
- *   either one alone suffices — the plain-language copy says this
- *   explicitly (losing one does not lock you out as long as the other
- *   remains), not just the bare claim.
- * - The optional Arweave-PIN wrap path (moved in scope, owner decision
- *   2026-10-08): an opt-in extra lock on EITHER default path above, with
- *   an unmissable (always-rendered, never collapsed) warning that
- *   forgetting it is exactly as unrecoverable as losing the seed words —
- *   there is no reset, ever — and that it is never the recommended
- *   default. Grounded against ARWEAVE_TAG_SCHEMA.md §4's "Arweave-PIN
- *   wrap path" / "Mutual exclusivity" subsections: a PIN mechanically
- *   generates a REAL second key from the PIN's digits (plain-language for
- *   the design's PIN-derived RSA-4096 keypair), and that key REPLACES —
- *   never supplements — the path's own default lock, per source,
- *   independently of the other path.
+ *   either one alone suffices.
+ * - The optional Arweave-PIN wrap path: an opt-in extra lock on EITHER
+ *   default path above, with an unmissable (always-rendered, never
+ *   collapsed) warning that forgetting it is exactly as unrecoverable as
+ *   losing the seed words.
+ * - NEW: a backup taken BEFORE a Codex Identity existed only ever had the
+ *   Master Seed path — adding a Codex Identity later does not retroactively
+ *   add it as a second unlock path to that already-permanent record; a
+ *   fresh backup is required to cover the new path. Restoring is therefore
+ *   designed around picking WHICH of possibly several past backups to
+ *   restore from (not a single implicit "the backup"), discovered by
+ *   looking up every backup ever made from the account's own Arweave
+ *   address — this is a real, load-bearing design fact for the not-yet-built
+ *   restore UI (see the "Known gap" note this package's own README already
+ *   carries), not a claim that the picker exists today.
  *
- * This component takes no props and performs no data fetching — it is
- * pure static content, composed into the real page by a later task
- * (`codex-id-page` T3) alongside the live eligibility status and action
- * buttons. Styled with this package's own gold-accent convention
- * (`ACCENT`, shared by `ArweaveAccountsArea.tsx`/`PureKeysArea.tsx`/
- * `CodexBackupArea.tsx`) rather than bare, unstyled text.
+ * Re-styled (owner correction): the original flat, unstyled single-column
+ * text wall is replaced with `informaticsStyles.ts`'s shared card/section
+ * treatment — same content discipline, legible layout.
  */
 
 import * as React from "react";
-
-const ACCENT = "#ceac5f";
-
-const SECTION_STYLE: React.CSSProperties = {
-  marginBottom: 16,
-};
-
-const HEADING_STYLE: React.CSSProperties = {
-  margin: "0 0 6px 0",
-  fontSize: 14,
-  fontWeight: 700,
-  color: ACCENT,
-};
-
-const BODY_STYLE: React.CSSProperties = {
-  margin: "0 0 6px 0",
-  fontSize: 13,
-  lineHeight: 1.5,
-  color: "#d2d3d4",
-};
-
-/** The PIN-unrecoverable warning's own box — deliberately NOT a `<details>`
- *  or anything else that could render collapsed/hidden by default; this
- *  warning is always fully rendered and visually distinct (a red-amber
- *  border, same "this is a real risk" visual weight this package already
- *  uses for `CODEX_BACKUP_PERMANENCE_WARNING` in `CodexBackupArea.tsx`). */
-const PIN_WARNING_STYLE: React.CSSProperties = {
-  margin: "8px 0",
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid #f8717140",
-  backgroundColor: "#f871711a",
-  color: "#fca5a5",
-  fontSize: 13,
-  fontWeight: 600,
-  lineHeight: 1.5,
-};
+import {
+  INFORMATICS_BODY_LAST_STYLE,
+  INFORMATICS_BODY_STYLE,
+  INFORMATICS_CARD_STYLE,
+  INFORMATICS_HEADING_STYLE,
+  INFORMATICS_LAST_SECTION_STYLE,
+  INFORMATICS_LIST_ITEM_STYLE,
+  INFORMATICS_LIST_STYLE,
+  INFORMATICS_SECTION_STYLE,
+  INFORMATICS_WARNING_STYLE,
+} from "./informaticsStyles.js";
 
 export function CodexBackupInformatics(): React.ReactElement {
   return (
-    <div data-testid="codex-backup-informatics">
-      <h3 style={HEADING_STYLE}>How codex backup on Arweave works</h3>
+    <div data-testid="codex-backup-informatics" style={INFORMATICS_CARD_STYLE}>
+      <h3 style={INFORMATICS_HEADING_STYLE}>How codex backup on Arweave works</h3>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           Backing up your codex uploads your entire running codex — every keyring it holds
           (your Ouronet accounts, Arweave seeds, pure keypairs, foreign keys, watch list, and
           UI settings) — as one single Arweave upload.
         </p>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           This is different from the regular Upload Wizard, which uploads individual files you
           pick one at a time — that is a separate, already-existing feature.
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           Every codex backup generates a fresh, random, one-time key, used only for that single
           backup, which re-encrypts everything inside it.
         </p>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           That one-time key is itself locked (wrapped) under your own real secrets — it is
           never stored anywhere in a form anyone could use directly.
         </p>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           Finally, the whole backup is sealed again as one single opaque block. The result:
           even someone who finds the permanent, public Arweave record of your backup cannot
           tell how many accounts or seeds it contains, let alone read any of them — it is not
@@ -125,19 +98,19 @@ export function CodexBackupInformatics(): React.ReactElement {
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           There are two completely independent ways to unlock a codex backup. Either one alone
           is enough to restore — you do not need both:
         </p>
-        <ul>
-          <li style={BODY_STYLE}>Your Master Seed words.</li>
-          <li style={BODY_STYLE}>
+        <ul style={INFORMATICS_LIST_STYLE}>
+          <li style={INFORMATICS_LIST_ITEM_STYLE}>Your Master Seed words.</li>
+          <li style={INFORMATICS_LIST_ITEM_STYLE}>
             Your Codex Identity — specifically its &quot;Standard&quot; half (not the combined
             identity, and not the &quot;Smart&quot; half).
           </li>
         </ul>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           Both of these independently lock the very same one-time key described above — not two
           different keys, one for each. That is why either one works alone: whichever one you
           use, it unlocks that same key by itself. In practice, this means losing one of them
@@ -145,25 +118,44 @@ export function CodexBackupInformatics(): React.ReactElement {
         </p>
       </section>
 
-      <section style={SECTION_STYLE}>
-        <p style={BODY_STYLE}>
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           You can add an optional PIN — a 6-to-15-digit number that only you know — as an extra
           lock on top of either restore path above.
         </p>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
           Turning on a PIN for one of these two paths generates a real, second key from the
           PIN&apos;s digits, and that new key takes the place of that path&apos;s ordinary lock
           — it is not an extra lock added on top of it, it stands in for it. The other restore
           path, if you leave it without a PIN, is unaffected and keeps working exactly as before
           on its own.
         </p>
-        <div data-testid="pin-unrecoverable-warning" role="alert" style={PIN_WARNING_STYLE}>
+        <div data-testid="pin-unrecoverable-warning" role="alert" style={INFORMATICS_WARNING_STYLE}>
           Warning: forgetting this PIN is exactly as unrecoverable as losing your seed words —
           there is no &quot;forgot PIN&quot; reset, ever.
         </div>
-        <p style={BODY_STYLE}>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
           This PIN is entirely opt-in: it is never turned on by default, and it is never
           presented as the recommended choice.
+        </p>
+      </section>
+
+      <section style={INFORMATICS_LAST_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
+          Each backup you make is its own permanent, independent record — a later backup never
+          replaces or updates an earlier one. This matters in particular if you add a Codex
+          Identity after already backing up with only your Master Seed: that earlier backup
+          stays exactly as it was, covering only the Master Seed path. Making a new backup is
+          what adds the Codex Identity path — it does not retroactively appear on the old one.
+        </p>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
+          Because of this, restoring is designed around picking WHICH of your past backups to
+          restore from — not just "the" backup — by looking up every backup your Arweave
+          address has ever made. Choosing a different one than you first tried prompts you
+          again for its own unlock, independently, since an older backup may only accept the
+          unlock path it was actually made with. There is no restore screen yet to do this with
+          (see this project&apos;s own known-gap note) — this describes how the system is built
+          to behave once one exists, not a feature available today.
         </p>
       </section>
     </div>

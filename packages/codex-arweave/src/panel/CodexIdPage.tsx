@@ -37,8 +37,8 @@ import { CodexMigrationInformatics } from "./CodexMigrationInformatics.js";
 const CODEX_ID_PAGE_STYLE: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 16,
-  maxWidth: 560,
+  gap: 20,
+  maxWidth: 820,
 };
 
 /** The Codex ID page's two action buttons, stacked. */

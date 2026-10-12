@@ -108,7 +108,10 @@ describe("CodexBackupInformatics — the two independent restore paths", () => {
     // design.md: "Standard Apollo (the Codex Identity's Standard half —
     // NOT the Smart half, and NOT the two combined)". The non-engineer
     // explainer must preserve this exact distinction, not blur it.
-    const identity = screen.getByText(/Codex Identity/i, { selector: "li, p" });
+    // Scoped to "li" specifically: the component's new multi-backup section
+    // (below) also legitimately mentions "Codex Identity" in a <p>, which
+    // would otherwise make this match ambiguous.
+    const identity = screen.getByText(/Codex Identity/i, { selector: "li" });
     expect(identity.textContent).toMatch(/Standard/);
     expect(identity.textContent).toMatch(/not the combined identity/i);
     expect(identity.textContent).toMatch(/not the.*Smart.*half/i);
@@ -178,19 +181,65 @@ describe("CodexBackupInformatics — the optional Arweave-PIN, unmissable warnin
     const optIn = screen.getByText(/opt-in/i, { selector: "p" });
     expect(optIn.textContent).toMatch(/never.*default/i);
   });
+
+  // NEW (owner correction, 2026-10-12): a backup taken before a Codex
+  // Identity existed only ever has the Master Seed unlock path — adding a
+  // Codex Identity later does not retroactively add it to that already-
+  // permanent record. A fresh backup is required, and restoring must let
+  // the user pick which of possibly several past backups to restore from.
+  it("explains that each backup is independent (a later one never updates an earlier one) and a Codex Identity added after a backup isn't retroactively covered by it", () => {
+    render(<CodexBackupInformatics />);
+    const el = screen.getByText(/independent record/i, { selector: "p" });
+    expect(el.textContent).toMatch(/never replaces or updates/i);
+    expect(el.textContent).toMatch(/Master Seed/i);
+  });
+
+  it("explains restoring is designed around picking which past backup to use, each prompting its own unlock", () => {
+    render(<CodexBackupInformatics />);
+    const el = screen.getByText(/picking WHICH/i, { selector: "p" });
+    expect(el.textContent).toMatch(/every backup/i);
+    expect(el.textContent).toMatch(/prompts you again/i);
+  });
 });
 
 describe("CodexMigrationInformatics — why some codexes aren't eligible yet", () => {
-  it("explains the Ouronet identity / Arweave recovery seed origin-words mismatch, most commonly from a wallet-imported phrase", () => {
+  // CORRECTED TWICE (owner corrections, 2026-10-12):
+  //   Round 1 — eligibility is NOT about where the words came from
+  //   (wallet-imported vs. Codex-generated); the real cause is chronology.
+  //   Round 2 — round 1's own text overstated Koala as the ONLY possible
+  //   way to generate Chainweb keys. Accurate framing: Koala is what
+  //   onboarding has always HISTORICALLY used (everyone started from it,
+  //   most codexes also derived their Ouronet Account from the same
+  //   words); Arweave support simply came later, so those words were
+  //   never also used for an Arweave account at the time.
+  it("explains Koala as what onboarding historically used (not the only possible way), and that most codexes also derived their Ouronet Account from the same words", () => {
     render(<CodexMigrationInformatics />);
-    // design.md: "their Ouronet identity and their Arweave recovery seed
-    // don't currently share the same origin words — most commonly because
-    // the codex was originally set up using a wallet-imported word phrase
-    // rather than being generated fresh by Codex itself."
-    const el = screen.getByText(/Ouronet identity/i, { selector: "p" });
-    expect(el.textContent).toMatch(/Arweave recovery seed/i);
-    expect(el.textContent).toMatch(/don't.*share.*origin words/i);
-    expect(el.textContent).toMatch(/wallet-imported/i);
+    // Unique to the first paragraph — "Koala" alone now also appears in
+    // the second paragraph (the Stoic Dalos Derivation contrast), so this
+    // anchors on text that's only in the "why not eligible" paragraph.
+    const el = screen.getByText(/historically used/i, { selector: "p" });
+    expect(el.textContent).toMatch(/Koala/i);
+    expect(el.textContent).toMatch(/not.*the only possible way/i);
+    expect(el.textContent).toMatch(/Ouronet Account/i);
+    expect(el.textContent).not.toMatch(/wallet-imported/i);
+  });
+
+  // NEW (owner correction round 2): the actual GOAL of migration, and WHY
+  // a Master Seed matters at all — a genuinely important addition the
+  // original content never explained.
+  it("states migration's goal: one single (ideally arbitrary) seed generating the Ouronet Account, Chainweb keys (via Stoic Dalos Derivation), and the Prime Arweave Seed together — called the Master Seed", () => {
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByText(/Stoic Dalos Derivation/i, { selector: "p" });
+    expect(el.textContent).toMatch(/Ouronet Account/i);
+    expect(el.textContent).toMatch(/Prime Arweave Seed/i);
+    expect(el.textContent).toMatch(/Master Seed/i);
+  });
+
+  it("explains WHY a Master Seed matters: seed words alone can regenerate the three core identities, but recovering everything else a codex holds depends entirely on locating an Arweave backup", () => {
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByText(/makes full seed-words-only restore actually possible/i, { selector: "p" });
+    expect(el.textContent).toMatch(/cannot regenerate anything else/i);
+    expect(el.textContent).toMatch(/find and download an actual backup/i);
   });
 });
 
