@@ -85,5 +85,5 @@
     "url": "https://github.com/AncientPantheon/Codex.git",
     "directory": "packages/codex-ui"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

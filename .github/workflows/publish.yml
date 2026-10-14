@@ -35,12 +35,57 @@ name: Publish to npmjs.org
 #
 # Doc gates (README + CHANGELOG version-parity) only apply to packages in
 # the publish queue. A non-published package's docs are untouched.
+#
+# AUTHENTICATION IS OIDC TRUSTED PUBLISHING, NOT A TOKEN (as of 2026-10-14).
+# npmjs.com trusts this repository + this exact workflow FILENAME (extension
+# included — renaming this file breaks the connection until it is recreated
+# to match) + this exact environment name directly, so there is normally no
+# long-lived secret to leak, rotate, or let expire. Four things make this
+# actually work, learned the hard way on the sibling ouronet-libs repo and
+# mirrored here rather than re-discovered:
+#
+#   1. `permissions: id-token: write` (job level, below) — without it there
+#      is no OIDC token to exchange at all.
+#   2. `actions/setup-node` MUST be given `registry-url:`. WITHOUT THIS npm
+#      never even attempts the OIDC exchange — it fails in ~1.5s with
+#      ENEEDAUTH, which reads exactly like "you forgot to log in" and sends
+#      you looking for a missing token that was never the problem.
+#   3. `npm` must be >= 11.5.1. `setup-node` still ships npm 10.x with Node
+#      22, so the upgrade step below is REQUIRED, not hygiene.
+#   4. `npm publish` must run FROM THE PACKAGE'S OWN DIRECTORY
+#      (`working-directory:`), NOT via `npm publish --workspace=...` from
+#      the monorepo root — npm resolves which package it's authenticating
+#      AS for the OIDC exchange from the current working directory, and at
+#      a monorepo root that resolves to the private root manifest, not the
+#      package actually being published.
+#
+# `repository.url` in each published package's package.json must also match
+# this GitHub repo, or `--provenance` fails at upload (E422, sigstore) AFTER
+# the tarball is already built — confirmed already correct for both
+# @ancientpantheon/codex and @ancientpantheon/arweave-core.
+#
+# A brand-new npmjs.com Trusted Publisher connection reads "Pending
+# validation" until ONE publish actually lands through it — OIDC exchanges
+# 404 on every attempt before that first publish, which is circular. Each
+# publish step below tries OIDC first, always, and only falls back to the
+# existing `NPM_PUBLISHER` token secret to break that one-time bootstrap
+# loop if OIDC genuinely fails. Once a release has gone out via OIDC for a
+# given package, that package's fallback branch is dead code — safe to
+# delete `NPM_PUBLISHER` from repo secrets, not required before.
+#
+# `workflow_dispatch` (below) exists ONLY to run the OIDC exchange probe
+# without publishing anything — the probe asks npm's own exchange endpoint
+# whether the trusted publisher actually matches, in ~40s, instead of
+# finding out six CI runs later on a real tag push. The probe must live IN
+# this file, because the OIDC claim names the workflow file by path; a probe
+# anywhere else proves nothing about this one.
 
 on:
   push:
     tags:
       - "v*"
       - "arweave-core-v*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -50,18 +95,26 @@ jobs:
 
     # The default GITHUB_TOKEN has read-only `contents` scope. Creating a
     # Release via `gh release create` requires `contents: write`.
-    # `id-token: write` is required for npm publish's `--provenance` flag —
-    # npm uses the OIDC token GitHub Actions issues via this permission to
-    # mint a SLSA attestation linking the published tarball to the exact
-    # workflow run that produced it.
+    # `id-token: write` does double duty: it is required for npm Trusted
+    # Publishing itself (`npm publish` exchanges this OIDC token for a
+    # short-lived npm credential) AND for the `--provenance` SLSA attestation
+    # linking the published tarball to the exact workflow run that produced
+    # it.
     permissions:
       contents: write
       id-token: write
 
-    # Inert until the `npm-publish` environment is created in repo Settings →
-    # Environments, at which point a required-reviewer protection rule and any
-    # environment-scoped secrets take effect. Harmless before then; see
-    # .github/SECURITY-CHECKLIST.md for the settings-side setup this expects.
+    # This name is load-bearing for Trusted Publishing, not just GitHub's own
+    # protection rules: npmjs.com's Trusted Publisher entry for
+    # @ancientpantheon/codex and @ancientpantheon/arweave-core must have its
+    # "Environment name" field set to exactly `npm-publish` to match the OIDC
+    # claim this environment causes GitHub to issue. (If a connection's job
+    # declared no `environment:` at all, its npm-side field must be left
+    # BLANK instead — setting one side only guarantees a mismatch.) The
+    # `npm-publish` environment already exists in repo Settings →
+    # Environments (confirmed via `gh api repos/AncientPantheon/Codex/
+    # environments`); see .github/SECURITY-CHECKLIST.md for the rest of the
+    # settings-side setup.
     environment: npm-publish
 
     steps:
@@ -74,22 +127,76 @@ jobs:
           # is a repo-write vector this job never needs.
           persist-credentials: false
 
-      # Plain Node setup — no registry-url here so setup-node doesn't write
-      # its own scoped .npmrc. We write the root .npmrc ourselves later, right
-      # before publish, so the token is not on disk during install/build/test.
       - name: Setup Node.js
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
           cache: npm
+          # REQUIRED FOR OIDC, not cosmetic: this is what gives npm a registry
+          # context to attempt the token exchange against. Without it npm
+          # never tries OIDC at all and fails in ~1.5s with ENEEDAUTH, which
+          # reads exactly like "you forgot to log in".
+          registry-url: 'https://registry.npmjs.org'
 
+      # TRUSTED PUBLISHING NEEDS npm >= 11.5.1, and setup-node still ships
+      # npm 10.x with Node 22. Without this upgrade, `npm publish` falls back
+      # to looking for an auth token that no longer exists and fails with a
+      # 404 that reads like a missing package — this is not hygiene, it is a
+      # hard prerequisite.
+      - name: Upgrade npm (OIDC trusted publishing support)
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version)"
+
+      - name: OIDC preflight (does this runner have an id-token to exchange?)
+        run: |
+          echo "npm            : $(npm --version)"
+          echo "ID token URL   : ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}${ACTIONS_ID_TOKEN_REQUEST_URL:-ABSENT}"
+          echo "ID token value : ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-ABSENT}"
+          echo "repo           : ${GITHUB_REPOSITORY}"
+          echo "workflow ref   : ${GITHUB_WORKFLOW_REF}"
+
+      # Publishes NOTHING. Asks npm's own exchange endpoint whether each
+      # package's trusted-publisher connection actually matches this repo +
+      # this workflow file + this environment, for both public packages.
+      # 201 Created (not 200) means the exchange SUCCEEDED and minted a
+      # token — checking for 200 alone reported a real match as a failure
+      # the first time this was built, which is worse than no check at all
+      # because it is believed.
+      - name: OIDC exchange probe (do the trusted publishers actually match?)
+        run: |
+          set -o pipefail
+          TOK=$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+                "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org" \
+                | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          for PKG in "@ancientpantheon%2fcodex" "@ancientpantheon%2farweave-core"; do
+            CODE=$(curl -sS -o /tmp/exchange.json -w '%{http_code}' -X POST \
+                   -H "Authorization: Bearer ${TOK}" -H "Content-Type: application/json" \
+                   "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${PKG}")
+            echo "── ${PKG} ── exchange HTTP ${CODE}"
+            sed -E 's/"token":"[^"]*"/"token":"***"/g' /tmp/exchange.json || true
+            echo
+            if [ "${CODE}" = "201" ] || [ "${CODE}" = "200" ]; then
+              echo "::notice::${PKG} trusted publisher MATCHES — a real publish will go out over OIDC."
+            else
+              echo "::warning::${PKG} trusted publisher did NOT match (HTTP ${CODE}). Compare the ref below"
+              echo "::warning::with the connection on npmjs.com, filename extension included:"
+              echo "::warning::  ${GITHUB_WORKFLOW_REF}"
+              echo "::warning::If the package page shows 'Pending validation', this 404 is expected"
+              echo "::warning::until one publish lands through it — see the publish steps' bootstrap"
+              echo "::warning::fallback, not a sign the connection itself is wrong."
+            fi
+            rm -f /tmp/exchange.json
+          done
+
+      # Everything below here only runs for a real tag push — workflow_dispatch
+      # exists solely for the probe above and stops here.
       - name: Install dependencies
+        if: github.ref_type == 'tag'
         # npm ci uses the committed lockfile (present by tag time) so the
         # published dist/ is built from the locked, reviewed toolchain — this
         # is also what --provenance attests over. --ignore-scripts blocks
-        # transitive lifecycle scripts from executing during install; combined
-        # with writing the .npmrc token only after this gate, no dependency
-        # script ever runs while the publish credential is on disk.
+        # transitive lifecycle scripts from executing during install.
         run: npm ci --ignore-scripts
 
       # Belt-and-suspenders: typecheck + build + tests gate the publish so a
@@ -102,6 +209,7 @@ jobs:
       # step creates it; a test importing a package by its bare specifier
       # before build would hit ERR_MODULE_NOT_FOUND.
       - name: Build + Typecheck + Test (all packages)
+        if: github.ref_type == 'tag'
         # BUILD FIRST, then typecheck + test. On a fresh checkout no package has a
         # `dist/` yet; some resolve a sibling's types via its `exports` → `dist`
         # (codex + codex-arweave → the published @ancientpantheon/arweave-core;
@@ -125,6 +233,7 @@ jobs:
       #
       # If neither matches, fail the workflow — the tag is wrong.
       - name: Detect publish queue (which packages match the tag?)
+        if: github.ref_type == 'tag'
         id: queue
         run: |
           REF_NAME="${GITHUB_REF#refs/tags/}"
@@ -180,6 +289,7 @@ jobs:
       # The three grep regexes below are the load-bearing contract the
       # skeleton READMEs/CHANGELOGs are authored against.
       - name: Verify README + CHANGELOG of queued packages mention the publish version
+        if: github.ref_type == 'tag'
         run: |
           TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
           PUBLISH_ARWEAVE_CORE="${{ steps.queue.outputs.PUBLISH_ARWEAVE_CORE }}"
@@ -224,36 +334,8 @@ jobs:
       # keeps a transitive advisory from bricking a release; a non-clean audit
       # is a maintainer decision, not an automatic publish abort.
       - name: Dependency advisory audit (non-blocking)
+        if: github.ref_type == 'tag'
         run: npm audit --audit-level=high --workspace=@ancientpantheon/arweave-core || true
-
-      # ------------------------------------------------------------------
-      # Credential on disk ONLY from here on — after install/build/test.
-      # ------------------------------------------------------------------
-      # The .npmrc (token) is written now, after the gate and immediately
-      # before publish, so the token is never present while dependency install
-      # or test/build code runs (the ~/.npmrc exfiltration vector). Explicit
-      # .npmrc at the repo root so npm picks it up regardless of working
-      # directory. `always-auth` + the registry-specific _authToken line is the
-      # canonical pattern npm documents for CI publishing. The token comes from
-      # the AncientPantheon org secret NPM_PUBLISHER; its value is never echoed —
-      # only a redacted structure print is emitted.
-      - name: Write .npmrc with auth token
-        run: |
-          cat > .npmrc <<EOF
-          //registry.npmjs.org/:_authToken=${{ secrets.NPM_PUBLISHER }}
-          @ancientpantheon:registry=https://registry.npmjs.org
-          always-auth=true
-          EOF
-          echo "--- .npmrc structure (token redacted) ---"
-          sed 's|=.*|=***|' .npmrc
-
-      # Fail-fast auth gate. A bare `npm whoami` (no `|| echo` fallback) so a
-      # missing or expired NPM_PUBLISHER hard-fails the job here — before any
-      # publish is attempted. This step needs only the .npmrc written above.
-      - name: Verify npm auth
-        run: |
-          echo "Checking npm whoami..."
-          npm whoami
 
       # ------------------------------------------------------------------
       # Idempotent publish — skip if the version already exists on npm
@@ -269,26 +351,89 @@ jobs:
       # eventually build on it. In this skeleton phase there are no
       # cross-package registry deps (internal members are private), so the
       # order is an ordering convention, not a present peer-dep constraint.
+      #
+      # EACH STEP RUNS FROM THE PACKAGE'S OWN DIRECTORY (`working-directory:`),
+      # NOT via `npm publish --workspace=...` — npm resolves which package it
+      # authenticates AS for the OIDC exchange from the current directory;
+      # at the monorepo root that resolves to the private root manifest
+      # instead of the package actually being published.
+      #
+      # OIDC FIRST, ALWAYS. The token-based fallback below exists only to
+      # break the one-time "Pending validation" bootstrap loop a brand-new
+      # trusted-publisher connection starts in (OIDC 404s on every attempt
+      # until one publish has landed through it) — it is never the primary
+      # or silently preferred path, and only runs after OIDC has actually
+      # been tried and failed.
 
       - name: Publish @ancientpantheon/arweave-core to npmjs.org
-        if: steps.queue.outputs.PUBLISH_ARWEAVE_CORE == 'true'
+        if: github.ref_type == 'tag' && steps.queue.outputs.PUBLISH_ARWEAVE_CORE == 'true'
+        working-directory: packages/arweave-core
+        env:
+          NPM_PUBLISHER: ${{ secrets.NPM_PUBLISHER }}
         run: |
-          TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
-          if npm view @ancientpantheon/arweave-core@${TAG_VERSION} version >/dev/null 2>&1; then
-            echo "@ancientpantheon/arweave-core@${TAG_VERSION} already on npm — skipping (idempotent)."
-          else
-            npm publish --workspace=@ancientpantheon/arweave-core --access public --provenance
+          V="${{ steps.queue.outputs.TAG_VERSION }}"
+          if npm view @ancientpantheon/arweave-core@${V} version >/dev/null 2>&1; then
+            echo "@ancientpantheon/arweave-core@${V} already on npm — skipping (idempotent)."
+            exit 0
           fi
 
-      - name: Publish @ancientpantheon/codex to npmjs.org
-        if: steps.queue.outputs.PUBLISH_CODEX == 'true'
-        run: |
-          TAG_VERSION="${{ steps.queue.outputs.TAG_VERSION }}"
-          if npm view @ancientpantheon/codex@${TAG_VERSION} version >/dev/null 2>&1; then
-            echo "@ancientpantheon/codex@${TAG_VERSION} already on npm — skipping (idempotent)."
-          else
-            npm publish --workspace=@ancientpantheon/codex --access public --provenance
+          # A PRERELEASE MUST NOT TAKE `latest` -- npm applies `latest` to
+          # whatever it publishes unless told otherwise, prerelease or not.
+          DIST=""
+          case "${V}" in *-*) DIST="--tag next";; esac
+          [ -n "${DIST}" ] && echo "prerelease ${V}: publishing under 'next', not 'latest'."
+
+          if npm publish --access public --provenance ${DIST}; then
+            echo "published via OIDC trusted publishing."
+            exit 0
           fi
+
+          if [ -z "${NPM_PUBLISHER}" ]; then
+            echo "::error::OIDC publish failed and no NPM_PUBLISHER secret is set."
+            echo "::error::If the trusted publisher still reads 'Pending validation', add a"
+            echo "::error::granular token as NPM_PUBLISHER once to validate it, then delete it."
+            exit 1
+          fi
+          echo "::warning::OIDC publish failed; falling back to the bootstrap token."
+          cat > "${RUNNER_TEMP}/.npmrc" <<EOF
+          //registry.npmjs.org/:_authToken=${NPM_PUBLISHER}
+          EOF
+          npm publish --access public --provenance ${DIST} --userconfig "${RUNNER_TEMP}/.npmrc"
+          rm -f "${RUNNER_TEMP}/.npmrc"
+
+      - name: Publish @ancientpantheon/codex to npmjs.org
+        if: github.ref_type == 'tag' && steps.queue.outputs.PUBLISH_CODEX == 'true'
+        working-directory: packages/codex
+        env:
+          NPM_PUBLISHER: ${{ secrets.NPM_PUBLISHER }}
+        run: |
+          V="${{ steps.queue.outputs.TAG_VERSION }}"
+          if npm view @ancientpantheon/codex@${V} version >/dev/null 2>&1; then
+            echo "@ancientpantheon/codex@${V} already on npm — skipping (idempotent)."
+            exit 0
+          fi
+
+          DIST=""
+          case "${V}" in *-*) DIST="--tag next";; esac
+          [ -n "${DIST}" ] && echo "prerelease ${V}: publishing under 'next', not 'latest'."
+
+          if npm publish --access public --provenance ${DIST}; then
+            echo "published via OIDC trusted publishing."
+            exit 0
+          fi
+
+          if [ -z "${NPM_PUBLISHER}" ]; then
+            echo "::error::OIDC publish failed and no NPM_PUBLISHER secret is set."
+            echo "::error::If the trusted publisher still reads 'Pending validation', add a"
+            echo "::error::granular token as NPM_PUBLISHER once to validate it, then delete it."
+            exit 1
+          fi
+          echo "::warning::OIDC publish failed; falling back to the bootstrap token."
+          cat > "${RUNNER_TEMP}/.npmrc" <<EOF
+          //registry.npmjs.org/:_authToken=${NPM_PUBLISHER}
+          EOF
+          npm publish --access public --provenance ${DIST} --userconfig "${RUNNER_TEMP}/.npmrc"
+          rm -f "${RUNNER_TEMP}/.npmrc"
 
       # ------------------------------------------------------------------
       # GitHub Release creation (single Release per tag, regardless of
@@ -299,6 +444,7 @@ jobs:
       # Per-package granular history lives in packages/{pkg}/CHANGELOG.md
       # and on npmjs.com.
       - name: Create GitHub Release for the pushed tag
+        if: github.ref_type == 'tag'
         env:
           # Prefer a user-supplied PAT (RELEASE_TOKEN) when present —
           # bypasses any org-level "Workflow permissions" lockdown that caps

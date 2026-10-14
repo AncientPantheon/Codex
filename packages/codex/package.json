@@ -111,5 +111,5 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

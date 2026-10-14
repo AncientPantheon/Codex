@@ -145,5 +145,5 @@
     "url": "https://github.com/AncientPantheon/Codex.git",
     "directory": "packages/codex-ouronet"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

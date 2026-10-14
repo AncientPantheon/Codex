@@ -88,5 +88,5 @@
     "url": "https://github.com/AncientPantheon/Codex.git",
     "directory": "packages/codex-arweave"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }
