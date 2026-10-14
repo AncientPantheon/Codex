@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.3 — 2026-10-14
+
+**PATCH — `@ouronet/talos-registry` bumped `^2.1.0`/`^2.2.0` → `^2.3.0`
+(peer + dev), and the committed Pact-signature manifest re-synced against
+the live contract tree to match.** talos-registry 2.3.0 re-synced against
+mainnet: the AQP-POOL reassign-beneficiary surface moved from a two-
+transaction "Hydra recipe" shape (`CCp_ReassignOrtoStakeBeneficiary`,
+`CCp_ReassignCollectableStakeBeneficiary`) to plain single-transaction
+entrypoints (`CC_ReassignOrtoStakeBeneficiary`,
+`CC_ReassignCollectableStakeBeneficiary`), added a new true-fungible
+counterpart (`CC_ReassignTrueFungibleStakeBeneficiary`), and picked up a
+batch of other already-deployed AQP-POOL/AQP-FVT entrypoints this
+package's own manifest had never carried. Confirmed none of the renamed-
+away names were referenced anywhere in this package's call sites before
+the bump (a plain grep across `src/`), so nothing here needed a code
+change beyond regenerating the manifest: `src/constants/
+pactSignatures.generated.ts` and `scripts/pact-signatures.full.json`
+were regenerated from the live Pact source tree via the package's own
+`scripts/generate-pact-signatures.py`, and the drift-guard test
+(`tests/pact-signatures.test.ts`) now reproduces the committed file
+byte-for-byte again. `ExecutionTooltip.tsx` — the consumer of this
+manifest — will show the real current signature for every affected
+button rather than a stale one.
+
+Also relicensed Apache-2.0 (see the root `@ancientpantheon/codex` entry
+for the full rationale) — no functional change.
+
 ## 1.1.2 — 2026-10-12
 
 **PATCH — critical live bug fix: Rotate Payment Key and Rotate Guard both

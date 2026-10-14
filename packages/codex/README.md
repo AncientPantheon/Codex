@@ -58,9 +58,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.5.1` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`).
+Version `1.5.2` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`). Licensed Apache-2.0.
 
 ## Version history
+
+**v1.5.2** — Relicensed Apache-2.0 (was `UNLICENSED`, a pre-release placeholder that should never have reached a public npm publish). Bundled from `codex-ouronet` 1.1.3: `@ouronet/talos-registry` bumped to `^2.3.0` and the committed Pact-signature manifest re-synced against a live mainnet redeploy (AQP-POOL reassign-beneficiary surface). Also: this package's own CI publish pipeline now authenticates via npm Trusted Publishing (OIDC) instead of an expired long-lived token — infrastructure only, invisible to consumers. `arweave-core`/`codex-core`/`codex-ui`/`codex-arweave` unchanged this release.
 
 **v1.5.1** — Bundled from `codex-arweave` 0.9.1: the Codex ID page, finalized — tabbed informatics, backup correctly gated on eligibility and opened as a real popup, a corrected eligibility explanation, and the page now fills the available width. `arweave-core`/`codex-core`/`codex-ouronet` unchanged this release.
 
@@ -213,7 +215,7 @@ release).
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.6.0` |
 | `@ancientpantheon/codex-ui` | `0.10.0` |
-| `@ancientpantheon/codex-ouronet` | `1.1.2` |
+| `@ancientpantheon/codex-ouronet` | `1.1.3` |
 | `@ancientpantheon/codex-arweave` | `0.9.1` |
 | `@ancientpantheon/arweave-core` | `0.5.0` |
 <!-- END member-versions -->

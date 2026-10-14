@@ -2,6 +2,31 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.5.2 — 2026-10-14
+
+**PATCH — relicensed Apache-2.0, and bundled from `@ancientpantheon/
+codex-ouronet` 1.1.3.**
+
+- **Licensing.** This package (and every member bundled into it) was
+  `UNLICENSED` — a placeholder from before the first public release,
+  carried forward by mistake into a package actually published on
+  npmjs.com, where `UNLICENSED` means no rights are granted to use it at
+  all. Relicensed Apache-2.0: the root `LICENSE` and each package's own
+  `LICENSE` now carry the real license text (npm does not pick up a
+  monorepo root `LICENSE` automatically, so it's copied into each
+  published package directory too), and every `package.json`'s
+  `"license"` field now says so.
+- **`@ouronet/talos-registry` bumped to `^2.3.0`**, re-synced against a
+  live mainnet redeploy of the AQP-POOL reassign-beneficiary surface.
+  See `codex-ouronet`'s own changelog entry for the full detail,
+  including confirmation that none of the renamed entrypoints were ever
+  referenced by this package. `arweave-core`/`codex-core`/`codex-ui`/
+  `codex-arweave` unchanged this release.
+- **Publishing infrastructure only, no package-code change:** this
+  package's own CI publish pipeline now authenticates to npmjs.org via
+  Trusted Publishing (OIDC) instead of a long-lived token, which had
+  expired. Not visible to consumers of this package in any way.
+
 ## 1.5.1 — 2026-10-13
 
 **PATCH — bundled from `@ancientpantheon/codex-arweave` 0.9.1.** The

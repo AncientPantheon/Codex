@@ -270,6 +270,9 @@
 "executor",
 "boost-class-id"
 ],
+"AQP-ANK.UEV_ExecutorNotCustodial": [
+"executor"
+],
 "AQP-ANK.UEV_IssueAnchor": [
 "ank-asset",
 "boost-class-id"
@@ -361,6 +364,9 @@
 ],
 "AQP-ANK.URCi_RevokeAnchor": [],
 "AQP-ANK.URCi_RevokeBoostClass": [],
+"AQP-ANK.URCv_AnchorableDptfAuthority": [
+"dptf-id"
+],
 "AQP-ANK.URCv_CoreDptf": [
 "dptf-id"
 ],
@@ -648,6 +654,15 @@
 "reward-ouroboros-id",
 "reward-wstoa-id"
 ],
+"AQP-BOOT.C_Step12b_AddLateFvtRewardLinks": [
+"patron",
+"nosferatu-treasury-id",
+"wondercoach-treasury-id",
+"stoicism-vault-id",
+"nosferatu-reward-id",
+"wondercoach-reward-id",
+"stoicism-reward-id"
+],
 "AQP-BOOT.C_Step13_CreateCustodiansVault": [
 "patron",
 "owner-konto",
@@ -688,10 +703,19 @@
 "dh-score-ids",
 "ouro-triplet-score-ids"
 ],
+"AQP-BOOT.C_Step7b_CreateStoicismPool": [
+"patron",
+"stoicism-dptf-id",
+"stoic-power-score-id"
+],
 "AQP-BOOT.C_Step8_IssueFvtEntities": [
 "patron",
 "owner-konto",
 "lp-denominator"
+],
+"AQP-BOOT.C_Step8b_IssueLateFvtEntities": [
+"patron",
+"owner-konto"
 ],
 "AQP-BOOT.C_Step9_AddFvtScoreEntities": [
 "patron",
@@ -706,7 +730,22 @@
 "shares-score-id",
 "bloodshed-score-id"
 ],
+"AQP-BOOT.C_Step9b_AddLateFvtScoreEntities": [
+"patron",
+"nosferatu-treasury-id",
+"wondercoach-treasury-id",
+"stoicism-vault-id",
+"core-nosferatu-score-id",
+"core-wondercoach-score-id",
+"stoic-power-score-id"
+],
 "AQP-BOOT.GOV|Demiurgoi": [],
+"AQP-BOOT.UEV_BootStepState": [
+"step-name",
+"what",
+"actual",
+"expected"
+],
 "AQP-DSA.A_SetOracleValidity": [
 "patron",
 "executor",
@@ -957,6 +996,10 @@
 "score-entity-id",
 "oracle-ts"
 ],
+"AQP-FVT.CC_ClearPoolSweep": [
+"patron",
+"pool-id"
+],
 "AQP-FVT.CC_Collect": [
 "patron",
 "executor",
@@ -1008,6 +1051,34 @@
 "nonce-amounts",
 "direction"
 ],
+"AQP-FVT.CC_ReassignCollectableStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"collectable-id",
+"son",
+"nonce",
+"current-beneficiary",
+"new-beneficiary"
+],
+"AQP-FVT.CC_ReassignOrtoStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"dpof-id",
+"nonce",
+"current-beneficiary",
+"new-beneficiary"
+],
+"AQP-FVT.CC_ReassignTrueFungibleStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"dptf-id",
+"amount",
+"current-beneficiary",
+"new-beneficiary"
+],
 "AQP-FVT.CC_SweepBegin": [
 "patron",
 "executor",
@@ -1032,11 +1103,33 @@
 "executor",
 "fvt-ids"
 ],
+"AQP-FVT.CCp_FvtFixSlice": [
+"patron",
+"fvt-id",
+"reward-dptf-id",
+"users"
+],
 "AQP-FVT.CCp_InjectFixChunk": [
 "patron",
 "fvt-id",
 "reward-dptf-id",
 "chunk"
+],
+"AQP-FVT.CCp_ReleaseSpecialCustodial": [
+"patron",
+"pool-id",
+"executee",
+"dpof-id",
+"nonce"
+],
+"AQP-FVT.CCp_StakeSpecialCustodial": [
+"patron",
+"executor",
+"executee",
+"pool-id",
+"dpof-id",
+"nonces",
+"nonce-amounts"
 ],
 "AQP-FVT.CCp_SweepRecomputeChunk": [
 "patron",
@@ -1243,6 +1336,9 @@
 "executor",
 "fvt-id"
 ],
+"AQP-FVT.UEV_FVT|PoolReleasable": [
+"pool-id"
+],
 "AQP-FVT.UEV_InjectContext": [
 "patron",
 "fvt-id",
@@ -1342,6 +1438,9 @@
 "dptf-id",
 "deb-user"
 ],
+"AQP-FVT.URCi_ClearPoolSweep": [
+"output"
+],
 "AQP-FVT.URCi_CollectFull": [
 "patron",
 "fvt-id",
@@ -1358,9 +1457,44 @@
 "output"
 ],
 "AQP-FVT.URCi_IssueStoa": [],
+"AQP-FVT.URCi_ReassignCollectableStakeBeneficiary": [
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"collectable-id",
+"son",
+"nonce",
+"nonce-amount"
+],
+"AQP-FVT.URCi_ReassignOrtoStakeBeneficiary": [
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"dpof-id",
+"nonce"
+],
+"AQP-FVT.URCi_ReassignTrueFungibleStakeBeneficiary": [
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"dptf-id",
+"amount"
+],
+"AQP-FVT.URCi_ReleaseSpecialCustodial": [
+"pool-id",
+"beneficiary-id",
+"dpof-id",
+"nonce"
+],
 "AQP-FVT.URCi_UnstaleMyScores": [
 "patron",
 "output"
+],
+"AQP-FVT.URH_FVT|ActiveSweepCoversPool": [
+"pool-id"
 ],
 "AQP-FVT.URH_FvtEnabledScoreEntityIdsForFvt": [
 "fvt-id"
@@ -1604,6 +1738,21 @@
 "AQP-FVT.XE_SweepEnd": [
 "anchor-id"
 ],
+"AQP-FVT.XI_CollectableStakePhases": [
+"patron",
+"pool-id",
+"tracker-owner",
+"transfer-sender",
+"executee",
+"collectable-id",
+"son",
+"nonces",
+"nonce-amounts",
+"direction",
+"move-asset",
+"settle-beneficiary",
+"settle-bundle"
+],
 "AQP-FVT.XI_Control": [
 "fvt-id",
 "new-can-upgrade",
@@ -1614,6 +1763,20 @@
 "fvt-class",
 "owner-konto",
 "common-denominator"
+],
+"AQP-FVT.XI_OrtoStakePhases": [
+"patron",
+"pool-id",
+"tracker-owner",
+"transfer-sender",
+"executee",
+"dpof-id",
+"nonces",
+"nonce-amounts",
+"direction",
+"move-asset",
+"settle-beneficiary",
+"settle-bundle"
 ],
 "AQP-FVT.XI_RefreshCollectableStakeAnchors": [
 "beneficiary-id",
@@ -1630,6 +1793,18 @@
 "AQP-FVT.XI_SetCommonDenominator": [
 "fvt-id",
 "common-denominator"
+],
+"AQP-FVT.XI_TrueFungibleStakePhases": [
+"patron",
+"pool-id",
+"owner-id",
+"beneficiary-id",
+"dptf-id",
+"amount",
+"direction",
+"move-asset",
+"settle-beneficiary",
+"settle-bundle"
 ],
 "AQP-INFO.CT_Bar": [],
 "AQP-INFO.GOV|Demiurgoi": [],
@@ -1755,6 +1930,10 @@
 "score-entity-type",
 "score-entity-id"
 ],
+"AQP-INFO.INFO_AQP-FVT|ClearPoolSweep": [
+"patron",
+"pool-id"
+],
 "AQP-INFO.INFO_AQP-FVT|Collect": [
 "patron",
 "fvt-id",
@@ -1767,6 +1946,11 @@
 "fvt-id",
 "new-can-upgrade",
 "new-can-change-owner"
+],
+"AQP-INFO.INFO_AQP-FVT|FvtFixSlice": [
+"patron",
+"fvt-id",
+"accounts"
 ],
 "AQP-INFO.INFO_AQP-FVT|Inject": [
 "patron",
@@ -1899,6 +2083,12 @@
 "pool-id",
 "score-id"
 ],
+"AQP-INFO.INFO_AQP-POOL|BackfillScoreSlice": [
+"patron",
+"pool-id",
+"score-id",
+"beneficiaries"
+],
 "AQP-INFO.INFO_AQP-POOL|BatchDrainCollectable": [
 "patron",
 "pool-id",
@@ -1937,13 +2127,30 @@
 "dptf-id",
 "legs"
 ],
+"AQP-INFO.INFO_AQP-POOL|BeginScoreRevoke": [
+"patron",
+"pool-id",
+"score-id",
+"slot-index"
+],
 "AQP-INFO.INFO_AQP-POOL|DisablePoolStake": [
 "patron",
 "pool-id"
 ],
+"AQP-INFO.INFO_AQP-POOL|DrainScoreSlice": [
+"patron",
+"pool-id",
+"score-id",
+"accounts"
+],
 "AQP-INFO.INFO_AQP-POOL|EnablePoolStake": [
 "patron",
 "pool-id"
+],
+"AQP-INFO.INFO_AQP-POOL|FinalizeScoreRevoke": [
+"patron",
+"pool-id",
+"score-id"
 ],
 "AQP-INFO.INFO_AQP-POOL|FinalizeVacate": [
 "patron",
@@ -1962,6 +2169,42 @@
 "pool-name",
 "asset-id",
 "aqp-class"
+],
+"AQP-INFO.INFO_AQP-POOL|ReassignCollectableStakeBeneficiary": [
+"patron",
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"collectable-id",
+"son",
+"nonce",
+"nonce-amount"
+],
+"AQP-INFO.INFO_AQP-POOL|ReassignOrtoStakeBeneficiary": [
+"patron",
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"dpof-id",
+"nonce"
+],
+"AQP-INFO.INFO_AQP-POOL|ReassignTrueFungibleStakeBeneficiary": [
+"patron",
+"pool-id",
+"owner",
+"current-beneficiary",
+"new-beneficiary",
+"dptf-id",
+"amount"
+],
+"AQP-INFO.INFO_AQP-POOL|ReleaseSpecialCustodial": [
+"patron",
+"pool-id",
+"beneficiary-id",
+"dpof-id",
+"nonce"
 ],
 "AQP-INFO.INFO_AQP-POOL|RevokeScore": [
 "patron",
@@ -1990,6 +2233,14 @@
 "owner-id",
 "beneficiary-id",
 "collectable-id",
+"nonces"
+],
+"AQP-INFO.INFO_AQP-POOL|StakeSpecialCustodial": [
+"patron",
+"pool-id",
+"owner-id",
+"beneficiary-id",
+"dpof-id",
 "nonces"
 ],
 "AQP-INFO.INFO_AQP-POOL|StakeTrueFungible": [
@@ -2048,6 +2299,32 @@
 "beneficiary-id",
 "dptf-id",
 "amount"
+],
+"AQP-INFO.INFO_AQP-POOL|UpdateScoreMultipliers": [
+"patron",
+"score-id",
+"mx-frozen",
+"mx-sleeping",
+"mx-hibernated"
+],
+"AQP-INFO.INFO_AQP-POOL|VacateNonFungible": [
+"patron",
+"pool-id",
+"dpnf-id"
+],
+"AQP-INFO.INFO_AQP-POOL|VacateOrtoFungible": [
+"patron",
+"pool-id",
+"dpof-id"
+],
+"AQP-INFO.INFO_AQP-POOL|VacateSemiFungible": [
+"patron",
+"pool-id",
+"dpsf-id"
+],
+"AQP-INFO.INFO_AQP-POOL|VacateTrueFungible": [
+"patron",
+"pool-id"
 ],
 "AQP-INFO.INFO_AQP-SCR|CombineTripletScoreModel": [
 "patron",
@@ -2172,10 +2449,36 @@
 "AQP-POOL.CAP_StakeOwner": [
 "owner-id"
 ],
+"AQP-POOL.CC_FinalizeScoreRevoke": [
+"patron",
+"executor",
+"pool-id",
+"score-id"
+],
+"AQP-POOL.CC_UpdateScoreMultipliers": [
+"patron",
+"executor",
+"score-id",
+"mx-frozen",
+"mx-sleeping",
+"mx-hibernated"
+],
+"AQP-POOL.CCp_BackfillScoreSlice": [
+"patron",
+"pool-id",
+"score-id",
+"beneficiaries"
+],
 "AQP-POOL.CT_AqpScName": [],
 "AQP-POOL.CT_Bar": [],
 "AQP-POOL.CT_EmptyCumulator": [],
 "AQP-POOL.C_AddScore": [
+"patron",
+"executor",
+"pool-id",
+"score-id"
+],
+"AQP-POOL.C_BeginScoreRevoke": [
 "patron",
 "executor",
 "pool-id",
@@ -2215,6 +2518,12 @@
 "executee",
 "dptf-id"
 ],
+"AQP-POOL.Cp_DrainScoreSlice": [
+"patron",
+"pool-id",
+"score-id",
+"accounts"
+],
 "AQP-POOL.GOV|Demiurgoi": [],
 "AQP-POOL.P|A_Add": [
 "policy-name",
@@ -2236,6 +2545,17 @@
 "policy-name"
 ],
 "AQP-POOL.P|UR_IMP": [],
+"AQP-POOL.UC_AQP|BackfillRowsForBeneficiary": [
+"beneficiary-id",
+"rows"
+],
+"AQP-POOL.UC_AQP|BackfillSumForBeneficiary": [
+"beneficiary-id",
+"rows"
+],
+"AQP-POOL.UC_AQP|BackfillUniqueBeneficiaries": [
+"rows"
+],
 "AQP-POOL.UC_PoolScoreSlotPatch": [
 "slot-index",
 "score-id"
@@ -2379,7 +2699,19 @@
 "pool-id",
 "beneficiary-id"
 ],
+"AQP-POOL.UEV_AQP|ScoreDrainComplete": [
+"pool-id",
+"score-id"
+],
+"AQP-POOL.UEV_AQP|ScoreMxChangeSafe": [
+"score-id"
+],
 "AQP-POOL.UEV_AddScorePoolAndScore": [
+"pool-id",
+"score-id",
+"slot-index"
+],
+"AQP-POOL.UEV_BeginScoreRevoke": [
 "pool-id",
 "score-id",
 "slot-index"
@@ -2402,6 +2734,10 @@
 "score-id",
 "slot-index"
 ],
+"AQP-POOL.UEV_ScoreDefinitionTargetMatchesPool": [
+"score-id",
+"asset-id"
+],
 "AQP-POOL.UEV_StakeBeneficiaryAccount": [
 "beneficiary-id"
 ],
@@ -2414,6 +2750,19 @@
 ],
 "AQP-POOL.UEV_StakeTrueFungibleDptfLeg": [
 "dptf-id"
+],
+"AQP-POOL.URC_AQP|PoolHasWeightedStakers": [
+"pool-id"
+],
+"AQP-POOL.URC_AQP|PoolLiquidityLegs": [
+"pool-id"
+],
+"AQP-POOL.URC_AQP|ScoreBackfillSupported": [
+"pool-id",
+"score-id"
+],
+"AQP-POOL.URC_AQP|ScoreMxChangeSafe": [
+"score-id"
 ],
 "AQP-POOL.URC_AqpOwnerKonto": [
 "pool-id"
@@ -2544,6 +2893,20 @@
 "AQP-POOL.URCi_AddScore": [
 "output"
 ],
+"AQP-POOL.URCi_BackfillScoreSlice": [
+"beneficiaries",
+"output"
+],
+"AQP-POOL.URCi_BeginScoreRevoke": [
+"output"
+],
+"AQP-POOL.URCi_DrainScoreSlice": [
+"accounts",
+"output"
+],
+"AQP-POOL.URCi_FinalizeScoreRevoke": [
+"output"
+],
 "AQP-POOL.URCi_Issue": [
 "output"
 ],
@@ -2567,6 +2930,32 @@
 "AQP-POOL.URCi_SyncTrueFungibleAnchorsFull": [
 "beneficiary-id",
 "dptf-id"
+],
+"AQP-POOL.URCi_UpdateScoreMultipliers": [
+"output"
+],
+"AQP-POOL.URHC_AQP|PoolOrphanedScores": [
+"pool-id"
+],
+"AQP-POOL.URHC_AQP|PoolSweepClear": [
+"pool-id"
+],
+"AQP-POOL.URHC_AQP|ScoreBackfillCandidates": [
+"pool-id",
+"score-id",
+"leg-rows"
+],
+"AQP-POOL.URHC_AQP|ScoreBackfillNeeded": [
+"pool-id",
+"score-id"
+],
+"AQP-POOL.URHC_AQP|ScoreBackfillOutstanding": [
+"pool-id",
+"score-id"
+],
+"AQP-POOL.URHC_AQP|ScoreDrainOutstanding": [
+"pool-id",
+"score-id"
 ],
 "AQP-POOL.URH_AQP|ActiveDpnfTrackerRows": [
 "pool-id",
@@ -2616,6 +3005,17 @@
 ],
 "AQP-POOL.URH_AQP|DptfStakesByOwner": [
 "owner-id"
+],
+"AQP-POOL.URH_AQP|ScoreBackfillLegRows": [
+"pool-id"
+],
+"AQP-POOL.URH_AQP|ScoreTargetBaseForBeneficiary": [
+"pool-id",
+"score-id",
+"beneficiary-id",
+"nat-rows",
+"frz-rows",
+"slp-rows"
 ],
 "AQP-POOL.UR_AQP|BenDpnfActiveNonceCount": [
 "beneficiary-id",
@@ -3362,6 +3762,37 @@
 "silver-score-id",
 "golden-score-id"
 ],
+"AQP-SCORE.UC_DecayMonthsRemaining": [
+"remaining-seconds",
+"cap-months"
+],
+"AQP-SCORE.UC_MxAtMonths": [
+"mx-ceiling",
+"months",
+"cap-months"
+],
+"AQP-SCORE.UC_MxForRemaining": [
+"mx-ceiling",
+"remaining-seconds",
+"cap-months"
+],
+"AQP-SCORE.UC_MxFrozenFloor": [
+"mx-sleeping"
+],
+"AQP-SCORE.UC_MxOrderingOk": [
+"mx-frozen",
+"mx-sleeping"
+],
+"AQP-SCORE.UC_MxSleepIntervalOk": [
+"mx-sleeping"
+],
+"AQP-SCORE.UC_SleepMonthsRemaining": [
+"remaining-seconds"
+],
+"AQP-SCORE.UC_SleepMxAtMonths": [
+"mx-ceiling",
+"months"
+],
 "AQP-SCORE.UCk_NFClassScore": [
 "score-id",
 "dpnf-id",
@@ -3395,6 +3826,10 @@
 "AQP-SCORE.UCk_SFScore": [
 "score-id",
 "dpsf-id",
+"nonce"
+],
+"AQP-SCORE.UCk_SleepStake": [
+"dpof-id",
 "nonce"
 ],
 "AQP-SCORE.UCk_Triplet": [
@@ -3520,6 +3955,11 @@
 "pool-id",
 "score-id"
 ],
+"AQP-SCORE.UEV_DpofSpecialStakeScoreContext": [
+"ouronet-account",
+"pool-id",
+"score-id"
+],
 "AQP-SCORE.UEV_DpofStakeScoreContext": [
 "ouronet-account",
 "pool-id",
@@ -3570,6 +4010,15 @@
 "trait-values",
 "trait-score-values"
 ],
+"AQP-SCORE.UEV_SemiFungibleScoreDefinition": [
+"score-id",
+"dpsf-id",
+"nonces",
+"nonce-score-values"
+],
+"AQP-SCORE.URC_HubsFirstScoreIds": [
+"score-ids"
+],
 "AQP-SCORE.URC_IsTrueTriplet": [
 "id0",
 "id1",
@@ -3589,6 +4038,31 @@
 ],
 "AQP-SCORE.URC_OrtoDpofUsesSleepingMultiplier": [
 "dpof-id"
+],
+"AQP-SCORE.URC_SCR|LiveRemainingTerm": [
+"dpof-id",
+"nonce"
+],
+"AQP-SCORE.URC_SCR|SleepingLegHeldMultiplier": [
+"score-id",
+"dpof-id",
+"nonce",
+"cap-months"
+],
+"AQP-SCORE.URC_SCR|SleepingLegHeldWeight": [
+"score-id",
+"dpof-id",
+"nonces",
+"nonce-amounts",
+"cap-months"
+],
+"AQP-SCORE.URC_SCR|SleepingLegWeight": [
+"score-id",
+"dpof-id",
+"nonces",
+"nonce-amounts",
+"cap-months",
+"from-ledger"
 ],
 "AQP-SCORE.URC_ScoreEntityModelExists": [
 "model-id"
@@ -3729,6 +4203,11 @@
 "nonces",
 "nonce-amounts"
 ],
+"AQP-SCORE.URCx_EquityShareRawWeight": [
+"dpsf-id",
+"nonces",
+"nonce-amounts"
+],
 "AQP-SCORE.URCx_SfStakeDefinitionWeightedRawWeight": [
 "score-id",
 "dpsf-id",
@@ -3736,6 +4215,31 @@
 "nonce-amounts"
 ],
 "AQP-SCORE.URH_SCR|AllScoreIds": [],
+"AQP-SCORE.URH_SCR|NFClassScoreDefinition": [
+"score-id",
+"dpnf-id"
+],
+"AQP-SCORE.URH_SCR|NFTraitScoreDefinition": [
+"score-id",
+"dpnf-id"
+],
+"AQP-SCORE.URH_SCR|PoolScoreIdsWithHolders": [
+"pool-id"
+],
+"AQP-SCORE.URH_SCR|SFScoreDefinition": [
+"score-id",
+"dpsf-id"
+],
+"AQP-SCORE.URH_SCR|ScoreDefinedNonFungibles": [
+"score-id"
+],
+"AQP-SCORE.URH_SCR|ScoreDefinedSemiFungibles": [
+"score-id"
+],
+"AQP-SCORE.URH_SCR|ScoreHolderAccounts": [
+"pool-id",
+"score-id"
+],
 "AQP-SCORE.UR_N-DEF-REV|NFDefRevision": [
 "score-id",
 "dpnf-id"
@@ -3949,6 +4453,10 @@
 "AQP-SCORE.UR_SCR|ScoreVacateGeneration": [
 "score-id"
 ],
+"AQP-SCORE.UR_SCR|SleepRemainingAtStake": [
+"dpof-id",
+"nonce"
+],
 "AQP-SCORE.UR_SCR|Triplet": [
 "triplet-id"
 ],
@@ -4060,6 +4568,12 @@
 "score-id",
 "fvt-id"
 ],
+"AQP-SCORE.WU_Score|Multipliers": [
+"score-id",
+"mx-frozen",
+"mx-sleeping",
+"mx-hibernated"
+],
 "AQP-SCORE.WU_Score|Nuke": [
 "score-id"
 ],
@@ -4071,6 +4585,11 @@
 "AQP-SCORE.WU_Score|OwnerKonto": [
 "score-id",
 "owner-konto"
+],
+"AQP-SCORE.WU_Score|SleepStake": [
+"dpof-id",
+"nonce",
+"remaining-at-stake"
 ],
 "AQP-SCORE.WW_NFClassScore": [
 "score-id",
@@ -4131,6 +4650,12 @@
 "direction",
 "employed-ids"
 ],
+"AQP-SCORE.XE_ApplyRawBaseDelta": [
+"ouronet-account",
+"pool-id",
+"score-id",
+"signed-base-delta"
+],
 "AQP-SCORE.XE_ApplyTrueFungibleStakeDelta": [
 "pool-id",
 "beneficiary-id",
@@ -4148,6 +4673,11 @@
 "score-id",
 "fvt-id"
 ],
+"AQP-SCORE.XE_DrainBase": [
+"ouronet-account",
+"pool-id",
+"score-id"
+],
 "AQP-SCORE.XE_NukeScoreForVacate": [
 "score-id"
 ],
@@ -4159,6 +4689,12 @@
 "AQP-SCORE.XE_RevokeAqpoolLink": [
 "score-id",
 "pool-id"
+],
+"AQP-SCORE.XE_SetScoreMultipliers": [
+"score-id",
+"mx-frozen",
+"mx-sleeping",
+"mx-hibernated"
 ],
 "AQP-SCORE.XI_1|UpdateScoreDataForNonFungible": [
 "ouronet-account",
@@ -4288,6 +4824,11 @@
 "AQP-SCORE.XI_RotateOwnership": [
 "score-id",
 "new-owner-konto"
+],
+"AQP-SCORE.XI_SleepStakeRecord": [
+"dpof-id",
+"nonces",
+"direction"
 ],
 "AQP-VCT.CAP_VctVacatePoolOwner": [
 "pool-id"
@@ -4476,6 +5017,10 @@
 ],
 "AQP-VCT.UC_VacateOfLegsToVacateArrays": [
 "legs"
+],
+"AQP-VCT.UC_VacateOrtoDestinations": [
+"owner-ids",
+"beneficiary-ids"
 ],
 "AQP-VCT.UC_VacateSumAmountForBeneficiaryFromLegs": [
 "beneficiary-id",
@@ -4709,6 +5254,21 @@
 "of-lanes",
 "coll-lanes",
 "coll-son"
+],
+"AQP-VCT.URCi_VacateNonFungible": [
+"pool-id",
+"dpnf-id"
+],
+"AQP-VCT.URCi_VacateOrtoFungible": [
+"pool-id",
+"dpof-id"
+],
+"AQP-VCT.URCi_VacateSemiFungible": [
+"pool-id",
+"dpsf-id"
+],
+"AQP-VCT.URCi_VacateTrueFungible": [
+"pool-id"
 ],
 "AQP-VCT.URHC_BuildVacateSlicePlan": [
 "pool-id",
@@ -12475,6 +13035,9 @@
 "EQUITY.URC_CombineCapacity": [
 "id"
 ],
+"EQUITY.URC_IzEquitySemiFungible": [
+"id"
+],
 "EQUITY.URC_MakeSharePackage": [
 "id",
 "shares-amount",
@@ -15620,6 +16183,39 @@
 "O-UI-FOUR.URC_01|Ico": [
 "account"
 ],
+"O-UI-FOURTEEN.GOV|Demiurgoi": [],
+"O-UI-FOURTEEN.URC_14|MyScoreInPool": [
+"account",
+"pool-id",
+"score-id"
+],
+"O-UI-FOURTEEN.URC_14|PoolLabel": [
+"pool-id"
+],
+"O-UI-FOURTEEN.URC_14|ScoreDefinition": [
+"score-id"
+],
+"O-UI-FOURTEEN.URC_14|ScoreEntityFull": [
+"account",
+"pool-id",
+"score-id"
+],
+"O-UI-FOURTEEN.URC_14|ScoreKind": [
+"score-class"
+],
+"O-UI-FOURTEEN.URC_14|TripletRungs": [
+"triplet-id"
+],
+"O-UI-FOURTEEN.URH_14|AllScoreEntities": [],
+"O-UI-FOURTEEN.URH_14|MyPoolIds": [
+"account"
+],
+"O-UI-FOURTEEN.URH_14|MyScoreEntities": [
+"account"
+],
+"O-UI-FOURTEEN.URH_14|PoolForAsset": [
+"asset-id"
+],
 "O-UI-NINE.GOV|Demiurgoi": [],
 "O-UI-NINE.UC_Price": [
 "input-price"
@@ -15769,6 +16365,50 @@
 "existance"
 ],
 "O-UI-TEN.URH_01|Header": [
+"account"
+],
+"O-UI-THIRTEEN.GOV|Demiurgoi": [],
+"O-UI-THIRTEEN.URC_13|AnchorDetail": [
+"anchor-id",
+"account"
+],
+"O-UI-THIRTEEN.URC_13|AnchorFull": [
+"anchor-id",
+"account"
+],
+"O-UI-THIRTEEN.URC_13|AnchorKind": [
+"asset-fungibility"
+],
+"O-UI-THIRTEEN.URC_13|AnchorRow": [
+"anchor-id"
+],
+"O-UI-THIRTEEN.URC_13|AnchorTerms": [
+"anchor-id"
+],
+"O-UI-THIRTEEN.URC_13|AnchorableAsset": [
+"asset-id",
+"asset-fungibility"
+],
+"O-UI-THIRTEEN.URC_13|AssetName": [
+"asset-id",
+"asset-fungibility"
+],
+"O-UI-THIRTEEN.URC_13|NeedsSync": [
+"account",
+"asset-id",
+"asset-kind"
+],
+"O-UI-THIRTEEN.URH_13|AnchorCatalogue": [],
+"O-UI-THIRTEEN.URH_13|BoostClasses": [
+"account"
+],
+"O-UI-THIRTEEN.URH_13|MyAnchorableAssets": [
+"account"
+],
+"O-UI-THIRTEEN.URH_13|MyAnchors": [
+"account"
+],
+"O-UI-THIRTEEN.URH_13|MyAuthorityTrueFungibles": [
 "account"
 ],
 "O-UI-THREE.GOV|Demiurgoi": [],
@@ -18014,6 +18654,7 @@
 "account",
 "wstoa-amount"
 ],
+"STOAICO.A_MigrateGeneralFields": [],
 "STOAICO.A_Stake": [
 "patron",
 "account",
@@ -22879,6 +23520,10 @@
 "fvt-id",
 "reward-dptf-id"
 ],
+"TS02-C3.AQP-FVT|CC_ClearPoolSweep": [
+"patron",
+"pool-id"
+],
 "TS02-C3.AQP-FVT|CC_Collect": [
 "patron",
 "executor",
@@ -22923,6 +23568,12 @@
 "patron",
 "executor",
 "fvt-ids"
+],
+"TS02-C3.AQP-FVT|CCp_FvtFixSlice": [
+"patron",
+"fvt-id",
+"reward-dptf-id",
+"users"
 ],
 "TS02-C3.AQP-FVT|CCp_InjectFixChunk": [
 "patron",
@@ -23049,10 +23700,44 @@
 "score-id",
 "reward-dptf-id"
 ],
+"TS02-C3.AQP-POOL|CC_FinalizeScoreRevoke": [
+"patron",
+"executor",
+"pool-id",
+"score-id"
+],
 "TS02-C3.AQP-POOL|CC_FullVacate": [
 "patron",
 "executor",
 "pool-id"
+],
+"TS02-C3.AQP-POOL|CC_ReassignCollectableStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"collectable-id",
+"son",
+"nonce",
+"current-beneficiary",
+"new-beneficiary"
+],
+"TS02-C3.AQP-POOL|CC_ReassignOrtoStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"dpof-id",
+"nonce",
+"current-beneficiary",
+"new-beneficiary"
+],
+"TS02-C3.AQP-POOL|CC_ReassignTrueFungibleStakeBeneficiary": [
+"patron",
+"owner",
+"pool-id",
+"dptf-id",
+"amount",
+"current-beneficiary",
+"new-beneficiary"
 ],
 "TS02-C3.AQP-POOL|CC_StakeNonFungibleCollectable": [
 "patron",
@@ -23120,6 +23805,43 @@
 "dptf-id",
 "amount"
 ],
+"TS02-C3.AQP-POOL|CC_UpdateScoreMultipliers": [
+"patron",
+"executor",
+"score-id",
+"mx-frozen",
+"mx-sleeping",
+"mx-hibernated"
+],
+"TS02-C3.AQP-POOL|CC_VacateNonFungible": [
+"patron",
+"executor",
+"pool-id",
+"dpnf-id"
+],
+"TS02-C3.AQP-POOL|CC_VacateOrtoFungible": [
+"patron",
+"executor",
+"pool-id",
+"dpof-id"
+],
+"TS02-C3.AQP-POOL|CC_VacateSemiFungible": [
+"patron",
+"executor",
+"pool-id",
+"dpsf-id"
+],
+"TS02-C3.AQP-POOL|CC_VacateTrueFungible": [
+"patron",
+"executor",
+"pool-id"
+],
+"TS02-C3.AQP-POOL|CCp_BackfillScoreSlice": [
+"patron",
+"pool-id",
+"score-id",
+"beneficiaries"
+],
 "TS02-C3.AQP-POOL|CCp_BatchDrainCollectable": [
 "patron",
 "pool-id",
@@ -23172,12 +23894,33 @@
 "beneficiary-ids",
 "amounts"
 ],
+"TS02-C3.AQP-POOL|CCp_ReleaseSpecialCustodial": [
+"patron",
+"pool-id",
+"executee",
+"dpof-id",
+"nonce"
+],
+"TS02-C3.AQP-POOL|CCp_StakeSpecialCustodial": [
+"patron",
+"executor",
+"executee",
+"pool-id",
+"dpof-id",
+"nonces"
+],
 "TS02-C3.AQP-POOL|C_AbortVacate": [
 "patron",
 "executor",
 "pool-id"
 ],
 "TS02-C3.AQP-POOL|C_AddScore": [
+"patron",
+"executor",
+"pool-id",
+"score-id"
+],
+"TS02-C3.AQP-POOL|C_BeginScoreRevoke": [
 "patron",
 "executor",
 "pool-id",
@@ -23226,28 +23969,11 @@
 "executee",
 "dptf-id"
 ],
-"TS02-C3.AQP-POOL|XB_VacateNonFungible": [
+"TS02-C3.AQP-POOL|Cp_DrainScoreSlice": [
 "patron",
-"executor",
 "pool-id",
-"dpnf-id"
-],
-"TS02-C3.AQP-POOL|XB_VacateOrtoFungible": [
-"patron",
-"executor",
-"pool-id",
-"dpof-id"
-],
-"TS02-C3.AQP-POOL|XB_VacateSemiFungible": [
-"patron",
-"executor",
-"pool-id",
-"dpsf-id"
-],
-"TS02-C3.AQP-POOL|XB_VacateTrueFungible": [
-"patron",
-"executor",
-"pool-id"
+"score-id",
+"accounts"
 ],
 "TS02-C3.AQP-SCR|C_CombineTripletScoreModel": [
 "patron",
@@ -24622,9 +25348,16 @@
 "id",
 "nonce"
 ],
+"VST.URC_HibernationFeePromile": [
+"dpof",
+"nonce"
+],
 "VST.URC_SecondsToUnlock": [
 "id",
 "nonces"
+],
+"VST.URC_SpecialLegIssuerRestricted": [
+"s-dpof"
 ],
 "VST.URC_SpecialTransferRoleKonto": [
 "s-token"
@@ -24739,6 +25472,13 @@
 "offset",
 "duration",
 "milestones"
+],
+"VST.XE_Unsleep": [
+"patron",
+"holder",
+"dpof",
+"nonce",
+"recipient"
 ],
 "VST.XI_CreateSpecialOrtoFungibleLink": [
 "patron",
