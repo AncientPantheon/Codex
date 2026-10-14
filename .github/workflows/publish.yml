@@ -143,9 +143,18 @@ jobs:
       # to looking for an auth token that no longer exists and fails with a
       # 404 that reads like a missing package — this is not hygiene, it is a
       # hard prerequisite.
+      #
+      # PINNED to an 11.x version, NOT `npm@latest`. npm 12 changed
+      # `allow-remote`'s default from `all` to `none` — a real, separate
+      # supply-chain hardening change, confirmed directly: `npm@latest`
+      # resolved to 12.2.0 here and `npm ci` then refused a legitimate
+      # transitive dependency (`viem`, via `@ardrive/turbo-sdk`, pins its own
+      # `ox` dependency to a non-registry `pkg.pr.new` preview URL) with
+      # `EALLOWREMOTE`. 11.21.0 clears the >= 11.5.1 OIDC floor with none of
+      # npm 12's new default lockdown.
       - name: Upgrade npm (OIDC trusted publishing support)
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11.21.0
           echo "npm $(npm --version)"
 
       - name: OIDC preflight (does this runner have an id-token to exchange?)
