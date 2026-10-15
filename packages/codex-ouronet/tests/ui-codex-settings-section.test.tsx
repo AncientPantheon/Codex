@@ -97,22 +97,36 @@ describe("<CodexSettingsSection>", () => {
     await renderSection({ onChangePassword, initialTab: "security" });
 
     fireEvent.click(screen.getByRole("button", { name: /change password/i }));
-    fireEvent.change(screen.getByLabelText(/current password/i), {
+    // Exact strings, not regexes: `ChangePasswordCard` (2026-10-15, FIX
+    // password-visibility-toggle) now also renders a per-field show/hide
+    // toggle button whose OWN aria-label ("Show current password" etc.)
+    // substring-matches these same broad `/current password/i`-style
+    // regexes, making the lookup ambiguous. The field's own aria-label is
+    // the exact string "Current password" (lowercase "password") — pin to
+    // that instead of loosening to match both.
+    fireEvent.change(screen.getByLabelText("Current password"), {
       target: { value: "old-pass" },
     });
-    fireEvent.change(screen.getByLabelText(/^new password/i), {
+    fireEvent.change(screen.getByLabelText("New password"), {
       target: { value: "fresh-pass-1" },
     });
-    fireEvent.change(screen.getByLabelText(/confirm/i), {
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
       target: { value: "fresh-pass-1" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^submit/i }));
 
     await waitFor(() =>
-      expect(onChangePassword).toHaveBeenCalledWith({
-        currentPassword: "old-pass",
-        newPassword: "fresh-pass-1",
-      }),
+      // `ChangePasswordCard` (2026-10-15, FIX progress-reporting) now always
+      // passes a second `onProgress` callback argument alongside the
+      // payload — this seam doesn't use it, but the mock call now has 2
+      // arguments instead of 1.
+      expect(onChangePassword).toHaveBeenCalledWith(
+        {
+          currentPassword: "old-pass",
+          newPassword: "fresh-pass-1",
+        },
+        expect.any(Function),
+      ),
     );
   });
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.0 — 2026-10-15
+
+**MINOR — `ChangePasswordCard`: live progress reporting + per-field
+password visibility, both from a real downstream consumer report
+(OuronetUI) against the exact shipped component (confirmed: the literal
+"Submitting…" button text in their bug report traced directly to this
+file, compiled into their installed `@ancientpantheon/codex`).**
+
+- `onChangePassword` may now optionally receive a second argument, an
+  `onProgress: (step: string) => void` reporter — same shape OuronetUI's
+  own `upgradeCodexEncryption(password, onProgress?)` already uses
+  internally. The card shows whatever was last reported while `busy`.
+  Fully additive/backward-compatible: a consumer that ignores the second
+  argument behaves exactly as before, no progress line ever renders. This
+  package does not and never did own the re-encryption loop itself (see
+  the component's own doc comment) — the card's `try/catch/finally` was
+  already correct, clearing `busy` whenever the consumer's promise
+  settles; what was missing was any way for a legitimately slow,
+  multi-entity re-encryption to report where it actually is.
+- Each of the three password fields (Current / New / Confirm) now has its
+  own independent show/hide toggle — revealing one never reveals the
+  others.
+
+8 new tests (`change-password-card.test.tsx`).
+
 ## 0.9.1 — 2026-09-30
 
 **PATCH — `useCodexBackup`'s `importFromCloud` now preserves a live

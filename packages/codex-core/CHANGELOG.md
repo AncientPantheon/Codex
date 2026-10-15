@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.1 — 2026-10-15
+
+**PATCH — `codexIdentity` added to the codec's top-level field allow-list,
+closing a reader/writer contradiction a downstream consumer (OuronetUI)
+found while debugging an unrelated issue.** `deriveBackupLineage()`
+(`codex-arweave`'s Arweave-backup lineage tagging) reads
+`parsed.codexIdentity.formatted` from an already-parsed backup envelope,
+believing it safe since `codexIdentity` isn't one of the three documented
+secret-ciphertext fields — true for decryption, irrelevant to this
+package's own shape gate, which had no `codexIdentity` entry in
+`KNOWN_TOP_LEVEL_FIELDS` at all. Any envelope that ever did carry the
+field — including `reencryptBackupSecretFields`'s own internal
+`deserializeCodex` call on its own output — would have thrown
+`CodexUnknownFieldError`. `buildBackupPayload` deliberately never emits
+`codexIdentity` today (a privacy decision, not an oversight — the wire
+format intentionally omits it), so this is a pure landmine-removal: no
+behavior changes for any backup produced today, `appId` still resolves to
+`undefined` as before. 4 new regression tests
+(`codec-codexidentity-allowlist.test.ts`).
+
 ## 0.6.0 — 2026-10-08
 
 **MINOR — new sanctioned backup-secret-field re-encryption function,

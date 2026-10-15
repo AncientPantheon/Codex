@@ -151,6 +151,21 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   // entry at all. Allow-listed alongside the other keyrings ONLY, never
   // wide-open.
   "watchList",
+  // Reader/writer contradiction found by a downstream consumer (OuronetUI,
+  // 2026-10-15), not a user-reported incident: `deriveBackupLineage()`
+  // (`codex-arweave/src/library/flow.ts`) reads `codexIdentity.formatted`
+  // from an already-parsed backup envelope, believing it safe since
+  // `codexIdentity` isn't one of the secret-ciphertext fields — true for
+  // DECRYPTION, but irrelevant to this SHAPE gate, which had no
+  // `codexIdentity` entry at all. Any envelope that ever DID carry the
+  // field (including `reencryptBackupSecretFields`'s own internal
+  // `deserializeCodex` call on its own output) would hard-fail here.
+  // `buildBackupPayload` deliberately never emits `codexIdentity` today
+  // (a privacy decision — see `buildSnapshotFromState`'s own comment), so
+  // this closes the landmine without changing that; no dedicated shape
+  // validator is added because `deriveBackupLineage` already does its own
+  // narrow, defensive, unknown-safe reads independently.
+  "codexIdentity",
 ]);
 
 // Strict-equality membership only. No trim/normalize/prefix matching: a version

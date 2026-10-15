@@ -2,6 +2,37 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.6.0 — 2026-10-15
+
+**MINOR — `ChangePasswordCard` gets live progress reporting + per-field
+password visibility, bundled from `codex-ui` 0.11.0. Plus a codec
+landmine fix from `codex-core` 0.6.1.** Both came from a real downstream
+consumer (OuronetUI) reporting a permanently-stuck "Submitting…" button
+and an unrelated `codexIdentity` reader/writer contradiction found while
+debugging it.
+
+- **`ChangePasswordCard`** (`@ancientpantheon/codex/ui`): `onChangePassword`
+  may now optionally receive a second argument, `onProgress: (step:
+  string) => void` — the same shape the consumer's own password-rotation
+  code already used internally elsewhere. Fully backward-compatible; a
+  consumer ignoring the second argument sees no change. This package never
+  owned the re-encryption loop itself (only the form), and its
+  `try/catch/finally` was already correct — the gap was no way for a
+  legitimately slow, multi-entity re-encryption to report where it
+  actually is, indistinguishable from a dead UI. Also: each of the three
+  password fields (Current / New / Confirm) now has its own independent
+  show/hide toggle.
+- **`codexIdentity`** added to the codec's top-level field allow-list
+  (`deserializeCodex`) — closes a reader/writer contradiction where
+  `codex-arweave`'s Arweave-backup lineage tagging read a field the shape
+  gate didn't recognize. No behavior change for any backup produced
+  today (the writer still never emits the field — a deliberate privacy
+  decision); this only prevents a future hard-fail if it ever does.
+
+`arweave-core`/`codex-arweave`/`codex-ouronet` unchanged this release —
+the still-in-progress legacy-prime-migration wizard work is deliberately
+**not** included here; it ships separately once complete.
+
 ## 1.5.3 — 2026-10-15
 
 **PATCH — critical fix: `./arweave` could not be bundled for the browser,
