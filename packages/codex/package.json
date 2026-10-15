@@ -1,6 +1,6 @@
 {
   "name": "@ancientpantheon/codex",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "The consumer-facing multi-chain Codex aggregator — install this one package to get the whole wallet (core + UI + every chain module) exposed through provider/hooks/ui and per-chain subpath exports. The four internal member packages are bundled in; consumers never resolve them separately.",
   "type": "module",
   "main": "./dist/index.js",
@@ -54,8 +54,9 @@
     "test:watch": "vitest",
     "clean": "rimraf dist"
   },
-  "_bundlingComment": "The four internal members (codex-core, codex-ui, codex-ouronet, codex-arweave) are bundled INTO this package's dist by tsup (see tsup.config.ts noExternal) and therefore live in devDependencies — they are build-time inputs, never installed by a consumer. Everything a consumer must actually resolve is in dependencies (externalized runtime libs + the published @ancientpantheon/arweave-core) or peerDependencies (react + the @stoachain chain primitives + @noble/curves + lucide-react, which the consumer already has one shared instance of).",
+  "_bundlingComment": "The four internal members (codex-core, codex-ui, codex-ouronet, codex-arweave) are bundled INTO this package's dist by tsup (see tsup.config.ts noExternal) and therefore live in devDependencies — they are build-time inputs, never installed by a consumer. Everything a consumer must actually resolve is in dependencies (externalized runtime libs) or peerDependencies (react + the @stoachain chain primitives + @noble/curves + lucide-react + @ancientpantheon/arweave-core, each of which the consumer is expected to end up with exactly ONE shared instance of). @ancientpantheon/arweave-core is deliberately declared in BOTH dependencies AND peerDependencies (2026-10-15, after a real consumer — OuronetUI — hit it installing TWICE: codex 1.5.2 wanting ^0.5.0, a consumer that also imports arweave-core directly and had declared its own ^0.3.0, npm nesting both rather than erroring or deduplicating, and the consumer's own code passing a value — a JWK — ACROSS that boundary, which only accidentally worked because the type is structural and erases). peerDependencies is the real contract (forces npm to warn loudly on an incompatible version instead of silently nesting a second copy); dependencies is kept alongside it so a consumer who never declares arweave-core themselves still gets a working install with zero extra setup, exactly as before.",
   "peerDependencies": {
+    "@ancientpantheon/arweave-core": "^0.5.0",
     "@noble/curves": "1.9.7",
     "@ouronet/dalos-crypto": ">=4.4.0",
     "@ouronet/ouronet-core": ">=4.6.0",

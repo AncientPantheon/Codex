@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.2 — 2026-10-15
+
+**PATCH — critical fix: `./arweave` could not be bundled for the browser.**
+A real downstream consumer (OuronetUI) reported `@ancientpantheon/codex`
+1.5.x failing `vite build` with `"read" is not exported by
+node-stdlib-browser/esm/mock/empty.js` — invisible to `tsc`/`vitest`, only a
+production bundler catches it. Root-caused to two layers: `await
+import("arbundles")` in `assembleBundleToFile.ts`/`dryRunUpload.ts` resolved
+arbundles' Node ESM build (bundling `fs`/`stream/promises` into the final
+dist) instead of its real published browser build, because this package's
+bundler doesn't apply the "browser" resolution condition by default. Fixed
+by importing `"arbundles/web"` explicitly at both call sites — confirmed the
+same signing surface (`ArweaveSigner`, `createData`, `sign`,
+`longTo32ByteArray`, `Bundle`) is exported there. See
+`@ancientpantheon/codex`'s own changelog entry for the second layer (axios,
+pulled in transitively, needed a bundler-level fix) and the full
+verification. No API or behavior change — the signing/streaming code paths
+are identical, only which build of a dependency gets inlined changed.
+
 ## 0.9.1 — 2026-10-13
 
 **PATCH — the Codex ID page, finalized (three rounds of owner-reported

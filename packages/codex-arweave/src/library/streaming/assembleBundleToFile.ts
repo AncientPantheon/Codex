@@ -293,8 +293,25 @@ export async function assembleBundleToFile(
   }
 
   // Dynamic, not static — see the module doc comment above for why.
+  //
+  // "arbundles/web" EXPLICITLY, not the bare "arbundles" specifier. arbundles
+  // publishes a real browser build (exports["."].browser points at it), but
+  // this package's consuming bundler (tsup, default platform "node") doesn't
+  // apply the "browser" resolution condition, so a bare import silently takes
+  // the Node ESM build instead and inlines its `src/file/*` module graph —
+  // fs/http2/stream-promises and all — into codex's own published dist. Never
+  // CALLED (file-backed bundling is a different code path this package never
+  // uses), but a bundler must still be able to LINK whatever it resolves, so
+  // those Node builtins broke a real consumer's production `vite build`
+  // (OuronetUI, 2026-10-15 — see that repo's own
+  // HANDOFF-codex-1.5.2-browser-build.md for the full trace). The explicit
+  // `/web` subpath exports the same signing surface (`ArweaveSigner`,
+  // `createData`, `sign`, `longTo32ByteArray` — confirmed present in
+  // arbundles@0.11.2's `build/web/esm/src/index.js` re-export graph) and is
+  // independent of ANY bundler's platform/condition configuration, including
+  // this package's own `tsup.config.ts` and every downstream consumer's.
   const { ArweaveSigner, createData, sign: signDataItem, longTo32ByteArray } =
-    await import("arbundles");
+    await import("arbundles/web");
 
   const jwk = importKeyfile(params.jwk);
   const ownerAddress = await addressOf(jwk);

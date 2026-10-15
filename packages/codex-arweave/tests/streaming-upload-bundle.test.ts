@@ -49,7 +49,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { describe, it, expect, vi } from "vitest";
-import type { DataItem } from "arbundles";
+// "arbundles/web" — matches the real build assembleBundleToFile.ts now
+// dynamically imports; the "arbundles" root resolves to a structurally
+// similar but NOMINALLY DISTINCT DataItem class (TypeScript treats two
+// classes with the same shape as unassignable when either declares a
+// private member, which DataItem does) — mixing the two types here, even
+// though both represent "a DataItem", fails to typecheck.
+import type { DataItem } from "arbundles/web";
 import {
   uploadBundle,
   uploadData,
@@ -331,8 +337,10 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
  *  reference. */
 let capturedSignCalls: { item: DataItem; rawId: Buffer }[] | null = null;
 
-vi.mock("arbundles", async (importOriginal) => {
-  const original = await importOriginal<typeof import("arbundles")>();
+// "arbundles/web" — matches the real module the source now dynamically
+// imports (fixed 2026-10-15: see assembleBundleToFile.ts's doc comment).
+vi.mock("arbundles/web", async (importOriginal) => {
+  const original = await importOriginal<typeof import("arbundles/web")>();
   return {
     ...original,
     sign: async (...args: Parameters<typeof original.sign>) => {

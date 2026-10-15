@@ -232,6 +232,38 @@ jobs:
           npm test
 
       # ------------------------------------------------------------------
+      # Browser-bundleability gate for @ancientpantheon/codex
+      # ------------------------------------------------------------------
+      # This is invisible to BOTH tsc and vitest (vitest externalizes deps on
+      # the dev resolver, so it never resolves a bare specifier the way a
+      # real production bundler does) — confirmed the hard way: a real
+      # consumer (OuronetUI) hit this on 1.5.2 with `tsc --noEmit` clean and
+      # 2151/2151 vitest tests passing, and only their own `vite build`
+      # caught it (see HANDOFF-codex-1.5.2-browser-build.md in that repo for
+      # the full trace; root cause and fix: 2026-10-15, codex-arweave's
+      # dynamic `await import("arbundles")` resolving arbundles' Node ESM
+      # build under this package's bundler instead of its real browser
+      # build, inlining fs/http2/stream-promises into this package's own
+      # published dist). `fs`/`http2`/`stream/promises`/`child_process` have
+      # no real browser polyfill (only an inert "empty" stub in common
+      # polyfill setups) — unlike `crypto`/`stream`/`buffer`/etc., which DO
+      # have functional browser polyfills and are fine to leave as bare
+      # externals for a consumer's own bundler to resolve. This is the exact
+      # check that document asked for in CI, run against EVERY published
+      # entry, not just `./arweave` — a future dependency change pulling the
+      # same shape of bug into a different entry should fail here too.
+      - name: Browser-bundleability gate (zero Node-only builtins in dist/)
+        if: github.ref_type == 'tag'
+        run: |
+          cd packages/codex
+          if grep -rlE "from '(fs|http2|stream/promises|child_process|net|tls|dns)'" dist/; then
+            echo "::error::@ancientpantheon/codex's dist/ imports a Node-only builtin with no real browser polyfill."
+            echo "::error::This breaks a browser bundler's production build even though tsc + vitest both pass — see the file(s) listed above."
+            exit 1
+          fi
+          echo "✓ No Node-only builtins (fs/http2/stream-promises/child_process/net/tls/dns) found in any dist/ entry."
+
+      # ------------------------------------------------------------------
       # Per-package publish-queue detection (the smart bit)
       # ------------------------------------------------------------------
       # Build a queue of the two PUBLIC packages whose `package.json`

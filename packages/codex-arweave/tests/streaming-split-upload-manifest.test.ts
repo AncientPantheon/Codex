@@ -42,7 +42,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { describe, it, expect, vi } from "vitest";
-import type { DataItem } from "arbundles";
+// "arbundles/web" — see streaming-upload-bundle.test.ts's own comment on
+// this import for why the root "arbundles" DataItem type doesn't typecheck
+// here (nominal distinctness from a private class member).
+import type { DataItem } from "arbundles/web";
 import {
   isCanonicalAddress,
   InvalidUploadParamsError,
@@ -70,8 +73,10 @@ const CAP = 1_000_000_000_000n;
  *  outside the one test that needs it. */
 let capturedSignCalls: { item: DataItem; rawId: Buffer }[] | null = null;
 
-vi.mock("arbundles", async (importOriginal) => {
-  const original = await importOriginal<typeof import("arbundles")>();
+// "arbundles/web" — matches the real module the source now dynamically
+// imports (fixed 2026-10-15: see assembleBundleToFile.ts's doc comment).
+vi.mock("arbundles/web", async (importOriginal) => {
+  const original = await importOriginal<typeof import("arbundles/web")>();
   return {
     ...original,
     // Transparent recording pass-through — every call still reaches the real

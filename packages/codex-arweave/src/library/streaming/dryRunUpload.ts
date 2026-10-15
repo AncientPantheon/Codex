@@ -380,7 +380,14 @@ async function decryptRoundTripCheck(params: {
 
   const ciphertextRegions: Uint8Array[] = isBundle
     ? await (async () => {
-        const { Bundle } = await import("arbundles");
+        // "arbundles/web" explicitly, NOT the bare "arbundles" specifier — see
+        // assembleBundleToFile.ts's own import for the full rationale (this
+        // package publishes a browser build via its own "browser" exports
+        // condition, but tsup's default platform is "node", so a bare import
+        // resolves to the Node ESM build and inlines fs/http2/stream-promises
+        // into this package's own dist; confirmed via a real OuronetUI
+        // consumer's production `vite build` failure, 2026-10-15).
+        const { Bundle } = await import("arbundles/web");
         const bundle = new Bundle(Buffer.from(fullBytes));
         return files.map((_f, i) => bundle.items[i]!.rawData as Uint8Array);
       })()

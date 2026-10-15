@@ -58,9 +58,11 @@ The four internal member packages (`codex-core`, `codex-ui`, `codex-ouronet`, `c
 
 ## Status
 
-Version `1.5.2` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`). Licensed Apache-2.0.
+Version `1.5.3` on public npmjs. The aggregate: the six subpath barrels wired to the members and the members bundled in (JS + types self-contained — a TypeScript consumer type-checks against only this package + `arweave-core`). Licensed Apache-2.0. `./arweave` bundles cleanly for the browser with any modern bundler — verified by a CI gate that fails the release if a Node-only builtin (`fs`/`http2`/`stream/promises`/`child_process`) ever appears in any published entry again.
 
 ## Version history
+
+**v1.5.3** — Critical fix: `./arweave` could not be bundled for the browser since 1.5.x, bundled from `codex-arweave` 0.9.2. Root cause had two layers — `arbundles` resolving to its Node build instead of its browser build, and (one layer deeper, found during the fix) `axios`'s own Node HTTP adapter not getting remapped away by the bundler either. Fixed at both layers; verified against a real downstream consumer's exact reproduction, which now passes clean across all 5 published entries. Also: `@ancientpantheon/arweave-core` is now a `peerDependency` (in addition to `dependencies`), so a version mismatch with a consumer's own direct install warns instead of silently installing two copies. `codex-core`/`codex-ui`/`codex-ouronet` unchanged this release.
 
 **v1.5.2** — Relicensed Apache-2.0 (was `UNLICENSED`, a pre-release placeholder that should never have reached a public npm publish). Bundled from `codex-ouronet` 1.1.3: `@ouronet/talos-registry` bumped to `^2.3.0` and the committed Pact-signature manifest re-synced against a live mainnet redeploy (AQP-POOL reassign-beneficiary surface). Also: this package's own CI publish pipeline now authenticates via npm Trusted Publishing (OIDC) instead of an expired long-lived token — infrastructure only, invisible to consumers. `arweave-core`/`codex-core`/`codex-ui`/`codex-arweave` unchanged this release.
 
@@ -216,6 +218,6 @@ release).
 | `@ancientpantheon/codex-core` | `0.6.0` |
 | `@ancientpantheon/codex-ui` | `0.10.0` |
 | `@ancientpantheon/codex-ouronet` | `1.1.3` |
-| `@ancientpantheon/codex-arweave` | `0.9.1` |
+| `@ancientpantheon/codex-arweave` | `0.9.2` |
 | `@ancientpantheon/arweave-core` | `0.5.0` |
 <!-- END member-versions -->

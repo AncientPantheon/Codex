@@ -2,6 +2,52 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.5.3 — 2026-10-15
+
+**PATCH — critical fix: `./arweave` could not be bundled for the browser,
+bundled from `@ancientpantheon/codex-arweave` 0.9.2.**
+
+A real downstream consumer (OuronetUI) reported this package's `./arweave`
+entry failing a production `vite build` since 1.5.x, shipping a temporary
+consumer-side workaround (Node-builtin shims) in the meantime — invisible to
+`tsc --noEmit`/`vitest` (both passed), only a real bundler catches it. Two
+root causes, confirmed by reading the actual published tarballs and the
+consumer's own detailed trace, not inferred:
+
+1. **`arbundles` resolved to its Node build, not its browser build.**
+   `codex-arweave`'s dynamic `await import("arbundles")` took the Node ESM
+   build under this package's bundler (which doesn't apply the "browser"
+   exports condition by default), inlining `fs`/`stream/promises` into this
+   package's own dist. Fixed at the source: both call sites now import
+   `"arbundles/web"` explicitly — the real published browser build, same
+   signing surface, independent of any bundler's platform configuration.
+2. **One layer deeper: `axios`.** Pulled in transitively via `arbundles` →
+   `@ethersproject/providers` → `axios`, which has its own correct `browser`
+   field remapping its Node HTTP adapter (the actual source of the `http2`
+   import that broke the consumer's build) to a no-op — but this package's
+   bundler (tsup/esbuild) wasn't honoring that remap either. Fixed in
+   `tsup.config.ts`: `platform: "browser"` activates it, paired with an
+   explicit `external` list for the Node builtins that DO have real browser
+   polyfills (`crypto`, `stream`, `buffer`, `events`, `util`, `path`, `http`,
+   `https`, `zlib`, `url`) so the build doesn't hard-fail on those — only the
+   genuinely unpolyfillable ones (`fs`, `http2`, `stream/promises`,
+   `child_process`) are left to fail loudly if anything reintroduces them.
+
+Verified against the exact reproduction the consumer provided: `grep -rlE
+"from '(fs|http2|stream/promises|child_process)'" dist/` is now clean across
+all 5 published entries (`.`, `./provider`, `./hooks`, `./ouronet`,
+`./arweave`). This exact check now also runs in CI on every tagged release.
+
+Also: `@ancientpantheon/arweave-core` is now declared in `peerDependencies`
+(was `dependencies` only) — the same consumer hit it installing TWICE
+(codex wanting `^0.5.0`, their own direct `^0.3.0` declaration, npm nesting
+both rather than deduplicating or warning). Kept in `dependencies` too, so a
+consumer who never declares it themselves still gets a working install with
+no extra setup.
+
+`arweave-core`/`codex-core`/`codex-ui`/`codex-ouronet` otherwise unchanged
+this release.
+
 ## 1.5.2 — 2026-10-14
 
 **PATCH — relicensed Apache-2.0, and bundled from `@ancientpantheon/

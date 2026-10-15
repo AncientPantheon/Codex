@@ -63,8 +63,13 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 
 import { describe, it, expect, vi } from "vitest";
-import { longTo32ByteArray } from "arbundles";
-import type { DataItem } from "arbundles";
+// "arbundles/web" for both — matches the real build assembleBundleToFile.ts
+// now dynamically imports. The DataItem type specifically must come from
+// the same build: "arbundles" root's DataItem is structurally similar but
+// NOMINALLY DISTINCT (TypeScript treats two classes with the same shape as
+// unassignable when either declares a private member, which DataItem does).
+import { longTo32ByteArray } from "arbundles/web";
+import type { DataItem } from "arbundles/web";
 import type { ArweaveJwk } from "@ancientpantheon/arweave-core";
 
 import { FakeBundleAssemblyFile } from "../src/library/streaming/fakeBundleAssemblyFile.js";
@@ -90,8 +95,16 @@ const throwawayJwk = JSON.parse(
  *  reference to a file's signed item unless a test explicitly asks for it. */
 let capturedSignCalls: { item: DataItem; rawId: Buffer }[] | null = null;
 
-vi.mock("arbundles", async (importOriginal) => {
-  const original = await importOriginal<typeof import("arbundles")>();
+// "arbundles/web" — matches the real module `assembleBundleToFile.ts` now
+// dynamically imports (fixed 2026-10-15: the bare "arbundles" specifier
+// resolved to arbundles' Node build under this package's bundler, inlining
+// fs/http2/stream-promises into codex's own published dist and breaking a
+// real consumer's production `vite build` — see that module's own updated
+// doc comment for the full trace). Mocking the OLD bare specifier here would
+// silently stop intercepting anything, since vitest's mock registry is keyed
+// by the exact resolved specifier the source module imports.
+vi.mock("arbundles/web", async (importOriginal) => {
+  const original = await importOriginal<typeof import("arbundles/web")>();
   return {
     ...original,
     // Transparent recording pass-through: behavior is byte-for-byte identical
