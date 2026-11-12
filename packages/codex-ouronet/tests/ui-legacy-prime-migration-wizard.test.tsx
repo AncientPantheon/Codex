@@ -2376,4 +2376,206 @@ describe("LegacyPrimeMigrationWizard — Page 7 (\"finalize\")", () => {
       }),
     );
   });
+
+  // review.md (deferred finding #3): a "use-existing-keyset" choice names
+  // an EXTERNAL, independently-mutable on-chain keyset — its resolved
+  // `keys` snapshot can be stale by the time Finalize actually locks it.
+  // This proves a keyset that has since DRIFTED (describeKeyset now
+  // returns something different from what was resolved at selection time)
+  // is NOT locked using the stale snapshot — it is treated as unresolved.
+  it("a 'use an existing keyset' choice that has DRIFTED by Finalize time is never locked using the stale snapshot", async () => {
+    const secret = await encryptStringV2(FINALIZE_WORDS.join(" "), FINALIZE_PASSWORD);
+    const kickstartKey = kickstartSeed().accounts[0]!.publicKey;
+    const targetAccount = makeAccount({
+      id: "finalize-target-use-existing-keyset-drifted",
+      originSeedTab: "write-seed",
+      guard: null, // Variant B
+      secret,
+    });
+    // First call (selection time, via "Resolve") returns `kickstartKey`;
+    // every call AFTER that (Finalize's own re-verification) returns a
+    // DIFFERENT key — simulating the on-chain keyset having been updated
+    // in the meantime.
+    const driftedKey = "c".repeat(64);
+    let callCount = 0;
+    const describeKeyset = vi.fn(async () => {
+      callCount += 1;
+      return callCount === 1 ? { keys: [kickstartKey], pred: "keys-all" } : { keys: [driftedKey], pred: "keys-all" };
+    });
+    const store = await renderFinalizeWizard(targetAccount, {
+      allSeeds: [kickstartSeed()],
+      ensurePrimeArweaveSeed: async () => {},
+      describeKeyset,
+    });
+
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // intro -> account
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-account-option-keep")).getByRole("button", {
+        name: /keep your current account/i,
+      }),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-payment-option-derive")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-option-custom");
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
+    );
+    fireEvent.click(await screen.findByTestId("legacy-prime-migration-guard-custom-sub-existing"));
+
+    fireEvent.change(screen.getByTestId("legacy-prime-migration-guard-existing-ns"), {
+      target: { value: "ouronet-ns" },
+    });
+    fireEvent.change(screen.getByTestId("legacy-prime-migration-guard-existing-ksn"), {
+      target: { value: "owner-made-keyset" },
+    });
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-guard-existing-resolve"));
+    await screen.findByTestId("legacy-prime-migration-guard-existing-resolved");
+
+    await waitFor(() => {
+      expect((screen.getByTestId("legacy-prime-migration-continue") as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // guard -> review
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // review -> finalize
+
+    await waitFor(() =>
+      expect(screen.getByTestId("legacy-prime-migration-finalize-committed")).toBeTruthy(),
+    );
+
+    // The stale key (resolved at selection time) must NOT have been
+    // locked — the re-check at Finalize caught the drift.
+    expect(store.getState().masterKeyLocks).not.toContainEqual(
+      expect.objectContaining({
+        seedId: "finalize-kickstart-seed", position: 0, reason: "master-guard-key",
+      }),
+    );
+  });
+
+  // review.md (deferred findings #1/#4): "keep" used to resolve/lock
+  // `currentPrimeAccount`'s guard unconditionally — but Page 2's "choose an
+  // existing account" option lets the user promote a DIFFERENT account.
+  // This proves guard "keep" now locks the CHOSEN account's own real guard
+  // (not the old current account's), and does so freshly at Finalize time
+  // rather than trusting a stale step-mount snapshot.
+  it("guard 'keep' locks the CHOSEN existing account's own guard, never the old current account's, when Page 2's 'existing account' option is used", async () => {
+    const secondSeed = () => ({
+      id: "finalize-second-seed", name: "Second Seed", seedType: "koala" as const,
+      version: "1.0.0", index: 1, secret: "encrypted-secret",
+      main: "k:" + "1".repeat(64), createdAt: "2026-05-24T10:05:00.000Z",
+      accounts: [{ index: 0, publicKey: "b".repeat(64), derivationPath: "m/44'/626'/1'/0/0" }],
+    });
+    const SECOND_KEY = secondSeed().accounts[0]!.publicKey;
+    const kickstartKey = kickstartSeed().accounts[0]!.publicKey;
+
+    // The OLD current account — its guard names `kickstartKey`. If "keep"
+    // ever resolves against THIS account instead of the chosen one, this
+    // key would wrongly get locked as the guard.
+    const wrongSecret = await encryptStringV2(FINALIZE_WORDS.join(" "), FINALIZE_PASSWORD);
+    const currentAccount = makeAccount({
+      id: "finalize-old-current", originSeedTab: "write-seed",
+      guard: { pred: "keys-all", keys: [kickstartKey] },
+      secret: wrongSecret,
+    });
+
+    // The NEWLY-chosen existing account — its OWN real guard names
+    // `SECOND_KEY`. This is the one that must actually get locked.
+    const CHOSEN_WORDS = ["delta", "epsilon", "zeta"];
+    const chosenSecret = await encryptStringV2(CHOSEN_WORDS.join(" "), FINALIZE_PASSWORD);
+    const chosenAccount = makeAccount({
+      id: "finalize-chosen-existing", originSeedTab: "write-seed",
+      guard: { pred: "keys-all", keys: [SECOND_KEY] },
+      secret: chosenSecret,
+    });
+
+    const store = await renderFinalizeWizard(currentAccount, {
+      allAccounts: [currentAccount, chosenAccount],
+      ensurePrimeArweaveSeed: async () => {},
+    });
+    await act(async () => {
+      await store.getState().actions.addOuroAccount(chosenAccount);
+      await store.getState().actions.addStoaChainSeed(secondSeed());
+    });
+
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // intro -> account
+    fireEvent.click(
+      await screen.findByTestId("legacy-prime-migration-account-existing-item-finalize-chosen-existing"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-payment-option-derive")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-section");
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-guard-option-keep")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // guard -> review
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // review -> finalize
+
+    await waitFor(() =>
+      expect(screen.getByTestId("legacy-prime-migration-finalize-committed")).toBeTruthy(),
+    );
+
+    const locks = store.getState().masterKeyLocks;
+    expect(locks).toContainEqual(
+      expect.objectContaining({
+        seedId: "finalize-second-seed", position: 0, reason: "master-guard-key",
+      }),
+    );
+    expect(locks).not.toContainEqual(
+      expect.objectContaining({
+        seedId: "finalize-kickstart-seed", position: 0, reason: "master-guard-key",
+      }),
+    );
+  });
+
+  // review.md (deferred finding #5, unrelated to guard-step-variants but
+  // repaired alongside it): once Stage 1 is already recorded (account +
+  // payment + guard all chosen), revising the account choice alone used to
+  // leave the OLD account id persisted — `handleChooseAccount` never
+  // called `recordSelectionIfComplete`, unlike the payment/guard handlers.
+  it("revising the account choice after Stage 1 is already recorded re-persists the NEW account, not the old one", async () => {
+    const secret = await encryptStringV2(FINALIZE_WORDS.join(" "), FINALIZE_PASSWORD);
+    const accountA = makeAccount({ id: "finalize-revise-a", originSeedTab: "write-seed", secret });
+    const accountB = makeAccount({ id: "finalize-revise-b", originSeedTab: "write-seed", secret });
+    const store = await renderFinalizeWizard(accountA, { allAccounts: [accountA, accountB] });
+
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // intro -> account
+    fireEvent.click(
+      within(await screen.findByTestId("legacy-prime-migration-account-option-keep")).getByRole("button", {
+        name: /keep your current account/i,
+      }),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    await screen.findByTestId("legacy-prime-migration-payment-section");
+    // An explicit payment click is what actually COMPLETES and records
+    // Stage 1 for the first time (an established invariant: arriving at a
+    // page via Continue alone, with only its pre-selected default, never
+    // records anything on its own — only an explicit onChoose call does).
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-payment-option-derive")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-section");
+
+    await waitFor(() => {
+      expect(store.getState().migrationProgress?.selection?.account).toEqual({ kind: "keep-current" });
+    });
+
+    // Go back to the account page and switch to the OTHER account — payment
+    // and guard are left untouched (both already complete, non-default
+    // clicks not required for either).
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-back")); // guard -> payment
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-back")); // payment -> account
+    fireEvent.click(await screen.findByTestId("legacy-prime-migration-account-existing-item-finalize-revise-b"));
+
+    await waitFor(() => {
+      expect(store.getState().migrationProgress?.selection?.account).toEqual({
+        kind: "existing", accountId: "finalize-revise-b",
+      });
+    });
+  });
 });

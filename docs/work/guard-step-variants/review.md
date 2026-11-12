@@ -99,25 +99,30 @@ Lenses: correctness, conventions, tests, security (10 files, 4-15 tier; security
 - Security: no findings.
 - Correctness: one finding (account-choice revision not re-persisted via `recordSelectionIfComplete`) — **REFUTED as in-scope**: confirmed technically accurate, but the cited code (`handleChooseAccount`, Page 2) predates this topic and is never touched by it (design.md's own "out of scope" line: "Any change to the payment step (3A) — this topic is Step 3B only," and Page 2 is two steps further removed still). Reported separately as a pre-existing issue for whichever topic owns Page 2/account-step persistence.
 
-## Deferred — pre-existing issues reported, not fixed in this pass
+## Deferred findings — repaired in a follow-up pass
 
-These five are real, confirmed defects, but all predate the guard-step-variants topic (or, in one case, belong to a different topic's code entirely) and were judged too architecturally significant to absorb into this review's fix loop:
+These five were real, confirmed defects that all predated the guard-step-variants topic (or, in one case, belonged to a different topic's code entirely). They were deliberately NOT fixed during the review's own fix loop (judged too architecturally significant to absorb into that cycle), then repaired afterward in a dedicated follow-up pass, with the same TDD discipline (regression test proven red-before/green-after for each).
 
-1. **[CRITICAL]** Guard "keep" locks the wrong account's keys when Page 2's "choose an existing account" path is used instead of "keep current." (`currentGuardForResolution`/`guardResolution` always derived from `currentPrimeAccount`, never the chosen account.)
-2. **[MEDIUM]** `recordSelectionIfComplete` persists an incomplete, zero-key guard selection as if it were complete (affects the original "custom" kind too, not just the two new kinds).
-3. **[MEDIUM]** "use-existing-keyset" choices are never re-verified against the chain before being locked or offered for rotation, including across a resumed session.
-4. **[MEDIUM]** Guard "keep"'s resolved keys are a one-time snapshot taken at step-mount, never refreshed before the (potentially much later) Finalize write. Same root state as #1.
-5. **[HIGH, different topic]** Revising the Page-2 account choice after Stage 1 is already recorded doesn't re-persist the selection, so a later account switch can be silently overridden by resume. Unrelated to guard-step-variants; belongs to whichever topic owns Page 2.
+1. **[CRITICAL] — FIXED.** Guard "keep" locked the wrong account's keys when Page 2's "choose an existing account" path was used instead of "keep current." `currentGuardForResolution` now reads `chosenAccountForPreview?.guard` (the Page-2-CHOSEN account, the same one `resolveFinalizeDerivation` itself resolves to) instead of unconditionally `currentPrimeAccount?.guard`. Regression test: `ui-legacy-prime-migration-wizard.test.tsx` — "guard 'keep' locks the CHOSEN existing account's own guard, never the old current account's...".
+2. **[MEDIUM] — FIXED.** `recordSelectionIfComplete` no longer persists an incomplete, zero-key guard selection as if it were complete — a new `isGuardChoiceComplete` check (mirroring `continueBlockedReason`'s own rule) gates the write. Regression test: `ui-step3-payment-and-guard.test.tsx` — "merely opening the custom editor (no key picked yet) does NOT persist the selection; picking a key does".
+3. **[MEDIUM] — FIXED** (the "re-verify before Finalize" option, not "demote on resume"). A "use-existing-keyset" choice is now re-resolved via `describeKeyset` immediately before Finalize's Write 3 locks it; any mismatch in keys or predicate (or a failed re-check) is treated as unresolved (`null`), never "lock the stale snapshot anyway." Scoped deliberately to the lock itself (the one truly irreversible action) — Stage 3A's "Apply" offer still reads the unverified choice, but that path already routes through `RotateGuardModal` for the user to review before signing, a materially lower-risk surface than the silent, automatic lock. Regression test: `ui-legacy-prime-migration-wizard.test.tsx` — "a 'use an existing keyset' choice that has DRIFTED by Finalize time is never locked using the stale snapshot".
+4. **[MEDIUM] — FIXED**, same change as #1 plus one more: Write 3 now also re-resolves the "keep" fallback's guard freshly at Finalize time (via a direct `resolveGuardKeys` call) instead of trusting the `guardResolution` state captured at step-mount, closing the staleness window across review/password/Arweave-seed steps. Covered by the same regression test as #1 (uses a FRESH resolution, not the stale mount-time one, to prove the correct account's current guard — not a snapshot — gets locked).
+5. **[HIGH, different topic] — FIXED.** `handleChooseAccount` now calls `recordSelectionIfComplete` too, but ONLY once a selection already exists (`recordedRun?.selection` truthy) — this re-syncs a REVISION of an already-complete selection without changing the established "arriving at a page via Continue alone never records anything on its own" invariant for a fresh, not-yet-complete run (verified by `ui-wizard-stage-boundaries.test.tsx`'s own "writes NOTHING merely by arriving at Step 3" test staying green). Regression test: `ui-legacy-prime-migration-wizard.test.tsx` — "revising the account choice after Stage 1 is already recorded re-persists the NEW account, not the old one".
 
-#1 and #4 share one root cause and would likely be fixed together. #5 is unrelated to this topic entirely.
+#1 and #4 share one root cause and were fixed together. #5 is unrelated to this topic entirely but was repaired alongside it per explicit instruction.
 
 ## Clean-pass confirmation
 
-After the last applied edit (round 5's fixes):
+After the review's own fix loop (round 5's fixes):
 - `npx tsc --noEmit` in `packages/codex-ouronet`: clean.
 - `npx vitest run` (full `codex-ouronet` suite): **1849 passed, 1 failed** — the one failure is `tests/pact-signatures.test.ts`'s pre-existing, unrelated pact-signature drift guard, present before this topic began.
 - Round 6's full-scope, full-lens-set pass: zero CONFIRMED in-scope findings.
 
+After the follow-up pass repairing all 5 deferred findings above:
+- `npx tsc --noEmit` in `packages/codex-ouronet`: clean.
+- `npx vitest run` (full `codex-ouronet` suite): **1852 passed, 1 failed** — same single pre-existing, unrelated failure.
+- Each of the 5 fixes has its own dedicated regression test, proven red-before/green-after via a temporary revert, same as every fix in the review's own rounds.
+
 ## Round count
 
-6 rounds. Terminal pass (round 6): clean.
+6 review rounds (terminal pass clean) + 1 follow-up repair pass (5 findings, all fixed and regression-proven).

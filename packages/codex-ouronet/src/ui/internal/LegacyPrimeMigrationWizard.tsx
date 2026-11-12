@@ -3863,8 +3863,18 @@ export function LegacyPrimeMigrationWizard({
   // a second, possibly-different chain read taken later. Unfolds whatever
   // shape `currentPrimeAccount.guard` is — `null` while in flight, never
   // rendered as "no guard", which would be a different and wrong statement.
+  //
+  // code review (review.md, deferred findings #1/#4): this MUST read the
+  // Page-2-CHOSEN account's own guard (`chosenAccountForPreview`, the SAME
+  // account `resolveFinalizeDerivation`'s own `targetAccount` resolves to),
+  // never unconditionally `currentPrimeAccount`'s — Page 2's "choose an
+  // existing account" option is a first-class path, and reading the OLD
+  // account's guard while displaying/locking it for the NEWLY-chosen one
+  // is exactly the CRITICAL bug this fix closes: "keep" would otherwise
+  // permanently lock keys belonging to the wrong account, while the real
+  // guard of the account actually being promoted goes unprotected.
   const [guardResolution, setGuardResolution] = useState<GuardKeyResolution | null>(null);
-  const currentGuardForResolution = currentPrimeAccount?.guard ?? null;
+  const currentGuardForResolution = chosenAccountForPreview?.guard ?? null;
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     let cancelled = false;
@@ -4058,18 +4068,57 @@ export function LegacyPrimeMigrationWizard({
       // "recommended-single-key" does (the difference is only WHICH
       // on-chain action eventually applies it — updating the reference vs.
       // switching away from it — and neither executes here, see
-      // `outstandingKeyChanges.ts`'s own note). "update-keyset-custom"/
-      // "use-existing-keyset" already carry their own real `keys` directly.
+      // `outstandingKeyChanges.ts`'s own note). "update-keyset-custom"
+      // already carries its own real `keys` directly — they are the
+      // codex's OWN keys, with no externally-mutable reference to drift
+      // from, so no re-verification risk applies to it the way it does
+      // below for "use-existing-keyset".
       const guardKeys =
         guardChoice?.kind === "custom" || guardChoice?.kind === "update-keyset-custom"
-        || guardChoice?.kind === "use-existing-keyset"
           ? guardChoice.keys
-          : guardChoice?.kind === "recommended-single-key"
+          // review.md (deferred finding #3): a "use-existing-keyset" choice
+          // names an EXTERNAL, independently-mutable on-chain keyset — the
+          // resolved `keys` snapshot can be stale by the time this write
+          // runs, especially across a resumed session (the resume path
+          // restores the choice verbatim, with no chain re-check). Locking
+          // a snapshot that no longer matches what the keyset actually
+          // names would be exactly the "lock/offer the wrong keys" hazard
+          // this file's own "absence of evidence must not unlock or
+          // mis-lock" rule exists to prevent — so re-verify right here,
+          // immediately before the lock, and treat ANY mismatch or failed
+          // re-check as "not yet resolved" (`null`), never "use the old
+          // value anyway".
+          : guardChoice?.kind === "use-existing-keyset"
+            ? await (async (): Promise<readonly string[] | null> => {
+                try {
+                  if (!describeKeyset) throw new Error("no chain connection available on this screen");
+                  const fresh = await describeKeyset(`${guardChoice.ns}.${guardChoice.ksn}`);
+                  const sameKeySet =
+                    fresh.keys.length === guardChoice.keys.length &&
+                    guardChoice.keys.every((k) => fresh.keys.includes(k));
+                  if (!sameKeySet || fresh.pred !== guardChoice.pred) return null;
+                  return guardChoice.keys;
+                } catch {
+                  return null;
+                }
+              })()
+            : guardChoice?.kind === "recommended-single-key"
             || guardChoice?.kind === "update-keyset-recommended"
             ? [deriveStoaDalosKeypairAtIndex(resolved.bitString, 1).publicKey]
-            : guardResolution
-              ? keysOf(guardResolution)
-              : null; // genuinely not yet resolved — stays unknown, not "none"
+            // code review (review.md, deferred finding #4): "keep" (or any
+            // choice that falls through to here) must lock what the chosen
+            // account's guard ACTUALLY is right now, not the
+            // `guardResolution` state the guard page captured at step-
+            // mount time — review, password re-entry, and the Arweave-seed
+            // step can all elapse between that snapshot and this write.
+            // Re-resolving here, synchronously before the lock, is the
+            // same `resolveGuardKeys` call `guardResolution`'s own effect
+            // uses, just taken at the moment that actually matters.
+            : keysOf(await resolveGuardKeys(chosenAccountForPreview?.guard ?? null, {
+                describeKeyset:
+                  describeKeyset ??
+                  (async () => { throw new Error("no chain connection available on this screen"); }),
+              }));
       const paymentPublicKey =
         paymentChoice?.kind === "stoic-dalos-position-0"
           ? deriveStoaDalosKeypairAtIndex(resolved.bitString, 0).publicKey
@@ -4212,6 +4261,25 @@ export function LegacyPrimeMigrationWizard({
    * Seed words never reach it: `toPersistableAccountSelection` is the one
    * conversion, and it drops them.
    */
+  // review.md (deferred finding #2): a guard choice can be non-null and
+  // still genuinely INCOMPLETE — clicking "Define a custom guard" (or
+  // switching to the "use an existing keyset" sub-tab) records
+  // `{kind:"custom"|..., keys:[], ...}` the instant it's clicked, before
+  // the user has picked/resolved any key. `continueBlockedReason`'s guard
+  // branch already treats this as incomplete and keeps the user on this
+  // page; `recordSelectionIfComplete` must agree, or a user who clicks
+  // into the custom option and abandons the wizard mid-pick leaves a
+  // half-made guard choice persisted as if it were a deliberate final one.
+  function isGuardChoiceComplete(guard: LegacyPrimeMigrationGuardChoice): boolean {
+    if (
+      (guard.kind === "custom" || guard.kind === "update-keyset-custom" || guard.kind === "use-existing-keyset")
+      && guard.keys.length === 0
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   function recordSelectionIfComplete(
     nextAccount: LegacyPrimeMigrationAccountChoice | null,
     nextPayment: LegacyPrimeMigrationPaymentChoice | null,
@@ -4219,6 +4287,7 @@ export function LegacyPrimeMigrationWizard({
   ): void {
     if (!actions) return;
     if (nextAccount == null || nextPayment == null || nextGuard == null) return;
+    if (!isGuardChoiceComplete(nextGuard)) return;
     const selection: MigrationSelection = {
       account: toPersistableAccountSelection(nextAccount),
       payment: nextPayment,
@@ -4303,6 +4372,26 @@ export function LegacyPrimeMigrationWizard({
   function handleChooseAccount(next: LegacyPrimeMigrationAccountChoice): void {
     setAccountChoice(next);
     notifyStateChange({ step, accountChoice: next, keysChoice });
+    // review.md (deferred finding #5, unrelated to guard-step-variants but
+    // repaired alongside it): `onChoosePayment`/`onChooseGuard` always
+    // re-sync the persisted selection on every change — this handler was
+    // the one exception. A user who completes Stage 1 once, then goes Back
+    // and picks a DIFFERENT account without also re-touching the
+    // (already-complete) payment/guard pages, left the OLD account id
+    // persisted; a resume after closing the wizard at that point would
+    // silently revert to the account the user had explicitly moved away
+    // from.
+    //
+    // Gated on a selection ALREADY existing — picking the account for the
+    // very first time must NOT record anything on its own (an established
+    // invariant from an earlier topic: "recording happens only through
+    // the explicit payment/guard onChoose callbacks, never from the
+    // account default alone" — `ui-wizard-stage-boundaries.test.tsx`'s own
+    // "writes NOTHING merely by arriving at Step 3" test). This only
+    // re-syncs an EXISTING selection; it never creates the first one.
+    if (recordedRun?.selection) {
+      recordSelectionIfComplete(next, paymentChoice, guardChoice);
+    }
   }
 
   function handleChooseKeys(next: LegacyPrimeMigrationKeysChoice): void {

@@ -361,6 +361,29 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     });
   });
 
+  // review.md (deferred finding #2): clicking "Define a custom guard"
+  // records `{kind:"custom", keys:[], ...}` immediately — a genuinely
+  // INCOMPLETE choice (Continue stays blocked on it). The persisted
+  // `migrationProgress.selection` must agree and stay unwritten until a
+  // real key is actually picked, or abandoning the wizard here would leave
+  // a half-made guard choice recorded as if it were final.
+  it("merely opening the custom editor (no key picked yet) does NOT persist the selection; picking a key does", async () => {
+    await openStep3();
+    await goToGuardStep();
+    await pickCustom();
+
+    expect(store!.getState().migrationProgress?.selection).toBeUndefined();
+
+    const editor = screen.getByTestId("legacy-prime-migration-guard-custom-editor");
+    fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
+
+    await waitFor(() => {
+      expect(store!.getState().migrationProgress?.selection?.guard).toEqual({
+        kind: "custom", keys: [CURRENT_PAYMENT], pred: "keys-all",
+      });
+    });
+  });
+
   it("offers the full predicate catalogue, with m-of-n DISABLED until the key count matches", async () => {
     await openStep3();
     await goToGuardStep();
