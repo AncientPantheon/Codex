@@ -59,7 +59,7 @@ import { usePatronSelectionDefaults } from "../../zbom/patron/usePatronSelection
 import { codexClock } from "../../zbom/debouncer/codexClock.js";
 import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
-import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile, SwipeDeck, type SwipeDeckHandle } from "@ancientpantheon/codex-ui/ui";
+import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile, SwipeDeck, LockedMedallion, type SwipeDeckHandle } from "@ancientpantheon/codex-ui/ui";
 import RotatePaymentKeyModal from "../../zbom/modals/RotatePaymentKeyModal.js";
 import RotateGuardModal from "../../zbom/modals/RotateGuardModal.js";
 import ReleaseStoicTagModal from "../../zbom/modals/ReleaseStoicTagModal.js";
@@ -70,7 +70,7 @@ import ActivateStandardAccountModal from "../../zbom/modals/ActivateStandardAcco
 import ActivateSmartAccountModal from "../../zbom/modals/ActivateSmartAccountModal.js";
 import ActivateApolloPythiaKeyModal from "../../zbom/modals/ActivateApolloPythiaKeyModal.js";
 import { flattenStoaChainAccounts } from "../../zbom/cfm/seam.js";
-import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconRenameBtnRect } from "../internal/IconButtons.js";
+import { IconCopyBtn, IconDeleteBtn, IconRenameBtnRect } from "../internal/IconButtons.js";
 import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { OuronetAddressHighlight } from "../internal/OuronetAddressHighlight.js";
 import { GuardTree } from "../internal/GuardTree.js";
@@ -86,8 +86,8 @@ import { DualApiPanel } from "./DualApiPanel.js";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IStoaChainWallet } from "../../types/entities.js";
 import { masterOuronetAccountName } from "@ancientpantheon/codex-core";
-import { OURONET_CODEX_MASTER, FORMER_OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
-import { isFormerMasterAccount, isMigrationSealed, resolveMasterOuronetAccount } from "@ancientpantheon/codex-core";
+import { OURONET_CODEX_MASTER, FORMER_CODEX_PRIME } from "@ancientpantheon/codex-core";
+import { isLegacyPrimeAccount, isMigrationSealed, ouronetAccountLock, resolveMasterOuronetAccount } from "@ancientpantheon/codex-core";
 import type { CodexMasterSeed, MigrationProgress } from "@ancientpantheon/codex-core";
 import { useCodexStoreOptional } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
@@ -610,12 +610,16 @@ function AccountRow({
   // positional answer rather than silently matching another row's empty id.
   const isMaster =
     masterAccount !== undefined && (account.id ? masterAccount.id === account.id : isFirst);
-  // The holder the role moved AWAY from, read off the former-id history on the
-  // master row. The predicate's third argument is the SEAL and it fails closed,
-  // so an unsealed codex never shows a former designation even once
-  // `formerOuroAccountIds` has been recorded by a finalize.
-  const isFormerMaster =
-    !isMaster && isFormerMasterAccount(account.id, codexMasterSeed, migrationProgress);
+  // The codex's LEGACY CodexPrime — the account that held the role before this
+  // codex ever settled a master, read off the master row's WRITE-ONCE
+  // `legacyPrimeOuroAccountId`. Deliberately not `isFormerMasterAccount`: that
+  // sibling reads the append-only `formerOuroAccountIds`, which accumulates
+  // every re-run's CANDIDATE — accounts that were proposed and never displaced
+  // anything (locked-entities-and-former-prime/design.md §A2). The predicate's
+  // third argument is the SEAL and it fails closed, so an unsealed codex never
+  // shows the designation even once a finalize has recorded the field.
+  const isLegacyPrime =
+    !isMaster && isLegacyPrimeAccount(account.id, codexMasterSeed, migrationProgress);
 
   // Both of the row's names (prime-two-name-model/design.md). The golden
   // DESIGNATION is derived from the role right here and never touches the
@@ -638,8 +642,8 @@ function AccountRow({
     ? primeName
     : isMaster
       ? OURONET_CODEX_MASTER
-      : isFormerMaster
-        ? FORMER_OURONET_CODEX_MASTER
+      : isLegacyPrime
+        ? FORMER_CODEX_PRIME
         : undefined;
   const displayName = designation ?? ownStoredName;
   // An APOLLO half gets no second line: its `primeName` already carries the
@@ -666,7 +670,31 @@ function AccountRow({
   //     never asked for.
   const primeBadged = isMaster || isCodexIdPrime;
   const renameLocked = isCodexIdPrime;
-  const deleteProtected = isFirst || isMaster || isCodexIdPrime;
+  // Would `deleteOuroAccount` refuse this row? ONE predicate answers it
+  // (codex-core's `ouronetAccountLock`), the medallion below renders its
+  // reason and the delete site withholds its control from the same value, so
+  // the badge and the store's throw cannot drift apart
+  // (locked-entities-and-former-prime/design.md §B4).
+  //
+  // It reads two facts `deleteProtected` never consulted, which is how bugs 3
+  // and 4 close: `hasEncryptedArweaveUpload` (store.ts:2508 throws on it,
+  // because deleting would orphan permanent on-chain ciphertext) and the
+  // account's OWN `isPrime` — which finalize moves immediately, while
+  // `useMasterOuronetIdentity` keeps answering `accounts[0]` until the seal,
+  // leaving a promoted non-index-0 account showing an enabled delete.
+  //
+  // `masterAccountId` is passed only once SEALED: before that the hook's
+  // answer is positional and `isFirst` already covers it, and feeding an
+  // unsealed guess here would move a protection on a finalize that was never
+  // applied.
+  const entityLock = ouronetAccountLock(account, {
+    masterAccountId: sealed ? masterAccount?.id : undefined,
+    isCodexIdHalf: isCodexIdPrime,
+  });
+  // The union, never a swap: `isFirst` stays in it because the naive
+  // replacement would make the DISPLACED index-0 account deletable, which is
+  // funds-adjacent and was never asked for.
+  const deleteProtected = isFirst || isMaster || isCodexIdPrime || entityLock !== null;
 
   // Pre-ZBOM tooltip canon rule 7 ("fill every parameter you can, and prove
   // it") — ONE fill map (preZbomFillMap.ts), not hand-rolled per button.
@@ -723,12 +751,12 @@ function AccountRow({
 
   // The gold follows the MASTER identity, not the position — so there is
   // exactly one gold row and it is the same row the designation names. The
-  // displaced holder reads in the muted silver `ArweaveSeedsArea`'s own
+  // displaced legacy prime reads in the muted silver `ArweaveSeedsArea`'s own
   // former-master designation already uses: deliberately neither the gold nor
   // an ordinary row's `#d2d3d4`/`#c0392b`.
   const rowBorderColor = isApollo ? apolloAccent + "55" : isMaster ? "#ceac5f40" : isActivated ? "#262626" : "#8b1a1a50";
   const rowBgColor = isApollo ? apolloAccent + "08" : isMaster ? "#ceac5f08" : isActivated ? "#18181B" : "#8b1a1a08";
-  const nameColor = isApollo ? apolloAccent : isMaster ? "#ceac5f" : isFormerMaster ? "#9a9a9a" : isActivated ? "#d2d3d4" : "#c0392b";
+  const nameColor = isApollo ? apolloAccent : isMaster ? "#ceac5f" : isLegacyPrime ? "#9a9a9a" : isActivated ? "#d2d3d4" : "#c0392b";
 
   return (
     <div
@@ -801,6 +829,24 @@ function AccountRow({
                 isCodexIdPrime ? apolloAccent : "#ceac5f",
               )}>🔒 Prime</span>
             ))}
+            {/* The Locked medallion sits immediately after the 🔒 Prime badge
+                and before every other pill: the two are the row's IDENTITY
+                signals (who this account is, and whether the store will let it
+                go), while StoicTag/Standard/APOLLO describe its chain shape.
+                Both branches of the `compact` fork render it — this file has
+                ONE `AccountRow`, so "desktop and mobile" here means both
+                sides of each ternary, not two trees. The compact form is the
+                SAME 20x20 geometry as `IconBadge`, and the badge container is
+                a no-wrap flex, so an extra badge costs the row width and never
+                height — which is what keeps the mobile deck's MEASURED chunk
+                sizes where they are. */}
+            {entityLock && (
+              <LockedMedallion
+                reason={entityLock.label}
+                compact={compact}
+                testId={`account-locked-${account.id}`}
+              />
+            )}
             {stoicTag && <StoicTagPillar tag={stoicTag} />}
             {compact ? (
               <IconBadge
@@ -1120,13 +1166,15 @@ function AccountRow({
               </PreZbomHint>
             )}
             <div style={{ flex: 1 }} />
-            {deleteProtected
-              ? <IconDeleteBtnDisabled size={28} title={
-                  isCodexIdPrime ? `${primeName} cannot be removed while it is part of the CodexID`
-                  : isMaster ? `${OURONET_CODEX_MASTER} cannot be removed`
-                  : "The codex's original account cannot be removed"
-                } />
-              : <IconDeleteBtn onClick={() => { void deleteAccount(account.id); }} size={28} />}
+            {/* NO delete control at all on a protected row — not a disabled
+                one. Owner: "delete button should not be available for them."
+                The row already says WHY through the Locked medallion on its
+                title line, which carries the store's own reason, so a second
+                dead control carrying a tooltip would be the weaker half of a
+                message already delivered. */}
+            {!deleteProtected && (
+              <IconDeleteBtn onClick={() => { void deleteAccount(account.id); }} size={28} />
+            )}
           </div>
           </>
         );

@@ -285,6 +285,74 @@ describe("<OuronetAccountsTab> — mobile: icon-only badges (Prime/Standard-Smar
   });
 });
 
+describe("<OuronetAccountsTab> — mobile: the compact Locked medallion (locked-entities-and-former-prime/design.md §B5)", () => {
+  it("renders the icon-only 20x20 compact form on every row the store would refuse to delete, and collides with NEITHER the Prime nor the Standard badge label", async () => {
+    // This file has no separate mobile row tree — `AccountRow`'s `compact`
+    // prop switches each badge between `IconBadge` and a text pill — so the
+    // medallion's mobile form is the `compact` branch. Two constraints are
+    // pinned here because breaking either silently breaks OTHER specs in this
+    // same file in a way that reads as unrelated:
+    //
+    //   * the accessible name must be neither "Prime" nor "Standard": the
+    //     badge specs above use `getByLabelText("Prime")` (throws on >1) and
+    //     `getAllByLabelText("Standard")` with an exact length of 2;
+    //   * the compact form must be ICON-ONLY at the SAME 20x20 geometry as
+    //     `IconBadge`, because the swipe-deck chunk sizes above are derived
+    //     from MEASURED row height — a text pill here would grow the row on a
+    //     real device and move numbers jsdom cannot see move.
+    await renderMobile([
+      ouroFx({ id: "o0", name: "Account 0" }),
+      ouroFx({ id: "o1", name: "Account 1", hasEncryptedArweaveUpload: true }),
+    ]);
+
+    const medallion = screen.getByTestId("account-locked-o1");
+    expect(medallion.getAttribute("aria-label")).toMatch(/^Locked — /);
+    expect(medallion.getAttribute("aria-label")).toMatch(/ArWeave upload/i);
+    // Icon-only: the word lives in the label and the tooltip, never in the row.
+    expect(medallion.textContent).toBe("");
+    expect(medallion.style.width).toBe("20px");
+    expect(medallion.style.height).toBe("20px");
+
+    // Neither existing label query is disturbed — both of these THROW if the
+    // medallion borrowed one of their names.
+    expect(screen.getByLabelText("Prime")).toBeTruthy();
+    expect(screen.getAllByLabelText("Standard")).toHaveLength(2);
+  });
+
+  it("the full-screen expand modal of a locked row carries NO delete control", async () => {
+    // Owner: "delete button should not be available for them." The expanded
+    // block is built ONCE (`expandedContent`) and rendered either inline or
+    // through `MobilePortal`, so the single shared delete site has to be
+    // checked on the mobile side too — a regression that re-added a disabled
+    // button would surface in both.
+    const { container } = await renderMobile([
+      ouroFx({ id: "o0", name: "Account 0" }),
+      ouroFx({ id: "o1", name: "Account 1", hasEncryptedArweaveUpload: true }),
+    ]);
+
+    const locked = container.querySelector('[data-account-id="o1"]') as HTMLElement;
+    fireEvent.click(locked.querySelector('[role="button"]') as HTMLElement);
+    const modal = screen.getByTestId("ouronet-account-expand-modal-o1");
+    expect(within(modal).queryByRole("button", { name: /^delete$/i })).toBeNull();
+    expect(within(modal).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
+  });
+
+  it("an ordinary row keeps its live delete and wears no medallion", async () => {
+    // The other half of the rule: over-locking is as wrong as under-locking,
+    // and a medallion on every row would say nothing at all.
+    const { container } = await renderMobile([
+      ouroFx({ id: "o0", name: "Account 0" }),
+      ouroFx({ id: "o1", name: "Account 1" }),
+    ]);
+
+    expect(screen.queryByTestId("account-locked-o1")).toBeNull();
+    const plain = container.querySelector('[data-account-id="o1"]') as HTMLElement;
+    fireEvent.click(plain.querySelector('[role="button"]') as HTMLElement);
+    const modal = screen.getByTestId("ouronet-account-expand-modal-o1");
+    expect(within(modal).getByRole("button", { name: /^delete$/i })).toBeTruthy();
+  });
+});
+
 describe("<OuronetAccountsTab> — mobile: no separator bar above/below CodexPrime (design.md §8, the follow-up feedback round)", () => {
   it("does not render the 'Other ... accounts' separator bar — CodexPrime is colour-coded instead (AccountRow's own border/background)", async () => {
     await renderMobile(manyAccounts(3));
@@ -486,11 +554,16 @@ const SEALED: MigrationProgress = {
   appliedAt: "2026-11-18T09:30:00.000Z",
 };
 
+/** `legacyPrimeOuroAccountId` is the WRITE-ONCE field the "Former Codex Prime"
+ *  designation reads (locked-entities-and-former-prime/design.md §A2-A3); the
+ *  append-only `formerOuroAccountIds` is kept because a settled row really
+ *  does carry both. */
 const SETTLED_ON_HODLER: CodexMasterSeed = {
   ouroAccountId: "hodler",
   chainwebSeedId: "cw-seed",
   establishedAt: "2026-11-17T00:00:00.000Z",
   formerOuroAccountIds: ["initial"],
+  legacyPrimeOuroAccountId: "initial",
 };
 
 /** The photograph's own two accounts, in codex (index) order. */
@@ -517,12 +590,18 @@ describe("<OuronetAccountsTab> — mobile: on a SEALED codex the settled master 
     expect(hodler.contains(badge)).toBe(true);
   });
 
-  it("the displaced index-0 account reads the FORMER designation in muted silver, keeps its own name, and is never gold", async () => {
+  it("the displaced index-0 account reads the Former Codex Prime designation in muted silver, keeps its own name, and is never gold", async () => {
+    // Owner decision (1), locked-entities-and-former-prime/design.md §A3: the
+    // displaced account is always the codex's kickstart prime, so it reads the
+    // retired "Former Codex Prime". The "Former Codex Ouronet Master" this
+    // line used to assert named a state that cannot occur; its constant is
+    // deleted. Mobile has no separate row tree — `AccountRow`'s `compact`
+    // prop switches badges only — so the designation is the desktop one.
     const { container } = await renderMobile(screenshotAccounts(), {}, SETTLED_ON_HODLER, SEALED);
 
     const initial = container.querySelector('[data-account-id="initial"]') as HTMLElement;
     const designation = within(initial).getByTestId("account-designation-initial");
-    expect(designation.textContent).toBe("Former Codex Ouronet Master");
+    expect(designation.textContent).toBe("Former Codex Prime");
     expect(designation.style.color).toBe(MUTED_SILVER);
     expect(within(initial).getByTestId("account-own-name-initial").textContent).toBe("Initial Seed");
     expect(within(initial).queryByLabelText("Prime")).toBeNull();

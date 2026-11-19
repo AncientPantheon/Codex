@@ -211,8 +211,14 @@ describe("<OuronetAccountsTab>", () => {
 
     const prime = (await screen.findByText("Codex Ouronet Master")).closest("[data-account-id]") as HTMLElement;
     expandRow(prime);
-    // The prime exposes only a disabled delete control.
-    expect(within(prime).getByRole("button", { name: /cannot be removed/i })).toBeTruthy();
+    // DELIBERATE REWRITE (locked-entities-and-former-prime/plan.md T5). This
+    // used to assert the prime exposed a DISABLED delete control
+    // (`getByRole("button", { name: /cannot be removed/i })`). The owner
+    // overruled that behaviour — "delete button should not be available for
+    // them" — so the row must now render NO delete control of any kind; the
+    // Locked medallion on its title line carries the reason instead. Not a
+    // casualty: do not "repair" this back to a disabled-button assertion.
+    expect(within(prime).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
     expect(within(prime).queryByRole("button", { name: /^delete$/i })).toBeNull();
 
     const second = (await screen.findByText("Second")).closest("[data-account-id]") as HTMLElement;
@@ -313,8 +319,25 @@ const FINALIZED_UNSEALED: MigrationProgress = {
   pending: { finalizedAt: "2026-11-17T10:00:00.000Z", accountId: "hodler" },
 };
 
-/** The codex settled on "hodler" and displaced "initial" — the screenshot. */
+/** The codex settled on "hodler" and displaced "initial" — the screenshot.
+ *
+ *  `legacyPrimeOuroAccountId` is the WRITE-ONCE field the "Former Codex Prime"
+ *  designation reads (locked-entities-and-former-prime/design.md §A2-A3); the
+ *  append-only `formerOuroAccountIds` stays on the fixture because the row
+ *  really does carry both, and keeping it here is what lets the spec below
+ *  prove the tab reads the former and ignores the latter. */
 const SETTLED_ON_HODLER: CodexMasterSeed = {
+  ouroAccountId: "hodler",
+  chainwebSeedId: "cw-seed",
+  establishedAt: ESTABLISHED_AT,
+  formerOuroAccountIds: ["initial"],
+  legacyPrimeOuroAccountId: "initial",
+};
+
+/** The same settlement, but with ONLY the append-only history recorded — a
+ *  row written before the write-once field existed, or by a wizard re-run that
+ *  appended a CANDIDATE that never displaced anything. */
+const SETTLED_WITHOUT_LEGACY_PRIME: CodexMasterSeed = {
   ouroAccountId: "hodler",
   chainwebSeedId: "cw-seed",
   establishedAt: ESTABLISHED_AT,
@@ -403,15 +426,40 @@ describe("<OuronetAccountsTab> — SEALED codex: pinning, gold, the 🔒 Prime b
     expect(within(hodler).getByTestId("account-own-name-hodler").textContent).toBe("My Trading Account");
   });
 
-  it("reads the DISPLACED account as the former master — muted silver, never gold, its own name still beneath", async () => {
+  it("reads the DISPLACED account as the Former Codex Prime — muted silver, never gold, its own name still beneath", async () => {
+    // Owner decision (1), locked-entities-and-former-prime/design.md §A3: a
+    // displacement can happen only ONCE and is always kickstart-prime ->
+    // settled master, so the displaced account is the codex's legacy
+    // CodexPrime and reads the RETIRED designation "Former Codex Prime". The
+    // short-lived "Former Codex Ouronet Master" this line used to assert
+    // described a state that cannot occur, and its constant is deleted.
     await renderTab(screenshotAccounts(), {}, SETTLED_ON_HODLER, SEALED);
 
     const initial = rowOf("initial");
     const designation = within(initial).getByTestId("account-designation-initial");
-    expect(designation.textContent).toBe("Former Codex Ouronet Master");
+    expect(designation.textContent).toBe("Former Codex Prime");
     expect(designation.style.color).toBe(MUTED_SILVER);
     expect(within(initial).getByTestId("account-own-name-initial").textContent).toBe("Initial Seed");
     // Exactly ONE gold row on the whole screen.
+    expect(goldRowIds()).toEqual(["hodler"]);
+  });
+
+  it("reads the WRITE-ONCE legacyPrimeOuroAccountId, never the append-only formerOuroAccountIds", async () => {
+    // design.md §A2: the wizard is re-runnable and every run executes Write 2,
+    // so `formerOuroAccountIds` accumulates CANDIDATES that were never applied
+    // and never displaced anything. A tab that designated off that list would
+    // hand "Former Codex Prime" to an account that was simply proposed once.
+    // Only the write-once field names the one real displacement — so a row
+    // carrying the history but not the field designates nobody.
+    await renderTab(screenshotAccounts(), {}, SETTLED_WITHOUT_LEGACY_PRIME, SEALED);
+
+    const initial = rowOf("initial");
+    expect(within(initial).queryByText("Former Codex Prime")).toBeNull();
+    expect(within(initial).queryByText("Former Codex Ouronet Master")).toBeNull();
+    // No designation at all ⇒ the row is titled by its own name, and so has no
+    // second line either.
+    expect(within(initial).getByTestId("account-name-initial").textContent).toBe("Initial Seed");
+    expect(screen.queryByTestId("account-own-name-initial")).toBeNull();
     expect(goldRowIds()).toEqual(["hodler"]);
   });
 });
@@ -446,9 +494,117 @@ describe("<OuronetAccountsTab> — UNSEALED codex: the positional rule, byte-for
     expect(within(hodler).queryByText(/🔒\s*Prime/)).toBeNull();
     expect(within(hodler).queryByText("Codex Ouronet Master")).toBeNull();
     // Nor does the FORMER designation appear on an unsealed codex, even with
-    // `formerOuroAccountIds` already recorded — `isFormerMasterAccount` fails
-    // closed without the seal.
-    expect(within(initial).queryByText("Former Codex Ouronet Master")).toBeNull();
+    // `legacyPrimeOuroAccountId` already recorded by the finalize —
+    // `isLegacyPrimeAccount` is seal-gated and fails closed, exactly like the
+    // sibling predicate this line used to name.
+    expect(within(initial).queryByText("Former Codex Prime")).toBeNull();
+  });
+});
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * locked-entities-and-former-prime/design.md Part B — the Locked medallion,
+ * and bugs 3 and 4.
+ *
+ * Owner: "we have no way to see which entries are protected. Such Protected
+ * Seeds or account should have a lock medalion ... and delete button should
+ * not be available for them."
+ *
+ * Both bugs are the same shape: the store refuses the delete
+ * (`deleteOuroAccount`, state/store.ts:2496-2516) while the row offers a live
+ * one, so the click fails silently and leaves an unhandled rejection. The
+ * medallion and the withheld control both read ONE predicate —
+ * codex-core's `ouronetAccountLock` — so the badge and the throw cannot drift.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/** No delete affordance of ANY kind in the row: neither the live control nor
+ *  the disabled-with-a-tooltip one this tab used to render. Owner: "delete
+ *  button should not be available for them." */
+const expectNoDeleteControl = (row: HTMLElement) => {
+  expect(within(row).queryByRole("button", { name: /^delete$/i })).toBeNull();
+  expect(within(row).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
+};
+
+describe("<OuronetAccountsTab> — the Locked medallion, and the deletes the store would refuse", () => {
+  it("bug 3: an account with a confirmed encrypted ArWeave upload is Locked and offers NO delete, while its ordinary neighbour still deletes", async () => {
+    // `deleteOuroAccount` throws `CodexArweaveEncryptionProtectedError` on
+    // `hasEncryptedArweaveUpload === true` (state/store.ts:2508-2510) because
+    // deleting the account would orphan permanent on-chain ciphertext forever.
+    // `deleteProtected` never read the flag, so this row showed an ENABLED
+    // delete whose click failed silently.
+    await renderTab([
+      ouroFx({ id: "prime", name: "Prime", isActive: true }),
+      ouroFx({ id: "uploader", name: "Uploader", address: "Ѻ.uploader", isActive: true, hasEncryptedArweaveUpload: true }),
+      ouroFx({ id: "plain", name: "Plain", address: "Ѻ.plain", isActive: true }),
+    ]);
+
+    const uploader = rowOf("uploader");
+    const medallion = within(uploader).getByTestId("account-locked-uploader");
+    // The medallion names the reason the STORE would give, not a generic
+    // "protected" — the owner has to know which remedy applies.
+    expect(medallion.getAttribute("aria-label")).toMatch(/^Locked — /);
+    expect(medallion.getAttribute("aria-label")).toMatch(/ArWeave upload/i);
+    expandRow(uploader);
+    expectNoDeleteControl(uploader);
+
+    // The neighbour the store would happily delete is untouched: no medallion,
+    // and a live control. Over-locking is as wrong as under-locking.
+    const plain = rowOf("plain");
+    expect(within(plain).queryByTestId("account-locked-plain")).toBeNull();
+    expandRow(plain);
+    expect(within(plain).getByRole("button", { name: /^delete$/i })).toBeTruthy();
+  });
+
+  it("bug 4 (the finalize→seal window): a promoted account at a NON-ZERO index on an UNSEALED codex is Locked and offers NO delete", async () => {
+    // `promoteSeedAndAccountToPrime` moves `isPrime` at FINALIZE
+    // (state/store.ts:2573-2576), but `useMasterOuronetIdentity` answers
+    // `accounts[0]` until the codex is SEALED. Between those two moments a
+    // promoted account sitting anywhere but index 0 showed an enabled delete
+    // that `deleteOuroAccount` refuses with `CodexPrimeProtectedError`.
+    // Reading `isPrime` off the ACCOUNT closes the window without disturbing
+    // the seal gate that (correctly) governs DESIGNATIONS — hence no master
+    // row and no progress in this fixture.
+    //
+    // The flags below are EXACTLY what `promoteSeedAndAccountToPrime` leaves
+    // behind: it maps `isPrime: false` onto every other account rather than
+    // deleting the key (state/store.ts:2589-2591). Stating index 0's `false`
+    // explicitly is also what makes the fixture constructible —
+    // `addOuroAccount` auto-primes the FIRST account added unless the caller
+    // says otherwise, and then refuses a second prime with a different id.
+    await renderTab([
+      ouroFx({ id: "initial", name: "Initial Seed", address: "Ѻ.initial", isPrime: false }),
+      ouroFx({ id: "promoted", name: "Promoted", address: "Ѻ.promoted", isPrime: true }),
+    ]);
+
+    const promoted = rowOf("promoted");
+    expect(within(promoted).getByTestId("account-locked-promoted").getAttribute("aria-label"))
+      .toMatch(/CodexPrime/);
+    expandRow(promoted);
+    expectNoDeleteControl(promoted);
+
+    // The seal gate is untouched: index 0 still holds the gold and the
+    // designation on an unsealed codex, exactly as before.
+    expect(goldRowIds()).toEqual(["initial"]);
+    expect(within(promoted).queryByText(/🔒\s*Prime/)).toBeNull();
+  });
+
+  it("the medallion is never the 🔒 character and never borrows the Prime badge's gold — one gold row stays the invariant", async () => {
+    // `ui-ouronet-accounts-tab.test.tsx`'s own `getByText(/🔒\s*Prime/)`
+    // queries throw on a second match in the same row, and `goldRowIds()`
+    // asserts exactly one gold row. A medallion drawn with the emoji or in
+    // `#ceac5f` would break both — pinned here so the next reader does not
+    // "simplify" the inline Lock SVG back into a character.
+    await renderTab([
+      ouroFx({ id: "prime", name: "Prime", isActive: true, hasEncryptedArweaveUpload: true }),
+      ouroFx({ id: "o2", name: "Second", address: "Ѻ.second", isActive: true }),
+    ]);
+
+    const prime = rowOf("prime");
+    const medallion = within(prime).getByTestId("account-locked-prime");
+    expect(medallion.textContent).not.toMatch(/🔒/);
+    // Still exactly one 🔒 Prime pill in the row — this is the query the
+    // medallion must not collide with.
+    expect(within(prime).getByText(/🔒\s*Prime/)).toBeTruthy();
+    expect(goldRowIds()).toEqual(["prime"]);
   });
 });
 
@@ -478,23 +634,35 @@ describe("<OuronetAccountsTab> — the settled master is renameable, but still N
     );
   });
 
-  it("leaves delete DISABLED on the settled master AND on the displaced index-0 account — delete protection is never loosened", async () => {
+  it("offers NO delete control at all on the settled master NOR on the displaced index-0 account — delete protection is never loosened", async () => {
     // `CodexPrimeProtectedError` is funds-adjacent and keyed off the stored
     // `isPrime` flag, which does NOT move on a settlement. So the row set the
     // UI refuses to delete is the UNION of today's (index 0, CodexID halves)
     // and the settled master — never a swap.
+    //
+    // DELIBERATE REWRITE (locked-entities-and-former-prime/plan.md T5). Both
+    // rows used to be asserted via `getByRole("button", { name: /cannot be
+    // removed/i })` plus `.disabled === true` — i.e. a DISABLED delete
+    // control. The owner overruled that behaviour: "delete button should not
+    // be available for them", taken literally. So the assertion flips from
+    // "present and disabled" to "absent", and the `/^delete$/i` null checks
+    // below are kept verbatim — they were true then and are true now, and
+    // together the pair proves no delete affordance of EITHER kind survives.
+    // Not a casualty: do not restore the disabled-button form.
     await renderTab(screenshotAccounts(), {}, SETTLED_ON_HODLER, SEALED);
 
     const hodler = rowOf("hodler");
     expandRow(hodler);
-    const hodlerDelete = within(hodler).getByRole("button", { name: /cannot be removed/i });
-    expect((hodlerDelete as HTMLButtonElement).disabled).toBe(true);
+    expect(within(hodler).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
     expect(within(hodler).queryByRole("button", { name: /^delete$/i })).toBeNull();
+    // ...and the row still SAYS why, which is what makes withholding the
+    // control an explanation rather than a disappearance.
+    expect(within(hodler).getByTestId("account-locked-hodler").getAttribute("aria-label"))
+      .toMatch(/^Locked — /);
 
     const initial = rowOf("initial");
     expandRow(initial);
-    const initialDelete = within(initial).getByRole("button", { name: /cannot be removed/i });
-    expect((initialDelete as HTMLButtonElement).disabled).toBe(true);
+    expect(within(initial).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
     expect(within(initial).queryByRole("button", { name: /^delete$/i })).toBeNull();
   });
 });

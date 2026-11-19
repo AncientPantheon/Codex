@@ -48,17 +48,46 @@ export {
   seedIsLocked,
 } from "./codex/masterKeyLocks.js";
 export type { MasterKeyLock, MasterKeyLockReason } from "./codex/masterKeyLocks.js";
+// ----- locked entities: one reason-returning predicate per entity type, each
+// answering "would the store refuse to delete this?". Built ON the lock
+// registry above — `chainwebSeedLock`/`chainwebKeyPositionLock` CALL its
+// helpers rather than restate them, and `MasterKeyLockReason` rides into
+// `EntityLockReason` verbatim so a medallion and a thrown
+// `CodexMasterKeyLockedError` name the same thing. Render-time cheap and
+// in-memory by contract; see codex/lockedEntities.ts for why the reason, and
+// not a boolean, is the return value.
+export {
+  ouronetAccountLock,
+  chainwebSeedLock,
+  chainwebKeyPositionLock,
+  pureKeypairLock,
+  arweaveSeedLock,
+} from "./codex/lockedEntities.js";
+export type {
+  EntityLock,
+  EntityLockReason,
+  OuronetAccountLockCandidate,
+  OuronetAccountLockOpts,
+  ChainwebSeedLockCandidate,
+  ChainwebKeyPositionLockOpts,
+  PureKeypairLockCandidate,
+  ArweaveSeedLockCandidate,
+} from "./codex/lockedEntities.js";
 // ----- the Codex Master Seed row: which three entities are the three faces
 // of this codex's one seed. Pure linkage; see codex/masterSeed.ts.
 // `recordFormerMasterIds` is the one writer of the former-holder history;
-// `isFormerMasterAccount`/`isFormerMasterArweaveSeed` are the two readers, and
-// both take the migration progress because the designation follows the SEAL,
-// not the finalize.
+// `isFormerMasterAccount`/`isFormerMasterArweaveSeed`/`isLegacyPrimeAccount`
+// are its readers, and all three take the migration progress because the
+// designation follows the SEAL, not the finalize. `isLegacyPrimeAccount` is
+// the one the accounts tab renders ("Former Codex Prime"); it reads the
+// WRITE-ONCE `legacyPrimeOuroAccountId`, not the append-only history, because
+// that history accumulates wizard candidates that displaced nobody.
 export {
   describeCodexMasterSeed,
   recordFormerMasterIds,
   isFormerMasterAccount,
   isFormerMasterArweaveSeed,
+  isLegacyPrimeAccount,
 } from "./codex/masterSeed.js";
 export type { CodexMasterSeed, CodexMasterSeedFaces } from "./codex/masterSeed.js";
 // ----- which Ouronet account the codex has SETTLED on as its master: the
@@ -100,7 +129,7 @@ export {
   MASTER_ARWEAVE_SEED,
   CODEX_MASTER_SEED,
   CODEX_STOIC_IDENTITY,
-  FORMER_OURONET_CODEX_MASTER,
+  FORMER_CODEX_PRIME,
   FORMER_MASTER_ARWEAVE_SEED,
   masterOuronetAccountName,
   masterOuronetAccountParts,

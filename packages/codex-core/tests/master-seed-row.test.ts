@@ -9,6 +9,7 @@ import {
   recordFormerMasterIds,
   isFormerMasterAccount,
   isFormerMasterArweaveSeed,
+  isLegacyPrimeAccount,
 } from "../src/codex/masterSeed.js";
 import type { CodexMasterSeed } from "../src/codex/masterSeed.js";
 import type { MigrationProgress } from "../src/codex/migrationProgress.js";
@@ -26,6 +27,7 @@ const full: Required<CodexMasterSeed> = {
   establishedAt: "2026-10-28T10:00:00.000Z",
   formerOuroAccountIds: ["ouro-0"],
   formerArweaveSeedIds: ["arw-0"],
+  legacyPrimeOuroAccountId: "ouro-0",
 };
 
 describe("describeCodexMasterSeed", () => {
@@ -69,6 +71,7 @@ describe("the row carries linkage ONLY", () => {
         "establishedAt",
         "formerArweaveSeedIds",
         "formerOuroAccountIds",
+        "legacyPrimeOuroAccountId",
         "ouroAccountId",
       ],
     );
@@ -180,6 +183,88 @@ describe("recordFormerMasterIds", () => {
 });
 
 // --------------------------------------------------------------------
+// `legacyPrimeOuroAccountId` — WRITE-ONCE. The wizard is re-runnable, and
+// every run executes Write 2, so the account carrying `isPrime` before a
+// RETRY's promotion is the previous CANDIDATE, not the owner's original
+// kickstart prime. A capture that re-ran each finalize would therefore record
+// the wrong account, and since the promotion destroys the evidence, that
+// error would be unrecoverable. Hence the carry-forward below: the first
+// recorded id wins over every later one, forever.
+// --------------------------------------------------------------------
+
+describe("recordFormerMasterIds carries legacyPrimeOuroAccountId write-once", () => {
+  it("records the field on the FIRST write that names one", () => {
+    const first = recordFormerMasterIds(undefined, {
+      ...settled,
+      legacyPrimeOuroAccountId: "ouro-legacy",
+    });
+    expect(first.legacyPrimeOuroAccountId).toBe("ouro-legacy");
+  });
+
+  it("does NOT overwrite it when a second write names a different legacy id", () => {
+    // The wizard's Retry path: this run reads the PREVIOUS CANDIDATE as the
+    // outgoing prime. The owner's original kickstart account must win.
+    const first = recordFormerMasterIds(undefined, {
+      ...settled,
+      legacyPrimeOuroAccountId: "ouro-legacy",
+    });
+    const second = recordFormerMasterIds(first, {
+      ...settled,
+      ouroAccountId: "ouro-3",
+      legacyPrimeOuroAccountId: "ouro-candidate-2",
+    });
+    expect(second.legacyPrimeOuroAccountId).toBe("ouro-legacy");
+  });
+
+  it("preserves it across a write that omits it entirely", () => {
+    // Every ordinary `setCodexMasterSeed` merge (an ArWeave face arriving
+    // later, a re-save) goes through here carrying no legacy id at all.
+    const first = recordFormerMasterIds(undefined, {
+      ...settled,
+      legacyPrimeOuroAccountId: "ouro-legacy",
+    });
+    const later = recordFormerMasterIds(first, { ...settled, arweaveSeedId: "arw-9" });
+    expect(later.legacyPrimeOuroAccountId).toBe("ouro-legacy");
+  });
+
+  it("leaves a row that never had one WITHOUT the key", () => {
+    // Same discipline as the former-id histories: a key that would be
+    // `undefined` stays absent, so `setCodexMasterSeed`'s JSON.stringify
+    // no-change short-circuit still sees two identical rows.
+    const row = recordFormerMasterIds(settled, { ...settled });
+    expect("legacyPrimeOuroAccountId" in row).toBe(false);
+  });
+
+  it("returns the next row by IDENTITY when the legacy id is unchanged", () => {
+    // The no-change short-circuit depends on this; a carry-forward that
+    // always rebuilt the row would defeat it.
+    const prev: CodexMasterSeed = { ...settled, legacyPrimeOuroAccountId: "ouro-legacy" };
+    const next = { ...settled, legacyPrimeOuroAccountId: "ouro-legacy" };
+    expect(recordFormerMasterIds(prev, next)).toBe(next);
+  });
+
+  it("treats an empty previous id as NOT set, so a real id can still land", () => {
+    // A falsy id is a half-written value, not an identity — the same reading
+    // `resolveMasterOuronetAccount` gives a falsy settled id.
+    const prev: CodexMasterSeed = { ...settled, legacyPrimeOuroAccountId: "" };
+    const next = recordFormerMasterIds(prev, {
+      ...settled,
+      legacyPrimeOuroAccountId: "ouro-legacy",
+    });
+    expect(next.legacyPrimeOuroAccountId).toBe("ouro-legacy");
+  });
+
+  it("does not disturb the former-id histories it shares the function with", () => {
+    const moved = recordFormerMasterIds(
+      { ...settled, legacyPrimeOuroAccountId: "ouro-legacy" },
+      { ...settled, ouroAccountId: "ouro-2" }
+    );
+    expect(moved.formerOuroAccountIds).toEqual(["ouro-1"]);
+    expect(moved.legacyPrimeOuroAccountId).toBe("ouro-legacy");
+  });
+});
+
+// --------------------------------------------------------------------
 // The derived "Former ..." predicates. Design: "the designation follows the
 // SEAL, not the finalize" — `codexMasterSeed` is written at finalize and is
 // re-writable while unsealed, whereas `migrationProgress.appliedAt` is
@@ -205,6 +290,7 @@ const moved: CodexMasterSeed = {
   arweaveSeedId: "arw-2",
   formerOuroAccountIds: ["ouro-1"],
   formerArweaveSeedIds: ["arw-1"],
+  legacyPrimeOuroAccountId: "ouro-legacy",
 };
 
 describe("isFormerMasterAccount", () => {
@@ -285,6 +371,57 @@ describe("isFormerMasterArweaveSeed", () => {
   });
 });
 
+describe("isLegacyPrimeAccount", () => {
+  it("is true for the recorded legacy prime on a SEALED codex", () => {
+    expect(isLegacyPrimeAccount("ouro-legacy", moved, SEALED)).toBe(true);
+  });
+
+  it("is false on a finalized-but-UNAPPLIED codex", () => {
+    // Owner: "Only when sealing we get to see the new designations." The row
+    // is written at finalize and is re-writable while unsealed; only
+    // `appliedAt` is monotone and permanent.
+    expect(isLegacyPrimeAccount("ouro-legacy", moved, UNSEALED)).toBe(false);
+  });
+
+  it("fails CLOSED on absent or null progress", () => {
+    expect(isLegacyPrimeAccount("ouro-legacy", moved, undefined)).toBe(false);
+    expect(isLegacyPrimeAccount("ouro-legacy", moved, null)).toBe(false);
+  });
+
+  it("is false for the account that currently HOLDS the master role", () => {
+    // A finalize that re-confirmed the sitting master displaced nobody; were
+    // the two ever to coincide, the row would otherwise render as both the
+    // master and its own predecessor at once.
+    const selfConfirmed: CodexMasterSeed = {
+      ...settled,
+      legacyPrimeOuroAccountId: settled.ouroAccountId,
+    };
+    expect(isLegacyPrimeAccount(settled.ouroAccountId, selfConfirmed, SEALED)).toBe(false);
+  });
+
+  it("is false for any other account, and for a row that recorded none", () => {
+    expect(isLegacyPrimeAccount("ouro-9", moved, SEALED)).toBe(false);
+    expect(isLegacyPrimeAccount("ouro-1", settled, SEALED)).toBe(false);
+    expect(isLegacyPrimeAccount("ouro-1", undefined, SEALED)).toBe(false);
+    expect(isLegacyPrimeAccount("ouro-1", null, SEALED)).toBe(false);
+  });
+
+  it("is false for an absent or empty id rather than matching an empty record", () => {
+    // An unidentifiable account must not inherit someone else's designation.
+    const blank: CodexMasterSeed = { ...moved, legacyPrimeOuroAccountId: "" };
+    expect(isLegacyPrimeAccount("", blank, SEALED)).toBe(false);
+    expect(isLegacyPrimeAccount(undefined, blank, SEALED)).toBe(false);
+    expect(isLegacyPrimeAccount(null, moved, SEALED)).toBe(false);
+  });
+
+  it("does not read the append-only former-id history", () => {
+    // That list accumulates wizard CANDIDATES; only this field is the one
+    // real displacement. "ouro-1" sits in `moved.formerOuroAccountIds`.
+    expect(isFormerMasterAccount("ouro-1", moved, SEALED)).toBe(true);
+    expect(isLegacyPrimeAccount("ouro-1", moved, SEALED)).toBe(false);
+  });
+});
+
 describe("the history travels in the codex EXPORT", () => {
   it("survives a serialize -> deserialize round trip intact", () => {
     // Same omission class as the dropped `foreignKeys`, `arweaveSeeds` and
@@ -308,5 +445,10 @@ describe("the history travels in the codex EXPORT", () => {
     expect(parsed.codexMasterSeed).toEqual(moved);
     expect(parsed.codexMasterSeed?.formerOuroAccountIds).toEqual(["ouro-1"]);
     expect(parsed.codexMasterSeed?.formerArweaveSeedIds).toEqual(["arw-1"]);
+    // The write-once legacy prime id rides the same passthrough. It is the
+    // ONLY record of which account was the codex's CodexPrime — the
+    // promotion destroyed every other trace — so losing it on export would
+    // lose the designation permanently, with nothing left to rebuild it from.
+    expect(parsed.codexMasterSeed?.legacyPrimeOuroAccountId).toBe("ouro-legacy");
   });
 });

@@ -65,7 +65,12 @@ import {
   type BitStringAccount,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
 import { DalosSecretReveal, CodexModalShell, BitmapKeyInput } from "@ancientpantheon/codex-ouronet/ui";
-import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
+// `LockedMedallion` is the ONE badge every surface wears on an entity the
+// STORE would refuse to delete (design.md §B5). It is safe to render from this
+// package despite the standing `lucide-react` ban here: it imports NOTHING —
+// lucide's own Lock icon node is inlined in it for exactly this reason — so it
+// cannot drag a second React instance in the way an icon package would.
+import { useIsMobile, LockedMedallion } from "@ancientpantheon/codex-ui/ui";
 
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist as BIP_ENGLISH_WORDLIST } from "@scure/bip39/wordlists/english";
@@ -88,7 +93,12 @@ import { resolveSeedBitString, SEED_BIT_LENGTH } from "../seeds/index.js";
 import { planIndexRanges, type IndexSelection } from "../seeds/planIndexRanges.js";
 import { resolveMasterArweaveSeed } from "./resolveMasterArweaveSeed.js";
 import { runSeededBatch } from "../keygen/KeygenRunner.js";
-import { MASTER_ARWEAVE_SEED, FORMER_MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
+import {
+  MASTER_ARWEAVE_SEED,
+  FORMER_MASTER_ARWEAVE_SEED,
+  arweaveSeedLock,
+  type EntityLock,
+} from "@ancientpantheon/codex-core";
 
 /* ────────────────────────────── the model ────────────────────────────── */
 
@@ -1885,6 +1895,11 @@ export function ArweaveSeedsArea({
             <SeedRow
               seed={seed}
               isPrime={seed === primeSeed}
+              // The SAME predicate the store's own refusal uses, so the UI and
+              // the store cannot disagree (design.md §B4). Deliberately NOT
+              // `seed === primeSeed`: that falls back to position 0, and a
+              // position is not an identity — see `arweaveSeedLock`.
+              lock={arweaveSeedLock(seed, masterArweaveSeedId)}
               isFormerMaster={seed !== primeSeed && formerMasterSeedIds.has(seed.id)}
               fullScreenPortalTarget={fullScreenPortalTarget}
               open={openSeedId === seed.id}
@@ -2244,6 +2259,12 @@ export function ArweaveSeedsArea({
 
   /* ── deletion ── */
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  /** The message of a delete the consumer REFUSED, or `null`. The store is the
+   *  enforcer (`deleteArweaveSeed` refuses its Master ArWeave Seed), and this
+   *  surface removes the control for everything that predicate locks — but a
+   *  refusal arriving by any other route must still be shown rather than
+   *  swallowed into an unhandled rejection (design criterion 10). */
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   /**
    * Deletes a seed and, WITH it, every key derived from it.
@@ -2259,9 +2280,25 @@ export function ArweaveSeedsArea({
       if (abortRef.current?.seedId === seed.id) abortRef.current.controller.abort();
       storedRef.current.delete(seed.id);
       setPendingDeleteId((prev) => (prev === seed.id ? null : prev));
+      setDeleteError(null);
       setLocalSeeds((prev) => prev.filter((entry) => entry.id !== seed.id));
       setDeletedSeedIds((prev) => new Set(prev).add(seed.id));
-      void onDeleteSeed?.({ seedId: seed.id, keyIds: keyIdsOfSeed(existingKeys, seed.id) });
+      // The row is dropped OPTIMISTICALLY (the session overlay must not wait on
+      // a round-trip), so a rejection has to undo that as well as name itself:
+      // a removal that outlives the refusal tells the user a seed is gone that
+      // the store still holds. `onDeleteSeed` may return void, so the outcome
+      // is normalised before it is caught.
+      Promise.resolve(onDeleteSeed?.({ seedId: seed.id, keyIds: keyIdsOfSeed(existingKeys, seed.id) })).catch(
+        (cause: unknown) => {
+          setDeleteError(messageOf(cause));
+          setLocalSeeds((prev) => (prev.some((entry) => entry.id === seed.id) ? prev : [...prev, seed]));
+          setDeletedSeedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(seed.id);
+            return next;
+          });
+        },
+      );
     },
     [existingKeys, onDeleteSeed],
   );
@@ -2419,6 +2456,16 @@ export function ArweaveSeedsArea({
           ) : (
             renderSeedsPage(0, false)
           )}
+        </div>
+      )}
+
+      {/* A REFUSED delete, in the consumer's own words. Rendered OUTSIDE the
+          page surface above, which is the element `useMobileSeedPageSize`
+          measures — a banner inside it would change the mobile page packing.
+          See `confirmDelete`. */}
+      {deleteError !== null && (
+        <div data-testid="arweave-seed-delete-error" style={errorStyle}>
+          {deleteError}
         </div>
       )}
 
@@ -2666,7 +2713,12 @@ function SeedRowActions({
    *  own `SeedRowActions`). */
   seedId: string;
   onView: () => void;
-  onDelete: () => void;
+  /** `null` on a LOCKED seed — the menu then offers View Seed and nothing
+   *  that destroys it. Removed, never disabled: owner decision 3,
+   *  *"delete button should not be available for them"*
+   *  (docs/work/locked-entities-and-former-prime/design.md §B5). This fork
+   *  previously had no gate of any kind. */
+  onDelete: (() => void) | null;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   // Anchored to the viewport (position: fixed), same reasoning as
@@ -2729,15 +2781,19 @@ function SeedRowActions({
             >
               <EyeGlyph style={{ width: 16, height: 16 }} /> View Seed
             </button>
-            <div style={{ height: 1, backgroundColor: "#919eab3d", margin: "4px 0" }} />
-            <button
-              type="button"
-              data-testid={`arweave-seed-row-actions-delete-${seedId}`}
-              style={{ ...item, color: "#c0392b" }}
-              onClick={() => { setOpen(false); onDelete(); }}
-            >
-              <TrashGlyph style={{ width: 16, height: 16 }} /> Delete
-            </button>
+            {onDelete !== null && (
+              <>
+                <div style={{ height: 1, backgroundColor: "#919eab3d", margin: "4px 0" }} />
+                <button
+                  type="button"
+                  data-testid={`arweave-seed-row-actions-delete-${seedId}`}
+                  style={{ ...item, color: "#c0392b" }}
+                  onClick={() => { setOpen(false); onDelete(); }}
+                >
+                  <TrashGlyph style={{ width: 16, height: 16 }} /> Delete
+                </button>
+              </>
+            )}
           </div>
         </>,
         document.body,
@@ -2749,6 +2805,7 @@ function SeedRowActions({
 function SeedRow({
   seed,
   isPrime,
+  lock,
   isFormerMaster,
   open,
   onToggle,
@@ -2765,6 +2822,13 @@ function SeedRow({
   ensureCodexUnlocked,
 }: {
   seed: ArweaveSeedRecord;
+  /** Why the STORE would refuse to delete this seed, or `null` — codex-core's
+   *  `arweaveSeedLock`, the same predicate `deleteArweaveSeed` enforces with.
+   *  Non-null means the row wears a {@link LockedMedallion} naming the reason
+   *  and renders NO delete control, in BOTH forks. It is NOT `isPrime`: that
+   *  one falls back to position 0 for display, and a position is not an
+   *  identity the store can defend. */
+  lock: EntityLock | null;
   /** TRUE for THE MASTER ROW — the one the codex calls its Master ArWeave
    *  Seed, which sits first and wears the gold treatment. It is NOT
    *  `ArweaveSeedRecord.isPrime` ("the first seed ever added"), and the two
@@ -2974,6 +3038,18 @@ function SeedRow({
               </span>
             </span>
           </button>
+          {/* COMPACT form on purpose: round 25 took the text badges off this
+              row ("we remove prime medalion, we designed that it is prime
+              simply via colour") and the mobile page size is measured from
+              the rendered row height — an icon-only 20×20 badge carries the
+              wording in its accessible name without growing the row. */}
+          {lock !== null && (
+            <LockedMedallion
+              compact
+              reason={lock.label}
+              testId={`arweave-seed-locked-${seed.id}`}
+            />
+          )}
           <span
             style={{
               flexShrink: 0,
@@ -2990,7 +3066,7 @@ function SeedRow({
           <SeedRowActions
             seedId={seed.id}
             onView={() => setRevealOpen(true)}
-            onDelete={onRequestDelete}
+            onDelete={lock === null ? onRequestDelete : null}
           />
         </div>
       ) : (
@@ -3081,6 +3157,13 @@ function SeedRow({
                 {"\u{1F512} Prime"}
               </span>
             )}
+            {/* Beside the Prime badge, never instead of it: the gold pill says
+                WHICH seed this is, the medallion says the store will not let
+                it go. Its own testid keeps the row's exact-count text
+                assertions (`getAllByText(PRIME_SEED_LABEL)`) intact. */}
+            {lock !== null && (
+              <LockedMedallion reason={lock.label} testId={`arweave-seed-locked-${seed.id}`} />
+            )}
             <span
               style={{
                 fontSize: 11,
@@ -3117,27 +3200,33 @@ function SeedRow({
             <EyeGlyph style={{ width: 15, height: 15 }} />
             View Seed
           </button>
-          {/* The Prime seed is deletable FOR NOW (development): the shipped
-              build makes it permanent, and only the warning copy ships in
-              this pass. */}
-          <button
-            type="button"
-            data-testid={`arweave-seed-delete-${seed.id}`}
-            aria-label={`Delete ${displayName}`}
-            title="Delete this seed and every Arweave key derived from it"
-            onClick={onRequestDelete}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "10px 14px",
-              border: "none",
-              backgroundColor: "transparent",
-              color: confirmingDelete ? "#f87171" : "#666",
-              cursor: "pointer",
-            }}
-          >
-            <TrashGlyph style={{ width: 15, height: 15 }} />
-          </button>
+          {/* A LOCKED seed has NO delete control — removed, not disabled
+              (owner decision 3, *"delete button should not be available for
+              them"*). This is where "The Prime seed is deletable FOR NOW
+              (development)" used to stand: deleting the master left
+              `codexMasterSeed.arweaveSeedId` dangling while the codex still
+              reported its ArWeave face established. The medallion above says
+              why the control is absent. */}
+          {lock === null && (
+            <button
+              type="button"
+              data-testid={`arweave-seed-delete-${seed.id}`}
+              aria-label={`Delete ${displayName}`}
+              title="Delete this seed and every Arweave key derived from it"
+              onClick={onRequestDelete}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "10px 14px",
+                border: "none",
+                backgroundColor: "transparent",
+                color: confirmingDelete ? "#f87171" : "#666",
+                cursor: "pointer",
+              }}
+            >
+              <TrashGlyph style={{ width: 15, height: 15 }} />
+            </button>
+          )}
         </div>
       )}
 

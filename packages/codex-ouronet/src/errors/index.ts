@@ -15,6 +15,7 @@ export {
   CodexArweaveEncryptionProtectedError,
   CodexMasterKeyLockedError,
   CodexPrimeSeedProtectedError,
+  CodexMasterArweaveSeedProtectedError,
   CodexKickstartError,
   CodexAdapterError,
   CodexPasswordError,

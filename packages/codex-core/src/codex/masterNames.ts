@@ -62,20 +62,30 @@ export const MASTER_ARWEAVE_SEED = "Master ArWeave Seed";
 export const CODEX_MASTER_SEED = "Codex Master Seed";
 
 /**
- * The golden designation of an Ouronet account that USED to be the master.
+ * The designation of the Ouronet account that was this codex's CodexPrime
+ * before it ever settled a master — the one account a codex can ever displace.
  *
- * Owner: *"Same for Initial Seed on Ouronet Account — it was Ouronet Codex
- * Master before, and would become after apply Former Codex Ouronet Master."*
+ * Owner: *"The former Prime Ouronet Account is now 'Initial Seed'. It would
+ * have to be 'Former Codex Prime', because that was its designation before:
+ * Codex Prime."*
  *
- * DERIVED from {@link OURONET_CODEX_MASTER} rather than written out, so the
- * pair cannot drift in wording: topic 1 of this project just changed the
- * master's wording ("Ouronet Codex Master" -> "Codex Ouronet Master"), and a
- * hand-written literal here would have been left behind reading the old one.
- * The exact resulting string is pinned in `tests/master-names.test.ts`, so a
- * rename of the master still has to break a test before it can silently
- * re-word this.
+ * WRITTEN OUT AS A LITERAL, and deliberately NOT derived from
+ * {@link OURONET_CODEX_MASTER} the way {@link FORMER_MASTER_ARWEAVE_SEED} is
+ * derived from its live sibling. "Codex Prime" is a RETIRED HISTORICAL
+ * designation, not a re-wording of a live name: the account carried that
+ * title at a point in the past, and that fact does not change if the master's
+ * current name is re-worded tomorrow. Deriving it would silently rewrite
+ * history on the next rename. The exact value is pinned in
+ * `tests/master-names.test.ts`, like its siblings.
+ *
+ * This REPLACES the short-lived `FORMER_OURONET_CODEX_MASTER`. Owner decision
+ * (1): a displacement can only happen once — *"only once we can apply the
+ * pending settings"* — and it is always kickstart-prime -> settled master, so
+ * an Ouronet account can never legitimately read "Former Codex Ouronet
+ * Master". Rendered behind `isLegacyPrimeAccount`'s seal gate (see
+ * `./masterSeed.ts`), in muted silver, never gold: exactly one gold row is the accounts tab's invariant.
  */
-export const FORMER_OURONET_CODEX_MASTER = `Former ${OURONET_CODEX_MASTER}` as const;
+export const FORMER_CODEX_PRIME = "Former Codex Prime";
 
 /**
  * The golden designation of an ArWeave seed that USED to be the master.

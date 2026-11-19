@@ -5,7 +5,9 @@
  *
  * Full surface: a "Create New Seed" button (→ CreateStoaChainSeedModal); each seed
  * row is expandable to reveal its derived keys; per key a Copy + Delete button
- * (the Prime seed's Key #0 delete is disabled); "Add Consecutive Key"
+ * (a key position the store would refuse to drop — the Prime seed's Key #0,
+ * or any position held by a master-key lock — shows a Locked medallion and
+ * NO delete control instead); "Add Consecutive Key"
  * (gap-fills the lowest free index) and "Add Key at Position" (arbitrary index,
  * dup-guarded). View-mnemonic / rename / delete-seed live in a per-row menu.
  *
@@ -24,11 +26,11 @@ import {
 import { smartDecrypt } from "@stoachain/stoa-core/crypto";
 import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
 import { binToHex } from "@stoachain/kadena-stoic-legacy/cryptography-utils";
-import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
+import { useIsMobile, LockedMedallion } from "@ancientpantheon/codex-ui/ui";
 import { useStoaChainSeeds } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
-import { IconCopyBtn, IconDeleteBtn, IconDeleteBtnDisabled, IconHideBtn } from "../internal/IconButtons.js";
+import { IconCopyBtn, IconDeleteBtn, IconHideBtn } from "../internal/IconButtons.js";
 import { KeyFieldsHalves } from "../internal/KeyFieldsHalves.js";
 import { MeasuredHexHighlight } from "../internal/StoaAddressHighlight.js";
 import { CreateStoaChainSeedModal } from "../internal/CreateStoaChainSeedModal.js";
@@ -36,7 +38,30 @@ import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { DalosSecretReveal } from "../internal/DalosSecretReveal.js";
 import { deriveStoaDalosKeypairAtIndex } from "../../wallet/stoaDalosKeygen.js";
 import type { IStoaChainSeed, SeedType, WalletAccount } from "../../types/entities.js";
-import { masterChainwebSeedName } from "@ancientpantheon/codex-core";
+import { masterChainwebSeedName, chainwebSeedLock, chainwebKeyPositionLock } from "@ancientpantheon/codex-core";
+import type { EntityLock, MasterKeyLock } from "@ancientpantheon/codex-core";
+import { useCodexStoreOptional } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/store.js";
+
+/**
+ * The codex's master-key lock registry, read through the NON-throwing store
+ * handle — the same `useCodexStoreOptional()((s) => s.masterKeyLocks)` shape
+ * `OuronetAccountsTab`'s own `useMasterOuronetIdentity` uses, and for the
+ * same reason: a surface mounted without a `<CodexProvider>` ancestor must
+ * degrade to "nothing known", never throw. `masterKeyLocks` is not part of
+ * codex-ui's `useCodex()` view, so there is no other route to it.
+ *
+ * What it answers (docs/work/locked-entities-and-former-prime/design.md §B2,
+ * bugs 1 and 2) is exactly what `deleteStoaChainSeed` and
+ * `updateStoaChainSeed` already enforce — via codex-core's
+ * `chainwebSeedLock` / `chainwebKeyPositionLock`, so the medallion and the
+ * store's throw can never name different things.
+ */
+function useMasterKeyLocks(): readonly MasterKeyLock[] | undefined {
+  const codexStore = useCodexStoreOptional();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return codexStore ? codexStore((st: CodexStoreState) => st.masterKeyLocks) : undefined;
+}
 
 /** Portals `children` into `target` when supplied (a DOM node spanning the
  *  host's WHOLE mobile body — see `SeedWordsTabProps.fullScreenPortalTarget`'s
@@ -317,11 +342,14 @@ export interface SeedWordsTabProps {
 
 /* ─── Key row ─── */
 function KeyRow({
-  account, seedId, isPrimeFirstKey, onDelete, decrypt,
+  account, seedId, lock, onDelete, decrypt,
 }: {
   account: WalletAccount;
   seedId: string;
-  isPrimeFirstKey: boolean;
+  /** Why `updateStoaChainSeed` would refuse to drop this position, or
+   *  `null`. Decided ONCE by codex-core's `chainwebKeyPositionLock` (see
+   *  `useMasterKeyLocks`), never re-derived here. */
+  lock: EntityLock | null;
   onDelete: (seedId: string, index: number) => void;
   /** Re-derives this key's private (secret) key from the seed mnemonic. */
   decrypt: () => Promise<string>;
@@ -334,6 +362,7 @@ function KeyRow({
   const isMobile = useIsMobile();
   return (
     <div
+      data-testid={`key-row-${seedId}-${account.index}`}
       style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: isMobile ? "8px 10px" : "6px 8px",
@@ -350,8 +379,12 @@ function KeyRow({
       <div style={{ flex: 1, minWidth: 0 }}>
         <KeyFieldsHalves publicKey={account.publicKey} decryptPrivate={decrypt} />
       </div>
-      {isPrimeFirstKey
-        ? <IconDeleteBtnDisabled size={28} title="Cannot delete first key of Prime seed" />
+      {/* Owner: "delete button should not be availabe for them" — a locked
+          position loses its delete control outright (it was a DISABLED
+          button, which the store's own guard comment called "cosmetic"),
+          and wears the medallion in its place so the row still says WHY. */}
+      {lock
+        ? <LockedMedallion reason={lock.label} testId={`key-locked-${seedId}-${account.index}`} />
         : <IconDeleteBtn onClick={() => onDelete(seedId, account.index)} size={28} />}
     </div>
   );
@@ -396,9 +429,12 @@ function PositionMedallion({ index, selected }: { index: number; selected: boole
  *  `StoaAccountsTab`'s own `AddressRow`/shared action row already
  *  established). A tap selects; the selected row's medallion lights up. */
 function MobileKeyRow({
-  account, selected, onSelect, showPrivate, privValue,
+  account, seedId, lock, selected, onSelect, showPrivate, privValue,
 }: {
   account: WalletAccount;
+  seedId: string;
+  /** See `KeyRow.lock` — the same answer, rendered in the mobile tree. */
+  lock: EntityLock | null;
   selected: boolean;
   onSelect: () => void;
   /** Whether the shared switcher is currently on "private" — only visually
@@ -412,6 +448,7 @@ function MobileKeyRow({
   const color = showingPrivate ? "#f59e0b" : "#c0c0c0";
   return (
     <div
+      data-testid={`key-row-${seedId}-${account.index}`}
       onClick={onSelect}
       style={{
         display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", cursor: "pointer",
@@ -426,15 +463,35 @@ function MobileKeyRow({
         edgeColor={showingPrivate ? color : "#eab308"}
         style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12 }}
       />
+      {/* COMPACT (icon-only) here, not the text pill: this mobile tree
+          deliberately drops text badges in favour of colour + a lock glyph
+          (the seed header's own round-6 owner correction, a few lines
+          below), and the delete control for whichever position is SELECTED
+          lives in the shared action bar above the list — so this badge's
+          job is only to say WHICH positions are held, at a glance. */}
+      {lock && <LockedMedallion compact reason={lock.label} testId={`key-locked-${seedId}-${account.index}`} />}
     </div>
   );
 }
 
 /* ─── Per-seed actions menu (View / Rename / Delete) ─── */
 function SeedActions({
-  isPrime, onView, onRename, onDelete,
+  isPrime, deleteLocked, onView, onRename, onDelete,
 }: {
   isPrime: boolean;
+  /** `deleteStoaChainSeed` would refuse this seed for a reason OTHER than
+   *  its being the prime one — today, a master-key lock
+   *  (docs/work/locked-entities-and-former-prime/design.md §B2, bug 1).
+   *
+   *  Deliberately a SECOND gate rather than being folded into `isPrime`:
+   *  the prime seed hides Rename AND Delete together (its displayed name is
+   *  `masterChainwebSeedName`'s, so renaming it means nothing), whereas a
+   *  locked seed loses only Delete — `updateStoaChainSeed` accepts a rename
+   *  of a locked seed (every locked position is kept), so hiding Rename
+   *  would withhold a capability the store actually allows. Same split
+   *  `OuronetAccountsTab` already draws between `renameLocked` and
+   *  `deleteProtected`. */
+  deleteLocked: boolean;
   onView: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -488,10 +545,15 @@ function SeedActions({
               <Eye style={{ width: 16, height: 16 }} /> View Seed Words
             </button>
             {!isPrime && (
+              <button type="button" style={{ ...item, color: "#d2d3d4" }} onClick={() => { setOpen(false); onRename(); }}>
+                <Edit2 style={{ width: 16, height: 16 }} /> Rename
+              </button>
+            )}
+            {/* Owner: "delete button should not be availabe for them" —
+                REMOVED, never disabled. The divider goes with it, so a
+                locked seed's menu does not end in a dangling rule. */}
+            {!isPrime && !deleteLocked && (
               <>
-                <button type="button" style={{ ...item, color: "#d2d3d4" }} onClick={() => { setOpen(false); onRename(); }}>
-                  <Edit2 style={{ width: 16, height: 16 }} /> Rename
-                </button>
                 <div style={{ height: 1, backgroundColor: "#919eab3d", margin: "4px 0" }} />
                 <button type="button" style={{ ...item, color: "#c0392b" }} onClick={() => { setOpen(false); onDelete(); }}>
                   <Trash2 style={{ width: 16, height: 16 }} /> Delete
@@ -537,6 +599,20 @@ function SeedRow({
   const ensureUnlocked = useEnsureCodexUnlocked();
   const isMobile = useIsMobile();
   const isPrime = seed.isPrime === true || index === 0;
+  // The store's own refusals, read ONCE per row and reused by both JSX
+  // trees below (docs/work/locked-entities-and-former-prime/design.md §B4).
+  // `seedLock` is deliberately given the SEED's own `isPrime`, not the row's
+  // `isPrime` above: the row widens it with an `index === 0` fallback for
+  // DISPLAY, while `deleteStoaChainSeed` refuses on `target?.isPrime` alone
+  // — and a medallion that claimed a refusal the store would not make is
+  // the same lie, pointed the other way.
+  const masterKeyLocks = useMasterKeyLocks();
+  const seedLock = chainwebSeedLock(seed, masterKeyLocks);
+  /** Why position `i` of this seed cannot be removed, or `null`. The row's
+   *  (widened) `isPrime` IS the right input here: `seedIsPrime` reproduces
+   *  today's first-key rule, which has always been the displayed one. */
+  const keyLockAt = (i: number) =>
+    chainwebKeyPositionLock(seed.id, i, masterKeyLocks, { seedIsPrime: isPrime });
   const displayName = masterChainwebSeedName(index, isPrime, seed.name);
   const cfg = SEED_COLORS[normalizeSeedType(seed.seedType)];
 
@@ -572,6 +648,10 @@ function SeedRow({
       ? selectedKeyIndexState
       : (sortedAccounts[0]?.index ?? null);
   const selectedAccount = sortedAccounts.find((a) => a.index === selectedKeyIndex) ?? null;
+  /** MOBILE ONLY — the lock on whichever position the shared action bar is
+   *  currently pointed at (that bar carries ONE delete for the selection,
+   *  not one per row). */
+  const selectedKeyLock = selectedAccount ? keyLockAt(selectedAccount.index) : null;
 
   const selectKey = (idx: number) => {
     setSelectedKeyIndexState(idx);
@@ -798,11 +878,17 @@ function SeedRow({
               {displayName}
             </span>
           )}
+          {/* COMPACT: this mobile header dropped its text badges in the
+              round-6 owner correction above ("gaining vertical space"), so
+              the Locked signal arrives as colour + a lock glyph, with its
+              reason on the badge's own label. */}
+          {seedLock && <LockedMedallion compact reason={seedLock.label} testId={`seed-locked-${seed.id}`} />}
           <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, lineHeight: "16px", color: "#888" }}>
             {seed.accounts.length} <Key style={{ width: 11, height: 11 }} />
           </span>
           <SeedActions
             isPrime={isPrime}
+            deleteLocked={seedLock !== null}
             onView={() => void handleView()}
             onRename={() => { setDraftName(isPrime ? "" : seed.name || ""); setRenaming(true); }}
             onDelete={() => onDeleteSeed(seed.id)}
@@ -840,11 +926,16 @@ function SeedRow({
         {isPrime && (
           <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, color: "#ceac5f", backgroundColor: "#ceac5f20" }}>🔒 Prime</span>
         )}
+        {/* The Locked medallion sits beside — never instead of — the
+            `🔒 Prime` pill: Prime is a DESIGNATION, Locked is "the store
+            would refuse to delete this", and the prime seed is both. */}
+        {seedLock && <LockedMedallion reason={seedLock.label} testId={`seed-locked-${seed.id}`} />}
         <span style={{ flexShrink: 0, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, color: cfg.color, backgroundColor: cfg.bg }}>{cfg.label}</span>
         <span style={{ fontSize: 12, flexShrink: 0, color: "#888" }}>{seed.accounts.length} key{seed.accounts.length !== 1 ? "s" : ""}</span>
         <div style={{ flex: 1 }} />
         <SeedActions
           isPrime={isPrime}
+          deleteLocked={seedLock !== null}
           onView={() => void handleView()}
           onRename={() => { setDraftName(isPrime ? "" : seed.name || ""); setRenaming(true); }}
           onDelete={() => onDeleteSeed(seed.id)}
@@ -996,8 +1087,12 @@ function SeedRow({
               >
                 {keyCopied ? <Check style={{ width: 16, height: 16 }} /> : <Copy style={{ width: 16, height: 16 }} />}
               </button>
-              {isPrime && selectedAccount.index === 0
-                ? <IconDeleteBtnDisabled size={36} title="Cannot delete first key of Prime seed" />
+              {/* The mobile tree's delete control is shared, tied to the
+                  SELECTED position — so it is withheld exactly when that
+                  position is locked, with the medallion standing in its
+                  place so the gap is never mistaken for a missing button. */}
+              {selectedKeyLock
+                ? <LockedMedallion compact reason={selectedKeyLock.label} testId={`key-action-locked-${seed.id}`} />
                 : <IconDeleteBtn onClick={() => onDeleteKey(seed, selectedAccount.index)} size={36} />}
             </div>
           )}
@@ -1076,6 +1171,8 @@ function SeedRow({
                 <MobileKeyRow
                   key={`${seed.id}-${acc.index}`}
                   account={acc}
+                  seedId={seed.id}
+                  lock={keyLockAt(acc.index)}
                   selected={acc.index === selectedKeyIndex}
                   onSelect={() => selectKey(acc.index)}
                   showPrivate={showPrivateKey}
@@ -1099,7 +1196,7 @@ function SeedRow({
                 key={`${seed.id}-${acc.index}`}
                 account={acc}
                 seedId={seed.id}
-                isPrimeFirstKey={isPrime && acc.index === 0}
+                lock={keyLockAt(acc.index)}
                 onDelete={(sid, i) => { void (sid === seed.id && onDeleteKey(seed, i)); }}
                 decrypt={revealPrivateKey(acc)}
               />
@@ -1216,9 +1313,21 @@ export function SeedWordsTab({ className, createOpen: createOpenProp, onCreateOp
 
   const handleRename = (seed: IStoaChainSeed, name: string) => void updateSeed({ ...seed, name });
 
+  /** The store's OWN words, not a summary of them
+   *  (docs/work/locked-entities-and-former-prime/design.md §B2, bug 1).
+   *  `CodexMasterKeyLockedError` / `CodexPrimeSeedProtectedError` each name
+   *  the reason AND the remedy — for a lock, that re-running Secure Master
+   *  Account is how it gets released. The old catch replaced all of that
+   *  with "This seed is protected and cannot be deleted.", which told the
+   *  owner neither what held it nor what to do. The generic sentence
+   *  survives only as the fallback for a non-`Error` throw. */
   const handleDeleteSeed = async (id: string) => {
     setTopError(null);
-    try { await deleteSeed(id); } catch { setTopError("This seed is protected and cannot be deleted."); }
+    try {
+      await deleteSeed(id);
+    } catch (e) {
+      setTopError(e instanceof Error ? e.message : "This seed is protected and cannot be deleted.");
+    }
   };
 
   /** Derive a key at `index` from the seed's mnemonic and persist it. `onStage`
@@ -1250,8 +1359,21 @@ export function SeedWordsTab({ className, createOpen: createOpenProp, onCreateOp
     await updateSeed({ ...seed, accounts });
   };
 
+  /** Removing a position goes through `updateStoaChainSeed`, which is where
+   *  the master-key lock guard actually lives ("The seeds UI's disabled
+   *  delete button is cosmetic; this is the real thing"). This was a bare
+   *  `void updateSeed(...)` with no `catch` at all, so a refusal became an
+   *  unhandled rejection and the owner saw nothing happen — design.md §B2,
+   *  bug 2. The control is withheld for every locked position now, but the
+   *  path must not be silent if it is ever reached anyway: the store's
+   *  message lands in the SAME slot a refused seed delete uses. */
   const handleDeleteKey = (seed: IStoaChainSeed, index: number) => {
-    void updateSeed({ ...seed, accounts: seed.accounts.filter((a) => a.index !== index) });
+    setTopError(null);
+    void updateSeed({ ...seed, accounts: seed.accounts.filter((a) => a.index !== index) }).catch(
+      (e: unknown) => {
+        setTopError(e instanceof Error ? e.message : "This key is protected and cannot be removed.");
+      },
+    );
   };
 
   // Pagination (mobile only — desktop stays unpaginated, unchanged) — MEASURED

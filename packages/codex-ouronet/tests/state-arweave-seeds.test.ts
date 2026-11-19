@@ -25,7 +25,10 @@ import {
   MemoryCodexAdapter,
   LocalStorageCodexAdapter,
 } from "@ancientpantheon/codex-ouronet/adapters";
-import { CodexKickstartError } from "@ancientpantheon/codex-ouronet/errors";
+import {
+  CodexKickstartError,
+  CodexMasterArweaveSeedProtectedError,
+} from "@ancientpantheon/codex-ouronet/errors";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
 
 /** The seed entity, reached through the store state rather than the `/types`
@@ -158,10 +161,82 @@ describe("arweaveSeeds slice — store actions", () => {
     expect(remounted.getState().arweaveSeeds.map((s) => s.id)).toEqual(["aws-1"]);
   });
 
-  it("deletes the Prime Arweave Seed too (design.md: deletable in development)", async () => {
+  // DELIBERATELY REWRITTEN — owner decision (3),
+  // docs/work/locked-entities-and-former-prime/design.md §B3. This test used to
+  // assert the OPPOSITE ("deletes the Prime Arweave Seed too (design.md:
+  // deletable in development)"): that `arweaveSeeds` was `[]` after deleting
+  // the prime. The owner ended the development-only exemption, because
+  // deleting the master ArWeave seed left `codexMasterSeed.arweaveSeedId`
+  // dangling while `describeCodexMasterSeed` still reported that face
+  // established. It was overruled, not broken by accident.
+  //
+  // The non-prime delete above (`aws-2`, no settled row) is the control: it
+  // must stay green exactly as it is.
+  it("REFUSES to delete the Prime Arweave Seed, and the seed is still there", async () => {
     await store.getState().actions.addArweaveSeed(seed());
-    await store.getState().actions.deleteArweaveSeed("aws-1");
-    expect(store.getState().arweaveSeeds).toEqual([]);
+
+    await expect(
+      store.getState().actions.deleteArweaveSeed("aws-1"),
+    ).rejects.toMatchObject({
+      name: "CodexMasterArweaveSeedProtectedError",
+      seedId: "aws-1",
+    });
+
+    expect(store.getState().arweaveSeeds.map((s) => s.id)).toEqual(["aws-1"]);
+  });
+
+  // The refusal must NAME the reason: `CodexMasterKeyLockedError`'s own doc
+  // comment states why ("a refusal that did not say WHY would be
+  // indistinguishable from a bug"), and the UI shows the store's message.
+  it("names the Master ArWeave Seed as the reason for the refusal", async () => {
+    await store.getState().actions.addArweaveSeed(seed());
+    await expect(
+      store.getState().actions.deleteArweaveSeed("aws-1"),
+    ).rejects.toThrow(/Master ArWeave Seed/);
+  });
+
+  // The SETTLED identity, not just the flag: a non-prime seed that the Codex
+  // Master Seed row names as its ArWeave face is equally undeletable. This is
+  // the branch a hand-rolled `if (seed.isPrime)` would miss.
+  it("REFUSES to delete a non-prime seed that codexMasterSeed names as its ArWeave face", async () => {
+    await store.getState().actions.addArweaveSeed(seed());
+    await store.getState().actions.addArweaveSeed(seed({ id: "aws-2", name: "Settled" }));
+    await store.getState().actions.setCodexMasterSeed({
+      ouroAccountId: "ouro-1",
+      chainwebSeedId: "kseed-1",
+      arweaveSeedId: "aws-2",
+    });
+    expect(store.getState().arweaveSeeds.find((s) => s.id === "aws-2")?.isPrime).not.toBe(true);
+
+    await expect(
+      store.getState().actions.deleteArweaveSeed("aws-2"),
+    ).rejects.toMatchObject({
+      name: "CodexMasterArweaveSeedProtectedError",
+      seedId: "aws-2",
+    });
+
+    expect(store.getState().arweaveSeeds.map((s) => s.id)).toEqual(["aws-1", "aws-2"]);
+  });
+
+  // The BARREL export, not just the thrown shape: the ArWeave panel catches
+  // this by class (`e instanceof ...`), so an error class that exists only
+  // inside `errors/types.ts` would leave that catch unreachable.
+  it("throws the CodexMasterArweaveSeedProtectedError exported from /errors", async () => {
+    await store.getState().actions.addArweaveSeed(seed());
+    await expect(
+      store.getState().actions.deleteArweaveSeed("aws-1"),
+    ).rejects.toBeInstanceOf(CodexMasterArweaveSeedProtectedError);
+  });
+
+  it("the refused seed is still on disk after a re-init (no partial write)", async () => {
+    await store.getState().actions.addArweaveSeed(seed());
+    await expect(
+      store.getState().actions.deleteArweaveSeed("aws-1"),
+    ).rejects.toThrow();
+
+    const remounted = createCodexStore();
+    await remounted.getState().actions.init(adapter, "dev");
+    expect(remounted.getState().arweaveSeeds.map((s) => s.id)).toEqual(["aws-1"]);
   });
 
   it("a foreign-key write does not wipe the seeds (full-snapshot cascade rule)", async () => {

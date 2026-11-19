@@ -10,7 +10,12 @@
  */
 
 import type { MasterKeyLockReason } from "@ancientpantheon/codex-core";
-import { MASTER_CHAINWEB_SEED, OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
+import {
+  CODEX_MASTER_SEED,
+  MASTER_ARWEAVE_SEED,
+  MASTER_CHAINWEB_SEED,
+  OURONET_CODEX_MASTER,
+} from "@ancientpantheon/codex-core";
 import type { RekeySkip } from "../rekey/index.js";
 
 /** Base class for all codex-related errors. */
@@ -167,6 +172,40 @@ export class CodexMasterKeyLockedError extends CodexError {
     this.seedId = seedId;
     this.position = position;
     this.reason = reason;
+  }
+}
+
+/**
+ * Thrown when something tries to delete the Master ArWeave Seed — the seed
+ * the codex's ArWeave face is built from (locked-entities-and-former-prime
+ * design.md §B3, owner decision 3).
+ *
+ * Until this existed, `deleteArweaveSeed` was an unguarded filter and the
+ * master ArWeave seed was deletable at every layer. Deleting it left
+ * `codexMasterSeed.arweaveSeedId` pointing at nothing while
+ * `describeCodexMasterSeed` still reported that face established — a codex
+ * claiming an identity it no longer held.
+ *
+ * Which seeds qualify is NOT decided here: `arweaveSeedLock` is the single
+ * rule (the settled `codexMasterSeed.arweaveSeedId`, or the seed's own
+ * `isPrime`), shared verbatim with the medallion that hides the delete
+ * control. This class only carries the refusal.
+ *
+ * The message NAMES the reason, for the same cause
+ * {@link CodexMasterKeyLockedError} gives: a refusal that did not say WHY
+ * would be indistinguishable from a bug.
+ */
+export class CodexMasterArweaveSeedProtectedError extends CodexError {
+  public override readonly name = "CodexMasterArweaveSeedProtectedError";
+  public readonly seedId: string;
+
+  constructor(seedId: string) {
+    super(
+      `ArWeave seed ${seedId} is your ${MASTER_ARWEAVE_SEED} and cannot be ` +
+        `deleted. Deleting it would leave your ${CODEX_MASTER_SEED}'s ArWeave ` +
+        `face pointing at nothing.`
+    );
+    this.seedId = seedId;
   }
 }
 

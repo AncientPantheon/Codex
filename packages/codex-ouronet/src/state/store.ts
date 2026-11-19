@@ -16,7 +16,7 @@ import type {
 import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
 import type { CodexAdapter, CodexSnapshot } from "../adapters/types.js";
 import type { MasterKeyLock, CodexMasterSeed, MigrationProgress, MigrationSelection, MigrationCommitRecord, MigrationPendingPlan, ForeignKeyEntry } from "@ancientpantheon/codex-core";
-import { isMigrationSealed, recordFormerMasterIds } from "@ancientpantheon/codex-core";
+import { arweaveSeedLock, isMigrationSealed, recordFormerMasterIds } from "@ancientpantheon/codex-core";
 import { computeMasterKeyLockDelta } from "./masterKeyLockDelta.js";
 import type { MasterKeyLockDelta } from "./masterKeyLockDelta.js";
 import {
@@ -26,6 +26,7 @@ import {
   CodexArweaveEncryptionProtectedError,
   CodexMasterKeyLockedError,
   CodexPrimeSeedProtectedError,
+  CodexMasterArweaveSeedProtectedError,
   CodexKickstartError,
   CodexIdentityError,
   CodexPasswordError,
@@ -2015,8 +2016,11 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       //     `foreignKeys`), because adding a `saveArweaveSeeds` method would
       //     extend the adapter CONTRACT; `buildArweaveSeedSnapshot` therefore
       //     builds a COMPLETE snapshot so no other shard is wiped.
-      //   - the prime seed is NOT delete-protected: design.md keeps the Prime
-      //     Arweave Seed deletable in development builds.
+      //   - deletion is guarded by `arweaveSeedLock`, NOT by `isPrime` alone:
+      //     the settled `codexMasterSeed.arweaveSeedId` counts too. (Until
+      //     owner decision 3, locked-entities-and-former-prime/design.md §B3,
+      //     the prime seed here was deliberately UNPROTECTED — "deletable in
+      //     development builds" — which is what left the row dangling.)
 
       async addArweaveSeed(seed: IArweaveSeed) {
         assertArweaveSeedSecretIsCiphertext(seed);
@@ -2050,6 +2054,21 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       },
 
       async deleteArweaveSeed(id: string) {
+        // THE Master ArWeave Seed guard (locked-entities-and-former-prime
+        // design.md §B3, owner decision 3). This action used to be an
+        // unguarded filter, so the codex's own ArWeave face was deletable at
+        // every layer: the row kept naming a seed that no longer existed while
+        // `describeCodexMasterSeed` still reported that face established.
+        //
+        // The rule is NOT restated here. `arweaveSeedLock` is the one place it
+        // lives — settled `codexMasterSeed.arweaveSeedId` first, the seed's own
+        // `isPrime` second — and the medallion that withholds the delete
+        // control reads the SAME function, so the UI cannot promise a deletion
+        // this guard refuses (parity: tests/state-locked-entities-parity.test.ts).
+        const target = get().arweaveSeeds.find((s) => s.id === id);
+        if (arweaveSeedLock(target, get().codexMasterSeed?.arweaveSeedId)) {
+          throw new CodexMasterArweaveSeedProtectedError(id);
+        }
         // Missing id falls through to a no-op filter (mirrors deleteForeignKey).
         const next = get().arweaveSeeds.filter((s) => s.id !== id);
         set({ arweaveSeeds: next });

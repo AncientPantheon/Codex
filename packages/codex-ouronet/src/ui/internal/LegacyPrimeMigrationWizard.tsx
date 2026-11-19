@@ -7027,6 +7027,38 @@ export function LegacyPrimeMigrationWizard({
       }
     }
 
+    /**
+     * THE LEGACY PRIME, read HERE because Write 1 is about to destroy it.
+     *
+     * `ensurePrimeSeedAccountPairingAndPromote` (below) ends in
+     * `promoteSeedAndAccountToPrime`, which clears `isPrime` on every OTHER
+     * account; Write 2 — the Codex Master Seed row — runs after that. So this
+     * is the LAST point at which the account that was this codex's CodexPrime
+     * can be identified at all. Nothing later can reconstruct it: the flag is
+     * gone, the row has never named it, and its stored name is not a signal
+     * either (the v0.2 kickstart path takes a caller-supplied name, which is
+     * why a real codex's account reads "Initial Seed" rather than the v0.3 literal
+     * `"CodexPrime"` — and name-matching is exactly what `codex/masterNames.ts`
+     * forbids).
+     *
+     * Read from the STORE, not from `allAccounts`: the flag is store state,
+     * and the props are a caller-supplied view that need not contain every
+     * account. It cannot throw — no store, or no account carrying the flag,
+     * simply yields `undefined` and the field is omitted, leaving Write 2
+     * byte-identical to what it was.
+     *
+     * WRITE-ONCE IS NOT ENFORCED HERE, deliberately. This wizard is
+     * re-runnable, and on a retry this reading is the PREVIOUS CANDIDATE, not
+     * the owner's original account — so a second guard here would be guarding
+     * the wrong value anyway. The rule lives in `recordFormerMasterIds`
+     * (codex-core), which `setCodexMasterSeed` routes every row write through:
+     * an id already on the row wins over anything this run names. See
+     * `CodexMasterSeed.legacyPrimeOuroAccountId` for the full reasoning.
+     */
+    const legacyPrimeOuroAccountId = codexStore
+      ?.getState()
+      .ouroAccounts.find((a) => a.isPrime)?.id;
+
     let guardRotationNeeded: boolean;
     /**
      * The Chainweb seed Write 1 paired this account with — hoisted out of the
@@ -7104,6 +7136,12 @@ export function LegacyPrimeMigrationWizard({
           ouroAccountId: resolved.accountId,
           chainwebSeedId,
           establishedAt: new Date().toISOString(),
+          // Only when it names someone ELSE: a finalize that re-confirms the
+          // account already holding the role displaced nobody and must not
+          // claim it did.
+          ...(legacyPrimeOuroAccountId && legacyPrimeOuroAccountId !== resolved.accountId
+            ? { legacyPrimeOuroAccountId }
+            : {}),
         });
         void actions.recordMigrationCommit({ rowWritten: true }).catch(() => {});
       } else {

@@ -7,13 +7,14 @@
  */
 
 import { describe, it, expect } from "vitest";
+import * as masterNames from "../src/codex/masterNames.js";
 import {
   OURONET_CODEX_MASTER,
   MASTER_CHAINWEB_SEED,
   MASTER_ARWEAVE_SEED,
   CODEX_MASTER_SEED,
   CODEX_STOIC_IDENTITY,
-  FORMER_OURONET_CODEX_MASTER,
+  FORMER_CODEX_PRIME,
   FORMER_MASTER_ARWEAVE_SEED,
   masterOuronetAccountName,
   masterOuronetAccountParts,
@@ -39,11 +40,26 @@ describe("master display names", () => {
 describe("the FORMER master designations", () => {
   it("are exactly the owner-approved strings", () => {
     // Owner: "the one that isn't anymore would be designated Former Master
-    // Arweave Seed. Same for Initial Seed on Ouronet Account - it was Ouronet
-    // Codex Master before, and would become after apply Former Codex Ouronet
-    // Master."
-    expect(FORMER_OURONET_CODEX_MASTER).toBe("Former Codex Ouronet Master");
+    // Arweave Seed." And for the Ouronet account: "It would have to be
+    // 'Former Codex Prime', because that was its designation before: Codex
+    // Prime."
+    //
+    // FORMER_CODEX_PRIME is pinned by LITERAL here, not against another
+    // constant, because it is not derived from one: "Codex Prime" is a
+    // retired historical designation, so it must not move if a live name is
+    // re-worded.
+    expect(FORMER_CODEX_PRIME).toBe("Former Codex Prime");
     expect(FORMER_MASTER_ARWEAVE_SEED).toBe("Former Master ArWeave Seed");
+  });
+
+  it("no longer offer a FORMER designation for the Ouronet MASTER", () => {
+    // Owner decision (1): "displacements can only happen once, because only
+    // once we can apply the pending settings" — and that one displacement is
+    // always kickstart-prime -> settled master. An Ouronet account can
+    // therefore never legitimately read "Former Codex Ouronet Master", so the
+    // constant that said it is gone rather than left to be picked up again.
+    expect("FORMER_OURONET_CODEX_MASTER" in masterNames).toBe(false);
+    expect(Object.values(masterNames)).not.toContain("Former Codex Ouronet Master");
   });
 });
 

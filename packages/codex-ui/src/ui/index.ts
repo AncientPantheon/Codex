@@ -44,6 +44,12 @@ export { StoicTagDisplay } from "./StoicTagDisplay.js";
 export type { StoicTagDisplayProps } from "./StoicTagDisplay.js";
 export { CodexLockControl, CodexPasswordPrompt } from "./CodexLockControl.js";
 export type { CodexLockControlProps } from "./CodexLockControl.js";
+// The one "this entity cannot be deleted" badge all five surfaces wear
+// (docs/work/locked-entities-and-former-prime/design.md §B5). Exported HERE
+// only — never from `./hooks`, whose enumerated barrel `surface-stability.test.ts`
+// pins. Imports no icon package, so codex-arweave can render it too.
+export { LockedMedallion, lockedMedallionLabel, LOCKED_MEDALLION_COLOR } from "./LockedMedallion.js";
+export type { LockedMedallionProps } from "./LockedMedallion.js";
 
 // ── Observational CodexID (C2: the seed-reveal modal is an injected slot) ──
 export {

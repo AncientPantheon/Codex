@@ -17,8 +17,9 @@ import { smartEncrypt } from "@stoachain/stoa-core/crypto";
 // pattern `e3-library-flow.test.ts` already uses for an external package.
 import * as stoaCrypto from "@stoachain/stoa-core/crypto";
 
-import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { CodexMasterKeyLockedError } from "@ancientpantheon/codex-ouronet/errors";
 import { useCodex, useStoaChainSeeds, useCodexAuth } from "@ancientpantheon/codex-ouronet/hooks";
 import { SeedWordsTab } from "@ancientpantheon/codex-ouronet/ui";
 import type { IStoaChainSeed } from "@ancientpantheon/codex-ouronet/types";
@@ -1157,5 +1158,239 @@ describe("<SeedWordsTab> — mobile: the drag-following swipe carousel (round 21
   it("desktop has no swipe track at all", async () => {
     await renderTab(manySeeds(13));
     expect(screen.queryByTestId("stoa-seeds-page-swipe-track")).toBeNull();
+  });
+});
+
+/**
+ * Locked seeds + locked key positions — docs/work/locked-entities-and-former-prime/
+ * design.md §B2, bugs 1 and 2, the owner's OWN reported case:
+ *
+ *   "the Seed that is responsible for the keys that i kept on my ouronet
+ *    account ... should be undeletable, which it is, but we have no way to
+ *    see which entries are protected. Such Protected Seeds or account should
+ *    have a lock medalion ... and delete button should not be availabe for
+ *    them."
+ *
+ * Both bugs are the same shape: the STORE refuses, the UI did not say so.
+ *
+ *  - bug 1 — `deleteStoaChainSeed` throws `CodexMasterKeyLockedError` on any
+ *    seed holding a lock, but the actions menu gated Delete on `isPrime`
+ *    alone, so a non-prime locked seed showed a LIVE Delete; and
+ *    `handleDeleteSeed` then threw the store's own message away and printed
+ *    "This seed is protected and cannot be deleted." — a sentence that names
+ *    neither the reason nor the remedy.
+ *  - bug 2 — `updateStoaChainSeed` guards locked POSITIONS, but the key rows
+ *    disabled delete for prime+index 0 only and `handleDeleteKey` had no
+ *    `catch` at all: an unhandled rejection and silence.
+ *
+ * This file has REAL desktop and mobile JSX trees (seed header: mobile vs
+ * desktop fork; key rows: `MobileKeyRow` vs `KeyRow`), so every case below is
+ * asserted on BOTH — a medallion added to one tree silently misses the other.
+ */
+describe("<SeedWordsTab> — Locked medallions (design.md §B2, bugs 1 and 2)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    store = null;
+  });
+
+  let store: ReturnType<typeof useCodexStore> | null = null;
+  /** Same handle `ui-migration-review-step.test.tsx:52-53` uses to reach the
+   *  real store from inside the provider — here to seed `masterKeyLocks`
+   *  through the store's OWN `addMasterKeyLocks` action rather than faking
+   *  the registry the UI reads. */
+  function GrabStore() {
+    store = useCodexStore();
+    return null;
+  }
+
+  const pub = (index: number) => String.fromCharCode(97 + index).repeat(64);
+  const key = (index: number) => ({ index, publicKey: pub(index), derivationPath: `m/${index}` });
+
+  const PRIME = () => seedFx({ id: "p", name: "Prime", isPrime: true });
+  /** A NON-prime seed holding two positions; position 1 is the locked one. */
+  const HOLDER = () => seedFx({ id: "s-held", name: "Guard Holder", accounts: [key(0), key(1)] });
+  const FREE = () => seedFx({ id: "s-free", name: "Disposable Seed", accounts: [key(0)] });
+  const PAYMENT_LOCK = { seedId: "s-held", position: 1, reason: "master-payment-key" as const };
+
+  async function renderLocked({
+    seeds,
+    locks = [],
+    mobile = false,
+  }: {
+    seeds: IStoaChainSeed[];
+    locks?: { seedId: string; position: number; reason: "master-payment-key" | "master-guard-key" }[];
+    mobile?: boolean;
+  }) {
+    if (mobile) {
+      FakeResizeObserver.nextWidth = 390;
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    }
+    const adapter = new MemoryCodexAdapter("dev");
+    const utils = render(
+      <CodexProvider adapter={adapter}>
+        <GrabStore />
+        <Seeder seeds={seeds} />
+        {mobile ? (
+          <CodexUiRoot>
+            <SeedWordsTab />
+          </CodexUiRoot>
+        ) : (
+          <SeedWordsTab />
+        )}
+      </CodexProvider>,
+    );
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-seed-id]").length).toBeGreaterThan(0),
+    );
+    if (locks.length > 0) {
+      await act(async () => {
+        await store!.getState().actions.addMasterKeyLocks(locks);
+      });
+    }
+    return utils;
+  }
+
+  const cardOf = (name: string) =>
+    screen.getByText(name).closest("[data-seed-id]") as HTMLElement;
+
+  // ── bug 1: the locked SEED ────────────────────────────────────────────
+
+  it("DESKTOP: a non-prime seed holding a master-key lock wears a Locked medallion naming the reason, and its menu offers no Delete", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER()], locks: [PAYMENT_LOCK] });
+    const card = cardOf("Guard Holder");
+
+    const medallion = within(card).getByTestId("seed-locked-s-held");
+    expect(medallion.textContent).toContain("Locked");
+    // The medallion reproduces `CodexMasterKeyLockedError`'s own remedy
+    // sentence, so the owner reads the SAME words whether the refusal is
+    // pre-empted (here) or thrown.
+    expect(medallion.getAttribute("title")).toMatch(/re-running Secure Master Account/);
+
+    openMenu(card);
+    // Owner: "delete button should not be available for them" — absent, not
+    // disabled. The menu is portaled to `document.body` (round 22).
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
+    // Rename is deliberately UNAFFECTED: `updateStoaChainSeed` accepts a
+    // rename of a locked seed (every locked position is kept), so hiding it
+    // would remove a capability the store allows.
+    expect(screen.getByRole("button", { name: /^rename$/i })).toBeTruthy();
+  });
+
+  it("DESKTOP: an unlocked sibling seed keeps its live Delete and wears no medallion (control)", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER(), FREE()], locks: [PAYMENT_LOCK] });
+    const card = cardOf("Disposable Seed");
+
+    expect(within(card).queryByTestId("seed-locked-s-free")).toBeNull();
+    openMenu(card);
+    expect(screen.getByRole("button", { name: /^delete$/i })).toBeTruthy();
+  });
+
+  it("MOBILE: the same locked seed wears the COMPACT medallion (icon-only, reason on the label) and its menu offers no Delete", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER()], locks: [PAYMENT_LOCK], mobile: true });
+    const card = cardOf("Guard Holder");
+
+    const medallion = within(card).getByTestId("seed-locked-s-held");
+    // Mobile drops TEXT badges in favour of colour + a lock glyph (a settled
+    // owner decision, recorded at SeedWordsTab.tsx's mobile header), so the
+    // medallion carries its words on the label, not in the row.
+    expect(medallion.textContent).toBe("");
+    expect(medallion.getAttribute("aria-label")).toMatch(/^Locked — /);
+    expect(medallion.getAttribute("aria-label")).toMatch(/re-running Secure Master Account/);
+
+    openMenu(card);
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
+  });
+
+  // ── bug 2: the locked key POSITION ────────────────────────────────────
+
+  it("DESKTOP: a locked key position wears a Locked medallion and has no delete button, while an unlocked position on the SAME seed keeps its live delete", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER()], locks: [PAYMENT_LOCK] });
+    const card = cardOf("Guard Holder");
+    fireEvent.click(within(card).getByText("Guard Holder"));
+
+    const locked = await within(card).findByTestId("key-row-s-held-1");
+    expect(within(locked).getByTestId("key-locked-s-held-1").getAttribute("title")).toMatch(
+      /re-running Secure Master Account/,
+    );
+    expect(within(locked).queryByTitle("Delete")).toBeNull();
+
+    const free = within(card).getByTestId("key-row-s-held-0");
+    expect(within(free).queryByTestId("key-locked-s-held-0")).toBeNull();
+    expect(within(free).getByTitle("Delete")).toBeTruthy();
+  });
+
+  it("MOBILE: the locked position wears the compact medallion in its row, and the shared action bar drops Delete while it is selected", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER()], locks: [PAYMENT_LOCK], mobile: true });
+    const card = cardOf("Guard Holder");
+    fireEvent.click(card.firstElementChild as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByTestId("key-locked-s-held-1").textContent).toBe("");
+    expect(within(dialog).queryByTestId("key-locked-s-held-0")).toBeNull();
+
+    // Position #0 is selected by default and is NOT locked — the shared
+    // switcher/copy/delete bar still carries a live Delete.
+    expect(within(dialog).getByTitle("Delete")).toBeTruthy();
+
+    fireEvent.click(
+      within(dialog).getByText("#1").closest("div[style*='cursor: pointer']") as HTMLElement,
+    );
+    await waitFor(() => expect(within(dialog).queryByTitle("Delete")).toBeNull());
+    expect(within(dialog).getByTestId("key-action-locked-s-held").getAttribute("aria-label")).toMatch(
+      /re-running Secure Master Account/,
+    );
+  });
+
+  // ── the handlers: the store's own words, and no silent rejection ──────
+
+  it("renders the STORE's own refusal message when a seed delete is refused — not a generic 'This seed is protected'", async () => {
+    await renderLocked({ seeds: [PRIME(), FREE()] });
+    // The control is gone for every seed the UI can SEE a lock on, so this
+    // pins the handler itself (defence in depth): a refusal arriving from
+    // the store by any route must reach the owner with the store's wording,
+    // which names the reason AND the remedy.
+    await act(async () => {
+      const actions = store!.getState().actions;
+      store!.setState({
+        actions: {
+          ...actions,
+          deleteStoaChainSeed: async () => {
+            throw new CodexMasterKeyLockedError("s-free", null, "master-payment-key");
+          },
+        },
+      });
+    });
+
+    openMenu(cardOf("Disposable Seed"));
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+    expect(await screen.findByText(/re-running Secure Master Account/)).toBeTruthy();
+    expect(screen.queryByText("This seed is protected and cannot be deleted.")).toBeNull();
+  });
+
+  it("surfaces a refused key delete in the error slot instead of rejecting unhandled", async () => {
+    await renderLocked({ seeds: [PRIME(), HOLDER()] });
+    await act(async () => {
+      const actions = store!.getState().actions;
+      store!.setState({
+        actions: {
+          ...actions,
+          updateStoaChainSeed: async () => {
+            throw new CodexMasterKeyLockedError("s-held", 1, "master-guard-key");
+          },
+        },
+      });
+    });
+
+    const card = cardOf("Guard Holder");
+    fireEvent.click(within(card).getByText("Guard Holder"));
+    const row = await within(card).findByTestId("key-row-s-held-0");
+    fireEvent.click(within(row).getByTitle("Delete"));
+
+    // The slot filling IS the proof the promise was caught: before this
+    // change `handleDeleteKey` was a bare `void updateSeed(...)`, so the
+    // refusal became an unhandled rejection and the owner saw nothing.
+    expect(await screen.findByText(/re-running Secure Master Account/)).toBeTruthy();
   });
 });

@@ -193,6 +193,35 @@ function openDefineForm(): void {
   fireEvent.click(screen.getByTestId("arweave-seed-custom-define"));
 }
 
+/**
+ * Defines a LATER (non-master) seed through the real panel's own
+ * "Add Arweave Seed" → words → confirm flow and returns the runtime-generated
+ * id of the row that appeared.
+ *
+ * Needed because the FIRST seed a codex ever defines is stored with
+ * `isPrime: true` — its Master ArWeave Seed — which is now LOCKED: the store
+ * refuses to delete it and the UI renders no delete control (owner decision 3,
+ * *"delete button should not be available for them"*). Every seed-DELETION case
+ * driven through the panel therefore has to operate on a later seed; the
+ * cascade behaviour it covers is unchanged and still has to be covered.
+ */
+async function defineLaterSeed(words: string): Promise<string> {
+  const idsOnScreen = (): string[] =>
+    Array.from(document.querySelectorAll("[data-seed-id]"), (el) =>
+      el.getAttribute("data-seed-id")!,
+    );
+  const before = new Set(idsOnScreen());
+  fireEvent.click(screen.getByTestId("arweave-add-seed"));
+  fireEvent.change(screen.getByTestId("arweave-seed-words-input"), { target: { value: words } });
+  fireEvent.click(screen.getByTestId("arweave-seed-confirm"));
+  let defined: string | undefined;
+  await waitFor(() => {
+    defined = idsOnScreen().find((id) => !before.has(id));
+    expect(defined).toBeDefined();
+  });
+  return defined!;
+}
+
 /* ── Restricted Seed Input word slots ── */
 
 /** The colour a slot holding a non-dictionary word must be painted, as jsdom
@@ -652,10 +681,11 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
       expect(screen.getByTestId("arweave-prime-seed-row")).toHaveAttribute("data-defined", "true"),
     );
 
-    // Open the seed row and run a single-position generate (#0 by default).
-    // The just-defined seed's id is generated at runtime — read it off the row
-    // rather than assuming the `"prime"` fixture id the other cases use.
-    const seedId = screen.getByTestId("arweave-prime-seed-row").getAttribute("data-seed-id")!;
+    // The cascade is exercised on a LATER seed: the first seed defined is the
+    // codex's Master ArWeave Seed (`isPrime: true`) and is Locked — it has no
+    // delete control at all any more (owner decision 3). Its id is generated at
+    // runtime, so it is read off the row rather than assumed.
+    const seedId = await defineLaterSeed("goodbye moon");
     fireEvent.click(screen.getByTestId(`arweave-seed-toggle-${seedId}`));
     fireEvent.click(screen.getByTestId("arweave-generate-run"));
     await waitFor(() => expect(worker?.onmessage).not.toBeNull());
@@ -921,7 +951,9 @@ describe("ArweavePanel — the wired Seeds and Accounts categories (T7)", () => 
       expect(screen.getByTestId("arweave-prime-seed-row")).toHaveAttribute("data-defined", "true"),
     );
 
-    const seedId = screen.getByTestId("arweave-prime-seed-row").getAttribute("data-seed-id")!;
+    // A LATER seed, for the same reason as the case above: the master seed has
+    // no delete control any more.
+    const seedId = await defineLaterSeed("goodbye moon");
     fireEvent.click(screen.getByTestId(`arweave-seed-toggle-${seedId}`));
     fireEvent.click(screen.getByTestId("arweave-generate-run"));
     await waitFor(() => expect(worker?.onmessage).not.toBeNull());
@@ -1272,9 +1304,13 @@ describe("ArweaveSeedsArea — Restricted Seed Input word slots (T11)", () => {
  *       callback must name exactly one seed's keys.
  *   (confirm) each key costs ~6.7 s of CPU; a one-click delete on the row would
  *       let a mis-click throw away hours of generation with no recourse.
- *   (b) the Prime seed is permanent in the SHIPPED build but deletable in
- *       development, so the flow can be re-run; without the control the only way
- *       to re-test definition is a fresh Codex.
+ *   (b) the Master ArWeave Seed is LOCKED — no delete control at all. This
+ *       clause used to say the opposite ("permanent in the SHIPPED build but
+ *       deletable in development"); the owner overruled it
+ *       (docs/work/locked-entities-and-former-prime/design.md §B3, owner
+ *       decision 3: *"delete button should not be available for them"*),
+ *       because deleting it leaves `codexMasterSeed.arweaveSeedId` dangling
+ *       while the codex still reports its ArWeave face established.
  *   (c) the permanence warning must be on screen BEFORE the user confirms —
  *       after the fact it is not a warning.
  *   (d) a run is minutes-to-hours long. A run left alive after its seed is gone
@@ -1291,39 +1327,48 @@ describe("ArweaveSeedsArea — deleting a seed cascades to its keys (T10)", () =
   const PRIME_KEY_0 = makeKey({ id: "k-prime-0", seedId: "prime", index: 0, address: "ADDR-P0" });
   const PRIME_KEY_1 = makeKey({ id: "k-prime-1", seedId: "prime", index: 1, address: "ADDR-P1" });
   const SECOND_KEY_0 = makeKey({ id: "k-second-0", seedId: "second", index: 0, address: "ADDR-S0" });
+  const SECOND_KEY_1 = makeKey({ id: "k-second-1", seedId: "second", index: 1, address: "ADDR-S1" });
 
   function deleteSeed(seedId: string): void {
     fireEvent.click(screen.getByTestId(`arweave-seed-delete-${seedId}`));
     fireEvent.click(screen.getByTestId(`arweave-seed-delete-confirm-${seedId}`));
   }
 
+  // Re-pointed from the prime seed to the deletable one: the master row has no
+  // delete control any more (owner decision 3). The cascade rule this guards —
+  // EXACTLY one seed's keys, never a neighbour's — is unchanged.
   it("(a) invokes the delete callback with the seed id and the ids of EXACTLY that seed's keys, leaving another seed's keys untouched", async () => {
     const onDeleteSeed = vi.fn();
     renderArea({
       seeds: [PRIME_SEED, SECOND_SEED],
-      existingKeys: [PRIME_KEY_0, SECOND_KEY_0, PRIME_KEY_1],
+      existingKeys: [PRIME_KEY_0, SECOND_KEY_0, PRIME_KEY_1, SECOND_KEY_1],
       onDeleteSeed,
     });
 
-    deleteSeed("prime");
+    deleteSeed("second");
 
     await waitFor(() => expect(onDeleteSeed).toHaveBeenCalledTimes(1));
     const request = onDeleteSeed.mock.calls[0][0] as { seedId: string; keyIds: readonly string[] };
-    expect(request.seedId).toBe("prime");
-    expect([...request.keyIds].sort()).toEqual(["k-prime-0", "k-prime-1"]);
-    expect(request.keyIds).not.toContain("k-second-0");
+    expect(request.seedId).toBe("second");
+    expect([...request.keyIds].sort()).toEqual(["k-second-0", "k-second-1"]);
+    expect(request.keyIds).not.toContain("k-prime-0");
+    expect(request.keyIds).not.toContain("k-prime-1");
   });
 
   it("(a) drops a legacy/indexless key of the same seed too — no derived key may survive the seed", async () => {
     const onDeleteSeed = vi.fn();
-    const indexless = makeKey({ id: "k-prime-noindex", seedId: "prime" });
-    renderArea({ seeds: [PRIME_SEED], existingKeys: [PRIME_KEY_0, indexless], onDeleteSeed });
+    const indexless = makeKey({ id: "k-second-noindex", seedId: "second" });
+    renderArea({
+      seeds: [PRIME_SEED, SECOND_SEED],
+      existingKeys: [SECOND_KEY_0, indexless, PRIME_KEY_0],
+      onDeleteSeed,
+    });
 
-    deleteSeed("prime");
+    deleteSeed("second");
 
     await waitFor(() => expect(onDeleteSeed).toHaveBeenCalledTimes(1));
     const request = onDeleteSeed.mock.calls[0][0] as { keyIds: readonly string[] };
-    expect([...request.keyIds].sort()).toEqual(["k-prime-0", "k-prime-noindex"]);
+    expect([...request.keyIds].sort()).toEqual(["k-second-0", "k-second-noindex"]);
   });
 
   it("(a) removes the deleted seed's row, so a gone seed cannot be deleted twice", async () => {
@@ -1339,22 +1384,37 @@ describe("ArweaveSeedsArea — deleting a seed cascades to its keys (T10)", () =
     expect(screen.getByTestId("arweave-prime-seed-row")).toHaveAttribute("data-defined", "true");
   });
 
+  // Re-pointed from the prime seed to a deletable one — the master row no
+  // longer HAS a first click to make. The confirm gate itself (one mis-click
+  // must not destroy hours of RSA work) is unchanged and still covered.
   it("requires a CONFIRM — the first click alone destroys nothing", () => {
     const onDeleteSeed = vi.fn();
-    renderArea({ seeds: [PRIME_SEED], existingKeys: [PRIME_KEY_0], onDeleteSeed });
+    renderArea({
+      seeds: [PRIME_SEED, SECOND_SEED],
+      existingKeys: [SECOND_KEY_0],
+      onDeleteSeed,
+    });
 
-    fireEvent.click(screen.getByTestId("arweave-seed-delete-prime"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-second"));
 
     expect(onDeleteSeed).not.toHaveBeenCalled();
-    expect(screen.getByTestId("arweave-seed-delete-confirm-prime")).toBeInTheDocument();
-    expect(screen.getByTestId("arweave-prime-seed-row")).toHaveAttribute("data-defined", "true");
+    expect(screen.getByTestId("arweave-seed-delete-confirm-second")).toBeInTheDocument();
+    expect(screen.getByTestId("arweave-seed-row-second")).toHaveAttribute("data-defined", "true");
   });
 
-  it("(b) exposes a delete control on the PRIME seed row — deletable in development", () => {
+  // OWNER DECISION (design.md §B3, decision 3): *"delete button should not be
+  // available for them"*. This test asserted the exact opposite — that the
+  // PRIME row exposes a delete control, "deletable in development" — which is
+  // the behaviour the owner has now overruled, because deleting the master
+  // leaves `codexMasterSeed.arweaveSeedId` dangling while the codex still
+  // reports its ArWeave face established. Rewritten to assert ABSENCE, plus
+  // the Locked medallion that explains it. Deliberate, not a casualty.
+  it("(b) renders NO delete control on the Master ArWeave Seed row — it is Locked", () => {
     renderArea({ seeds: [PRIME_SEED] });
 
     const prime = screen.getByTestId("arweave-prime-seed-row");
-    expect(within(prime).getByTestId("arweave-seed-delete-prime")).toBeInTheDocument();
+    expect(within(prime).queryByTestId("arweave-seed-delete-prime")).toBeNull();
+    expect(within(prime).getByTestId("arweave-seed-locked-prime")).toBeInTheDocument();
   });
 
   it("(c) warns that the Prime Arweave Seed is permanent in the shipped build BEFORE the define is confirmed", () => {
@@ -1376,17 +1436,20 @@ describe("ArweaveSeedsArea — deleting a seed cascades to its keys (T10)", () =
     expect(screen.queryByTestId("arweave-seed-prime-permanence-warning")).toBeNull();
   });
 
+  // Re-pointed from the prime seed to a deletable one (owner decision 3). The
+  // rule it guards — a run left alive after ITS seed is gone keeps persisting
+  // keys for a seed that no longer exists — is unchanged.
   it("(d) aborts a generation run in flight against the seed being deleted", async () => {
     const worker = new FakeWorker();
     const persistKey = vi.fn();
     renderArea({
-      seeds: [PRIME_SEED],
+      seeds: [PRIME_SEED, SECOND_SEED],
       existingKeys: [],
       persistKey,
       onDeleteSeed: vi.fn(),
       workerFactory: () => worker as unknown as Worker,
     });
-    fireEvent.click(screen.getByTestId("arweave-seed-toggle-prime"));
+    fireEvent.click(screen.getByTestId("arweave-seed-toggle-second"));
     fireEvent.change(screen.getByTestId("arweave-generate-mode"), { target: { value: "upTo" } });
     fireEvent.change(screen.getByTestId("arweave-generate-upto"), { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("arweave-generate-run"));
@@ -1395,7 +1458,7 @@ describe("ArweaveSeedsArea — deleting a seed cascades to its keys (T10)", () =
     worker.emit(keyMsg(0));
     await waitFor(() => expect(persistKey).toHaveBeenCalledTimes(1));
 
-    deleteSeed("prime");
+    deleteSeed("second");
 
     await waitFor(() => expect(worker.terminated).toBe(true));
   });
@@ -4769,11 +4832,23 @@ describe("ArweaveSeedsArea — mobile seed row triple-dot menu (round 20)", () =
     expect(screen.getByTestId("arweave-seed-row-actions-trigger-prime")).toBeTruthy();
   });
 
-  it("opening the menu shows View Seed and Delete", () => {
+  // SPLIT (owner decision 3, design.md §B3): this used to open the MASTER
+  // seed's menu and assert both items. The master is Locked — its menu must
+  // offer View Seed and nothing that destroys it — so the "and Delete" half
+  // moved onto a seed that really is deletable.
+  it("opening the MASTER seed's menu shows View Seed and NO Delete — it is Locked", () => {
     renderMobile();
     fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
     expect(screen.getByTestId("arweave-seed-row-actions-view-prime")).toBeTruthy();
-    expect(screen.getByTestId("arweave-seed-row-actions-delete-prime")).toBeTruthy();
+    expect(screen.queryByTestId("arweave-seed-row-actions-delete-prime")).toBeNull();
+  });
+
+  it("opening a NON-master seed's menu shows View Seed and Delete", () => {
+    const other: ArweaveSeedRecord = { id: "s2", label: "Second Seed", bits: PRIME_BITS };
+    renderMobile([PRIME_SEED, other]);
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-s2"));
+    expect(screen.getByTestId("arweave-seed-row-actions-view-s2")).toBeTruthy();
+    expect(screen.getByTestId("arweave-seed-row-actions-delete-s2")).toBeTruthy();
   });
 
   it("View Seed opens the SAME full-screen reveal the desktop 'View Seed' button opens", () => {
@@ -4783,11 +4858,16 @@ describe("ArweaveSeedsArea — mobile seed row triple-dot menu (round 20)", () =
     expect(screen.getByTestId("arweave-seed-reveal-modal-prime")).toBeTruthy();
   });
 
+  // Re-pointed at a NON-master seed (owner decision 3) — the master's menu has
+  // no Delete item to click any more. The behaviour guarded (the menu item
+  // opens the SAME confirm panel the desktop trash does, never a one-click
+  // destroy) is unchanged.
   it("Delete triggers the same delete-confirm panel the desktop trash icon opens", () => {
-    renderMobile();
-    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-prime"));
-    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-delete-prime"));
-    expect(screen.getByTestId("arweave-seed-delete-confirm-panel-prime")).toBeTruthy();
+    const other: ArweaveSeedRecord = { id: "s2", label: "Second Seed", bits: PRIME_BITS };
+    renderMobile([PRIME_SEED, other]);
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-s2"));
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-delete-s2"));
+    expect(screen.getByTestId("arweave-seed-delete-confirm-panel-s2")).toBeTruthy();
   });
 
   it("each row's menu is independent — opening one seed's menu doesn't affect another's", () => {
@@ -5300,5 +5380,243 @@ describe("ArweavePanel — resolves the seal-gated former-master ids for the See
     expect(screen.queryByText(FORMER_MASTER_ARWEAVE_SEED)).toBeNull();
     // It reads as the ordinary seed it is, under its own name.
     expect(within(row).getByText("My cold storage seed")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The Master ArWeave Seed is LOCKED — docs/work/locked-entities-and-former-prime
+ * design.md §B3/§B5, plan T8.
+ *
+ * This surface was "the face with no protection at any layer": the store's
+ * `deleteArweaveSeed` was an unguarded filter and this area's delete control
+ * was always live, including on the master row — with the apology in the code
+ * ("The Prime seed is deletable FOR NOW (development)"). Deleting it leaves
+ * `codexMasterSeed.arweaveSeedId` dangling while `describeCodexMasterSeed`
+ * still reports that face established.
+ *
+ * What each case guards:
+ *   - the medallion NAMES the reason, so the missing delete control reads as a
+ *     deliberate protection and not as a broken button;
+ *   - the control is ABSENT, not disabled (owner decision 3: *"delete button
+ *     should not be available for them"*), in BOTH forks — desktop's trash
+ *     icon and mobile's triple-dot menu item are separate trees, and mobile's
+ *     had no gate of any kind;
+ *   - the lock is decided by codex-core's `arweaveSeedLock` — the SAME
+ *     predicate the store's refusal uses — so the UI and the store cannot
+ *     disagree (design criterion 9). That is why the SETTLED id locks a seed
+ *     with no `isPrime` flag, and why a stale `isPrime` seed stays locked even
+ *     when the codex has settled on a different master: a control the store
+ *     would refuse must not be offered;
+ *   - an ordinary seed is untouched — a protection that locks everything
+ *     protects nothing;
+ *   - a refusal that DOES reach the callback is surfaced, not swallowed into
+ *     an unhandled rejection, and the row the store kept comes back (criterion
+ *     10).
+ */
+describe("ArweaveSeedsArea — the Master ArWeave Seed is Locked (T8)", () => {
+  /** No `isPrime` flag at all: only the injected settled id makes it master. */
+  const SETTLED_MASTER: ArweaveSeedRecord = {
+    id: "settled",
+    label: "My cold storage seed",
+    bits: PRIME_BITS,
+  };
+  const PLAIN_SEED: ArweaveSeedRecord = {
+    id: "plain",
+    label: "Second Arweave Seed",
+    bits: "0".repeat(SEED_BIT_LENGTH),
+  };
+
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+    observe(target: Element) {
+      this.callback([{ contentRect: { width: 390 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+
+  function renderMobileArea(props: Partial<ArweaveSeedsAreaProps>) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    return render(
+      <CodexUiRoot>
+        <ArweaveSeedsArea {...props} />
+      </CodexUiRoot>,
+    );
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  /* ── desktop ── */
+
+  it("the master row wears a Locked medallion that NAMES the reason", () => {
+    renderArea({ seeds: [PRIME_SEED] });
+
+    const medallion = within(screen.getByTestId("arweave-prime-seed-row")).getByTestId(
+      "arweave-seed-locked-prime",
+    );
+    // The word the whole topic standardises on — never "Protected", which this
+    // panel already spends on a different tier (a seed whose words are held).
+    expect(medallion.textContent).toMatch(/Locked/);
+    expect(medallion.getAttribute("aria-label")).toMatch(/^Locked — /);
+    // …and the REASON, not just the state.
+    expect(medallion.getAttribute("aria-label")).toMatch(/Master ArWeave Seed/i);
+  });
+
+  it("renders NO delete control on the master row, while its other actions stay", () => {
+    renderArea({ seeds: [PRIME_SEED, PLAIN_SEED] });
+
+    const prime = screen.getByTestId("arweave-prime-seed-row");
+    expect(within(prime).queryByTestId("arweave-seed-delete-prime")).toBeNull();
+    // Only the destructive control is withheld: View Seed and the row toggle
+    // are untouched.
+    expect(within(prime).getByTestId("arweave-seed-reveal-prime")).toBeInTheDocument();
+    expect(within(prime).getByTestId("arweave-seed-toggle-prime")).toBeInTheDocument();
+  });
+
+  it("a plain seed shows no medallion and keeps a LIVE delete", () => {
+    const onDeleteSeed = vi.fn();
+    renderArea({ seeds: [PRIME_SEED, PLAIN_SEED], onDeleteSeed });
+
+    const row = screen.getByTestId("arweave-seed-row-plain");
+    expect(within(row).queryByTestId("arweave-seed-locked-plain")).toBeNull();
+
+    fireEvent.click(within(row).getByTestId("arweave-seed-delete-plain"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-confirm-plain"));
+    expect(onDeleteSeed).toHaveBeenCalledTimes(1);
+    expect(onDeleteSeed.mock.calls[0]?.[0]).toMatchObject({ seedId: "plain" });
+  });
+
+  it("does NOT lock a seed that is master only by POSITION — a display fallback is not an identity", () => {
+    // `resolveMasterArweaveSeed` falls back to row 0 when a codex has neither
+    // the flag nor a settled id, so this seed WEARS the master treatment. It
+    // is still deletable, because the store cannot defend an insertion-ordered
+    // index: whichever seed happened to be first would become undeletable, and
+    // adding a seed would move the protection onto a different row. Gating the
+    // control on the row's `isPrime` prop instead of `arweaveSeedLock` is the
+    // obvious wrong implementation and this is what catches it.
+    const onDeleteSeed = vi.fn();
+    renderArea({ seeds: [PLAIN_SEED], onDeleteSeed });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    expect(row).toHaveAttribute("data-seed-id", "plain");
+    expect(within(row).queryByTestId("arweave-seed-locked-plain")).toBeNull();
+    expect(within(row).getByTestId("arweave-seed-delete-plain")).toBeInTheDocument();
+  });
+
+  it("locks the seed the codex has SETTLED on, even with no isPrime flag anywhere", () => {
+    renderArea({ seeds: [PLAIN_SEED, SETTLED_MASTER], masterArweaveSeedId: "settled" });
+
+    const master = screen.getByTestId("arweave-prime-seed-row");
+    expect(master).toHaveAttribute("data-seed-id", "settled");
+    expect(within(master).getByTestId("arweave-seed-locked-settled")).toBeInTheDocument();
+    expect(within(master).queryByTestId("arweave-seed-delete-settled")).toBeNull();
+    // The other seed is not dragged into the protection.
+    expect(
+      within(screen.getByTestId("arweave-seed-row-plain")).getByTestId("arweave-seed-delete-plain"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a STALE isPrime seed locked when a different seed is the settled master — the UI never offers what the store refuses", () => {
+    // `arweaveSeedLock` fires on the settled id OR the `isPrime` flag (the
+    // pre-settlement rule every codex that has not re-run the wizard still
+    // needs). The store applies both, so the UI must withhold the control on
+    // both — otherwise this row's trash icon is a button that throws.
+    renderArea({ seeds: [PRIME_SEED, SETTLED_MASTER], masterArweaveSeedId: "settled" });
+
+    const stale = screen.getByTestId("arweave-seed-row-prime");
+    expect(within(stale).getByTestId("arweave-seed-locked-prime")).toBeInTheDocument();
+    expect(within(stale).queryByTestId("arweave-seed-delete-prime")).toBeNull();
+    // The one-gold-row invariant is untouched by any of this.
+    expect(screen.getAllByTestId("arweave-prime-seed-row")).toHaveLength(1);
+  });
+
+  it("leaves the gold designation row's own text alone — the medallion adds no second copy of the name", () => {
+    renderArea({ seeds: [{ ...SETTLED_MASTER }], masterArweaveSeedId: "settled" });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    expect(within(row).getAllByText(PRIME_SEED_LABEL)).toHaveLength(1);
+    expect(within(row).getByTestId("arweave-seed-designation-settled")).toBeInTheDocument();
+    expect(within(row).getByTestId("arweave-seed-own-name-settled").textContent).toBe(
+      "My cold storage seed",
+    );
+    expect(within(row).getByTestId("arweave-prime-badge")).toBeInTheDocument();
+  });
+
+  /* ── mobile: a genuinely separate tree ── */
+
+  it("mobile — the master row wears the COMPACT medallion (icon only, so the measured row height cannot grow)", () => {
+    renderMobileArea({ seeds: [PRIME_SEED] });
+
+    const medallion = within(screen.getByTestId("arweave-prime-seed-row")).getByTestId(
+      "arweave-seed-locked-prime",
+    );
+    // Round 25 dropped text badges from the mobile row deliberately; the
+    // medallion carries its wording in the accessible name instead.
+    expect(medallion.textContent).toBe("");
+    expect(medallion.getAttribute("aria-label")).toMatch(/^Locked — /);
+    expect(medallion.getAttribute("aria-label")).toMatch(/Master ArWeave Seed/i);
+  });
+
+  it("mobile — a plain seed's row carries no medallion", () => {
+    renderMobileArea({ seeds: [PRIME_SEED, PLAIN_SEED] });
+
+    expect(screen.queryByTestId("arweave-seed-locked-plain")).toBeNull();
+  });
+
+  it("mobile — the settled master's menu withholds Delete even though its row has no isPrime flag", () => {
+    renderMobileArea({ seeds: [SETTLED_MASTER, PLAIN_SEED], masterArweaveSeedId: "settled" });
+
+    fireEvent.click(screen.getByTestId("arweave-seed-row-actions-trigger-settled"));
+    expect(screen.getByTestId("arweave-seed-row-actions-view-settled")).toBeTruthy();
+    expect(screen.queryByTestId("arweave-seed-row-actions-delete-settled")).toBeNull();
+  });
+
+  /* ── the refusal must not be silent (criterion 10) ── */
+
+  it("surfaces the store's OWN message when the delete callback rejects, instead of swallowing it", async () => {
+    const message = "This seed is your Master ArWeave Seed.";
+    const onDeleteSeed = vi.fn(async () => {
+      throw new Error(message);
+    });
+    renderArea({ seeds: [PRIME_SEED, PLAIN_SEED], onDeleteSeed });
+
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-plain"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-confirm-plain"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("arweave-seed-delete-error").textContent).toContain(message),
+    );
+  });
+
+  it("puts the row BACK when the store refused it — an optimistic removal must not outlive the refusal", async () => {
+    const onDeleteSeed = vi.fn(async () => {
+      throw new Error("refused");
+    });
+    renderArea({ seeds: [PRIME_SEED, PLAIN_SEED], onDeleteSeed });
+
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-plain"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-confirm-plain"));
+
+    await waitFor(() => expect(screen.getByTestId("arweave-seed-delete-error")).toBeInTheDocument());
+    expect(screen.getByTestId("arweave-seed-row-plain")).toBeInTheDocument();
+  });
+
+  it("clears a previous refusal once a delete succeeds — a stale error must not haunt the surface", async () => {
+    const onDeleteSeed = vi
+      .fn<(request: { seedId: string }) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("refused"))
+      .mockResolvedValueOnce(undefined);
+    renderArea({ seeds: [PRIME_SEED, PLAIN_SEED], onDeleteSeed });
+
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-plain"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-confirm-plain"));
+    await waitFor(() => expect(screen.getByTestId("arweave-seed-delete-error")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-plain"));
+    fireEvent.click(screen.getByTestId("arweave-seed-delete-confirm-plain"));
+    await waitFor(() => expect(screen.queryByTestId("arweave-seed-row-plain")).toBeNull());
+    expect(screen.queryByTestId("arweave-seed-delete-error")).toBeNull();
   });
 });

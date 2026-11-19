@@ -17,7 +17,9 @@ import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { useCodex, usePureKeypairs } from "@ancientpantheon/codex-ouronet/hooks";
 import { PureKeypairsTab } from "@ancientpantheon/codex-ouronet/ui";
 import type { IPureKeypair } from "@ancientpantheon/codex-ouronet/types";
+import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 const kpFx = (over: Partial<IPureKeypair> = {}): IPureKeypair => ({
   id: over.id ?? "kp-1",
@@ -121,13 +123,20 @@ describe("<PureKeypairsTab>", () => {
     await waitFor(() => expect(document.querySelectorAll("[data-keypair-id]").length).toBe(0));
   });
 
-  it("disables deletion for a protected CodexGuard key (UI-level protection)", async () => {
+  // Owner instruction, recorded deliberately (docs/work/locked-entities-and-
+  // former-prime/design.md §B5, plan T7): *"Such Protected Seeds or account
+  // should have a lock medalion ... and delete button should not be available
+  // for them."* This test used to assert the DISABLED delete button still
+  // EXISTED (`getByRole("button", { name: /cannot be removed/i })`). The owner
+  // overruled that behaviour: a protected key renders NO delete control at
+  // all. Do not "repair" this back into a disabled-button assertion.
+  it("removes deletion entirely for a protected CodexGuard key (UI-level protection)", async () => {
     await renderTab([
       kpFx({ id: "kp-guard", publicKey: "d".repeat(64), isCodexGuard: true, label: "GuardianKey" }),
     ]);
     const card = screen.getByText("GuardianKey").closest("[data-keypair-id]") as HTMLElement;
     expandRow(card);
-    expect(within(card).getByRole("button", { name: /cannot be removed/i })).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
     expect(within(card).queryByRole("button", { name: /^delete$/i })).toBeNull();
     expect(screen.getByText("GuardianKey")).toBeTruthy();
   });
@@ -448,5 +457,169 @@ describe("<PureKeypairsTab> — mobile: pagination (round 9/10 — 'we need pagi
     await renderTab(pairs);
     for (let i = 0; i < 6; i++) expect(screen.getByText(`Key${String(i).padStart(2, "0")}`)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
+  });
+});
+
+// docs/work/locked-entities-and-former-prime — Part B. This tab is the surface
+// the shared medallion's SHAPE was ported from, so these specs pin the swap:
+// the two hand-rolled protection pills (one per fork) become codex-ui's
+// `<LockedMedallion>`, driven by codex-core's `pureKeypairLock` rather than a
+// local flag copy, and the protected row's delete control is GONE rather than
+// disabled (owner: "delete button should not be available for them").
+describe("<PureKeypairsTab> — the shared Locked medallion (design.md §B5)", () => {
+  class FakeResizeObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(target: Element) {
+      this.callback(
+        [{ contentRect: { width: FakeResizeObserver.nextWidth } } as unknown as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+      void target;
+    }
+    unobserve() {}
+    disconnect() {}
+    static nextWidth = 390;
+  }
+
+  async function renderTabMobile(pairs: IPureKeypair[]) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const adapter = new MemoryCodexAdapter("dev");
+    const utils = render(
+      <CodexProvider adapter={adapter}>
+        <Seeder pairs={pairs} />
+        <CodexUiRoot>
+          <PureKeypairsTab />
+        </CodexUiRoot>
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(document.querySelectorAll("[data-keypair-id]").length).toBe(pairs.length));
+    return utils;
+  }
+
+  // Regression this catches: the badge going back to naming only the flag
+  // ("CodexGuard") with no "Locked" word, or losing the reason entirely — the
+  // owner's complaint was that a protected entry is indistinguishable, and the
+  // reason is the only thing that explains WHY the store would refuse.
+  it("desktop: a serving CodexGuard key wears the medallion, reading 'Locked' and naming the guard reason", async () => {
+    await renderTab([
+      kpFx({ id: "kp-guard", publicKey: "d".repeat(64), isCodexGuard: true, label: "GuardianKey" }),
+    ]);
+    const card = screen.getByText("GuardianKey").closest("[data-keypair-id]") as HTMLElement;
+    const medallion = within(card).getByTestId("locked-medallion");
+    expect(medallion.textContent?.trim()).toBe("Locked");
+    // Containment, not equality: `pureKeypairLock`'s label is a full sentence
+    // that EMBEDS this tab's own historical wording.
+    expect(medallion.getAttribute("aria-label")).toContain("Locked");
+    expect(medallion.getAttribute("aria-label")).toContain("CodexGuard");
+  });
+
+  // Regression this catches: the shared component's neutral slate default
+  // silently replacing this row's gold protection accent. The medallion takes
+  // a `color` override precisely so a surface keeps its own accent, and the
+  // row's border/background/label all stay gold — a slate pill inside a gold
+  // row would read as a second, unrelated signal.
+  it("desktop: the medallion keeps this row's gold protection accent via the color override", async () => {
+    await renderTab([
+      kpFx({ id: "kp-gold", publicKey: "e".repeat(64), isCodexGuard: true, label: "GoldKey" }),
+    ]);
+    const card = screen.getByText("GoldKey").closest("[data-keypair-id]") as HTMLElement;
+    const medallion = within(card).getByTestId("locked-medallion");
+    expect(medallion.style.color).toBe("rgb(206, 172, 95)"); // #ceac5f
+    expect(medallion.style.backgroundColor).toBe("rgba(206, 172, 95, 0.125)"); // #ceac5f20
+  });
+
+  // Regression this catches: a retired guard being reported as a SERVING
+  // guard (or as unprotected). The store keeps every key that ever held the
+  // role and refuses the delete; the medallion must say which of the two it is.
+  it("desktop: a retired guard key is locked with the retired-guard reason", async () => {
+    await renderTab([
+      kpFx({ id: "kp-retired", publicKey: "f".repeat(64), wasCodexGuard: true, label: "OldGuard" }),
+    ]);
+    const card = screen.getByText("OldGuard").closest("[data-keypair-id]") as HTMLElement;
+    const medallion = within(card).getByTestId("locked-medallion");
+    expect(medallion.getAttribute("aria-label")).toContain("retired guard");
+    expandRow(card);
+    expect(within(card).queryByRole("button", { name: /^delete$/i })).toBeNull();
+  });
+
+  // Regression this catches: the duo pure prime — the half the store refuses
+  // hardest — losing its reason, or the medallion naming a flag instead of the
+  // master the key actually belongs to.
+  it("desktop: a duo pure-prime key is locked with the Codex Master's own name as the reason", async () => {
+    await renderTab([
+      kpFx({ id: "kp-duo", publicKey: "1".repeat(64), isDuoPurePrime: true, label: "DuoHalf" }),
+    ]);
+    const card = screen.getByText("DuoHalf").closest("[data-keypair-id]") as HTMLElement;
+    const medallion = within(card).getByTestId("locked-medallion");
+    expect(medallion.getAttribute("aria-label")).toContain(OURONET_CODEX_MASTER);
+    expandRow(card);
+    expect(within(card).queryByRole("button", { name: /^delete$/i })).toBeNull();
+  });
+
+  // Regression this catches: over-locking. If the predicate (or the swap) ever
+  // claims a plain key is protected, the owner loses the ability to delete
+  // their own keys — the medallion may never claim un-protection OR
+  // over-protection.
+  it("desktop: an unflagged key wears no medallion and keeps its live delete control", async () => {
+    await renderTab([
+      kpFx({ id: "kp-plain", publicKey: "2".repeat(64), label: "PlainKey" }),
+    ]);
+    const card = screen.getByText("PlainKey").closest("[data-keypair-id]") as HTMLElement;
+    expect(within(card).queryByTestId("locked-medallion")).toBeNull();
+    expandRow(card);
+    expect(within(card).getByRole("button", { name: /^delete$/i })).toBeTruthy();
+  });
+
+  // Regression this catches: the mobile fork — a genuinely separate tree in
+  // this file — being left on the old hand-rolled pill, or being given the
+  // FULL medallion, whose text would grow the deliberately slim (round-26)
+  // mobile row the seed rows' height is matched against.
+  it("mobile: the compact, icon-only medallion is used, and the delete control is absent there too", async () => {
+    await renderTabMobile([
+      kpFx({ id: "kp-guard", publicKey: "d".repeat(64), isCodexGuard: true, label: "GuardianKey" }),
+    ]);
+    const card = (await screen.findByText("GuardianKey")).closest("[data-keypair-id]") as HTMLElement;
+    const medallion = within(card).getByTestId("locked-medallion");
+    expect(medallion.textContent).toBe("");
+    expect(medallion.style.width).toBe("20px");
+    expect(medallion.getAttribute("aria-label")).toContain("CodexGuard");
+    expandRow(card);
+    expect(within(card).queryByRole("button", { name: /^delete$/i })).toBeNull();
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  // Regression this catches: the swap eating the OTHER badge. The
+  // GuardOfCodexID half carries a DIFFERENT fact — it is the CodexID's prime
+  // entity, with its own purple accent and `🔒 Prime` label — and only the
+  // protection half of each ternary was in scope. Its delete control is gone
+  // for the same owner reason as every other locked row.
+  it("the GuardOfCodexID prime half keeps its own 🔒 Prime badge and purple accent, and shows no delete control", async () => {
+    let store: ReturnType<typeof useCodexStore> | null = null;
+    const StoreGrabber = () => { store = useCodexStore(); return null; };
+    const adapter = new MemoryCodexAdapter("dev");
+    render(
+      <CodexProvider adapter={adapter}>
+        <Seeder pairs={[kpFx({ id: "kp-guard", publicKey: "d".repeat(64), isCodexGuard: true, label: "GuardianKey" })]} />
+        <StoreGrabber />
+        <PureKeypairsTab />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(document.querySelectorAll("[data-keypair-id]").length).toBe(1));
+    await act(async () => {
+      await store!.getState().actions.updateUiSettings({
+        observationalCodexId: { enabled: true, standardId: "", smartId: "", guardKeypairId: "kp-guard" },
+      } as never);
+    });
+    const card = (await screen.findByText("GuardOfCodexID (GuardianKey)")).closest("[data-keypair-id]") as HTMLElement;
+    const primePill = within(card).getByText(/🔒\s*Prime/);
+    expect(primePill.style.color).toBe("rgb(167, 139, 250)"); // #a78bfa
+    expect(within(card).queryByTestId("locked-medallion")).toBeNull();
+    expandRow(card);
+    expect(within(card).queryByRole("button", { name: /^delete$/i })).toBeNull();
+    expect(within(card).queryByRole("button", { name: /cannot be removed/i })).toBeNull();
   });
 });

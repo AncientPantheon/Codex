@@ -5,7 +5,8 @@
  *   • List      — one row per stored keypair showing ONLY the public key (its
  *                 `k:` account surfaces in the Stoa Accounts tab). Each row has a
  *                 password-gated "View Private Key" reveal (masked by default) +
- *                 copy. Protected keys (CodexGuard / Duo-prime) are delete-locked.
+ *                 copy. Protected keys (CodexGuard / Duo-prime) wear the shared
+ *                 Locked medallion and have no delete control at all.
  *   • Generate  — mint a fresh ed25519 keypair (`genKeyPair`), show both halves
  *                 with a save-warning, then encrypt + store on confirm.
  *   • Import    — paste a known public + private key; validated by re-deriving
@@ -23,7 +24,7 @@
 import * as React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  KeyRound, Plus, Sparkles, Download, Copy, Check, AlertTriangle, Lock, RefreshCw, ShieldCheck, ChevronDown, ChevronRight,
+  KeyRound, Plus, Sparkles, Download, Copy, Check, AlertTriangle, RefreshCw, ShieldCheck, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { smartDecrypt, encryptStringV2 } from "@stoachain/stoa-core/crypto";
 import { tryDerivePublicKey } from "@stoachain/stoa-core/guard";
@@ -32,18 +33,17 @@ import { usePureKeypairs } from "../../hooks/index.js";
 import { useCodexAuth } from "../../hooks/index.js";
 import { useCodex } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
-import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile } from "@ancientpantheon/codex-ui/ui";
-import { IconDeleteBtn, IconDeleteBtnDisabled } from "../internal/IconButtons.js";
+import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, useIsMobile, LockedMedallion } from "@ancientpantheon/codex-ui/ui";
+import { IconDeleteBtn } from "../internal/IconButtons.js";
 import { KeyFieldsHalves } from "../internal/KeyFieldsHalves.js";
 import type { IPureKeypair } from "../../types/entities.js";
-import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
+import { OURONET_CODEX_MASTER, pureKeypairLock } from "@ancientpantheon/codex-core";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const isHex64 = (s: string) => /^[0-9a-fA-F]{64}$/.test(s.trim());
 /** A pasteable private key: 64 hex (plain Ed25519) OR 128 hex (BIP32-Ed25519
  *  extended key `kL‖kR`, the Chainweaver / kadenakeys.io export format). */
 const isHexPriv = (s: string) => /^([0-9a-fA-F]{64}|[0-9a-fA-F]{128})$/.test(s.trim());
-const isProtected = (k: IPureKeypair) => k.isCodexGuard === true || k.wasCodexGuard === true || k.isDuoPurePrime === true;
 
 type Sub = "list" | "generate" | "import";
 
@@ -222,13 +222,17 @@ function KeypairRow({
   primeName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const protRaw = isProtected(keypair);
+  // docs/work/locked-entities-and-former-prime §B4: codex-core's
+  // `pureKeypairLock` is the SAME rule `deletePureKeypair` enforces (the
+  // isCodexGuard → wasCodexGuard → isDuoPurePrime cascade), returning the
+  // REASON rather than a boolean — so the badge and the store cannot drift.
+  // Its labels embed this row's own historical wording ("CodexGuard",
+  // "retired guard", the master's name) verbatim.
+  const lock = pureKeypairLock(keypair);
+  const protRaw = lock !== null;
   const isGuardPrime = !!primeName;
   const locked = protRaw || isGuardPrime;
   const label = primeName ?? keypair.label ?? `Pure Key #${index + 1}`;
-  const protLabel = isGuardPrime
-    ? "GuardOfCodexID"
-    : keypair.isCodexGuard ? "CodexGuard" : keypair.wasCodexGuard ? "retired guard" : keypair.isDuoPurePrime ? OURONET_CODEX_MASTER : "";
   const accent = isGuardPrime ? "#a78bfa" : protRaw ? "#ceac5f" : "#6366f1";
   const border = isGuardPrime ? "#a78bfa55" : protRaw ? "#ceac5f40" : "#262626";
   const bg = isGuardPrime ? "#a78bfa10" : protRaw ? "#ceac5f08" : "#18181B";
@@ -265,11 +269,15 @@ function KeypairRow({
             style={{ flexShrink: 0, width: 10, height: 10, borderRadius: "50%", backgroundColor: accent }}
           />
           <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: locked ? accent : "#d2d3d4" }}>{label}</span>
-          {locked && protLabel && (
-            isGuardPrime
-              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
-              : <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}><Lock size={10} /> {protLabel}</span>
-          )}
+          {/* The CodexID Prime badge and the Locked medallion say DIFFERENT
+              things: the first is "this is the CodexID's prime half" (its own
+              purple accent), the second is "the store would refuse to delete
+              this". Only the protection half was swapped for the shared
+              component — `compact` here so the round-26 slim mobile row,
+              whose height is matched to the seed rows, does not grow. */}
+          {isGuardPrime
+            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
+            : lock && <LockedMedallion reason={lock.label} color={badgeColor} compact />}
         </div>
       ) : (
         <div
@@ -283,11 +291,9 @@ function KeypairRow({
             <KeyRound style={{ width: 18, height: 18, color: accent }} />
           </div>
           <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: locked ? accent : "#d2d3d4" }}>{label}</span>
-          {locked && protLabel && (
-            isGuardPrime
-              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
-              : <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}><Lock size={10} /> {protLabel}</span>
-          )}
+          {isGuardPrime
+            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 9999, fontSize: 10, fontWeight: 600, flexShrink: 0, color: badgeColor, backgroundColor: `${badgeColor}20` }}>🔒 Prime</span>
+            : lock && <LockedMedallion reason={lock.label} color={badgeColor} />}
         </div>
       )}
 
@@ -298,9 +304,11 @@ function KeypairRow({
           <div style={{ flex: 1, minWidth: 0 }}>
             <KeyFieldsHalves publicKey={keypair.publicKey} decryptPrivate={decryptFor(keypair)} />
           </div>
-          {locked
-            ? <IconDeleteBtnDisabled size={28} title={`${protLabel} key cannot be removed`} />
-            : <IconDeleteBtn onClick={() => onDelete(keypair.id)} size={28} />}
+          {/* Owner decision (design.md §B5): "delete button should not be
+              available for them." A locked key renders NO delete control at
+              all — the disabled-but-present button this row used to show is
+              the behaviour that was overruled. */}
+          {!locked && <IconDeleteBtn onClick={() => onDelete(keypair.id)} size={28} />}
         </div>
       )}
     </div>

@@ -67,6 +67,34 @@ export interface CodexMasterSeed {
   /** Every `IArweaveSeed.id` displaced from {@link arweaveSeedId}, in the
    *  same order and under the same rules as {@link formerOuroAccountIds}. */
   readonly formerArweaveSeedIds?: readonly string[];
+  /**
+   * `IOuroAccount.id` of the account that was this codex's CodexPrime before
+   * it ever settled a master. Written ONCE — by the first finalize that
+   * promotes a DIFFERENT account — and never overwritten afterwards; see
+   * {@link recordFormerMasterIds}, which enforces that for every writer.
+   *
+   * ## Why this is not {@link formerOuroAccountIds}
+   *
+   * The eligibility wizard is re-runnable by design, and EVERY run executes
+   * its Write 2. So the append-only history accumulates every *candidate*
+   * that briefly held the row — accounts that were never applied and never
+   * displaced anything. Designations only become visible at the seal, so at
+   * seal time that list can hold several ids with equal claim to a "Former"
+   * title while only one of them is a real displacement.
+   *
+   * Compounding it: on a retry, "the account carrying `isPrime` before this
+   * run's promotion" is the PREVIOUS CANDIDATE, not the owner's original
+   * account. A capture that re-ran each finalize would record the wrong one —
+   * and because the promotion destroys the evidence (it clears `isPrime` on
+   * every other account), nothing could ever reconstruct the right one. That
+   * is why write-once is the load-bearing property here, not an optimisation.
+   *
+   * `formerOuroAccountIds` stays exactly as it is — an honest audit trail of
+   * ids that have held the row — and is simply no longer consulted for the
+   * Ouronet designation. Read this field through
+   * {@link isLegacyPrimeAccount}, which applies the seal gate.
+   */
+  readonly legacyPrimeOuroAccountId?: string;
 }
 
 /** Which faces of the master seed are established. `"arweave"` is the one
@@ -110,6 +138,9 @@ export function describeCodexMasterSeed(
  *     holder, not a former one;
  *   - an id already in the history is not appended twice, so handing the role
  *     back and forth cannot grow the list without bound;
+ *   - {@link CodexMasterSeed.legacyPrimeOuroAccountId} is WRITE-ONCE: once
+ *     `previous` carries one, it wins over whatever `next` names. See that
+ *     field for why a later reading would be the wrong account;
  *   - a list that would be empty stays ABSENT rather than becoming `[]`. A
  *     first-ever settlement therefore produces a row byte-identical to the
  *     one it would have produced before this history existed, which is what
@@ -131,9 +162,17 @@ export function recordFormerMasterIds(
     previous?.arweaveSeedId,
     next.arweaveSeedId
   );
+  // WRITE-ONCE: an id already recorded wins over anything `next` carries,
+  // forever. `setCodexMasterSeed` routes every row write through here, so the
+  // rule holds at the store with no store logic — and the wizard's finalize
+  // can stay an unconditional write. Falsy counts as NOT SET (a half-written
+  // id is not an identity), so an empty string cannot block the real one.
+  const legacyPrimeOuroAccountId =
+    previous?.legacyPrimeOuroAccountId || next.legacyPrimeOuroAccountId;
   if (
     formerOuroAccountIds === next.formerOuroAccountIds &&
-    formerArweaveSeedIds === next.formerArweaveSeedIds
+    formerArweaveSeedIds === next.formerArweaveSeedIds &&
+    legacyPrimeOuroAccountId === next.legacyPrimeOuroAccountId
   ) {
     return next;
   }
@@ -141,6 +180,7 @@ export function recordFormerMasterIds(
     ...next,
     ...(formerOuroAccountIds ? { formerOuroAccountIds } : {}),
     ...(formerArweaveSeedIds ? { formerArweaveSeedIds } : {}),
+    ...(legacyPrimeOuroAccountId ? { legacyPrimeOuroAccountId } : {}),
   };
 }
 
@@ -183,6 +223,15 @@ function appendDisplaced(
  *   inherit someone else's history.
  * @param row the codex's `codexMasterSeed`, absent on a never-migrated codex.
  * @param progress the codex's `migrationProgress`, i.e. the seal.
+ *
+ * ## Nothing renders this for accounts any more
+ *
+ * Stated so the next reader does not take its existence as evidence of a live
+ * surface. A displacement can only happen ONCE, and it is always
+ * kickstart-prime -> settled master, so the accounts tab now asks
+ * {@link isLegacyPrimeAccount} instead. This predicate is KEPT because it is
+ * correct for what it says and is the right answer should a second
+ * displacement ever become possible; its ArWeave twin below is still live.
  */
 export function isFormerMasterAccount(
   accountId: string | undefined | null,
@@ -190,6 +239,41 @@ export function isFormerMasterAccount(
   progress: MigrationProgress | undefined | null
 ): boolean {
   return isDisplacedHolder(accountId, row?.formerOuroAccountIds, row?.ouroAccountId, progress);
+}
+
+/**
+ * True when `accountId` is the codex's LEGACY CodexPrime — the account that
+ * held the role before this codex ever settled a master, recorded once in
+ * {@link CodexMasterSeed.legacyPrimeOuroAccountId}. The account that renders
+ * the retired designation "Former Codex Prime".
+ *
+ * Seal-gated, exactly like {@link isFormerMasterAccount} and for the owner's
+ * own reason — *"Only when sealing we get to see the new designations."* The
+ * gate is not re-implemented here: this delegates to the same
+ * `isDisplacedHolder` rule both "Former ..." predicates share, handing it a
+ * one-id history, so there is still ONE copy of the "sealed, identified, and
+ * not the current holder" discipline rather than a fourth.
+ *
+ * It deliberately does NOT read `formerOuroAccountIds`: that append-only list
+ * accumulates every wizard CANDIDATE, and only the write-once field names the
+ * one real displacement. See that field for why.
+ *
+ * @param accountId `IOuroAccount.id` of the account being asked about.
+ * @param row the codex's `codexMasterSeed`, absent on a never-migrated codex.
+ * @param progress the codex's `migrationProgress`, i.e. the seal.
+ */
+export function isLegacyPrimeAccount(
+  accountId: string | undefined | null,
+  row: CodexMasterSeed | undefined | null,
+  progress: MigrationProgress | undefined | null
+): boolean {
+  const legacy = row?.legacyPrimeOuroAccountId;
+  return isDisplacedHolder(
+    accountId,
+    legacy ? [legacy] : undefined,
+    row?.ouroAccountId,
+    progress
+  );
 }
 
 /**
