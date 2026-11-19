@@ -13,14 +13,17 @@ export {
   CodexKeyMissingError,
   CodexPrimeProtectedError,
   CodexArweaveEncryptionProtectedError,
+  CodexMasterKeyLockedError,
   CodexPrimeSeedProtectedError,
   CodexKickstartError,
   CodexAdapterError,
   CodexPasswordError,
   CodexMigrationError,
+  CodexStructuralMigrationError,
   CodexConsumerSettingsError,
   CodexIdentityError,
   CodexGuardError,
+  CodexPasswordChangeIncompleteError,
 } from "./types.js";
 
 // `CodexImportError` is thrown by the backup hook, which moved to codex-ui in

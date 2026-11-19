@@ -85,6 +85,12 @@ import { SingleApiPanel } from "./SingleApiPanel.js";
 import { DualApiPanel } from "./DualApiPanel.js";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IStoaChainWallet } from "../../types/entities.js";
+import { masterOuronetAccountName } from "@ancientpantheon/codex-core";
+import { OURONET_CODEX_MASTER, FORMER_OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
+import { isFormerMasterAccount, isMigrationSealed, resolveMasterOuronetAccount } from "@ancientpantheon/codex-core";
+import type { CodexMasterSeed, MigrationProgress } from "@ancientpantheon/codex-core";
+import { useCodexStoreOptional } from "../../provider/index.js";
+import type { CodexStoreState } from "../../state/store.js";
 
 /** Overlay live URC_0027 chain state onto a codex account for display. The
  *  codex store stays the at-rest source of truth; chain fields win when present. */
@@ -426,6 +432,98 @@ function MobilePortal({ target, children }: { target?: Element | null; children:
   return target ? createPortal(children, target) : <>{children}</>;
 }
 
+/**
+ * The codex's Codex Ouronet Master — ONE derived identity, read by the pinned
+ * row, by the gold treatment, by the 🔒 Prime badge and by the golden
+ * designation alike.
+ *
+ * The defect this exists to kill (prime-identity-display/plan.md T2, the
+ * owner's screenshot) is that those four used to disagree: the pinned row read
+ * `hydratedAccounts[0]`, the gold and the badge read `index === 0`, and only
+ * the NAME read `codexMasterSeed.ouroAccountId` — so a settlement that moved
+ * the master left "Initial Seed" pinned, gold and badged while the row reading
+ * "Codex Ouronet Master" sat below it under "Other standard accounts". Both
+ * the tab (pinning) and every `AccountRow` (gold, badge, designation) resolve
+ * through this one hook now, so they cannot drift apart again.
+ *
+ * ## The seal gate
+ *
+ * prime-two-name-model/design.md: *"the designation follows the SEAL, not the
+ * finalize"*. `codexMasterSeed` is written by the wizard's finalize, is
+ * non-fatal on failure and is re-writable by a later finalize while unsealed,
+ * whereas `migrationProgress.appliedAt` is monotone and permanent. So until
+ * the seal this answers `accounts[0]` — today's purely positional rule, byte
+ * for byte — which is what keeps every never-migrated codex, and every
+ * finalized-but-unapplied one, reading exactly as it always has.
+ *
+ * `migrationProgress` is not part of `useCodex()`'s view (`codex-ui`'s
+ * `CodexView` exposes `codexMasterSeed` but not the progress, and that package
+ * is outside this change's scope), so it is read through the NON-throwing
+ * store handle — the same `useCodexStoreOptional()((s) => s.migrationProgress)`
+ * form `PendingKeyChangesSection` already uses, for the same reason: a surface
+ * mounted without a `<CodexProvider>` ancestor must degrade, never throw.
+ */
+function useMasterOuronetIdentity<T extends { id: string; isPrime?: boolean }>(
+  accounts: readonly T[],
+): {
+  /** The master row itself — `undefined` only when there are no accounts. */
+  masterAccount: T | undefined;
+  /** The master row, for the former-holder predicate. */
+  codexMasterSeed: CodexMasterSeed | undefined;
+  /** The seal, i.e. that predicate's required third argument. */
+  migrationProgress: MigrationProgress | undefined;
+  /** Whether Apply has happened. False ⇒ the positional rule, unchanged. */
+  sealed: boolean;
+} {
+  const { codexMasterSeed } = useCodex();
+  const codexStore = useCodexStoreOptional();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const migrationProgress = codexStore
+    ? codexStore((st: CodexStoreState) => st.migrationProgress)
+    : undefined;
+  const sealed = isMigrationSealed(migrationProgress);
+  return {
+    masterAccount: sealed
+      ? resolveMasterOuronetAccount(accounts, codexMasterSeed?.ouroAccountId)
+      : accounts[0],
+    codexMasterSeed,
+    migrationProgress,
+    sealed,
+  };
+}
+
+/** The name `kickstartCodex` still STORES on the master Ouronet account
+ *  (`state/store.ts:1209`) — the legacy literal the master-name module exists
+ *  to stop DISPLAYING. Never written here; only recognised. */
+const LEGACY_STORED_MASTER_NAME = "CodexPrime";
+
+/**
+ * The second line of a two-name row: the account's OWN stored name, beneath
+ * the golden designation it reads under (prime-two-name-model/design.md — "a
+ * prime seed or account has 2 names: its golden prime name, and its normal
+ * name"). The designation is derived and the stored name is never overwritten,
+ * so both can be shown without either mangling the other.
+ *
+ * `undefined` — no second line at all — in the three cases where there is
+ * nothing honest to show:
+ *   1. the row wears no designation, so its title already IS its own name;
+ *   2. the stored name is {@link LEGACY_STORED_MASTER_NAME}: every codex old
+ *      and new stores it on the master, and an unconditional line would leak
+ *      that retired literal back onto screen;
+ *   3. self-reference — the stored name already equals the designation, which
+ *      is exactly the name-mangling this model exists to stop. Echoing it
+ *      would make a codex that suffered that write look correct.
+ */
+function accountOwnNameLine(
+  storedName: string | undefined,
+  designation: string | undefined,
+): string | undefined {
+  if (!designation || !storedName) return undefined;
+  if (storedName === LEGACY_STORED_MASTER_NAME) return undefined;
+  if (storedName === designation) return undefined;
+  return storedName;
+}
+
 function AccountRow({
   account, index, seeds, pureKeypairs, accounts, stoaChainAccounts, forceExpanded, paymentBalance, paymentKeyFunded, primeName,
   apiKeyRow, apiKeyLoaded, expandable = true, compact = false, fullScreenPortalTarget,
@@ -499,8 +597,76 @@ function AccountRow({
 
   const isFirst = index === 0;
   const isCodexIdPrime = !!primeName;
-  const locked = isFirst || isCodexIdPrime;
-  const displayName = primeName ?? (isFirst ? "CodexPrime" : account.name || `Account #${index + 1}`);
+  // The ONE master identity, seal-gated — see `useMasterOuronetIdentity`. The
+  // gold, the badge and the designation below all read it, and so does the
+  // tab's pinned prime zone, so the four can no longer name different rows.
+  const { masterAccount, codexMasterSeed, migrationProgress, sealed } =
+    useMasterOuronetIdentity(accounts);
+  // `accounts` is the tab's `hydratedAccounts` — the SAME array this row's own
+  // `index` indexes — so on an unsealed codex (where the hook answers
+  // `accounts[0]`) this is exactly `index === 0`. Compared by id rather than by
+  // identity so a re-hydrated copy still matches; a row with no id at all (the
+  // `key` fallbacks in this file admit that possibility) falls back to the
+  // positional answer rather than silently matching another row's empty id.
+  const isMaster =
+    masterAccount !== undefined && (account.id ? masterAccount.id === account.id : isFirst);
+  // The holder the role moved AWAY from, read off the former-id history on the
+  // master row. The predicate's third argument is the SEAL and it fails closed,
+  // so an unsealed codex never shows a former designation even once
+  // `formerOuroAccountIds` has been recorded by a finalize.
+  const isFormerMaster =
+    !isMaster && isFormerMasterAccount(account.id, codexMasterSeed, migrationProgress);
+
+  // Both of the row's names (prime-two-name-model/design.md). The golden
+  // DESIGNATION is derived from the role right here and never touches the
+  // account's stored `name` — that is the whole fix for "as non-prime accounts
+  // become prime, their names mangle". The positional/settled naming RULE
+  // itself stays in `masterOuronetAccountName` so these rows, the two ZBOM
+  // pickers and the Codex ID card cannot disagree about one account's name;
+  // `primeName` (the APOLLO CodexID half) still wins outright, as before.
+  const ownStoredName = masterOuronetAccountName(index, account.name, primeName, {
+    accountId: account.id,
+    // The RESOLVED master's id, never the raw `ouroAccountId`: a dangling id
+    // resolves to a fallback row, and feeding the raw one here would hand the
+    // master NAME to an account that is not in the list while the gold went to
+    // that fallback — the very disagreement being fixed. Null until the seal.
+    settledMasterAccountId: sealed ? (masterAccount?.id ?? null) : null,
+  });
+  // Derived, and mutually exclusive with the title being the account's own
+  // name — which is what lets a reader (and the specs) tell the two apart.
+  const designation: string | undefined = isCodexIdPrime
+    ? primeName
+    : isMaster
+      ? OURONET_CODEX_MASTER
+      : isFormerMaster
+        ? FORMER_OURONET_CODEX_MASTER
+        : undefined;
+  const displayName = designation ?? ownStoredName;
+  // An APOLLO half gets no second line: its `primeName` already carries the
+  // original inline ("StandardCodexID (Name)").
+  const ownName = isCodexIdPrime ? undefined : accountOwnNameLine(account.name, designation);
+
+  // `locked` used to govern three unrelated things at once — the 🔒 Prime
+  // badge, the rename affordance and delete-protection — which is why the
+  // master could not be renamed. Split, deliberately:
+  //   * the badge marks the master IDENTITY (or a CodexID half), nothing else;
+  //   * rename is now OFFERED on the master — the owner: "a prime account can
+  //     still get its normal name, like the other accounts and seeds, which
+  //     wouldn't have been possible before". Safe only because the designation
+  //     is DERIVED: a typed name lands on the stored `name` (the second line)
+  //     and can neither collide with nor overwrite the golden one. A CodexID
+  //     half stays un-renameable — its title is built from the other half's;
+  //   * delete-protection is only ever WIDENED, never moved. The stored
+  //     `isPrime` flag that makes `deleteOuroAccount` throw
+  //     `CodexPrimeProtectedError` (`state/store.ts:2498`) does NOT move on a
+  //     settlement, so the row set this UI refuses to delete is the UNION of
+  //     today's (index 0, CodexID halves) and the settled master. The naive
+  //     loosening — `isMaster || isCodexIdPrime` — would have made the
+  //     DISPLACED index-0 account deletable, which is funds-adjacent and was
+  //     never asked for.
+  const primeBadged = isMaster || isCodexIdPrime;
+  const renameLocked = isCodexIdPrime;
+  const deleteProtected = isFirst || isMaster || isCodexIdPrime;
 
   // Pre-ZBOM tooltip canon rule 7 ("fill every parameter you can, and prove
   // it") — ONE fill map (preZbomFillMap.ts), not hand-rolled per button.
@@ -515,10 +681,14 @@ function AccountRow({
   const patronFillValue = resolvePatronFillValue(initialPatronMode, account.address, accounts[0]?.address);
   const withPatron = patronFillValue ? { ...accountFillValues, patron: patronFillValue } : accountFillValues;
   const [renaming, setRenaming] = useState(false);
-  const [draftName, setDraftName] = useState(displayName);
+  // The draft is seeded from — and committed to — the account's OWN stored
+  // name, never `displayName`: a draft prefilled with the golden designation
+  // would write the role name onto disk the moment the user pressed Enter,
+  // which is precisely the data loss the two-name model exists to stop.
+  const [draftName, setDraftName] = useState(account.name ?? "");
   const commitRename = () => {
     const next = draftName.trim();
-    if (next && next !== displayName) void updateAccount({ ...account, name: next });
+    if (next && next !== account.name) void updateAccount({ ...account, name: next });
     setRenaming(false);
   };
   const stoicTag = account.stoicTag;
@@ -551,9 +721,14 @@ function AccountRow({
     ? identifyKeySource(account.stoaChainLedger, seeds, pureKeypairs)
     : { label: "", color: "#888" };
 
-  const rowBorderColor = isApollo ? apolloAccent + "55" : isFirst ? "#ceac5f40" : isActivated ? "#262626" : "#8b1a1a50";
-  const rowBgColor = isApollo ? apolloAccent + "08" : isFirst ? "#ceac5f08" : isActivated ? "#18181B" : "#8b1a1a08";
-  const nameColor = isApollo ? apolloAccent : isFirst ? "#ceac5f" : isActivated ? "#d2d3d4" : "#c0392b";
+  // The gold follows the MASTER identity, not the position — so there is
+  // exactly one gold row and it is the same row the designation names. The
+  // displaced holder reads in the muted silver `ArweaveSeedsArea`'s own
+  // former-master designation already uses: deliberately neither the gold nor
+  // an ordinary row's `#d2d3d4`/`#c0392b`.
+  const rowBorderColor = isApollo ? apolloAccent + "55" : isMaster ? "#ceac5f40" : isActivated ? "#262626" : "#8b1a1a50";
+  const rowBgColor = isApollo ? apolloAccent + "08" : isMaster ? "#ceac5f08" : isActivated ? "#18181B" : "#8b1a1a08";
+  const nameColor = isApollo ? apolloAccent : isMaster ? "#ceac5f" : isFormerMaster ? "#9a9a9a" : isActivated ? "#d2d3d4" : "#c0392b";
 
   return (
     <div
@@ -603,8 +778,17 @@ function AccountRow({
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: nameColor }}>{displayName}</span>
-            {locked && (compact ? (
+            {/* The title is EITHER the derived golden designation or the
+                account's own name — never both, which is why the two testids
+                are mutually exclusive: a reader can tell which of its two
+                names a row is titled by without parsing its colour. */}
+            <span
+              data-testid={designation ? `account-designation-${account.id}` : `account-name-${account.id}`}
+              style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: nameColor }}
+            >
+              {displayName}
+            </span>
+            {primeBadged && (compact ? (
               <IconBadge
                 icon={<Lock size={11} />}
                 bg={`${isCodexIdPrime ? apolloAccent : "#ceac5f"}20`}
@@ -656,6 +840,18 @@ function AccountRow({
               </span>
             ))}
           </div>
+          {/* The account's OWN name, beneath the golden designation it reads
+              under — the second of its two names, shown rather than displaced:
+              the designation is derived, so this one is never overwritten. */}
+          {ownName && (
+            <div
+              data-testid={`account-own-name-${account.id}`}
+              style={{ marginTop: 2, fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={`This account's own name — its designation is "${designation ?? ""}"`}
+            >
+              {ownName}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {isSelected && (compact ? (
@@ -891,7 +1087,7 @@ function AccountRow({
             <button type="button" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, padding: "6px 10px", borderRadius: 6, backgroundColor: "#0a0a0a", border: "1px solid #262626", color: "#d2d3d4", cursor: "pointer" }} onClick={() => setViewSeedOpen(true)}>
               <Eye style={{ width: 14, height: 14 }} /> View Seed
             </button>
-            {!locked && (renaming ? (
+            {!renameLocked && (renaming ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <input
                   autoFocus
@@ -904,7 +1100,7 @@ function AccountRow({
                 <button type="button" title="Cancel" onClick={() => setRenaming(false)} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 6, backgroundColor: "#141414", color: "#777", border: "2px solid #252525", cursor: "pointer" }}><X size={13} /></button>
               </span>
             ) : (
-              <IconRenameBtnRect onClick={() => { setDraftName(displayName); setRenaming(true); }} />
+              <IconRenameBtnRect onClick={() => { setDraftName(account.name ?? ""); setRenaming(true); }} />
             ))}
             {!account.isActive && !isApollo && (
               <PreZbomHint
@@ -924,8 +1120,12 @@ function AccountRow({
               </PreZbomHint>
             )}
             <div style={{ flex: 1 }} />
-            {locked
-              ? <IconDeleteBtnDisabled size={28} title={isCodexIdPrime ? `${primeName} cannot be removed while it is part of the CodexID` : "CodexPrime cannot be removed"} />
+            {deleteProtected
+              ? <IconDeleteBtnDisabled size={28} title={
+                  isCodexIdPrime ? `${primeName} cannot be removed while it is part of the CodexID`
+                  : isMaster ? `${OURONET_CODEX_MASTER} cannot be removed`
+                  : "The codex's original account cannot be removed"
+                } />
               : <IconDeleteBtn onClick={() => { void deleteAccount(account.id); }} size={28} />}
           </div>
           </>
@@ -1273,10 +1473,15 @@ export function OuronetAccountsTab({ className, paginationRiserTarget, swipeIndi
 
   // The prime zone pins all prime entities to the top (excluded from pagination,
   // separated from the rest): the CodexID APOLLO half for this sub-tab AND the
-  // codex's own CodexPrime account (index 0) when it lives in this sub-tab.
+  // codex's own master Ouronet account when it lives in this sub-tab.
   const primeId = activeTab === "standard" ? stdPrimeId : smtPrimeId;
   const apolloPrime = primeId ? currentList.find((a) => a.id === primeId) : undefined;
-  const codexPrimeAcct = hydratedAccounts[0];
+  // The SAME derived identity the rows paint gold and badge (see
+  // `useMasterOuronetIdentity`), not `hydratedAccounts[0]`: pinning one row
+  // positionally while the gold and the designation followed the settled
+  // master is the owner's screenshot. Unsealed codices still answer
+  // `hydratedAccounts[0]`, so nothing moves before Apply.
+  const { masterAccount: codexPrimeAcct } = useMasterOuronetIdentity(hydratedAccounts);
   const codexPrimeInTab = codexPrimeAcct
     ? (activeTab === "standard" ? !codexPrimeAcct.isSmart : codexPrimeAcct.isSmart)
     : false;
@@ -1288,7 +1493,7 @@ export function OuronetAccountsTab({ className, paginationRiserTarget, swipeIndi
     primeIds.add(apolloPrime.id);
   }
   if (codexPrimeInTab && codexPrimeAcct && !primeIds.has(codexPrimeAcct.id)) {
-    primeRows.push({ account: codexPrimeAcct }); // index-0 ⇒ AccountRow renders it as CodexPrime
+    primeRows.push({ account: codexPrimeAcct }); // the master ⇒ AccountRow renders it gold, badged and designated
     primeIds.add(codexPrimeAcct.id);
   }
 

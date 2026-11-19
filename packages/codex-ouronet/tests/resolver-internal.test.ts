@@ -136,6 +136,45 @@ async function makeStoicSeed(): Promise<{
   };
 }
 
+/** Build a LEGACY stoic ("Stoa Dalos") seed whose `secret` decrypts straight
+ *  to the raw space-separated DALOS seed words — never run through
+ *  `seedWordsToBitString` before encryption, unlike `makeStoicSeed()` above.
+ *  This is the real shape found live on a real codex (debug bug 2a,
+ *  `docs/work/debug/two-real-codex-bugs.md`): data created before (or
+ *  imported through a path that skipped) the pre-conversion convention
+ *  `CreateStoaChainSeedModal.tsx` follows today. Before the fix, feeding this
+ *  straight to `generateFromBitStringAtIndex` either threw or mis-derived —
+ *  `deriveStoaDalosKeypairAtIndex` now detects the shape and converts. */
+async function makeLegacyStoicSeedWithRawWordsSecret(): Promise<{
+  seed: IStoaChainSeed;
+  derivedPub: string;
+  derivedPriv: string;
+}> {
+  const words = ["bid", "day", "just", "attack", "address", "climb", "actual", "puppy"];
+  const bitString = seedWordsToBitString(words);
+  const { publicKey, privateKey } = deriveStoaDalosKeypairAtIndex(bitString, 0);
+  // The LEGACY shape under test: secret encrypts the raw words, not the
+  // pre-converted bitstring.
+  const encryptedWords = await smartEncrypt(words.join(" "), PASSWORD, "1.0");
+  return {
+    seed: {
+      id: "seed-stoic-legacy-1",
+      name: "Legacy Stoa Dalos Seed",
+      seedType: "stoic",
+      version: "1.0",
+      index: 0,
+      secret: encryptedWords,
+      main: `k:${publicKey}`,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      accounts: [
+        { index: 0, publicKey, derivationPath: "m'/44'/626'/0'" },
+      ],
+    },
+    derivedPub: publicKey,
+    derivedPriv: privateKey,
+  };
+}
+
 /** Build a real CHAINWEAVER pure keypair the way a user would after pasting a
  *  128-hex KadenaKeys / Chainweaver export into AddPureKeypairForm: generate a
  *  12-word mnemonic, derive the canonical extended key (empty wallet password →
@@ -293,6 +332,22 @@ describe("InternalCodexResolver", () => {
       // Unlike chainweaver/eckowallet, no WASM-signing material is attached —
       // this keypair must fall through universalSignTransaction's nacl branch.
       expect(result.encryptedSecretKey).toBeUndefined();
+    }, 10000);
+
+    it("resolves a LEGACY stoic seed whose secret decrypts to raw words, not a pre-converted bitstring (bug 2a regression)", async () => {
+      // This is the exact seam RotatePaymentKeyModal/RotateGuardModal resolve
+      // a stoic seed's signing key through (via useGetKeypair →
+      // InternalCodexResolver.getKeyPairByPublicKey → resolveStoicKeypair) —
+      // so a real legacy codex with this shape must sign correctly here too,
+      // not just display correctly in the seed-reveal UI.
+      const { seed, derivedPub, derivedPriv } = await makeLegacyStoicSeedWithRawWordsSecret();
+      await store.getState().actions.addStoaChainSeed(seed);
+      store.getState().actions.authenticate(PASSWORD, 60);
+
+      const result = await resolver.getKeyPairByPublicKey(derivedPub);
+      expect(result.publicKey).toBe(derivedPub);
+      expect(result.seedType).toBe("stoic");
+      expect(result.privateKey).toBe(derivedPriv);
     }, 10000);
 
     it("produces a VALID Ed25519 signature for a stoic ('Stoa Dalos') key (end-to-end, zero stoa-core changes)", async () => {

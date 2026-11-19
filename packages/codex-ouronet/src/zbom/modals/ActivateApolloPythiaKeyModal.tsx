@@ -59,6 +59,7 @@ import {
   buildDeployApiKeyPactCode,
   buildDeployApiKeyPreview,
 } from "../pythia/deployApiKey.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 
@@ -447,7 +448,7 @@ export default function ActivateApolloPythiaKeyModal({
         </div>
         {ownerAccount ? (
           <span className="text-xs font-mono font-bold" style={{ color: "#ceac5f" }}>
-            {accounts.indexOf(ownerAccount) === 0 ? "CodexPrime" : ownerAccount.name || (ownerAccount.address?.slice(0, 28) + "…")}
+            {accounts.indexOf(ownerAccount) === 0 ? OURONET_CODEX_MASTER : ownerAccount.name || (ownerAccount.address?.slice(0, 28) + "…")}
           </span>
         ) : (
           <p className="text-[11px]" style={{ margin: 0, color: "#f0a978" }}>
@@ -492,6 +493,7 @@ export default function ActivateApolloPythiaKeyModal({
   return (
     <ZbomModalFrame onClose={onClose} width={720}>
       <ZbomLayout
+      kind="page"
         header={
           <>
             <div className="flex items-center gap-2">
@@ -583,7 +585,7 @@ export default function ActivateApolloPythiaKeyModal({
           additionalGuards={
             ownershipGuard
               ? [{
-                  label: `Owner ownership — ${ownerAccount ? (accounts.indexOf(ownerAccount) === 0 ? "CodexPrime" : ownerAccount.name || ownerAccount.address?.slice(0, 14) + "…") : ""}`,
+                  label: `Owner ownership — ${ownerAccount ? (accounts.indexOf(ownerAccount) === 0 ? OURONET_CODEX_MASTER : ownerAccount.name || ownerAccount.address?.slice(0, 14) + "…") : ""}`,
                   guard: ownershipGuard as any,
                 }]
               : []

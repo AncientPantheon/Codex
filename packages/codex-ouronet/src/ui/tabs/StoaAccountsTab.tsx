@@ -50,6 +50,7 @@ import { SendKadenaModal } from "../internal/SendKadenaModal.js";
 import type { IStoaChainSeed } from "../../types/entities.js";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/index.js";
+import { masterChainwebSeedName } from "@ancientpantheon/codex-core";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const ADDR_PREFIXES = ["k:", "u:", "c:", "w:"];
@@ -1255,7 +1256,7 @@ export function StoaAccountsTab({
     const out: AddrGroup[] = [];
     seeds.forEach((seed: IStoaChainSeed, i) => {
       const isPrime = seed.isPrime === true || i === 0;
-      const name = isPrime ? "Prime Codex Seed" : seed.name || `Seed #${i + 1}`;
+      const name = masterChainwebSeedName(i, isPrime, seed.name);
       const color = SEED_TYPE_COLOR[seed.seedType] ?? "#ec4899";
       out.push({
         id: seed.id,

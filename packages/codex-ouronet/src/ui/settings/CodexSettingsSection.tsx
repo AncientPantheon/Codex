@@ -26,6 +26,7 @@ import { type CSSProperties, useCallback } from "react";
 import { Wrench, Globe, Timer, Eye, ShieldCheck, Fingerprint, Settings2 } from "lucide-react";
 import { useCodexStore } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
+import { CodexPasswordChangeIncompleteError } from "../../errors/types.js";
 import {
   ChangePasswordCard,
   type ChangePasswordPayload,
@@ -125,7 +126,20 @@ export function CodexSettingsSection({
   const actions = useCodexStore()((s: CodexStoreState) => s.actions);
   const defaultChangePassword = useCallback(
     async ({ currentPassword, newPassword }: ChangePasswordPayload) => {
-      await actions.changeCodexPassword(currentPassword, newPassword);
+      // `changeCodexPassword` resolves (never rejects) even when `rekeyCodex`
+      // had to skip a secret it couldn't decrypt under the old password —
+      // skip-not-drop is the safe choice THERE, but discarding that report
+      // HERE would tell the user "success" while a secret silently stays on
+      // the old password forever (confirmed live: it then fails signing with
+      // a genuine AES-GCM auth-tag mismatch, e.g. a stoic seed's `secret` the
+      // next time Rotate Payment Key / Rotate Guard needs it — debug bug 1,
+      // docs/work/debug/two-real-codex-bugs.md). Throwing surfaces it through
+      // this card's own existing catch (ChangePasswordCard.tsx's handleSubmit)
+      // at the one moment it's still cheap to fix.
+      const { skipped } = await actions.changeCodexPassword(currentPassword, newPassword);
+      if (skipped.length > 0) {
+        throw new CodexPasswordChangeIncompleteError(skipped);
+      }
     },
     [actions],
   );

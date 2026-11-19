@@ -12,10 +12,13 @@ import {
   toPersistableAccountSelection,
   isResumableSelection,
   containsSuspectedSecret,
+  isMigrationSealed,
+  hasMigrationPending,
 } from "../src/codex/migrationProgress.js";
 import type {
   MigrationProgress,
   MigrationSelection,
+  MigrationPendingPlan,
 } from "../src/codex/migrationProgress.js";
 
 const WORDS = "river stone ember ancient hodler vault";
@@ -112,6 +115,94 @@ describe("a full recorded run carries no secret material", () => {
 
   it("does not false-positive on a boolean flag whose name reads secret-ish", () => {
     expect(containsSuspectedSecret({ committed: { wordsWritten: true } })).toBe(false);
+  });
+});
+
+describe("the pending plan carries no secret material either", () => {
+  it("a FULLY populated MigrationPendingPlan has nothing secret in it", () => {
+    // The pending plan travels in the export exactly like the rest of the
+    // row. If a future field on it were named/shaped like key material, this
+    // is the scan that catches it before it ships in cleartext.
+    const pending: MigrationPendingPlan = {
+      finalizedAt: "2026-11-18T10:00:00.000Z",
+      accountId: "ouro-1",
+      seedId: "seed-1",
+      arweaveSeedId: "ar-seed-1",
+      paymentPublicKey: "a".repeat(64),
+      guardPublicKeys: ["b".repeat(64), "c".repeat(64)],
+      guardPred: "keys-all",
+    };
+    const row: MigrationProgress = {
+      stage: "committing",
+      startedAt: "2026-11-18T09:00:00.000Z",
+      updatedAt: "2026-11-18T10:00:00.000Z",
+      selection: {
+        account: toPersistableAccountSelection({ kind: "new-words", words: WORDS }),
+      },
+      pending,
+    };
+
+    expect(containsSuspectedSecret(row)).toBe(false);
+    expect(JSON.stringify(row)).not.toContain(WORDS);
+    // Pure data: it survives the export round trip byte-for-byte.
+    expect(
+      (JSON.parse(JSON.stringify(row)) as MigrationProgress).pending
+    ).toEqual(pending);
+  });
+});
+
+describe("isMigrationSealed / hasMigrationPending", () => {
+  const PENDING: MigrationPendingPlan = {
+    finalizedAt: "2026-11-18T10:00:00.000Z",
+    accountId: "ouro-1",
+  };
+  const base = {
+    stage: "committing",
+    startedAt: "2026-11-18T09:00:00.000Z",
+    updatedAt: "2026-11-18T10:00:00.000Z",
+  } as const;
+
+  it("no pending, not sealed — the wizard has never been finalized", () => {
+    const row: MigrationProgress = { ...base };
+    expect(isMigrationSealed(row)).toBe(false);
+    expect(hasMigrationPending(row)).toBe(false);
+  });
+
+  it("pending, not sealed — there IS something to apply", () => {
+    const row: MigrationProgress = { ...base, pending: PENDING };
+    expect(isMigrationSealed(row)).toBe(false);
+    expect(hasMigrationPending(row)).toBe(true);
+  });
+
+  it("pending AND sealed — sealed wins; nothing is pending any more", () => {
+    // The load-bearing combination: after Apply the plan STAYS on the row as
+    // the record of what was applied, so a predicate that only looked at
+    // `pending` would keep offering Apply/Retry on a sealed codex forever.
+    const row: MigrationProgress = {
+      ...base,
+      stage: "done",
+      pending: PENDING,
+      appliedAt: "2026-11-18T11:00:00.000Z",
+    };
+    expect(isMigrationSealed(row)).toBe(true);
+    expect(hasMigrationPending(row)).toBe(false);
+  });
+
+  it("sealed with no pending plan — still sealed", () => {
+    const row: MigrationProgress = {
+      ...base,
+      stage: "done",
+      appliedAt: "2026-11-18T11:00:00.000Z",
+    };
+    expect(isMigrationSealed(row)).toBe(true);
+    expect(hasMigrationPending(row)).toBe(false);
+  });
+
+  it("no row at all is neither sealed nor pending", () => {
+    expect(isMigrationSealed(undefined)).toBe(false);
+    expect(hasMigrationPending(undefined)).toBe(false);
+    expect(isMigrationSealed(null)).toBe(false);
+    expect(hasMigrationPending(null)).toBe(false);
   });
 });
 

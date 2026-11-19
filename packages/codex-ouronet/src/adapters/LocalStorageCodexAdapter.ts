@@ -14,7 +14,7 @@ import {
   type IConsumerSettings,
   type ICodexIdentity,
 } from "../types/entities.js";
-import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { ForeignKeyEntry, MasterKeyLock, CodexMasterSeed, MigrationProgress } from "@ancientpantheon/codex-core";
 import type { CodexAdapter, CodexSnapshot } from "./types.js";
 import { emptySnapshot } from "./types.js";
 
@@ -50,6 +50,26 @@ import { emptySnapshot } from "./types.js";
  *                              `secret` is ciphertext at rest — NEVER the
  *                              1600-bit plaintext; absent on pre-seed codices
  *                              → [])
+ *   - "migrationProgress"      an eligibility migration started and not
+ *                              finished (JSON object). Carries ids and
+ *                              public keys only, never seed words.
+ *   - "codexMasterSeed"        the Codex Master Seed row (JSON object:
+ *                              which Ouronet account / Chainweb seed /
+ *                              ArWeave seed are the three faces of the one
+ *                              seed). Pure linkage, no secret material.
+ *                              Absent on pre-master codices -> undefined.
+ *   - "masterKeyLocks"         master-key locks (JSON array of
+ *                              {seedId, position, reason}) — which derived
+ *                              key positions the Codex Ouronet Master
+ *                              depends on and therefore may not be removed.
+ *                              Absent on pre-lock codices -> [].
+ *   - "codex_shape_version"    per-codex-instance shape stamp the structural
+ *                              migration engine writes on success (string,
+ *                              e.g. "1.0.0"; absent on a never-migrated
+ *                              codex -> undefined, which is what makes the
+ *                              migration run). NOT the schema version below
+ *                              and NOT the package build constant — see
+ *                              codex-core's `codex/shapeVersion.ts`.
  *   - "codex_schema_version"   in-band schema version (string -> int)
  *   - "codex_last_updated"     ISO timestamp
  *   - "codex_device"           "dev" | "main"
@@ -93,7 +113,11 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       const codexIdentity = this.loadCodexIdentity();
       const foreignKeys = this.parseArray<ForeignKeyEntry>("foreignKeys");
       const arweaveSeeds = this.parseArray<IArweaveSeed>("arweaveSeeds");
+      const masterKeyLocks = this.parseArray<MasterKeyLock>("masterKeyLocks");
+      const codexMasterSeed = this.loadCodexMasterSeed();
+      const migrationProgress = this.loadJsonObject<MigrationProgress>("migrationProgress");
       const schemaVersion = this.loadSchemaVersion();
+      const Codex_Shape_Version = this.loadShapeVersion();
       const lastUpdatedAt = window.localStorage.getItem("codex_last_updated");
       const lastUpdatedDevice = this.loadDeviceVariant();
 
@@ -108,7 +132,11 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         codexIdentity,
         foreignKeys,
         arweaveSeeds,
+        masterKeyLocks,
+        codexMasterSeed,
+        migrationProgress,
         schemaVersion,
+        Codex_Shape_Version,
         lastUpdatedAt,
         lastUpdatedDevice,
       };
@@ -153,7 +181,60 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
           JSON.stringify(snapshot.arweaveSeeds)
         );
       }
+      // Master-key locks. Same refuse-to-erase-on-absence discipline as the
+      // `arweaveSeeds` shard above, and deliberately the OPPOSITE of
+      // `codex_shape_version` below. Rationale: an absent `Codex_Shape_Version`
+      // is a truthful claim ("this data is unstamped"), but an absent
+      // `masterKeyLocks` means only "this writer did not know about locks" —
+      // and erasing on that would let any pre-locks code path silently strip
+      // the guarantee that protects the master's payment key. An explicit
+      // empty array still clears, so a genuine release works.
+      // Same refuse-to-erase-on-absence discipline as masterKeyLocks: an
+      // absent row means "this writer did not know about the row", not "this
+      // codex has no master seed". Erasing on absence would make a codex
+      // forget which of its seeds everything derives from.
+      // Unlike every other shard here this one IS erased on an explicit
+      // `null`: finishing or abandoning a migration must actually clear the
+      // row, or a completed codex would offer to resume forever. `undefined`
+      // still means "this writer did not know about the field" and leaves it.
+      if (snapshot.migrationProgress !== undefined) {
+        window.localStorage.setItem(
+          "migrationProgress",
+          JSON.stringify(snapshot.migrationProgress)
+        );
+      } else if (snapshot.migrationProgress === null) {
+        window.localStorage.removeItem("migrationProgress");
+      }
+      if (snapshot.codexMasterSeed !== undefined) {
+        window.localStorage.setItem(
+          "codexMasterSeed",
+          JSON.stringify(snapshot.codexMasterSeed)
+        );
+      }
+      if (snapshot.masterKeyLocks !== undefined) {
+        window.localStorage.setItem(
+          "masterKeyLocks",
+          JSON.stringify(snapshot.masterKeyLocks)
+        );
+      }
       window.localStorage.setItem("codex_schema_version", String(snapshot.schemaVersion));
+      // Structural-migration success stamp. Written FAITHFULLY, INCLUDING ITS
+      // ABSENCE (absent -> removeItem), which is deliberately the OPPOSITE
+      // discipline to the `arweaveSeeds` shard above. That one refuses to erase
+      // because nothing can reconstruct a lost seed; this is not a secret but a
+      // CLAIM ABOUT THE SHAPE of the data being written. Leaving a stale claim
+      // over freshly-written legacy-shaped data would mark unmigrated data as
+      // migrated and make the structural upgrade skip the very codex that needs
+      // it; re-running an idempotent, postcondition-checked migration is the
+      // strictly cheaper error.
+      if (snapshot.Codex_Shape_Version !== undefined) {
+        window.localStorage.setItem(
+          "codex_shape_version",
+          snapshot.Codex_Shape_Version
+        );
+      } else {
+        window.localStorage.removeItem("codex_shape_version");
+      }
       if (snapshot.lastUpdatedAt) {
         window.localStorage.setItem("codex_last_updated", snapshot.lastUpdatedAt);
       }
@@ -332,6 +413,10 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
         "codexIdentity",
         "foreignKeys",
         "arweaveSeeds",
+        "masterKeyLocks",
+        "codexMasterSeed",
+        "migrationProgress",
+        "codex_shape_version",
         "codex_schema_version",
         "codex_last_updated",
         "codex_device",
@@ -488,6 +573,35 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       // crash) — treat as absent rather than crashing the codex load.
       return undefined;
     }
+  }
+
+  /** The shape stamp, or `undefined` when never stamped. An empty string is
+   *  treated as absent: `formatCodexShapeVersionLabel("")` would otherwise
+   *  render a blank version instead of "Unversioned". */
+  /** The Codex Master Seed row, or `undefined` when never written. Corrupt
+   *  JSON degrades to `undefined` rather than crashing the codex load, the
+   *  same way every other object shard here does. */
+  private loadCodexMasterSeed(): CodexMasterSeed | undefined {
+    return this.loadJsonObject<CodexMasterSeed>("codexMasterSeed");
+  }
+
+  /** Read a JSON-object shard, degrading corrupt JSON to `undefined` rather
+   *  than crashing the codex load — the convention every object shard here
+   *  follows. */
+  private loadJsonObject<T>(key: string): T | undefined {
+    const raw = window.localStorage.getItem(key);
+    if (!raw || raw === "null") return undefined;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === "object" && parsed !== null ? (parsed as T) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private loadShapeVersion(): string | undefined {
+    const raw = window.localStorage.getItem("codex_shape_version");
+    return raw ? raw : undefined;
   }
 
   private loadSchemaVersion(): number {

@@ -44,6 +44,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useControls, ControlsDrawer } from "@ancientpantheon/codex-ui/ui";
+import { useNeedsStructuralUpgrade } from "@ancientpantheon/codex-ouronet/hooks";
 import "./ouronet-shell-mock.css";
 
 /** Viewport-relative on purpose (unlike CodexUI's own container-relative
@@ -192,12 +193,17 @@ function CodexTierTwoMenu({
   onExport,
   onImport,
   onClose,
+  needsStructuralUpgrade,
 }: {
   activeView: CodexPlaygroundView;
   onSelectView: (view: CodexPlaygroundView) => void;
   onExport: () => void;
   onImport?: () => void;
   onClose: () => void;
+  /** Drives the flashing "Codex ID" badge below — same hook/boolean as
+   *  `App.tsx`'s desktop `.cxpg-viewtab` and `CodexIdPage`'s own gating
+   *  (docs/work/upgrade-prompt-ui, T3), so all three can never disagree. */
+  needsStructuralUpgrade: boolean;
 }) {
   return (
     <div className="cxpg-osm-codex-menu" role="menu" aria-label="Codex">
@@ -220,6 +226,14 @@ function CodexTierTwoMenu({
       >
         <IdCard size={19} strokeWidth={1.5} aria-hidden="true" />
         <span>Codex ID</span>
+        {needsStructuralUpgrade ? (
+          <span
+            className="cxpg-osm-codex-menu-item-upgrade-badge"
+            data-testid="codex-id-upgrade-badge"
+            title="Structural upgrade needed"
+            aria-hidden="true"
+          />
+        ) : null}
       </button>
       <button
         type="button"
@@ -267,6 +281,10 @@ export function OuronetShellMock({
 }: OuronetShellMockProps): ReactElement {
   const barRef = useRef<HTMLDivElement>(null);
   const [codexMenuOpen, setCodexMenuOpen] = useState(false);
+  // Drives the flashing "Codex ID" tier-2 menu item badge below — same
+  // hook, same boolean as App.tsx's desktop ".cxpg-viewtab" counterpart
+  // (docs/work/upgrade-prompt-ui, T3).
+  const needsStructuralUpgrade = useNeedsStructuralUpgrade();
 
   return (
     <div className="cxpg-osm-root">
@@ -326,6 +344,7 @@ export function OuronetShellMock({
             onExport={onExport}
             onImport={onImport}
             onClose={() => setCodexMenuOpen(false)}
+            needsStructuralUpgrade={needsStructuralUpgrade}
           />
         )}
         <nav className="cxpg-osm-tabbar" aria-label="Ouronet sections (mock)">

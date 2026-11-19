@@ -89,6 +89,8 @@ import {
   createRealArweaveAdapter,
 } from "./realArweaveAdapter";
 import { DEFAULT_GATEWAY_URL } from "./ArweaveModeToggle";
+import { masterChainwebSeedName } from "@ancientpantheon/codex-core";
+import { MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 
 // Register the Arweave address-book validator on the module-level default
 // registry, mirroring how packages/codex/src/ui/CodexTabsWired.tsx does it for
@@ -255,7 +257,7 @@ export function toArweaveSeedChainwebSources(
 ): ArweaveSeedChainwebSource[] {
   return seeds.map((seed, i) => ({
     id: seed.id,
-    label: seed.isPrime === true ? "Prime Codex Seed" : seed.name || `Seed #${i + 1}`,
+    label: masterChainwebSeedName(i, seed.isPrime, seed.name),
     isDefault: seed.isPrime === true,
   }));
 }
@@ -448,7 +450,7 @@ export interface StoredArweaveSeed {
 function labelOfStoredSeed(seed: StoredArweaveSeed): string {
   const name = seed.name?.trim();
   if (name !== undefined && name !== "") return name;
-  return seed.isPrime === true ? "Prime Arweave Seed" : "Arweave Seed";
+  return seed.isPrime === true ? MASTER_ARWEAVE_SEED : "Arweave Seed";
 }
 
 /**

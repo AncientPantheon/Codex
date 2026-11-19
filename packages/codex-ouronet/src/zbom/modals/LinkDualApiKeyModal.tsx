@@ -52,6 +52,7 @@ import { useWallet } from "../cfm/seam.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
 import { buildLinkDualApiKeyPactCode, buildLinkDualApiKeyPreview, getLinkDualApiKeyInfo } from "../pythia/linkDualApiKey.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 type Guard = { keys: string[]; pred: string } | null;
@@ -160,7 +161,7 @@ export default function LinkDualApiKeyModal({
   const ownerName = (addr: string) => {
     const a = accounts.find((x) => x.address === addr);
     if (!a) return addr ? addr.slice(0, 16) + "…" : "—";
-    return accounts.indexOf(a) === 0 ? "CodexPrime" : (a.name || addr.slice(0, 16) + "…");
+    return accounts.indexOf(a) === 0 ? OURONET_CODEX_MASTER : (a.name || addr.slice(0, 16) + "…");
   };
 
   const guardsLoaded = stdGuardLoaded && smtGuardLoaded;
@@ -310,6 +311,7 @@ export default function LinkDualApiKeyModal({
   return (
     <ZbomModalFrame onClose={onClose} width={720}>
       <ZbomLayout
+      kind="page"
         header={
           <>
             <div className="flex items-center gap-2">

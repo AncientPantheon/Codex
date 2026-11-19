@@ -1,8 +1,22 @@
 /**
  * OuronetAddressHighlight — renders an Ouronet address (Ѻ.BODY) FILLING the
- * parent width: silver base, blue-bold highlight on the first 3 body chars AND
- * the last 3 chars, with a CENTERED middle truncation (`start … end`, balanced
- * halves) when it can't fit — so it fills the row and reads clearly as shortened.
+ * parent width: BLUE `Ѻ.` prefix, silver base body, YELLOW-bold highlight on
+ * the first 3 body chars AND the last 3 chars, with a CENTERED middle
+ * truncation (`start … end`, balanced halves) when it can't fit — so it fills
+ * the row and reads clearly as shortened.
+ *
+ * Owner correction (this session): "the prefix of the ouronet account is blue,
+ * then the first 3 and last 3 are yellow". This used to be the reverse-ish —
+ * a SILVER prefix with BLUE edge anchors (measured live before the change:
+ * prefix `rgb(160,160,176)`, anchors `rgb(59,130,246)`). The yellow is this
+ * package's OWN established edge-anchor yellow (`StoaAddressHighlight.tsx`'s
+ * `const YELLOW = "#eab308"`, the default `edgeColor` its
+ * `MeasuredHexHighlight` already paints first-3/last-3 with in 15 places) —
+ * not a new color invented here; the blue is the one this file already had.
+ * Changed at the component (not per-call-site) deliberately: this IS the
+ * single source of the "how an Ouronet address looks" convention, and the
+ * owner has repeatedly (and rightly) called out this wizard drifting from
+ * what the rest of the codex shows.
  *
  * The fit is measured (monospace → ~constant char width) and split into balanced
  * halves around a single `…`.
@@ -25,7 +39,11 @@ interface Props {
 }
 
 const SILVER = "#a0a0b0";
+/** The `Ѻ.` prefix. */
 const BLUE = "#3b82f6";
+/** First-3 / last-3 body anchors — `StoaAddressHighlight.tsx`'s own
+ *  `YELLOW`, this package's established edge-anchor color. */
+const YELLOW = "#eab308";
 
 function measureCharWidthIn(el: HTMLElement): number {
   if (typeof document === "undefined") return 0;
@@ -58,10 +76,10 @@ function highlighted(s: string) {
   const h2 = s.slice(-3);
   return (
     <>
-      <span style={{ color: SILVER }}>{prefix}</span>
-      <span style={{ color: BLUE, fontWeight: 700 }}>{h1}</span>
+      <span style={{ color: BLUE }}>{prefix}</span>
+      <span style={{ color: YELLOW, fontWeight: 700 }}>{h1}</span>
       <span style={{ color: SILVER }}>{mid}</span>
-      <span style={{ color: BLUE, fontWeight: 700 }}>{h2}</span>
+      <span style={{ color: YELLOW, fontWeight: 700 }}>{h2}</span>
     </>
   );
 }

@@ -98,7 +98,7 @@ async function renderTabExpanded() {
       <OuronetAccountsTab />
     </CodexProvider>,
   );
-  const card = (await screen.findByText("CodexPrime")).closest("[data-account-id]") as HTMLElement;
+  const card = (await screen.findByText("Codex Ouronet Master")).closest("[data-account-id]") as HTMLElement;
   const header = card.querySelector('[role="button"]') as HTMLElement;
   fireEvent.click(header);
   return card;

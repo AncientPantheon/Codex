@@ -56,8 +56,10 @@ import { createPortal } from "react-dom";
 import type { PanelProps } from "@ancientpantheon/codex-ui";
 import { useIsMobile, MobileCategoryIconBtn } from "@ancientpantheon/codex-ui/ui";
 import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import { isFormerMasterArweaveSeed } from "@ancientpantheon/codex-core";
 import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 import { useEnsureCodexUnlockedOptional } from "@ancientpantheon/codex-ouronet/zbom";
+import { useCodexStoreOptional } from "@ancientpantheon/codex-ouronet/provider";
 
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
 import type { LibraryEntry } from "../library/types.js";
@@ -665,6 +667,55 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
   // `ensureCodexUnlocked` prop already treats as "proceed straight to
   // decrypt," unchanged from before this round.
   const ensureCodexUnlocked = useEnsureCodexUnlockedOptional();
+  // WHICH Arweave seed the codex calls its Master ArWeave Seed
+  // (`codexMasterSeed.arweaveSeedId`), threaded into `ArweaveSeedsArea` as an
+  // injected prop — that surface deliberately reaches into no store of its
+  // own, so the panel resolves this for it exactly as it already does
+  // `ensureCodexUnlocked`. It decides which seed row sits first and wears the
+  // gold treatment; see `resolveMasterArweaveSeed.ts` for why the seed's own
+  // `isPrime` flag is the wrong answer once the eligibility wizard has
+  // settled a master.
+  //
+  // Read through the NON-throwing `useCodexStoreOptional()` (this panel is
+  // deliberately mountable with zero providers), and SUBSCRIBED rather than
+  // read once through `getState()`: the wizard's finalize step writes this
+  // row while the panel is already mounted, and a non-reactive read would
+  // leave the list ordered by the stale `isPrime` flag until some unrelated
+  // re-render. Whether a `<CodexProvider>` ancestor exists is fixed for this
+  // component's whole mounted lifetime, so conditioning the selector call on
+  // it is not the hazard the Rules-of-Hooks lint guards against — the same
+  // idiom (and the same disable) `PendingKeyChangesSection` and
+  // `LegacyPrimeMigrationWizard` already use.
+  const codexStore = useCodexStoreOptional();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const masterArweaveSeedId = codexStore
+    ? codexStore((s) => s.codexMasterSeed?.arweaveSeedId)
+    : undefined;
+  // The same division of labour for the FORMER holders
+  // (`former-master-record`): the store read and the SEAL GATE live here, and
+  // `ArweaveSeedsArea` is handed plain ids to render
+  // `FORMER_MASTER_ARWEAVE_SEED` against.
+  //
+  // The row and the progress are selected SEPARATELY (two stable object
+  // references) and combined in a `useMemo`, rather than selecting a derived
+  // array: a selector returning a fresh array on every call re-renders this
+  // panel on every unrelated store write.
+  //
+  // `isFormerMasterArweaveSeed` is codex-core's own predicate — the seal gate
+  // (*"the designation follows the SEAL, not the finalize"*) and the "not the
+  // current holder" rule are ITS business, not this panel's, so a
+  // finalized-but-unapplied codex resolves to no former ids at all here.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const codexMasterSeedRow = codexStore ? codexStore((s) => s.codexMasterSeed) : undefined;
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const migrationProgress = codexStore ? codexStore((s) => s.migrationProgress) : undefined;
+  const formerMasterArweaveSeedIds = useMemo(
+    () =>
+      (codexMasterSeedRow?.formerArweaveSeedIds ?? []).filter((seedId) =>
+        isFormerMasterArweaveSeed(seedId, codexMasterSeedRow, migrationProgress),
+      ),
+    [codexMasterSeedRow, migrationProgress],
+  );
   // Accounts' own relocated controls — same "report upward, don't
   // duplicate the underlying logic" shape `ChainwebPanel.tsx` uses for
   // `StoaAccountsTab` ("same structure and design and placement of
@@ -954,10 +1005,12 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
   );
 
   const accountsSeeds = useMemo(
-    // Forward `isPrime` so Accounts titles the prime group "Prime Arweave Seed"
-    // even when the prime seed is not first in the array. Without it the list
-    // falls back to positional inference (index 0), which mislabels after a
-    // reorder or once an earlier seed is deleted.
+    // Forward `isPrime` so Accounts can still title the master group on a codex
+    // that has settled no master id, even when the prime seed is not first in
+    // the array. Without it the list falls back to positional inference (index
+    // 0), which mislabels after a reorder or once an earlier seed is deleted.
+    // It is only the FALLBACK now: `masterArweaveSeedId` below outranks it (see
+    // `resolveMasterArweaveSeed`).
     //
     // `hasWords` drives Accounts' balance-delete-guard tier (design.md §3):
     // `true` only when this seed's plaintext words are actually known this
@@ -1223,6 +1276,8 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
           )}
           <ArweaveSeedsArea
             seeds={seeds}
+            masterArweaveSeedId={masterArweaveSeedId}
+            formerMasterArweaveSeedIds={formerMasterArweaveSeedIds}
             onSeedDefined={handleSeedDefined}
             existingKeys={arweaveKeys}
             persistKey={persistKey}
@@ -1253,6 +1308,14 @@ export function ArweavePanel({ fullScreenPortalTarget, zone3AnchorTarget }: Pane
           <ArweaveAccountsArea
             entries={arweaveKeys}
             seeds={accountsSeeds}
+            // The SAME two injected identity inputs the Seeds area above gets,
+            // resolved once at the top of this component: Accounts' group
+            // headings were the fourth independent "which seed is the master?"
+            // rule in this codebase (`isPrime === true || i === 0`) and titled
+            // the wrong seed's address group after a settlement. Both surfaces
+            // now read one resolver against one store value.
+            masterArweaveSeedId={masterArweaveSeedId}
+            formerMasterArweaveSeedIds={formerMasterArweaveSeedIds}
             // onDeleteKey intentionally NOT threaded: Accounts is a pure
             // listing of every address the codex holds — it never deletes.
             // A key can only be removed from its OWN category: a seed-derived

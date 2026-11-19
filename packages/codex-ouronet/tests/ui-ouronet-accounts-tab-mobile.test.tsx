@@ -49,12 +49,13 @@ vi.mock("../src/zbom/ouroSelectorReads.js", async (importOriginal) => {
   return { ...actual, getAccountSelectorDataLive: async () => [] };
 });
 
-import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { useCodex, useOuroAccounts } from "@ancientpantheon/codex-ouronet/hooks";
 import { OuronetAccountsTab } from "@ancientpantheon/codex-ouronet/ui";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
 import type { IOuroAccount } from "@ancientpantheon/codex-ouronet/types";
+import type { CodexMasterSeed, MigrationProgress } from "@ancientpantheon/codex-core";
 
 class FakeResizeObserver {
   callback: ResizeObserverCallback;
@@ -96,11 +97,27 @@ const ouroFx = (over: Partial<IOuroAccount> = {}): IOuroAccount => ({
 const manyAccounts = (n: number): IOuroAccount[] =>
   Array.from({ length: n }, (_, i) => ouroFx({ id: `o${i}`, name: `Account ${i}`, address: `Ѻ.o${i}` }));
 
-function Seeder({ accounts }: { accounts: IOuroAccount[] }) {
+/** Seeds the accounts and — for the master-identity specs — the settled
+ *  `codexMasterSeed` row plus the SEAL, written straight onto the per-mount
+ *  store (the same display-only seeding the desktop suite uses: there is no
+ *  form for either, and driving the whole wizard is a different suite's job). */
+function Seeder({
+  accounts,
+  masterSeed,
+  progress,
+}: {
+  accounts: IOuroAccount[];
+  masterSeed?: CodexMasterSeed;
+  progress?: MigrationProgress;
+}) {
   const { addAccount } = useOuroAccounts();
   const { isReady } = useCodex();
+  const store = useCodexStore();
   React.useEffect(() => {
-    if (isReady) accounts.forEach((a) => void addAccount(a));
+    if (!isReady) return;
+    if (masterSeed) store.setState({ codexMasterSeed: masterSeed });
+    if (progress) store.setState({ migrationProgress: progress });
+    accounts.forEach((a) => void addAccount(a));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady]);
   return null;
@@ -109,19 +126,21 @@ function Seeder({ accounts }: { accounts: IOuroAccount[] }) {
 async function renderMobile(
   accounts: IOuroAccount[],
   props: React.ComponentProps<typeof OuronetAccountsTab> = {},
+  masterSeed?: CodexMasterSeed,
+  progress?: MigrationProgress,
 ) {
   FakeResizeObserver.nextWidth = 390;
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   const adapter = new MemoryCodexAdapter("dev");
   const utils = render(
     <CodexProvider adapter={adapter}>
-      <Seeder accounts={accounts} />
+      <Seeder accounts={accounts} masterSeed={masterSeed} progress={progress} />
       <CodexUiRoot>
         <OuronetAccountsTab {...props} />
       </CodexUiRoot>
     </CodexProvider>,
   );
-  await waitFor(() => expect(screen.getByText("CodexPrime")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("Codex Ouronet Master")).toBeTruthy());
   return utils;
 }
 
@@ -197,8 +216,8 @@ describe("<OuronetAccountsTab> — mobile: the measured page size (useMobilePage
   it("never re-renders the pinned CodexPrime row inside any chunk but the very first (no more per-page repeat)", async () => {
     const { container } = await renderMobile(manyAccounts(25));
     const chunks = container.querySelectorAll("[data-mobile-swipe-chunk]");
-    expect(within(chunks[0] as HTMLElement).queryByText("CodexPrime")).toBeTruthy();
-    expect(within(chunks[1] as HTMLElement).queryByText("CodexPrime")).toBeNull();
+    expect(within(chunks[0] as HTMLElement).queryByText("Codex Ouronet Master")).toBeTruthy();
+    expect(within(chunks[1] as HTMLElement).queryByText("Codex Ouronet Master")).toBeNull();
   });
 });
 
@@ -443,5 +462,80 @@ describe("<OuronetAccountsTab> — mobile: swipe bullets are now FLAT (chunksPer
     // while the leading slot (already on page 1) doesn't.
     expect(lead!.textContent).toBe("");
     expect(trail!.textContent).toBe("…");
+  });
+});
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * prime-identity-display/plan.md T2 — the owner's screenshot, on mobile.
+ *
+ * Mobile pins the prime row(s) at the very start of the continuous list with
+ * NO separator bar, and conveys "prime" by COLOUR plus a compact icon badge
+ * instead of the desktop "🔒 Prime" text pill (owner directive: "the prime
+ * account must be designated as such via colour coding"). All three of those
+ * — the pinned slot, the gold and the badge — must land on the SAME row as
+ * the golden designation: the codex's settled master once Apply has sealed it.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+const GOLD = "rgb(206, 172, 95)";
+const MUTED_SILVER = "rgb(154, 154, 154)";
+
+const SEALED: MigrationProgress = {
+  stage: "done",
+  startedAt: "2026-11-17T00:00:00.000Z",
+  updatedAt: "2026-11-18T09:30:00.000Z",
+  appliedAt: "2026-11-18T09:30:00.000Z",
+};
+
+const SETTLED_ON_HODLER: CodexMasterSeed = {
+  ouroAccountId: "hodler",
+  chainwebSeedId: "cw-seed",
+  establishedAt: "2026-11-17T00:00:00.000Z",
+  formerOuroAccountIds: ["initial"],
+};
+
+/** The photograph's own two accounts, in codex (index) order. */
+const screenshotAccounts = (): IOuroAccount[] => [
+  ouroFx({ id: "initial", name: "Initial Seed", address: "Ѻ.initial" }),
+  ouroFx({ id: "hodler", name: "AncientHodler", address: "Ѻ.hodler" }),
+];
+
+const rowIdsIn = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll("[data-account-id]")).map((el) => el.getAttribute("data-account-id"));
+
+describe("<OuronetAccountsTab> — mobile: on a SEALED codex the settled master owns the pinned, gold, badged slot", () => {
+  it("pins the settled master ahead of index 0 inside chunk 0, paints it gold and gives IT the compact Prime badge", async () => {
+    const { container } = await renderMobile(screenshotAccounts(), {}, SETTLED_ON_HODLER, SEALED);
+
+    expect(rowIdsIn(container)).toEqual(["hodler", "initial"]);
+
+    const hodler = container.querySelector('[data-account-id="hodler"]') as HTMLElement;
+    const designation = within(hodler).getByTestId("account-designation-hodler");
+    expect(designation.textContent).toBe("Codex Ouronet Master");
+    expect(designation.style.color).toBe(GOLD);
+    // One compact Prime badge on the whole screen, and it is on THIS row.
+    const badge = screen.getByLabelText("Prime");
+    expect(hodler.contains(badge)).toBe(true);
+  });
+
+  it("the displaced index-0 account reads the FORMER designation in muted silver, keeps its own name, and is never gold", async () => {
+    const { container } = await renderMobile(screenshotAccounts(), {}, SETTLED_ON_HODLER, SEALED);
+
+    const initial = container.querySelector('[data-account-id="initial"]') as HTMLElement;
+    const designation = within(initial).getByTestId("account-designation-initial");
+    expect(designation.textContent).toBe("Former Codex Ouronet Master");
+    expect(designation.style.color).toBe(MUTED_SILVER);
+    expect(within(initial).getByTestId("account-own-name-initial").textContent).toBe("Initial Seed");
+    expect(within(initial).queryByLabelText("Prime")).toBeNull();
+  });
+
+  it("backwards compatibility: with no settled master and no seal, index 0 keeps the pinned, gold, badged slot", async () => {
+    const { container } = await renderMobile(screenshotAccounts());
+
+    expect(rowIdsIn(container)).toEqual(["initial", "hodler"]);
+    const initial = container.querySelector('[data-account-id="initial"]') as HTMLElement;
+    expect(within(initial).getByTestId("account-designation-initial").style.color).toBe(GOLD);
+    expect(initial.contains(screen.getByLabelText("Prime"))).toBe(true);
+    const hodler = container.querySelector('[data-account-id="hodler"]') as HTMLElement;
+    expect(within(hodler).queryByLabelText("Prime")).toBeNull();
   });
 });

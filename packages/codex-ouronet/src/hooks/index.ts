@@ -86,3 +86,10 @@ export type {
   ChainAddressValidator,
   AddressValidatorRegistry,
 } from "./addressBookChain.js";
+
+// "Needs a structural upgrade" derived state (docs/work/upgrade-prompt-ui,
+// T2). STAYS Ouronet-side — it compares the live `Codex_Shape_Version`
+// against `STRUCTURAL_SHAPE_TARGET_VERSION`, a codex-ouronet-owned constant
+// codex-ui must not import (core <- ui <- ouronet). Exported LOCALLY below,
+// same pattern as the address-book validation registry above.
+export { useNeedsStructuralUpgrade } from "./useNeedsStructuralUpgrade.js";

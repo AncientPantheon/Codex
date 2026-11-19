@@ -265,6 +265,7 @@ body {
 }
 
 .cxpg-viewtab {
+  position: relative;
   font-family: var(--cxpg-font);
   font-size: 13px;
   font-weight: 600;
@@ -286,6 +287,32 @@ body {
 .cxpg-viewtab--active {
   background: var(--cxpg-accent);
   color: #0a0d16;
+}
+
+/* Flashing structural-upgrade indicator (docs/work/upgrade-prompt-ui, T3) —
+   a small dot on the "Codex ID" tab, rendered only while
+   useNeedsStructuralUpgrade() is true. */
+.cxpg-viewtab-upgrade-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  animation: cxpg-upgrade-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cxpg-upgrade-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    background-color: #ff4d4f;
+  }
+  50% {
+    opacity: 0.3;
+    background-color: #ffb3b3;
+  }
 }
 
 /* CodexID bar — identity display (left) + debouncer/lock (right), above the tabs. */

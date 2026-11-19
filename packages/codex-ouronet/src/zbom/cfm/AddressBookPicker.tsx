@@ -8,7 +8,10 @@ import { BookOpen, User, ChevronDown } from "lucide-react";
 import { useWallet } from "./seam.js";
 import { useAddressBook } from "../../hooks/index.js";
 import { useWatchList } from "../../hooks/index.js";
+import { useCodex } from "../../hooks/index.js";
 import { getSeedDisplayName, sortSeeds } from "../../ui/internal/seedNames.js";
+import { masterOuronetAccountName } from "@ancientpantheon/codex-core";
+import { codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
 
 export interface AddressBookPickerProps {
   addressType: "ouronet" | "stoa";
@@ -32,6 +35,7 @@ export function AddressBookPicker({ addressType, onSelect, className }: AddressB
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { ouro, kadena, pureKeypairs } = useWallet();
+  const { codexMasterSeed } = useCodex();
   const { entries: abEntries } = useAddressBook();
   const { entries: watchEntries } = useWatchList();
   const getAddressesByType = (t: string) => abEntries.filter((e) => e.type === t);
@@ -46,12 +50,30 @@ export function AddressBookPicker({ addressType, onSelect, className }: AddressB
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // The settled master (codexMasterSeed.ouroAccountId) outranks position when
+  // the codex has one; null means "never settled", which keeps the positional
+  // rule. See @ancientpantheon/codex-core's masterOuronetAccountName.
+  const settledMasterAccountId = codexMasterSeed?.ouroAccountId ?? null;
+
   const entries: PickerEntry[] = [];
 
   if (addressType === "ouronet") {
-    // Ouronet accounts from wallet — index 0 is always "CodexPrime"
+    // Ouronet accounts from wallet — the master is the account the codex
+    // settled on, or index 0 when it never settled one.
     ouro.forEach((acc, idx) => {
-      const displayName = idx === 0 ? "CodexPrime" : (acc.name || `Account #${idx + 1}`);
+      const resolvedName = masterOuronetAccountName(idx, acc.name, undefined, {
+        accountId: acc.id,
+        settledMasterAccountId,
+      });
+      // One line only here (the address already owns the other), so the
+      // settled master's former name goes INLINE — "Codex Ouronet Master
+      // (AncientHodler)". Only the SETTLED master gets it: on a codex that
+      // never settled one, index 0 keeps reading as the bare role name
+      // exactly as it does today.
+      const displayName =
+        !!settledMasterAccountId && acc.id === settledMasterAccountId
+          ? codexIdPrimeName(resolvedName, acc.name)
+          : resolvedName;
       entries.push({
         address: acc.address,
         name: displayName,

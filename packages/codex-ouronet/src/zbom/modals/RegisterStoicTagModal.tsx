@@ -87,6 +87,7 @@ import { StoicTagDisplay } from "@ancientpantheon/codex-ui/ui";
 import { filterToDalosGlyphs, MAX_STOIC_TAG_GLYPHS } from "../../ui/internal/dalosGlyphs.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 function toNum(v: any): number {
   if (v === null || v === undefined) return 0;
@@ -462,11 +463,12 @@ export default function RegisterStoicTagModal({
 
   if (!open) return null;
 
-  const displayAccountName = accounts.indexOf(account) === 0 ? "CodexPrime" : account.name || account.address?.slice(0, 20) + "…";
+  const displayAccountName = accounts.indexOf(account) === 0 ? OURONET_CODEX_MASTER : account.name || account.address?.slice(0, 20) + "…";
 
   return (
     <ZbomModalFrame onClose={onClose} width={720}>
       <ZbomLayout
+      kind="page"
         header={
           <>
             <div className="flex items-center gap-2">

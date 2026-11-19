@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within, cleanup } from "@testing-library/react";
 import type { AccountSelectorData } from "@ouronet/ouronet-core/interactions/ouroTypes";
 
 const WORDS = "river stone ember";
@@ -27,11 +27,12 @@ vi.mock("../src/zbom/ouroSelectorReads.js", async (importOriginal) => {
 });
 
 import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
-import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { MemoryCodexAdapter, emptySnapshot } from "@ancientpantheon/codex-ouronet/adapters";
 import { LegacyPrimeMigrationWizard } from "../src/ui/internal/LegacyPrimeMigrationWizard.js";
 import { seedWordsToBitString } from "@ouronet/dalos-crypto/gen1";
 import { deriveStoaDalosKeypairAtIndex } from "../src/wallet/stoaDalosKeygen.js";
-import type { IOuroAccount, IStoaChainSeed, IKeyset } from "../src/types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IKeyset, IPureKeypair } from "../src/types/entities.js";
+import type { MigrationProgress } from "@ancientpantheon/codex-core";
 
 const PASSWORD = "step3-test-pw";
 const BITS = seedWordsToBitString(WORDS.split(" "));
@@ -64,6 +65,7 @@ function Grab() { store = useCodexStore(); return null; }
 async function openStep3(opts: {
   guard?: IKeyset | null;
   describeKeyset?: (n: string) => Promise<{ keys: readonly string[]; pred: string }>;
+  pureKeypairs?: readonly IPureKeypair[];
 } = {}) {
   const current = account({ id: "current", name: "AncientHodler", guard: opts.guard ?? null });
   store = null;
@@ -75,6 +77,7 @@ async function openStep3(opts: {
         currentPrimeAccount={current}
         allAccounts={[current]}
         allSeeds={seeds}
+        pureKeypairs={opts.pureKeypairs}
         describeKeyset={opts.describeKeyset}
       />
     </CodexProvider>,
@@ -99,6 +102,15 @@ async function goToGuardStep() {
   await screen.findByTestId("legacy-prime-migration-guard-section");
 }
 
+// `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "E": every group
+// starts collapsed unless it already holds a selected key, so a row inside
+// a given group is only queryable/clickable once that group's own
+// disclosure header has been opened. Shared across every describe block
+// below that reaches into `legacy-prime-migration-guard-custom-editor`.
+const expandGroup = (editor: HTMLElement, n: number) => {
+  fireEvent.click(within(editor).getByTestId(`legacy-prime-migration-guard-custom-group-${n}`));
+};
+
 beforeEach(() => { selectorRows.mockReset(); });
 
 describe("Step 3 - payment key section", () => {
@@ -106,9 +118,9 @@ describe("Step 3 - payment key section", () => {
   // and guard became separate pages (owner correction, this session) —
   // repeating them inline here would be redundant with it, the same
   // reason `AccountStep`/`IntroStep` don't repeat "Step 2"/"Step 1" either.
-  it('shows the modal subtitle "Step 3A of 4 — Payment Key Setup"', async () => {
+  it('shows the modal subtitle "Step 3A of 5 — Payment Key Setup"', async () => {
     await openStep3();
-    expect(screen.getByText(/step 3a of 4/i)).toBeTruthy();
+    expect(screen.getByText(/step 3a of 5/i)).toBeTruthy();
   });
 
   it("shows the CURRENT payment key and the seed + position holding it (its 'ties')", async () => {
@@ -123,7 +135,16 @@ describe("Step 3 - payment key section", () => {
   // Owner: "by default the option 1 is selectable, which means the new
   // derivation... must show the one that will become" — landing on this
   // step must not require a click before the user sees anything chosen.
-  it("pre-selects option 1 (derive) on arrival, with the FROM -> TO preview already visible", async () => {
+  // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 7):
+  // "the circled rectangle... is no longer needed, because we already
+  // show it where the arrow is pointing" — the standalone FROM/TO box
+  // duplicated the SAME two values the CURRENT/SETTLED FOR pair above it
+  // already shows (CURRENT = the FROM value, SETTLED FOR = the TO
+  // value), so it's gone outright. The "TO" value now lives on the
+  // SETTLED FOR box's own `KeyLine` instead, under the SAME testid
+  // (`legacy-prime-migration-payment-to`) so it stays trivially
+  // assertable without the redundant second box.
+  it("pre-selects option 1 (derive) on arrival, with the derived key already visible in the SETTLED FOR box — no separate FROM/TO box", async () => {
     await openStep3();
     expect(
       screen.getByTestId("legacy-prime-migration-payment-option-derive").getAttribute("aria-selected"),
@@ -131,33 +152,78 @@ describe("Step 3 - payment key section", () => {
     expect(
       screen.getByTestId("legacy-prime-migration-payment-option-keep").getAttribute("aria-selected"),
     ).toBe("false");
-    const block = await screen.findByTestId("legacy-prime-migration-payment-fromto");
-    expect(block.textContent).toMatch(/FROM/);
+    expect(screen.queryByTestId("legacy-prime-migration-payment-fromto")).toBeNull();
+    expect(screen.getByTestId("legacy-prime-migration-payment-current")).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-payment-to")).toBeTruthy();
     });
   });
 
-  it("renders a FROM -> TO pair once the derive option is chosen", async () => {
+  it("shows the derived key in the SETTLED FOR box once the derive option is (re-)chosen, with no separate FROM/TO box", async () => {
     await openStep3();
     fireEvent.click(within(screen.getByTestId("legacy-prime-migration-payment-option-derive")).getByRole("button"));
-    const block = await screen.findByTestId("legacy-prime-migration-payment-fromto");
-    expect(block.textContent).toMatch(/FROM/);
+    expect(screen.queryByTestId("legacy-prime-migration-payment-fromto")).toBeNull();
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-payment-to")).toBeTruthy();
     });
   });
 
-  it("switching to 'keep' deselects derive and hides the FROM -> TO preview", async () => {
+  it("switching to 'keep' deselects derive and the derived-key display disappears", async () => {
     await openStep3();
-    await screen.findByTestId("legacy-prime-migration-payment-fromto"); // starts showing (default)
+    await screen.findByTestId("legacy-prime-migration-payment-to"); // starts showing (default: derive)
     fireEvent.click(within(screen.getByTestId("legacy-prime-migration-payment-option-keep")).getByRole("button"));
     await waitFor(() => {
       expect(
         screen.getByTestId("legacy-prime-migration-payment-option-keep").getAttribute("aria-selected"),
       ).toBe("true");
     });
+    expect(screen.queryByTestId("legacy-prime-migration-payment-to")).toBeNull();
     expect(screen.queryByTestId("legacy-prime-migration-payment-fromto")).toBeNull();
+  });
+
+  // owner (live testing, this session): "only the circled 1 and 2 can be
+  // pressed, we need to be able to make the whole selection clickable" —
+  // clicking the DESCRIPTION text (not the header button) must select
+  // the option too.
+  it("clicking the option's DESCRIPTION text (not just its header button) selects it", async () => {
+    await openStep3();
+    const keepOption = screen.getByTestId("legacy-prime-migration-payment-option-keep");
+    fireEvent.click(within(keepOption).getByText(/recovering it depends on/i));
+    await waitFor(() => {
+      expect(keepOption.getAttribute("aria-selected")).toBe("true");
+    });
+  });
+
+  // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 7):
+  // "when making the 2nd selection, which is to keep the existing
+  // private key, the circled Dalos Derivation would have to Change to
+  // Koala Derivation, because that[']s what the seed is using that is
+  // responsible for the key involved in the second Selection." The
+  // "Derivation method" section's own option 1 defaults to
+  // `STOIC_DALOS_DERIVATION_LABEL` unconditionally — honest while
+  // deriving (it genuinely IS the method in use), but misleading once
+  // the payment key is instead KEPT as an EXISTING, non-Stoic-Dalos key
+  // (Koala here, from this file's own fixture: `seedType: "koala"`):
+  // nothing is being Stoic-Dalos-derived for payment at all anymore, so
+  // the label now reflects the kept key's own REAL origin instead.
+  it("relabels 'Derivation method' option 1 to the kept payment key's own real origin ('Koala Derivation'), once payment is explicitly KEPT as an existing koala key", async () => {
+    await openStep3();
+    // Starts out "Stoic Dalos Derivation" — payment still defaults to
+    // "derive", genuinely using that method.
+    expect(
+      within(screen.getByTestId("legacy-prime-migration-keys-option-stoic-dalos")).getByText("Stoic Dalos Derivation"),
+    ).toBeTruthy();
+
+    fireEvent.click(within(screen.getByTestId("legacy-prime-migration-payment-option-keep")).getByRole("button"));
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId("legacy-prime-migration-keys-option-stoic-dalos")).getByText("Koala Derivation"),
+      ).toBeTruthy();
+    });
+    expect(
+      within(screen.getByTestId("legacy-prime-migration-keys-option-stoic-dalos")).queryByText("Stoic Dalos Derivation"),
+    ).toBeNull();
   });
 
   it("derives the TO key at POSITION 0 of the chosen account's words", async () => {
@@ -169,6 +235,29 @@ describe("Step 3 - payment key section", () => {
       expect(to.textContent ?? "").not.toBe("");
     });
     expect(KEY0).not.toBe(KEY1); // the two positions really are different keys
+  });
+
+  // owner (live testing, this session): "Current detected, and the
+  // upcoming one you settled for in a simple Current/Before and After
+  // Rectangle." The payment step's own "Settled for" box must summarize
+  // whichever option is currently chosen.
+  it("the 'Settled for' box shows the NEW key once deriving completes", async () => {
+    await openStep3();
+    fireEvent.click(within(screen.getByTestId("legacy-prime-migration-payment-option-derive")).getByRole("button"));
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-payment-settled");
+      expect(settled.textContent).toMatch(/a new key, derived at position 0/i);
+      expect(settled.querySelector(`[title="${KEY0}"]`)).toBeTruthy();
+    });
+  });
+
+  it("the 'Settled for' box shows 'Unchanged' and the kept key's own origin when keeping", async () => {
+    await openStep3();
+    fireEvent.click(within(screen.getByTestId("legacy-prime-migration-payment-option-keep")).getByRole("button"));
+    const settled = screen.getByTestId("legacy-prime-migration-payment-settled");
+    expect(settled.textContent).toMatch(/unchanged/i);
+    expect(settled.textContent).toMatch(/koala/i);
+    expect(settled.querySelector(`[title="${CURRENT_PAYMENT}"]`)).toBeTruthy();
   });
 
   // CORRECTED, this session — the owner's own technical challenge: keeping
@@ -185,6 +274,20 @@ describe("Step 3 - payment key section", () => {
     expect(keep.textContent ?? "").toMatch(/non-removable/i);
     expect(keep.textContent ?? "").not.toMatch(/does NOT achieve words-only restore/i);
     expect(keep.textContent ?? "").not.toMatch(/eligib/i);
+  });
+
+  // owner (live testing, this session): "when selecting option 2 (keep the
+  // same payment key), then the Derivation method changes automatically to
+  // the type of derivation that key is derived from. So it would be Koala,
+  // Chainweaver or PureKey (since that key is in the codex, you could know
+  // what to display here)." The fixture's own seed is `seedType: "koala"`.
+  it("shows the kept payment key's OWN derivation type (Koala), detected from the codex's own seeds", async () => {
+    await openStep3();
+    const keep = screen.getByTestId("legacy-prime-migration-payment-option-keep");
+    expect(screen.getByTestId("legacy-prime-migration-payment-keep-origin").textContent)
+      .toMatch(/koala/i);
+    expect(screen.queryByTestId("legacy-prime-migration-payment-keep-origin-warning")).toBeNull();
+    expect(keep).toBeTruthy(); // the option itself still renders normally
   });
 });
 
@@ -215,6 +318,124 @@ describe("Step 3 - guard section, by current guard shape", () => {
     expect(describeKeyset).toHaveBeenCalledWith("ouronet-ns.dh_hov-keyset");
   });
 
+  // owner (live testing, this session): "the user has to see, hey my
+  // guard currently is a keyset-ref" — expanding a reference's keys isn't
+  // enough on its own; the fact that it IS a reference (as opposed to a
+  // direct keyset) must be explicitly visible, with the same "keyset-ref"
+  // vocabulary the Codex ID page's own guard display already uses.
+  it("explicitly labels a resolved keyset-ref as a KEYSET-REF, not just an expanded key list", async () => {
+    const describeKeyset = vi.fn(async () => ({ keys: [OTHER_KEY], pred: "keys-all" }));
+    await openStep3({
+      guard: { keysetref: { ns: "ouronet-ns", ksn: "dh_hov-keyset" } } as unknown as IKeyset,
+      describeKeyset,
+    });
+    await goToGuardStep();
+    const el = await screen.findByTestId("legacy-prime-migration-guard-current-keyset");
+    expect(within(el).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+      .toMatch(/keyset-ref/i);
+  });
+
+  // Owner (live testing, real data, said several times): "it still
+  // doesnt show its a keyset-ref... the AncientHodler Account has a
+  // keyset-ref, which is the ouronet-ns.dh_ah-keyset, which should be
+  // shown there at the current guard."
+  //
+  // The case the two tests around this one both MISSED: a guard already
+  // EXPANDED to `{pred, keys}` that still records the reference it came
+  // from. `detectGuardKind` calls that a plain `"keyset"` (there's no
+  // nested `keysetref` object), so the badge depended entirely on
+  // `resolveGuardKeys` picking the annotation up — and it only ever read
+  // the camelCase `keysetRef` spelling, so the lowercase one (which real
+  // persisted guards use) silently produced an unannotated keyset. No
+  // `describeKeyset` is needed or wanted here: the keys are already in
+  // hand, only the "this came from a reference" fact was being dropped.
+  it("labels an already-EXPANDED keyset that records its source reference as a KEYSET-REF, naming it — for both spellings, with no chain read", async () => {
+    for (const annotation of [
+      { keysetRef: "ouronet-ns.dh_ah-keyset" },
+      { keysetref: "ouronet-ns.dh_ah-keyset" },
+    ]) {
+      const describeKeyset = vi.fn();
+      await openStep3({
+        guard: { pred: "keys-any", keys: [CURRENT_PAYMENT, OTHER_KEY], ...annotation } as unknown as IKeyset,
+        describeKeyset,
+      });
+      await goToGuardStep();
+      const el = await screen.findByTestId("legacy-prime-migration-guard-current-keyset");
+      expect(within(el).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+        .toMatch(/keyset-ref/i);
+      expect(el.textContent).toMatch(/ouronet-ns\.dh_ah-keyset/);
+      expect(el.textContent).toMatch(/2 key\(s\)/);
+      expect(describeKeyset).not.toHaveBeenCalled();
+      cleanup();
+    }
+  });
+
+  // Owner (live testing, real data, asked 10+ times — and THIS is why
+  // every previous attempt failed): "you still havent shown that the
+  // current guard is a keyset-ref… In the codex it is properly
+  // recognised as a keyset ref. WHY can't you do it here as well."
+  //
+  // Because the two screens were reading DIFFERENT VALUES, not rendering
+  // one value differently. `OuronetAccountsTab` renders
+  // `hydrate(account, byAddress[address])`, overlaying the LIVE URC_0027
+  // `ouronet-account-guard` ("chain fields win when present"), which is
+  // the real `{keysetref:{ns,ksn}}`. This wizard read the codex's at-rest
+  // `account.guard` — an older EXPANDED `{pred,keys}` snapshot with no
+  // reference annotation anywhere in it. No display fix could ever
+  // surface a reference that wasn't in the value being displayed.
+  it("resolves the LIVE chain guard, not the codex's stale stored copy — so a keyset-ref shows as one here exactly as it does on the Codex tab", async () => {
+    const describeKeyset = vi.fn(async () => ({
+      keys: [CURRENT_PAYMENT, OTHER_KEY], pred: "keys-any",
+    }));
+    // The chain says: this account's guard IS a keyset reference.
+    selectorRows.mockResolvedValue([{
+      "iz-activated": true,
+      "ouronet-account": "Ѻ.current-address",
+      "ouronet-account-guard": { keysetref: { ns: "ouronet-ns", ksn: "dh_ah-keyset" } },
+      "iz-smart": false,
+      "ouro-balance": 0,
+      "ignis-balance": 0,
+      "payment-key-existance": false,
+      "payment-key": "",
+      "payment-key-balance": 0,
+      "payment-key-guard": false,
+      "public-key": "",
+      sovereign: false,
+      governor: false,
+      "stoic-tag-has": false,
+      "stoic-tag": "",
+    } as unknown as AccountSelectorData]);
+
+    // ...while the codex's own stored copy is a STALE expanded keyset
+    // that mentions no reference at all. Reading this is what used to
+    // make the badge impossible.
+    await openStep3({
+      guard: { pred: "keys-any", keys: [CURRENT_PAYMENT, OTHER_KEY] } as unknown as IKeyset,
+      describeKeyset,
+    });
+    await goToGuardStep();
+
+    const el = await screen.findByTestId("legacy-prime-migration-guard-current-keyset");
+    await waitFor(() => {
+      expect(within(el).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+        .toMatch(/keyset-ref/i);
+    });
+    expect(el.textContent).toMatch(/ouronet-ns\.dh_ah-keyset/);
+    // And it genuinely went to chain to expand that reference.
+    expect(describeKeyset).toHaveBeenCalledWith("ouronet-ns.dh_ah-keyset");
+  });
+
+  it("explicitly labels an UNRESOLVED keyset-ref as a KEYSET-REF too, not just an error", async () => {
+    await openStep3({
+      guard: { keysetref: { ns: "ouronet-ns", ksn: "dh_sc_dalos-keyset" } } as unknown as IKeyset,
+      describeKeyset: async () => { throw new Error("node unreachable"); },
+    });
+    await goToGuardStep();
+    const el = await screen.findByTestId("legacy-prime-migration-guard-current-unresolved");
+    expect(within(el).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+      .toMatch(/keyset-ref/i);
+  });
+
   it("reports an UNRESOLVABLE reference as unknown - never as 'no keys'", async () => {
     // The safety property, surfaced in the UI: a failed read must not read as
     // "this guard authorizes nothing".
@@ -237,15 +458,90 @@ describe("Step 3 - guard section, by current guard shape", () => {
     const el = await screen.findByTestId("legacy-prime-migration-guard-current-unsupported");
     expect(el.textContent).toMatch(/does not name a fixed list of keys/i);
   });
+
+  // Owner (live testing, this round): switched the chosen account (Page 2)
+  // to a SECOND account whose real guard is a genuine keyset-ref, with NO
+  // `describeKeyset` wired (the real app's state before this round's own
+  // wiring fix) — the guard step's CURRENT box kept showing the FIRST
+  // account's flat 2-key keyset instead of correctly flipping to the
+  // second account's "could not be read" state. `guardResolution`'s own
+  // effect (unlike every other resolution effect in this file) has only a
+  // `cancelled` boolean, no request-id token — this reproduces the race
+  // directly: switch accounts, go back to the guard step, and prove the
+  // CURRENT box reflects the NEWLY chosen account's own guard, not a
+  // stale leftover from the previous one.
+  it("re-resolves the CURRENT guard after switching accounts — never keeps showing the PREVIOUS account's resolution", async () => {
+    const flatKeys = [CURRENT_PAYMENT, OTHER_KEY];
+    const current = account({
+      id: "current", name: "FirstAccount",
+      guard: { pred: "keys-any", keys: flatKeys } as unknown as IKeyset,
+    });
+    const other = account({
+      id: "other", name: "AncientHodler",
+      guard: { keysetref: { ns: "ouronet-ns", ksn: "dh_ah-keyset" } } as unknown as IKeyset,
+    });
+    store = null;
+    render(
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+        <Grab />
+        <LegacyPrimeMigrationWizard
+          open onClose={() => {}}
+          currentPrimeAccount={current}
+          allAccounts={[current, other]}
+          allSeeds={seeds}
+          // No `describeKeyset` — reproduces the real app's state before
+          // this round's own wiring fix (`CodexIdPage.tsx` never passed
+          // it at all).
+        />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(store!.getState().ready).toBe(true));
+    act(() => { store!.getState().actions.authenticate(PASSWORD, 60); });
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // intro -> account
+    const keepOption = await screen.findByTestId("legacy-prime-migration-account-option-keep");
+    fireEvent.click(within(keepOption).getByRole("button"));
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    await screen.findByTestId("legacy-prime-migration-payment-section");
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-section");
+
+    // FirstAccount's flat keyset resolves correctly.
+    let el = await screen.findByTestId("legacy-prime-migration-guard-current-keyset");
+    expect(el.textContent).toMatch(/2 key\(s\)/);
+
+    // Back to payment, back to account, switch to AncientHodler.
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-back")); // guard -> payment
+    await screen.findByTestId("legacy-prime-migration-payment-section");
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-back")); // payment -> account
+    const otherItem = await screen.findByTestId("legacy-prime-migration-account-existing-item-other");
+    fireEvent.click(otherItem);
+    await waitFor(() => {
+      expect((screen.getByTestId("legacy-prime-migration-continue") as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    await screen.findByTestId("legacy-prime-migration-payment-section");
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-section");
+
+    // AncientHodler's real guard is a keyset-ref with no describeKeyset
+    // wired — this must become "could not be read", never a stale
+    // continuation of FirstAccount's flat 2-key display.
+    await waitFor(() => {
+      expect(screen.queryByTestId("legacy-prime-migration-guard-current-keyset")).toBeNull();
+    });
+    el = await screen.findByTestId("legacy-prime-migration-guard-current-unresolved");
+    expect(within(el).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+      .toMatch(/keyset-ref/i);
+  });
 });
 
 describe("Step 3 - guard options", () => {
   // See the payment section's equivalent test above for why this is the
   // modal subtitle now, not inline section text.
-  it('shows the modal subtitle "Step 3B of 4 — Ouronet Account Guard Setup"', async () => {
+  it('shows the modal subtitle "Step 3B of 5 — Ouronet Account Guard Setup"', async () => {
     await openStep3();
     await goToGuardStep();
-    expect(screen.getByText(/step 3b of 4/i)).toBeTruthy();
+    expect(screen.getByText(/step 3b of 5/i)).toBeTruthy();
   });
 
   it("offers the recommended single-key keys-all guard, naming position 1", async () => {
@@ -325,6 +621,94 @@ describe("Step 3 - guard options", () => {
     expect(custom.textContent).toMatch(/Expert Mode/i);
     expect(custom.textContent).toMatch(/any predicate/i);
   });
+
+  // owner (live testing, round 2): "Current detected, and the upcoming one
+  // you settled for... Current/Before and After Rectangle." The guard
+  // step's own "Settled for" box must summarize whichever option is
+  // currently chosen, the same way the payment step's does.
+  it("the 'Settled for' box shows the derived key once the recommended option is ready", async () => {
+    await openStep3();
+    await goToGuardStep();
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-guard-settled");
+      expect(settled.textContent).toMatch(/a keyset of 1 key\(s\) under keys-all/i);
+      expect(settled.querySelector(`[title="${KEY1}"]`)).toBeTruthy();
+    });
+  });
+
+  it("the 'Settled for' box shows 'no guard on record' + '(unchanged)' when keep-as-is is chosen and there's no guard at all", async () => {
+    await openStep3({ guard: null });
+    await goToGuardStep();
+    const keep = await screen.findByTestId("legacy-prime-migration-guard-option-keep");
+    fireEvent.click(within(keep).getByRole("button"));
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-guard-settled");
+      expect(settled.textContent).toMatch(/no guard on record/i);
+      expect(settled.textContent).toMatch(/\(unchanged\)/i);
+    });
+  });
+
+  // Owner (live testing, this round): "Settle for Unchanged is incorrect,
+  // we should show the same keys as the one on left. instead of saying
+  // Unchanged... And if its the same then we add (unchanged) in
+  // parenthesis." A bare "Unchanged." told the user nothing about WHAT
+  // isn't changing — this proves the real current keys now appear on the
+  // right, identical to the left-hand CURRENT box, with "(unchanged)"
+  // marking that they're the same.
+  it("the 'Settled for' box shows the SAME real keys as the CURRENT box, with '(unchanged)', for a direct keyset", async () => {
+    await openStep3({ guard: { pred: "keys-any", keys: [CURRENT_PAYMENT, OTHER_KEY] } });
+    await goToGuardStep();
+    const keep = await screen.findByTestId("legacy-prime-migration-guard-option-keep");
+    fireEvent.click(within(keep).getByRole("button"));
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-guard-settled");
+      expect(settled.textContent).toMatch(/2 key\(s\)/);
+      expect(settled.textContent).toMatch(/keys-any/);
+      expect(settled.textContent).toMatch(/\(unchanged\)/i);
+      expect(settled.querySelector(`[title="${CURRENT_PAYMENT}"]`)).toBeTruthy();
+      expect(settled.querySelector(`[title="${OTHER_KEY}"]`)).toBeTruthy();
+    });
+  });
+
+  // Owner (live testing, this round, real-data report): "it still doesnt
+  // show its a keyset-ref" — the SAME keyset-ref badge the CURRENT box
+  // already shows must also appear on the SETTLED side for "keep",
+  // including when it hasn't resolved.
+  it("the 'Settled for' box shows the keyset-ref badge too, for 'keep' on a resolved reference", async () => {
+    const describeKeyset = vi.fn(async () => ({ keys: [OTHER_KEY], pred: "keys-all" }));
+    await openStep3({
+      guard: { keysetref: { ns: "ouronet-ns", ksn: "dh_hov-keyset" } } as unknown as IKeyset,
+      describeKeyset,
+    });
+    await goToGuardStep();
+    const keep = await screen.findByTestId("legacy-prime-migration-guard-option-keep");
+    fireEvent.click(within(keep).getByRole("button"));
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-guard-settled");
+      expect(within(settled).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+        .toMatch(/keyset-ref/i);
+      expect(settled.textContent).toMatch(/ouronet-ns\.dh_hov-keyset/);
+      expect(settled.textContent).toMatch(/\(unchanged\)/i);
+      expect(settled.querySelector(`[title="${OTHER_KEY}"]`)).toBeTruthy();
+    });
+  });
+
+  it("the 'Settled for' box shows the keyset-ref badge for 'keep' even when the reference could not be read, without fabricating keys", async () => {
+    await openStep3({
+      guard: { keysetref: { ns: "ouronet-ns", ksn: "dh_sc_dalos-keyset" } } as unknown as IKeyset,
+      describeKeyset: async () => { throw new Error("node unreachable"); },
+    });
+    await goToGuardStep();
+    const keep = await screen.findByTestId("legacy-prime-migration-guard-option-keep");
+    fireEvent.click(within(keep).getByRole("button"));
+    await waitFor(() => {
+      const settled = screen.getByTestId("legacy-prime-migration-guard-settled");
+      expect(within(settled).getByTestId("legacy-prime-migration-guard-keyset-ref-badge").textContent)
+        .toMatch(/keyset-ref/i);
+      expect(settled.textContent).toMatch(/could not be read/i);
+      expect(settled.textContent).toMatch(/\(unchanged\)/i);
+    });
+  });
 });
 
 describe("Step 3 - the custom keyset editor (advanced)", () => {
@@ -340,6 +724,7 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     await openStep3();
     await goToGuardStep();
     const editor = await pickCustom();
+    expandGroup(editor, 0);
     expect(within(editor).getByLabelText("Master Chainweb Seed - Key #0")).toBeTruthy();
     expect(within(editor).getByLabelText("Master Chainweb Seed - Key #1")).toBeTruthy();
   });
@@ -355,6 +740,7 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     await openStep3();
     await goToGuardStep();
     const editor = await pickCustom();
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect(screen.queryByTestId("legacy-prime-migration-guard-custom-empty")).toBeNull();
@@ -375,6 +761,7 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     expect(store!.getState().migrationProgress?.selection).toBeUndefined();
 
     const editor = screen.getByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
 
     await waitFor(() => {
@@ -388,6 +775,7 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     await openStep3();
     await goToGuardStep();
     const editor = await pickCustom();
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     const select = screen.getByTestId("legacy-prime-migration-guard-custom-pred") as HTMLSelectElement;
     const byLabel = (t: string) =>
@@ -403,11 +791,181 @@ describe("Step 3 - the custom keyset editor (advanced)", () => {
     await openStep3();
     await goToGuardStep();
     const editor = await pickCustom();
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #1"));
     const select = screen.getByTestId("legacy-prime-migration-guard-custom-pred") as HTMLSelectElement;
     const keys2 = Array.from(select.querySelectorAll("option")).find((o) => o.textContent?.startsWith("keys-2"));
     await waitFor(() => expect(keys2!.hasAttribute("disabled")).toBe(false));
+  });
+
+  // `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "G — Pure keys
+  // join the picker and the dashboard": a codex's raw pure keypairs (never
+  // derived from a seed) are perfectly valid guard/payment keys, so the
+  // picker must list them too — each still its OWN individually
+  // selectable checkbox (a predicate needs real, distinct public keys),
+  // never collapsed into one unselectable blob the way the Settling
+  // Dashboard's attribution card does.
+  it("lists a pureKeypairs entry as its own checkbox, and toggling it updates selectedKeys exactly like a seed-derived key", async () => {
+    const PURE_KEY = "8".repeat(64);
+    const pureKeypair: IPureKeypair = {
+      id: "pk-1", publicKey: PURE_KEY, encryptedPrivateKey: "ct", createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    await openStep3({ pureKeypairs: [pureKeypair] });
+    await goToGuardStep();
+    const editor = await pickCustom();
+    // Group 0 is the seed, group 1 is the trailing "Pure Keys" group —
+    // both start collapsed (no key pre-selected), so both must be opened
+    // before their rows are queryable.
+    expandGroup(editor, 0);
+    expandGroup(editor, 1);
+
+    // Present alongside the seed-derived keys, not instead of them.
+    expect(within(editor).getByLabelText("Master Chainweb Seed - Key #0")).toBeTruthy();
+    const checkbox = within(editor).getByLabelText("Pure Keypair") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(true));
+    await waitFor(() => {
+      expect(store!.getState().migrationProgress?.selection?.guard).toEqual({
+        kind: "custom", keys: [PURE_KEY], pred: "keys-all",
+      });
+    });
+
+    // Unchecking it behaves exactly like unchecking a seed-derived key.
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(false));
+  });
+
+  // `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "E — Search +
+  // collapsed-by-default grouping in the picker": with hundreds of keys a
+  // flat checkbox wall is unusable, so rows are partitioned into
+  // collapsible per-seed/"Pure Keys" groups, collapsed by default — a
+  // regression here would mean either a huge key list is unusable again,
+  // or (worse) a key the owner thinks is hidden is actually visible/picked.
+  it("groups rows by seed, collapsed by default, with no row visible/queryable until its group is opened", async () => {
+    await openStep3();
+    await goToGuardStep();
+    const editor = await pickCustom();
+
+    const group0 = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-0");
+    expect(group0.getAttribute("aria-expanded")).toBe("false");
+    // The group's own name and row count both appear in its header.
+    expect(group0.textContent).toMatch(/Master Chainweb Seed/);
+    expect(group0.textContent).toMatch(/2/);
+    // Collapsed: neither row is in the DOM at all, not merely hidden.
+    expect(within(editor).queryByLabelText("Master Chainweb Seed - Key #0")).toBeNull();
+    expect(within(editor).queryByLabelText("Master Chainweb Seed - Key #1")).toBeNull();
+  });
+
+  it("clicking a collapsed group's header reveals its rows, and toggling one still updates selectedKeys/the predicate", async () => {
+    await openStep3();
+    await goToGuardStep();
+    const editor = await pickCustom();
+    const group0 = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-0");
+
+    fireEvent.click(group0);
+    expect(group0.getAttribute("aria-expanded")).toBe("true");
+    const checkbox = within(editor).getByLabelText("Master Chainweb Seed - Key #0") as HTMLInputElement;
+    fireEvent.click(checkbox);
+    await waitFor(() => {
+      expect(store!.getState().migrationProgress?.selection?.guard).toEqual({
+        kind: "custom", keys: [CURRENT_PAYMENT], pred: "keys-all",
+      });
+    });
+
+    // Clicking the SAME header again collapses it back (manual override,
+    // independent of the already-selected key inside it).
+    fireEvent.click(group0);
+    expect(group0.getAttribute("aria-expanded")).toBe("false");
+    expect(within(editor).queryByLabelText("Master Chainweb Seed - Key #0")).toBeNull();
+  });
+
+  it("a non-empty search force-expands only the group with a matching row, and hides every other group's rows", async () => {
+    const PURE_KEY = "6".repeat(64);
+    const pureKeypair: IPureKeypair = {
+      id: "pk-2", publicKey: PURE_KEY, encryptedPrivateKey: "ct", createdAt: "2026-01-01T00:00:00.000Z",
+      label: "Treasury Key",
+    };
+    await openStep3({ pureKeypairs: [pureKeypair] });
+    await goToGuardStep();
+    const editor = await pickCustom();
+    const seedGroup = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-0");
+    const pureGroup = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-1");
+    // Both start collapsed — neither row is visible yet.
+    expect(seedGroup.getAttribute("aria-expanded")).toBe("false");
+    expect(pureGroup.getAttribute("aria-expanded")).toBe("false");
+
+    const search = within(editor).getByTestId("legacy-prime-migration-guard-custom-search");
+    fireEvent.change(search, { target: { value: "treasury" } });
+
+    // Only the "Pure Keys" group (the one matching row) is force-expanded.
+    expect(pureGroup.getAttribute("aria-expanded")).toBe("true");
+    expect(within(editor).getByLabelText("Treasury Key")).toBeTruthy();
+    // The seed group has zero matches, so it stays collapsed and shows
+    // none of its own rows either way.
+    expect(seedGroup.getAttribute("aria-expanded")).toBe("false");
+    expect(within(editor).queryByLabelText("Master Chainweb Seed - Key #0")).toBeNull();
+
+    // Clearing the search collapses the "Pure Keys" group back to its own
+    // manual (default, collapsed) state — the force-expand was search-only.
+    fireEvent.change(search, { target: { value: "" } });
+    expect(pureGroup.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // The resume path (`migrationResume.ts`) is the one real way a "custom"
+  // guard choice's `keys` can already be non-empty the FIRST time
+  // `CustomKeysetEditor` ever mounts — proving the "already-selected key"
+  // branch runs at genuine first render, not merely after a user click.
+  it("a group containing an already-selected key starts expanded on first render, while the other starts collapsed", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const current = account({ id: "current", name: "AncientHodler" });
+    const PURE_KEY = "5".repeat(64);
+    const pureKeypair: IPureKeypair = {
+      id: "pk-3", publicKey: PURE_KEY, encryptedPrivateKey: "ct", createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    await adapter.saveAll({
+      ...emptySnapshot("dev"), schemaVersion: 1,
+      ouroAccounts: [current], kadenaSeeds: seeds, pureKeypairs: [pureKeypair],
+      migrationProgress: {
+        stage: "selection",
+        startedAt: "2026-11-01T00:00:00.000Z",
+        updatedAt: "2026-11-01T00:00:00.000Z",
+        selection: {
+          account: { kind: "keep-current" },
+          payment: { kind: "stoic-dalos-position-0" },
+          guard: { kind: "custom", keys: [CURRENT_PAYMENT], pred: "keys-all" },
+        },
+      } satisfies MigrationProgress,
+    });
+    store = null;
+    render(
+      <CodexProvider adapter={adapter}>
+        <Grab />
+        <LegacyPrimeMigrationWizard
+          open onClose={() => {}}
+          currentPrimeAccount={current}
+          allAccounts={[current]}
+          allSeeds={seeds}
+          pureKeypairs={[pureKeypair]}
+        />
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(store!.getState().ready).toBe(true));
+    await screen.findByTestId("legacy-prime-migration-payment-section");
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue"));
+
+    const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    const seedGroup = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-0");
+    const pureGroup = within(editor).getByTestId("legacy-prime-migration-guard-custom-group-1");
+    // The seed group holds CURRENT_PAYMENT, already in `selectedKeys` —
+    // starts expanded, with no click.
+    expect(seedGroup.getAttribute("aria-expanded")).toBe("true");
+    expect(within(editor).getByLabelText("Master Chainweb Seed - Key #0")).toBeTruthy();
+    // The Pure Keys group holds no already-selected key — starts collapsed.
+    expect(pureGroup.getAttribute("aria-expanded")).toBe("false");
+    expect(within(editor).queryByLabelText("Pure Keypair")).toBeNull();
   });
 });
 
@@ -572,6 +1130,7 @@ describe("Step 3 - guard, Variant A (a keyset reference)", () => {
       ).toBe("true");
     });
     const editor = screen.getByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     // 3A means the reference is KEPT — proven by the recorded kind once
     // Continue is reachable, via the finalize-level lock test below; here,
@@ -588,6 +1147,7 @@ describe("Step 3 - guard, Variant A (a keyset reference)", () => {
       within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
     );
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
 
     fireEvent.click(screen.getByTestId("legacy-prime-migration-guard-custom-sub-direct"));
@@ -614,6 +1174,7 @@ describe("Step 3 - guard, Variant A (a keyset reference)", () => {
       within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
     );
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
@@ -626,8 +1187,11 @@ describe("Step 3 - guard, Variant A (a keyset reference)", () => {
       .toMatch(/1 selected/);
 
     // Re-clicking the "Define a custom guard" header, already selected.
+    // Scoped to its own accessible name now that the custom editor's own
+    // group-disclosure buttons also render inside this same container.
     fireEvent.click(
-      within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
+      within(screen.getByTestId("legacy-prime-migration-guard-option-custom"))
+        .getByRole("button", { name: /define a custom/i }),
     );
     expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
       .toMatch(/1 selected/);
@@ -684,6 +1248,7 @@ describe("Step 3 - guard, Variant B (a direct keyset, or none)", () => {
       within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
     );
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect((screen.getByTestId("legacy-prime-migration-continue") as HTMLButtonElement).disabled)
@@ -947,6 +1512,7 @@ describe("Step 3 - guard, Variant B (a direct keyset, or none)", () => {
     // unmounts the picker.
     fireEvent.click(screen.getByTestId("legacy-prime-migration-guard-custom-sub-direct"));
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
@@ -1019,6 +1585,7 @@ describe("Step 3 - guard, Variant B (a direct keyset, or none)", () => {
       within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
     );
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
@@ -1031,8 +1598,11 @@ describe("Step 3 - guard, Variant B (a direct keyset, or none)", () => {
       .toMatch(/1 selected/);
 
     // Re-clicking the "Define a custom guard" header, already selected.
+    // Scoped to its own accessible name now that the custom editor's own
+    // group-disclosure buttons also render inside this same container.
     fireEvent.click(
-      within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
+      within(screen.getByTestId("legacy-prime-migration-guard-option-custom"))
+        .getByRole("button", { name: /define a custom/i }),
     );
     expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
       .toMatch(/1 selected/);
@@ -1072,15 +1642,19 @@ describe("Step 3 - guard, the unsupported/unknown fallback is untouched", () => 
       within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
     );
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #0"));
     await waitFor(() => {
       expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
         .toMatch(/1 selected/);
     });
 
-    // Re-clicking the header while already selected.
+    // Re-clicking the header while already selected. Scoped to its own
+    // accessible name now that the custom editor's own group-disclosure
+    // buttons also render inside this same container.
     fireEvent.click(
-      within(screen.getByTestId("legacy-prime-migration-guard-option-custom")).getByRole("button"),
+      within(screen.getByTestId("legacy-prime-migration-guard-option-custom"))
+        .getByRole("button", { name: /define a custom/i }),
     );
     expect(screen.getByTestId("legacy-prime-migration-guard-custom-editor").textContent)
       .toMatch(/1 selected/);

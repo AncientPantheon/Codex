@@ -12,9 +12,19 @@
  */
 
 // ----- product-facing form version (NOT the at-rest migration counter —
-// ----- see codexFormVersion.ts's own doc comment for why these are separate) -----
+// ----- see codexPackageVersionOutput.ts's own doc comment for why these are separate) -----
 
-export { CODEX_FORM_VERSION } from "./codexFormVersion.js";
+export { CODEX_PACKAGE_VERSION_OUTPUT } from "./codexPackageVersionOutput.js";
+
+// ----- per-codex-instance shape stamp (`codex-shape-version-stamp` topic) —
+// ----- DISTINCT from the product-facing CODEX_FORM_VERSION above: this is
+// ----- per-codex-instance, not per-app-build; see shapeVersion.ts's own doc
+// ----- comment -----
+
+export {
+  detectCodexShapeVersion,
+  formatCodexShapeVersionLabel,
+} from "./codex/shapeVersion.js";
 
 // ----- codec envelope (D2) -----
 
@@ -29,6 +39,77 @@ export type {
   CodexExportV1_2,
   CodexExportV1_3,
 } from "./codex/types.js";
+// ----- master-key locks: which derived key positions are load-bearing and
+// therefore unremovable; see codex/masterKeyLocks.ts for why this is a
+// reason-tagged registry rather than a boolean flag.
+export {
+  lockMatchesPosition,
+  lockedPositionsOf,
+  seedIsLocked,
+} from "./codex/masterKeyLocks.js";
+export type { MasterKeyLock, MasterKeyLockReason } from "./codex/masterKeyLocks.js";
+// ----- the Codex Master Seed row: which three entities are the three faces
+// of this codex's one seed. Pure linkage; see codex/masterSeed.ts.
+// `recordFormerMasterIds` is the one writer of the former-holder history;
+// `isFormerMasterAccount`/`isFormerMasterArweaveSeed` are the two readers, and
+// both take the migration progress because the designation follows the SEAL,
+// not the finalize.
+export {
+  describeCodexMasterSeed,
+  recordFormerMasterIds,
+  isFormerMasterAccount,
+  isFormerMasterArweaveSeed,
+} from "./codex/masterSeed.js";
+export type { CodexMasterSeed, CodexMasterSeedFaces } from "./codex/masterSeed.js";
+// ----- which Ouronet account the codex has SETTLED on as its master: the
+// account-side twin of codex-arweave's `resolveMasterArweaveSeed`, with the
+// same precedence (settled id > `isPrime` > position 0). A pure list-and-id
+// resolver — it does NOT apply the seal gate; see
+// codex/masterOuronetAccount.ts for why that is the caller's job here while
+// `isFormerMasterAccount` above gates itself.
+export { resolveMasterOuronetAccount } from "./codex/masterOuronetAccount.js";
+export type { MasterOuronetAccountCandidate } from "./codex/masterOuronetAccount.js";
+// ----- a started-but-unfinished eligibility migration. Carries ids and
+// public keys only; `toPersistableAccountSelection` is what keeps seed words
+// out of it. See codex/migrationProgress.ts.
+export {
+  toPersistableAccountSelection,
+  isResumableSelection,
+  containsSuspectedSecret,
+  isMigrationSealed,
+  hasMigrationPending,
+} from "./codex/migrationProgress.js";
+export type {
+  MigrationProgress,
+  MigrationStage,
+  MigrationPendingPlan,
+  MigrationSelection,
+  MigrationAccountSelection,
+  MigrationPaymentSelection,
+  MigrationGuardSelection,
+  MigrationCommitRecord,
+  MigrationExecutionStep,
+  LiveAccountChoice,
+} from "./codex/migrationProgress.js";
+// ----- canonical display names for the Codex Master Seed and its three
+// derivations; see codex/masterNames.ts for why the positional rule lives
+// there too rather than being re-inlined at every call site.
+export {
+  OURONET_CODEX_MASTER,
+  MASTER_CHAINWEB_SEED,
+  MASTER_ARWEAVE_SEED,
+  CODEX_MASTER_SEED,
+  CODEX_STOIC_IDENTITY,
+  FORMER_OURONET_CODEX_MASTER,
+  FORMER_MASTER_ARWEAVE_SEED,
+  masterOuronetAccountName,
+  masterOuronetAccountParts,
+  masterChainwebSeedName,
+} from "./codex/masterNames.js";
+export type {
+  MasterOuronetAccountOpts,
+  MasterOuronetAccountParts,
+} from "./codex/masterNames.js";
 
 export {
   isForeignKeyEntry,

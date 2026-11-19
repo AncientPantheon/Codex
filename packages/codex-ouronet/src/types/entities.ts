@@ -61,6 +61,16 @@ export interface IKeyset {
 }
 
 /** A single account derived from a kadena HD seed. */
+/** Master-key locks are defined in codex-core (the allowed core <- ui <-
+ *  ouronet direction) because the generic storage substrate is what
+ *  enforces them. Re-exported here so Ouronet-side code can reach them
+ *  alongside the entities they lock, without a second definition drifting
+ *  from the first. NOTE: the lock names a `(seedId, position)` pair — it
+ *  deliberately does NOT live on {@link WalletAccount} below, because
+ *  `updateStoaChainSeed` replaces that object wholesale and would clobber
+ *  it. See `codex-core/src/codex/masterKeyLocks.ts`. */
+export type { MasterKeyLock, MasterKeyLockReason } from "@ancientpantheon/codex-core";
+
 export interface WalletAccount {
   index: number;
   publicKey: string;

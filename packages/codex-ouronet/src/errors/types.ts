@@ -9,6 +9,10 @@
  * without parsing strings.
  */
 
+import type { MasterKeyLockReason } from "@ancientpantheon/codex-core";
+import { MASTER_CHAINWEB_SEED, OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
+import type { RekeySkip } from "../rekey/index.js";
+
 /** Base class for all codex-related errors. */
 export class CodexError extends Error {
   public override readonly name: string = "CodexError";
@@ -74,7 +78,7 @@ export class CodexPrimeProtectedError extends CodexError {
 
   constructor(ouroAccountId: string) {
     super(
-      `Ouro account ${ouroAccountId} is the CodexPrime account and cannot ` +
+      `Ouro account ${ouroAccountId} is the ${OURONET_CODEX_MASTER} account and cannot ` +
         `be deleted. Add another account first if you want it as primary.`
     );
     this.ouroAccountId = ouroAccountId;
@@ -114,11 +118,55 @@ export class CodexPrimeSeedProtectedError extends CodexError {
 
   constructor(seedId: string) {
     super(
-      `StoaChain seed ${seedId} is the Prime Codex Seed and cannot be ` +
+      `StoaChain seed ${seedId} is the ${MASTER_CHAINWEB_SEED} and cannot be ` +
         `deleted. Removing the prime seed is equivalent to deleting the ` +
         `codex itself — use the codex-reset flow instead.`
     );
     this.seedId = seedId;
+  }
+}
+
+/**
+ * Thrown when something tries to remove a derived key POSITION, or delete a
+ * seed, that the Codex Ouronet Master is actually relying on — its payment
+ * key, or a key inside its guard.
+ *
+ * Distinct from {@link CodexPrimeSeedProtectedError}, which protects ONE
+ * seed by identity. This protects an arbitrary set of `(seedId, position)`
+ * pairs across any number of seeds, because a custom guard keyset may draw
+ * keys from several seeds at once.
+ *
+ * `position` is `null` for a whole-seed refusal: deleting a seed is blocked
+ * by the same invariant, but no single position is the offender — the seed
+ * is simply held by at least one lock.
+ *
+ * The `reason` is deliberately part of the message. A refusal that did not
+ * say WHY would be indistinguishable from a bug; the reason is what tells
+ * the user the lock is a consequence of their own Master Account setup, and
+ * that re-running Secure Master Account is how it gets released.
+ */
+export class CodexMasterKeyLockedError extends CodexError {
+  public override readonly name = "CodexMasterKeyLockedError";
+  public readonly seedId: string;
+  /** The offending key index, or `null` when a whole seed was refused. */
+  public readonly position: number | null;
+  public readonly reason: MasterKeyLockReason;
+
+  constructor(seedId: string, position: number | null, reason: MasterKeyLockReason) {
+    super(
+      position === null
+        ? `StoaChain seed ${seedId} holds at least one key your ` +
+            `${OURONET_CODEX_MASTER} depends on (${reason}) and cannot be deleted. ` +
+            `Release it by re-running Secure Master Account once the key ` +
+            `is genuinely no longer in use.`
+        : `Key #${position} of StoaChain seed ${seedId} is in use as ` +
+            `${reason} by your ${OURONET_CODEX_MASTER} and cannot be removed. ` +
+            `Release it by re-running Secure Master Account once the key ` +
+            `is genuinely no longer in use.`
+    );
+    this.seedId = seedId;
+    this.position = position;
+    this.reason = reason;
   }
 }
 
@@ -156,11 +204,11 @@ export class CodexKickstartError extends CodexError {
   ) {
     const messages: Record<CodexKickstartError["reason"], string> = {
       "already-kickstarted":
-        "Codex has already been kickstarted (a Prime Codex Seed exists). " +
+        `Codex has already been kickstarted (a ${MASTER_CHAINWEB_SEED} exists). ` +
         "Use addStoaChainSeed() to add additional seeds, or reset the codex first.",
       "smart-account-not-allowed":
-        "CodexPrime must be a Standard Ouronet Account (isSmart: false). " +
-        "Smart accounts (Σ. prefix) cannot be the CodexPrime.",
+        `${OURONET_CODEX_MASTER} must be a Standard Ouronet Account (isSmart: false). ` +
+        `Smart accounts (Σ. prefix) cannot be the ${OURONET_CODEX_MASTER}.`,
       "id-conflict":
         "Cannot install a second prime entity. Exactly one prime kadena seed " +
         "and one prime ouro account are allowed per codex.",
@@ -261,6 +309,39 @@ export class CodexMigrationError extends CodexError {
       "post-condition-failed":
         "A schema migration produced an invalid result, or the migration " +
         "registry is malformed.",
+    };
+    super(detail ? `${messages[reason]} ${detail}` : messages[reason], {
+      cause,
+    });
+    this.reason = reason;
+  }
+}
+
+/** Thrown by the structural-migration engine (`runStructuralMigration`,
+ *  `structural-migration-engine` topic) — the async, password-aware,
+ *  skip-not-drop sibling of the pure `CodexMigrationError` schema-version
+ *  runner above. The `reason` field discriminates:
+ *
+ *   - `post-condition-failed`: the engine completed its walk but the
+ *     resulting snapshot's `Codex_Shape_Version` did not equal the
+ *     declared `STRUCTURAL_SHAPE_TARGET_VERSION`. This should be
+ *     unreachable by construction — the check exists so a future refactor
+ *     that breaks the stamp fails loudly, matching `CodexMigrationError`'s
+ *     own `post-condition-failed` enforcement discipline. */
+export class CodexStructuralMigrationError extends CodexError {
+  public override readonly name = "CodexStructuralMigrationError";
+  public readonly reason: "post-condition-failed";
+
+  constructor(
+    reason: CodexStructuralMigrationError["reason"],
+    detail?: string,
+    cause?: unknown
+  ) {
+    const messages: Record<CodexStructuralMigrationError["reason"], string> = {
+      "post-condition-failed":
+        "The structural migration engine produced an invalid result: its " +
+        "output snapshot's Codex_Shape_Version did not reach the declared " +
+        "target version.",
     };
     super(detail ? `${messages[reason]} ${detail}` : messages[reason], {
       cause,
@@ -417,5 +498,48 @@ export class CodexGuardError extends CodexError {
       cause,
     });
     this.reason = reason;
+  }
+}
+
+/**
+ * Thrown when `changeCodexPassword` finishes with one or more secrets left
+ * un-re-keyed (`rekeyCodex`'s skip-not-drop result, `RekeySkip[]`).
+ *
+ * `rekeyCodex` itself already does the safe thing — it never drops a secret
+ * it can't decrypt under the old password, it just keeps the ORIGINAL
+ * ciphertext and reports the skip. But a skip left silently unreported is
+ * its own hazard: the password cache moves to the new password for
+ * everything else, so the next time that one secret is needed for signing
+ * (e.g. a stoic seed's `secret`, read by `resolveStoicKeypair` for Rotate
+ * Payment Key / Rotate Guard), decrypting it with the now-current password
+ * genuinely fails — a real AES-GCM auth-tag mismatch, confirmed live
+ * (`docs/work/debug/two-real-codex-bugs.md`, bug 1) on a codex that had been
+ * through exactly this silent-skip path before. The user sees a cryptic
+ * crypto failure on an already-unlocked, already-correctly-authenticated
+ * codex, with no link back to the password change that caused it.
+ *
+ * Throwing here — instead of discarding `skipped` — surfaces the problem at
+ * the ONE moment it can still be fixed cheaply: right after the change,
+ * while the user still remembers (or can re-derive) the field's actual
+ * password, rather than months later as an unexplained signing failure.
+ */
+export class CodexPasswordChangeIncompleteError extends CodexError {
+  public override readonly name = "CodexPasswordChangeIncompleteError";
+  public readonly skipped: readonly RekeySkip[];
+
+  constructor(skipped: readonly RekeySkip[]) {
+    const fields = skipped
+      .map((s) => (s.id ? `${s.slice}.${s.field} (${s.id})` : `${s.slice}.${s.field}`))
+      .join(", ");
+    super(
+      `Password changed, but ${skipped.length} secret${skipped.length === 1 ? "" : "s"} ` +
+        `could not be moved to the new password and remain protected by the ` +
+        `OLD password: ${fields}. Everything else now uses the new password. ` +
+        `Those fields will keep working with their old password, but any ` +
+        `operation that needs them (e.g. signing) will fail until this is ` +
+        `resolved — contact support with this message rather than changing ` +
+        `the password again, which will not fix it.`
+    );
+    this.skipped = skipped;
   }
 }

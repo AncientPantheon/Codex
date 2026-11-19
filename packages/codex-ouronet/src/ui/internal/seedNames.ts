@@ -3,12 +3,13 @@
  * `src/lib/seed-utils.ts` so the packaged CodexUI labels seeds identically
  * to the legacy My Codex page.
  *
- * Prime-seed rule: the codex's prime seed always reads "Prime Codex Seed",
+ * Prime-seed rule: the codex's prime seed always reads MASTER_CHAINWEB_SEED,
  * whether it's flagged via `isPrime`, sits at index 0, or still carries the
  * historical "Initial Seed" name from older codices.
  */
 
 import type { IStoaChainSeed } from "../../types/entities.js";
+import { MASTER_CHAINWEB_SEED } from "@ancientpantheon/codex-core";
 
 export function getSeedDisplayName(
   seed: IStoaChainSeed,
@@ -19,7 +20,7 @@ export function getSeedDisplayName(
     : seedIndexOrSeeds;
 
   if (seed.isPrime || idx === 0 || seed.name === "Initial Seed") {
-    return "Prime Codex Seed";
+    return MASTER_CHAINWEB_SEED;
   }
 
   return seed.name || (idx >= 0 ? `Seed #${idx + 1}` : seed.id.slice(0, 8));

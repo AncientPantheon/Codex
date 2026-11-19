@@ -36,6 +36,7 @@ import { readObservationalCodexIdConfig, CODEXID_PRIME_NAMES, codexIdPrimeName, 
 import { IconDeleteBtn, IconDeleteBtnDisabled } from "../internal/IconButtons.js";
 import { KeyFieldsHalves } from "../internal/KeyFieldsHalves.js";
 import type { IPureKeypair } from "../../types/entities.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 const isHex64 = (s: string) => /^[0-9a-fA-F]{64}$/.test(s.trim());
@@ -227,7 +228,7 @@ function KeypairRow({
   const label = primeName ?? keypair.label ?? `Pure Key #${index + 1}`;
   const protLabel = isGuardPrime
     ? "GuardOfCodexID"
-    : keypair.isCodexGuard ? "CodexGuard" : keypair.wasCodexGuard ? "retired guard" : keypair.isDuoPurePrime ? "CodexPrime" : "";
+    : keypair.isCodexGuard ? "CodexGuard" : keypair.wasCodexGuard ? "retired guard" : keypair.isDuoPurePrime ? OURONET_CODEX_MASTER : "";
   const accent = isGuardPrime ? "#a78bfa" : protRaw ? "#ceac5f" : "#6366f1";
   const border = isGuardPrime ? "#a78bfa55" : protRaw ? "#ceac5f40" : "#262626";
   const bg = isGuardPrime ? "#a78bfa10" : protRaw ? "#ceac5f08" : "#18181B";
@@ -569,7 +570,7 @@ export function PureKeypairsTab({ className, onPaginationHandleChange }: PureKey
   const handleDelete = async (id: string) => {
     setDeleteError(null);
     try { await deleteKeypair(id); }
-    catch { setDeleteError("This key is protected (CodexGuard / CodexPrime) and cannot be deleted."); }
+    catch { setDeleteError(`This key is protected (CodexGuard / ${OURONET_CODEX_MASTER}) and cannot be deleted.`); }
   };
 
   const TABS: { key: Sub; label: string; icon: typeof KeyRound; color: string }[] = [

@@ -77,6 +77,14 @@ const FOREIGN_KEYS_BLOCK_SCHEMA_VERSION = 2;
  * pureKeypairs/foreignKeys omission discipline. Before this fix the codec had
  * no `arweaveSeeds` awareness at all, so a seed silently dropped out of every
  * export regardless of the source.
+ *
+ * `Codex_Shape_Version` (the `codex-shape-version-stamp` topic) is EMITTED
+ * only when the OPTIONAL source field is present (`!== undefined`), passed
+ * through UNCHANGED — same omit-when-absent discipline as the keyrings
+ * above. DISTINCT from `schemaVersion` (device-local, never emitted here at
+ * all) and from `CODEX_PACKAGE_VERSION_OUTPUT` (a global build constant):
+ * this is the per-codex-instance shape stamp that travels in the export so
+ * it is readable pre-unlock.
  */
 export function buildCodexExport<
   KS, OA, PK, AB, UI, AS, WL,
@@ -107,6 +115,18 @@ export function buildCodexExport<
       : {}),
     ...(codex.watchList !== undefined && codex.watchList.length > 0
       ? { watchList: codex.watchList }
+      : {}),
+    ...(codex.migrationProgress !== undefined
+      ? { migrationProgress: codex.migrationProgress }
+      : {}),
+    ...(codex.codexMasterSeed !== undefined
+      ? { codexMasterSeed: codex.codexMasterSeed }
+      : {}),
+    ...(codex.masterKeyLocks !== undefined
+      ? { masterKeyLocks: codex.masterKeyLocks }
+      : {}),
+    ...(codex.Codex_Shape_Version !== undefined
+      ? { Codex_Shape_Version: codex.Codex_Shape_Version }
       : {}),
   };
   return withKeyrings;
@@ -166,6 +186,15 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   // validator is added because `deriveBackupLineage` already does its own
   // narrow, defensive, unknown-safe reads independently.
   "codexIdentity",
+  // 11th entry: the per-codex-instance shape stamp (`codex-shape-version-
+  // stamp` topic) — DISTINCT from `schemaVersion` (device-local, never
+  // emitted here at all) and from `CODEX_PACKAGE_VERSION_OUTPUT` (a global
+  // build constant). Allow-listed so a "1.3" export carrying it round-trips
+  // without throwing `CodexUnknownFieldError`.
+  "Codex_Shape_Version",
+  "masterKeyLocks",
+  "codexMasterSeed",
+  "migrationProgress",
 ]);
 
 // Strict-equality membership only. No trim/normalize/prefix matching: a version

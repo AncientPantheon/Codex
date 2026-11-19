@@ -68,6 +68,17 @@ interface ParsedBackup {
    *  fallback — an absent field must NOT wipe a live watched address on
    *  restore (the reported codex-save-vanishes incident). */
   watchList?: CodexSnapshot["watchList"];
+  /** The per-codex shape stamp (`codex-shape-version-stamp`), absent on
+   *  legacy/pre-stamp backups. The codec already allow-lists and carries
+   *  it; this interface simply never declared it, so the restore path
+   *  below had nothing to read — see that assignment's own note. */
+  Codex_Shape_Version?: CodexSnapshot["Codex_Shape_Version"];
+  /** Master-key locks. Absent on any backup written before locks existed. */
+  masterKeyLocks?: CodexSnapshot["masterKeyLocks"];
+  /** The Codex Master Seed row. Absent on any backup written before it. */
+  codexMasterSeed?: CodexSnapshot["codexMasterSeed"];
+  /** An unfinished migration. Absent on any backup written before it. */
+  migrationProgress?: CodexSnapshot["migrationProgress"];
 }
 
 export interface CodexBackupView {
@@ -103,7 +114,46 @@ function buildBackupPayload(snapshot: CodexSnapshot): unknown {
     foreignKeys: snapshot.foreignKeys,
     arweaveSeeds: snapshot.arweaveSeeds,
     watchList: snapshot.watchList,
+    // Carries the per-codex shape stamp (codex-shape-version-stamp, T6) onto
+    // the export — `buildCodexExport` omits the key entirely when it is
+    // `undefined` (same omit-when-absent discipline as every other optional
+    // field here), so a legacy/imported codex lacking the field still
+    // exports without the key, never a fabricated value.
+    Codex_Shape_Version: snapshot.Codex_Shape_Version,
+    masterKeyLocks: snapshot.masterKeyLocks,
+    codexMasterSeed: snapshot.codexMasterSeed,
+    migrationProgress: snapshot.migrationProgress,
   });
+}
+
+/**
+ * `downloadAsJson`'s default-filename template — encodes the live codex's
+ * own `Codex_Shape_Version` (codex-shape-version-stamp, T6) so a user with
+ * several exports sitting in a Downloads folder can tell which shape each
+ * one is in without opening the file. `shapeVersion` must be read off the
+ * already-built snapshot/export payload, never re-parsed from the JSON
+ * string. Exported as its own pure function because no real post-T1 export
+ * can ever have an `undefined` Codex_Shape_Version end-to-end (every live
+ * codex is at least stamped "1.0.0") — this is the only way to directly
+ * unit-test the "unversioned" branch.
+ *
+ * `codex-id-step-flow` (owner, this session): once BOTH Step 1 (versioned)
+ * AND Step 2 (Permaweb-eligible) are checked, the codex "finally has the
+ * proper shape going forward" — the Permaweb Eligibility wizard's own
+ * Finalize step stamps this as `primeAlignment: "aligned"`. Reflected here
+ * as a `_permaweb-eligible` filename marker so it's visible without opening
+ * the file, mirroring the shape-version marker's own reasoning exactly.
+ * Omitted (not a fabricated `"legacy"` suffix) when `primeAlignment` is
+ * `"legacy"` or not supplied at all — same omit-when-absent discipline the
+ * shape version itself follows for a pre-T1 export.
+ */
+export function buildDefaultBackupFilename(
+  shapeVersion: string | undefined,
+  timestamp: string,
+  primeAlignment?: "legacy" | "aligned"
+): string {
+  const alignmentMarker = primeAlignment === "aligned" ? "_permaweb-eligible" : "";
+  return `OuronetCodex_v${shapeVersion ?? "unversioned"}${alignmentMarker}_${timestamp}.json`;
 }
 
 /**
@@ -152,17 +202,37 @@ export function useCodexBackup(): CodexBackupView {
       schemaVersion: s.schemaVersion,
       lastUpdatedAt: s.lastUpdatedAt,
       lastUpdatedDevice: s.lastUpdatedDevice,
+      // Carries the live per-codex shape stamp through to the snapshot
+      // (codex-shape-version-stamp, T6) — `undefined` on a legacy/imported
+      // codex the T3 store never silently stamps as current, "1.0.0"+ on
+      // anything `kickstartCodex` created.
+      Codex_Shape_Version: s.Codex_Shape_Version,
+      masterKeyLocks: s.masterKeyLocks,
+      codexMasterSeed: s.codexMasterSeed,
+      migrationProgress: s.migrationProgress,
     };
   }, [store]);
 
-  const exportForCloud = useCallback(async (): Promise<string> => {
+  /** Builds BOTH the snapshot and its stringified export payload in one
+   *  pass, so `downloadAsJson` can read `Codex_Shape_Version` off the
+   *  already-built `snapshot` for its default filename (T6) without
+   *  re-parsing the JSON string it also needs to write to the Blob. */
+  const buildExportState = useCallback((): {
+    snapshot: CodexSnapshot;
+    json: string;
+  } => {
     const snapshot = buildSnapshotFromState();
-    return JSON.stringify(buildBackupPayload(snapshot), null, 2);
+    const json = JSON.stringify(buildBackupPayload(snapshot), null, 2);
+    return { snapshot, json };
   }, [buildSnapshotFromState]);
+
+  const exportForCloud = useCallback(async (): Promise<string> => {
+    return buildExportState().json;
+  }, [buildExportState]);
 
   const downloadAsJson = useCallback(
     async (filename?: string): Promise<void> => {
-      const json = await exportForCloud();
+      const { snapshot, json } = buildExportState();
       if (
         typeof window === "undefined" ||
         typeof document === "undefined"
@@ -178,15 +248,17 @@ export function useCodexBackup(): CodexBackupView {
       a.href = url;
       a.download =
         filename ??
-        `OuronetCodex_${new Date()
-          .toISOString()
-          .replace(/[:.]/g, "-")}.json`;
+        buildDefaultBackupFilename(
+          snapshot.Codex_Shape_Version,
+          new Date().toISOString().replace(/[:.]/g, "-"),
+          store.getState().primeAlignment
+        );
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     },
-    [exportForCloud]
+    [buildExportState, store]
   );
 
   const importFromCloud = useCallback(
@@ -253,6 +325,37 @@ export function useCodexBackup(): CodexBackupView {
         schemaVersion: current.schemaVersion,
         lastUpdatedAt: new Date().toISOString(),
         lastUpdatedDevice: current.lastUpdatedDevice,
+        // Owner-reported incident ("upgraded it, exported it, loaded it
+        // again, still says its not versioned"): this assignment did not
+        // exist, so every import rebuilt the snapshot WITHOUT the shape
+        // stamp and a freshly-upgraded codex came back claiming to be
+        // unversioned. The writer side was always correct — their export
+        // carries `Codex_Shape_Version: "1.0.0"` and the codec allow-lists
+        // it — the reader just never picked it up. Fourth instance of the
+        // same omission as watchList / arweaveSeeds / foreignKeys above.
+        //
+        // ADOPTED VERBATIM, INCLUDING ITS ABSENCE — deliberately NOT
+        // `?? current.Codex_Shape_Version`, which is the opposite of the
+        // funds-critical discipline those three use, for a specific
+        // reason: those protect SECRETS from being wiped by an older
+        // backup, whereas this describes the SHAPE OF THE DATA BEING
+        // IMPORTED. Inheriting this device's stamp onto freshly-imported
+        // legacy data would mark unmigrated shapes as migrated and make
+        // the structural upgrade skip the very codex that needs it.
+        Codex_Shape_Version: parsed.Codex_Shape_Version,
+        // Funds-adjacent, so this one DOES fall back to `current` like
+        // foreignKeys/arweaveSeeds/watchList — and unlike the stamp directly
+        // above. Importing an older backup that predates locks must never
+        // silently unlock the key positions this device's master depends on.
+        masterKeyLocks: parsed.masterKeyLocks ?? current.masterKeyLocks,
+        // Falls back to `current` for the same reason as the locks: an older
+        // backup that predates the row must not make this codex forget which
+        // of its seeds everything derives from.
+        codexMasterSeed: parsed.codexMasterSeed ?? current.codexMasterSeed,
+        // Adopted from the IMPORTED codex, with the device's own as fallback:
+        // resuming on another machine is the stated reason this travels at
+        // all, so the file's in-progress run must win over this device's.
+        migrationProgress: parsed.migrationProgress ?? current.migrationProgress,
       };
 
       await adapter.saveAll(next);

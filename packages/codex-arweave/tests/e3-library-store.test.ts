@@ -1,5 +1,17 @@
+// @vitest-environment node
 /**
  * E3 RED matrix — the `LibraryStore` seam CONFORMANCE suite (E-07, N-07).
+ *
+ * `@vitest-environment node` (line 1) is load-bearing, and is the fix this
+ * package's own `vitest.config.ts` TODO asked for: *"fix the harness (e.g.
+ * run these in the node environment) and drop this exclusion."* This suite
+ * drives `SqliteLibraryStore`, which lazily `import("node:sqlite")`s. Under
+ * the default jsdom/CLIENT environment vite tries to BUNDLE that Node
+ * builtin and the whole FILE fails to collect — zero tests run — with
+ * "Cannot bundle built-in module node:sqlite". In the node environment it
+ * resolves natively, which is also how the shipped bundle treats it.
+ * Matches the convention the config already documents for the other
+ * node-logic seam tests (KeygenRunner, the validator, the tree-shake gate).
  *
  * ONE conformance suite runs against BOTH reference impls behind the seam:
  *   - `MemoryLibraryStore` (node/test, Map-backed) — the Library-LOGIC impl;

@@ -57,6 +57,7 @@ import {
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
 import { KADENA_CHAIN_ID as STOACHAIN_CHAIN_ID, KADENA_NETWORK as STOACHAIN_NETWORK } from "@stoachain/stoa-core/constants";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 // ─── Zone tokens ──────────────────────────────────────────────────────────────
 
@@ -381,6 +382,7 @@ export default function ActivateStandardAccountModal({
   return (
     <ZbomModalFrame onClose={onClose} width={600}>
       <ZbomLayout
+      kind="page"
         header={<>
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 flex-shrink-0" style={{ color: "#ceac5f" }} />
@@ -390,7 +392,7 @@ export default function ActivateStandardAccountModal({
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs" style={{ color: "#888" }}>Account:</span>
             <span className="text-xs font-mono font-bold" style={{ color: "#ceac5f" }}>
-              {accounts.indexOf(ouroAccount as any) === 0 ? "CodexPrime" : ouroAccount.name || ouroAccount.address?.slice(0, 20) + "…"}
+              {accounts.indexOf(ouroAccount as any) === 0 ? OURONET_CODEX_MASTER : ouroAccount.name || ouroAccount.address?.slice(0, 20) + "…"}
             </span>
           </div>
           <div className="inline-flex items-center gap-2 mt-2 px-2 py-1 rounded-lg border"

@@ -13,6 +13,7 @@
  */
 
 import { useCodexStore } from "../provider/index.js";
+import type { CodexMasterSeed } from "@ancientpantheon/codex-core";
 
 export interface CodexView {
   isReady: boolean;
@@ -40,6 +41,25 @@ export interface CodexView {
   >["uiSettings"];
 
   schemaVersion: number;
+  /** The per-codex-instance shape stamp (`"1.0.0"`, …), or `undefined` for a
+   *  codex that predates this field ("Unversioned"). Distinct from
+   *  `schemaVersion` (the local-only, never-exported migration counter) and
+   *  from `CODEX_PACKAGE_VERSION_OUTPUT` (the running app/package's own
+   *  build version) — see `docs/work/codex-shape-version-stamp/design.md`. */
+  Codex_Shape_Version: string | undefined;
+  /** The Codex Master Seed row — which three entities are the three faces of
+   *  this codex's one seed. `undefined` on a codex that has never settled
+   *  one; see codex-core's `codex/masterSeed.ts`. */
+  codexMasterSeed: CodexMasterSeed | undefined;
+  /** `"aligned"` once the codex's Prime Ouronet Account/Chainweb Seed/
+   *  Arweave Seed trio has been permanently locked via the Permaweb
+   *  Eligibility wizard's Finalize step; `"legacy"` otherwise (the
+   *  default for every codex, including ones that predate this field —
+   *  see `docs/work/legacy-prime-migration/design.md`'s "lock-in rule").
+   *  Read directly off the live store (the real type, via a type-only
+   *  import in `CodexProvider.tsx`) — not yet part of the exported JSON
+   *  envelope, so never written through `buildCodexExport`. */
+  primeAlignment: "legacy" | "aligned";
   lastUpdatedAt: string | null;
   lastUpdatedDevice: ReturnType<
     ReturnType<typeof useCodexStore>["getState"]
@@ -60,6 +80,9 @@ export function useCodex(): CodexView {
     watchList: store((s) => s.watchList),
     uiSettings: store((s) => s.uiSettings),
     schemaVersion: store((s) => s.schemaVersion),
+    Codex_Shape_Version: store((s) => s.Codex_Shape_Version),
+    codexMasterSeed: store((s) => s.codexMasterSeed),
+    primeAlignment: store((s) => s.primeAlignment),
     lastUpdatedAt: store((s) => s.lastUpdatedAt),
     lastUpdatedDevice: store((s) => s.lastUpdatedDevice),
   };

@@ -14,8 +14,11 @@
  *     empty state — the control stays so the two chains stay identical;
  *   • addresses grouped by their SOURCE SEED, each group collapsible with a
  *     count badge (Stoa's `GroupRow`), holding that seed's entries ascending by
- *     `index`. The prime seed's group is fixed as "Prime Arweave Seed"; any other
- *     falls back to `Seed #N` when it carries no label (Stoa's naming rule).
+ *     `index`. The MASTER seed's group is fixed as the product's own
+ *     `MASTER_ARWEAVE_SEED` designation; any other falls back to `Seed #N` when
+ *     it carries no label (Stoa's naming rule). WHICH seed is the master comes
+ *     from `resolveMasterArweaveSeed` against the injected
+ *     `masterArweaveSeedId`, never from `isPrime` — see {@link groupHeading}.
  *
  * Secrecy: `encryptedKeyfile` is the only copy of the user's key material and is
  * NEVER rendered — every row shows the entry's PLAINTEXT `address` (E5's
@@ -59,6 +62,8 @@ import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 import type { ArweavePanelDeps } from "./context.js";
 import { SendArweaveModal } from "./SendArweaveModal.js";
 import { ARWEAVE_CHAIN_ID } from "../address-book/chainId.js";
+import { MASTER_ARWEAVE_SEED, FORMER_MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
+import { resolveMasterArweaveSeed } from "./resolveMasterArweaveSeed.js";
 
 /** A single STABLE empty array, reused as `watchedEntries`'s default when the
  *  prop is omitted. A `[]` written directly in the destructuring default is a
@@ -80,8 +85,55 @@ const UNASSIGNED_LABEL = "Unassigned";
 const PURE_KEYS_ID = "pure-keys";
 const PURE_KEYS_LABEL = "Pure Keys";
 
-/** The prime seed's group is fixed copy, never the stored label. */
-const PRIME_LABEL = "Prime Arweave Seed";
+/** The master seed's group is fixed copy, never the stored label. */
+const PRIME_LABEL = MASTER_ARWEAVE_SEED;
+
+/**
+ * WHAT ONE SEED'S GROUP IS CALLED — the single master rule this surface reads.
+ *
+ * `isMasterRow` is {@link resolveMasterArweaveSeed}'s verdict against the
+ * injected `codexMasterSeed.arweaveSeedId`, and `isFormerMasterRow` is
+ * codex-core's seal-gated `isFormerMasterArweaveSeed`, both resolved in
+ * `ArweavePanel.tsx` — NEVER `ArweaveAccountsSeed.isPrime`, which is
+ * CREATION-TIME PROVENANCE ("the first seed ever added") and is deliberately
+ * not moved when the eligibility wizard settles a new master. Reading the flag
+ * here was this file's own version of the defect the Seeds area already fixed:
+ * after a settlement it titled the WRONG seed's address group, on the page a
+ * user picks a send-from address on.
+ *
+ * ONE LINE, not the Seeds area's two (designation above the seed's own stored
+ * name). A group heading is not an entity row: this string is also every mobile
+ * row's seed MEDALLION (`codexFlatEntries`), which is a single badge, and the
+ * desktop header is a one-line `textOverflow: ellipsis` span sharing its row
+ * with the count badge. The seed's own name belongs to the seed's own row, in
+ * the Seeds category, where `seedOwnNameLine` already renders it; here the
+ * heading only answers "which seed produced these addresses?".
+ *
+ * Precedence:
+ *   1. the master → its DERIVED golden designation, never its stored label;
+ *   2. a recorded former holder → `FORMER_MASTER_ARWEAVE_SEED`, so a displaced
+ *      seed cannot keep reading as the master;
+ *   3. its own stored name — EXCEPT a stale golden title on a codex that has
+ *      settled a master (see `masterIsSettled`): names used to be overwritten
+ *      with these very strings, and `ForeignChainsWiring.tsx`'s own blank-label
+ *      fallback can still re-assert one, which would put the master title on
+ *      two groups at once;
+ *   4. its position, as it always has.
+ */
+function groupHeading(
+  seed: ArweaveAccountsSeed,
+  position: number,
+  isMasterRow: boolean,
+  isFormerMasterRow: boolean,
+  masterIsSettled: boolean,
+): string {
+  if (isMasterRow) return PRIME_LABEL;
+  if (isFormerMasterRow) return FORMER_MASTER_ARWEAVE_SEED;
+  const stored = seed.label;
+  const storedIsStaleDesignation =
+    masterIsSettled && (stored === PRIME_LABEL || stored === FORMER_MASTER_ARWEAVE_SEED);
+  return !storedIsStaleDesignation && stored ? stored : `Seed #${position + 1}`;
+}
 
 const MONO = "var(--codex-font-mono, 'JetBrains Mono', ui-monospace, monospace)";
 
@@ -201,6 +253,26 @@ export interface ArweaveAccountsAreaProps {
   entries: ForeignKeyEntry[];
   /** The known Arweave seeds, in display order; each becomes one group. */
   seeds: ArweaveAccountsSeed[];
+  /** `codexMasterSeed.arweaveSeedId` — the id of the seed the CODEX has settled
+   *  on as its Master ArWeave Seed. It decides which group wears the
+   *  `MASTER_ARWEAVE_SEED` designation; see `resolveMasterArweaveSeed` for the
+   *  full precedence and why the `isPrime` flag alone is the wrong answer.
+   *  INJECTED, like every other input here (`ArweavePanel.tsx` reads it from the
+   *  codex store) — this component reaches into no store itself. Absent on every
+   *  codex that has not re-run the eligibility wizard, which must keep its
+   *  headings exactly as they always were. Same prop, same meaning, as
+   *  `ArweaveSeedsAreaProps.masterArweaveSeedId`. */
+  masterArweaveSeedId?: string;
+  /** The ids of every seed the codex has on record as a FORMER Master ArWeave
+   *  Seed — `codexMasterSeed.formerArweaveSeedIds`, already run through
+   *  codex-core's seal-gated `isFormerMasterArweaveSeed`. Each such group reads
+   *  `FORMER_MASTER_ARWEAVE_SEED` instead of a stored name that may still claim
+   *  the master title. INJECTED and pre-resolved, exactly like
+   *  {@link masterArweaveSeedId} and
+   *  `ArweaveSeedsAreaProps.formerMasterArweaveSeedIds`: `ArweavePanel.tsx` owns
+   *  the store read and the seal gate. Absent on every codex that has never
+   *  moved its master Arweave seed. */
+  formerMasterArweaveSeedIds?: readonly string[];
   /** Deletes ONE key. INJECTED — this surface reaches into no store, it only
    *  names the entry to delete. Omitted entirely → no row renders a delete
    *  control at all (mirrors Stoa's `onRemove &&` gating), since an unwired
@@ -1500,7 +1572,12 @@ function GroupSection({
               `flex: 1` child with no `minWidth: 0` won't shrink below its
               own text width, so a longer seed label can push the count
               badge off its line instead of the row truncating cleanly. */}
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: 14, color: "#d2d3d4" }}>{group.label}</span>
+          <span
+            data-testid={`arweave-accounts-label-${group.id}`}
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: 14, color: "#d2d3d4" }}
+          >
+            {group.label}
+          </span>
           <span
             data-testid={`arweave-accounts-count-${group.id}`}
             style={{
@@ -1545,6 +1622,8 @@ function GroupSection({
 export function ArweaveAccountsArea({
   entries,
   seeds,
+  masterArweaveSeedId,
+  formerMasterArweaveSeedIds,
   onDeleteKey,
   getBalance,
   deps,
@@ -1685,11 +1764,22 @@ export function ArweaveAccountsArea({
       else bucket.push(entry);
     }
 
+    // ONE resolution of "which seed is the master", for every group — the same
+    // resolver, and the same single verdict, the Seeds area derives its own
+    // `primeSeed` from. `masterIsSettled` records that the verdict came from the
+    // codex's SETTLED identity rather than a fallback, which is the only case in
+    // which a stale golden title stored on another seed is provably stale (see
+    // {@link groupHeading}).
+    const master = resolveMasterArweaveSeed(seeds, masterArweaveSeedId);
+    const masterIsSettled = master !== undefined && master.id === masterArweaveSeedId;
+    const formerMasterIds = new Set(formerMasterArweaveSeedIds ?? []);
+
     const out: Group[] = seeds.map((seed, i) => ({
       id: seed.id,
-      // Same rule as Stoa: the prime seed is named by the product, not by its
-      // stored label; every other seed falls back to its position.
-      label: seed.isPrime === true || i === 0 ? PRIME_LABEL : seed.label || `Seed #${i + 1}`,
+      // Same rule as Stoa: the master seed is named by the product, not by its
+      // stored label; every other seed falls back to its own name, then to its
+      // position.
+      label: groupHeading(seed, i, seed === master, formerMasterIds.has(seed.id), masterIsSettled),
       entries: [...(known.get(seed.id) ?? [])].sort(byIndexAscending),
       // Protected unless the seed EXPLICITLY says its words are unknown this
       // session; absent `hasWords` (an older caller) defaults to Protected —
@@ -1716,7 +1806,7 @@ export function ArweaveAccountsArea({
       });
     }
     return out;
-  }, [entries, seeds]);
+  }, [entries, seeds, masterArweaveSeedId, formerMasterArweaveSeedIds]);
 
   // "Report upward, don't duplicate the underlying logic" — same shape
   // `StoaAccountsTab`'s own `onTotalChange`/`onRefreshHandleChange`/

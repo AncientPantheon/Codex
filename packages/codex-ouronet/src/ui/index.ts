@@ -92,6 +92,16 @@ export type { DebouncerInfoModalProps } from "../zbom/debouncer/DebouncerInfoMod
 // ── STAY-set: the @stoachain-edged settings cards (C4 — CodexInfoCard +
 //    EncryptionCard transitively edge @stoachain via encryptionState) ──
 export { CodexInfoCard } from "./settings/CodexInfoCard.js";
+// ── stage 3A: the OPTIONAL key changes a user chose that are not yet in
+// force on chain. Exported for the Codex ID page, which composes it.
+export { PendingKeyChangesCard } from "./settings/PendingKeyChangesCard.js";
+export { PendingKeyChangesSection } from "./settings/PendingKeyChangesSection.js";
+export type { PendingKeyChangesCardProps } from "./settings/PendingKeyChangesCard.js";
+export { computeOutstandingKeyChanges } from "./internal/outstandingKeyChanges.js";
+export type {
+  PendingKeyChange,
+  OutstandingKeyChanges,
+} from "./internal/outstandingKeyChanges.js";
 export type { CodexInfoCardProps } from "./settings/CodexInfoCard.js";
 export { EncryptionCard } from "./settings/EncryptionCard.js";
 export type { EncryptionCardProps } from "./settings/EncryptionCard.js";

@@ -23,6 +23,7 @@ import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { useCodex } from "@ancientpantheon/codex-ouronet/hooks";
 import { useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
+import { CODEX_PACKAGE_VERSION_OUTPUT } from "@ancientpantheon/codex-core";
 import {
   CodexInfoCard,
   ChangePasswordCard,
@@ -112,13 +113,55 @@ describe("<CodexInfoCard>", () => {
 
   it("shows the Codex Form product version, SEPARATE from the raw Schema Version counter (owner ruling, 2026-09-26)", async () => {
     await renderUnder(<CodexInfoCard />);
-    // "Codex Form" is CODEX_FORM_VERSION (a new, cosmetic, additive
+    // "Codex Form" is CODEX_PACKAGE_VERSION_OUTPUT (a new, cosmetic, additive
     // constant) — NOT a repurposing of schemaVersion, which stays whatever
     // the adapter's real migration counter says (0 for a fresh
     // MemoryCodexAdapter codex — see state/migrations.ts's own doc comment
     // for why these two rows are deliberately different fields).
     expect(screen.getByTestId("info-form-version").textContent).toBe("1.0.0");
     expect(screen.getByTestId("info-schema").textContent).toBe("0");
+  });
+
+  // docs/work/codex-shape-version-stamp (Topic 1, T4): "Codex Form" is now
+  // TWO distinct rows — "Codex Shape" (the REAL per-codex
+  // `Codex_Shape_Version`, driven by the migration engine, per codex
+  // instance) and "Codex Package" (the renamed, still-global,
+  // never-per-codex build constant). Before this change both questions
+  // were answered by one row, which is exactly how the owner ended up
+  // seeing "v1.0.0" on every codex regardless of its real age — these two
+  // tests pin that the rows are sourced independently so a future
+  // divergence between the two values (the whole point of the field) is
+  // actually caught, not silently papered over because both happen to read
+  // "1.0.0" today.
+  it("shows Codex Shape (the real per-codex value) and Codex Package (the build constant) as two independently-sourced rows", async () => {
+    await renderUnder(<CodexInfoCard />);
+    await act(async () => {
+      capturedStore!.setState({ Codex_Shape_Version: "1.0.0" });
+    });
+
+    expect(screen.getByText("Codex Shape")).toBeTruthy();
+    expect(screen.getByTestId("info-shape-version").textContent).toBe(
+      "v1.0.0",
+    );
+
+    expect(screen.getByText("Codex Package")).toBeTruthy();
+    expect(screen.getByTestId("info-form-version").textContent).toBe(
+      CODEX_PACKAGE_VERSION_OUTPUT,
+    );
+  });
+
+  it("shows Codex Shape as Unversioned for a codex with no Codex_Shape_Version, while Codex Package keeps showing the real build constant unaffected", async () => {
+    await renderUnder(<CodexInfoCard />);
+    // A fresh MemoryCodexAdapter("dev") with no kickstartCodex run leaves
+    // Codex_Shape_Version at its default `undefined` — the "legacy/imported
+    // codex" case this field's whole design exists to detect honestly,
+    // never silently stamped as current.
+    expect(screen.getByTestId("info-shape-version").textContent).toBe(
+      "Unversioned",
+    );
+    expect(screen.getByTestId("info-form-version").textContent).toBe(
+      CODEX_PACKAGE_VERSION_OUTPUT,
+    );
   });
 
   it("breaks down the 3 supported blockchains (owner ruling, 2026-09-26: Arweave, Stoa-Chainweb, Kadena-Chainweb)", async () => {

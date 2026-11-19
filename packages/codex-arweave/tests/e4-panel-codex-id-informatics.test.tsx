@@ -32,6 +32,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 import { CodexBackupInformatics } from "../src/panel/CodexBackupInformatics";
 import { CodexEncryptionInformatics } from "../src/panel/CodexEncryptionInformatics";
@@ -241,7 +242,7 @@ describe("CodexMigrationInformatics — why some codexes aren't eligible yet", (
     render(<CodexMigrationInformatics />);
     const el = screen.getByText(/Stoic Dalos Derivation/i, { selector: "p" });
     expect(el.textContent).toMatch(/Ouronet Account/i);
-    expect(el.textContent).toMatch(/Prime Arweave Seed/i);
+    expect(el.textContent).toMatch(/Master\sArWeave\sSeed/i);
     expect(el.textContent).toMatch(/Master Seed/i);
   });
 
@@ -295,4 +296,56 @@ describe("CodexMigrationInformatics — migration moves real on-chain funds", ()
     expect(el.textContent).toMatch(/multi-step|multiple steps|several steps/i);
     expect(el.textContent).toMatch(/confirmation/i);
   });
+
+  it("names all THREE derivations of the one Master Seed, so the threefold model is stated, not implied", () => {
+    render(<CodexMigrationInformatics />);
+    // Asserted against the exported constant, not a copy of its value: this
+    // explainer hardcoded the master's name as a literal, so it went on
+    // rendering the pre-rename wording after the constant was corrected,
+    // while every surface that imported the constant moved. The canonical
+    // string is pinned once, in codex-core's master-names test; what matters
+    // here is that this panel cannot drift away from it again.
+    expect(screen.getByTestId("master-name-ouronet").textContent).toContain(OURONET_CODEX_MASTER);
+    expect(screen.getByTestId("master-name-chainweb").textContent).toMatch(/Master Chainweb Seed/);
+    expect(screen.getByTestId("master-name-arweave").textContent).toMatch(/Master ArWeave Seed/);
+  });
+
+  it("states that position 0 pays and position 1 guards", () => {
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByTestId("master-name-chainweb");
+    expect(el.textContent).toMatch(/position\s*0 pays/i);
+    expect(el.textContent).toMatch(/position\s*1 guards/i);
+  });
+
+  it("explains the lock and how Secure Master Account releases it", () => {
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByTestId("master-key-lock-note");
+    expect(el.textContent).toMatch(/Secure Master Account/);
+    expect(el.textContent).toMatch(/releasing whatever no longer is/i);
+  });
+
+  it("names the Codex Stoic Identity and says the Master Seed itself can never go on chain", () => {
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByTestId("codex-stoic-identity-note");
+    expect(el.textContent).toMatch(/never be put on chain/i);
+  });
+
+  it("states BOTH ArWeave unlock paths, marking the identity one optional", () => {
+    render(<CodexMigrationInformatics />);
+    expect(screen.getByTestId("restore-path-master-seed").textContent).toMatch(/Codex Master Seed/);
+    const optional = screen.getByTestId("restore-path-stoic-identity").textContent ?? "";
+    expect(optional).toMatch(/Codex Stoic Identity/);
+    expect(optional).toMatch(/Optional/i);
+  });
+
+  it("is HONEST that no restore screen exists yet and that locating a backup still needs the Master Seed", () => {
+    // The owner's standing rule: never describe an unbuilt capability as if
+    // it ships today. The envelope really does carry both locks; the restore
+    // flow and the identity-based lookup do not exist.
+    render(<CodexMigrationInformatics />);
+    const el = screen.getByTestId("restore-honesty-note");
+    expect(el.textContent).toMatch(/finding a backup still relies on/i);
+    expect(el.textContent).toMatch(/not locate one for you/i);
+  });
+
 });

@@ -844,7 +844,7 @@ describe("<SendArweaveModal>", () => {
 describe("ArweaveAccountsArea — Send button (T7)", () => {
   it("omits the Send button entirely when deps is not provided (keeps pre-T7 rendering unchanged)", () => {
     const entry = makeEntry();
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
     expect(screen.queryByTestId(`arweave-account-send-${entry.id}`)).toBeNull();
   });
 
@@ -857,7 +857,7 @@ describe("ArweaveAccountsArea — Send button (T7)", () => {
     render(
       <ArweaveAccountsArea
         entries={[entryA, entryB]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         deps={deps}
       />,
     );
@@ -894,7 +894,7 @@ describe("ArweaveAccountsArea — Send button (T7)", () => {
     render(
       <ArweaveAccountsArea
         entries={[entryA, entryB]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         getBalance={getBalance}
         deps={deps}
       />,

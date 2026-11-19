@@ -62,12 +62,14 @@ import {
   useCodexAuth,
   useCodexBackup,
   useCodexLifecycle,
+  useNeedsStructuralUpgrade,
 } from "@ancientpantheon/codex-ouronet/hooks";
 import type {
   KickstartArgsV3,
   KickstartResultV3,
 } from "@ancientpantheon/codex-ouronet/codex-identity";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { detectCodexShapeVersion } from "@ancientpantheon/codex-core";
 import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
 import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
 import type { KeygenProgress } from "@ancientpantheon/codex-arweave/seeds";
@@ -152,6 +154,10 @@ function DashboardBody({
   const { downloadAsJson, exportForCloud, clearDirty } = useCodexBackup();
   const { isReady } = useCodex();
   const store = useCodexStore();
+  // Drives the flashing "Codex ID" nav badge below (desktop tab here,
+  // mobile menu item in OuronetShellMock.tsx) — single source of truth
+  // shared with CodexIdPage's own gating (docs/work/upgrade-prompt-ui).
+  const needsStructuralUpgrade = useNeedsStructuralUpgrade();
 
   // The generic backup-divergence `beforeunload` guard (docs/work/
   // codex-session-lifecycle) — armed/disarmed off `store.dirty` for as
@@ -664,6 +670,19 @@ function DashboardBody({
                   onClick={() => setActiveView("codex-id")}
                 >
                   Codex ID
+                  {/* Flashing structural-upgrade indicator (docs/work/
+                      upgrade-prompt-ui, T3) — same hook, same boolean as
+                      OuronetShellMock's mobile "Codex ID" menu item and
+                      CodexIdPage's own "Upgrade Codex Now" gating, so all
+                      three can never disagree. */}
+                  {needsStructuralUpgrade ? (
+                    <span
+                      className="cxpg-viewtab-upgrade-badge"
+                      data-testid="codex-id-upgrade-badge"
+                      title="Structural upgrade needed"
+                      aria-hidden="true"
+                    />
+                  ) : null}
                 </button>
               </div>
             </div>
@@ -834,7 +853,12 @@ function EncryptedSession({
     );
   }
   if (isLocked) {
-    return <UnlockScreen />;
+    // Pre-unlock detection (T5, docs/work/codex-shape-version-stamp): a pure,
+    // never-throwing probe of the raw uploaded text — no decryption, no
+    // password — so the shape-version label is visible on <UnlockScreen>
+    // before the store is even touched.
+    const shapeVersion = detectCodexShapeVersion(backupText);
+    return <UnlockScreen shapeVersion={shapeVersion} />;
   }
   return IS_APOLLO_VERIFY ? <ApolloVerifyView /> : <Dashboard onReset={onReset} />;
 }

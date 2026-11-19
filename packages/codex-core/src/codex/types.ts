@@ -15,6 +15,9 @@
 
 import type { ForeignKeyEntry, ForeignKeysBlock } from "./foreignKeys.js";
 import type { PureKeypairEntry } from "./pureKeypairs.js";
+import type { MasterKeyLock } from "./masterKeyLocks.js";
+import type { CodexMasterSeed } from "./masterSeed.js";
+import type { MigrationProgress } from "./migrationProgress.js";
 
 /**
  * The wire shape of one Arweave seed inside a "1.3" export envelope — the
@@ -162,6 +165,35 @@ export interface PlaintextCodex<
    * the next round-trip.
    */
   readonly watchList?: WatchList[];
+
+  /**
+   * OPTIONAL per-codex-instance semver shape stamp — "what shape is THIS
+   * specific codex's data in," grown by the migration engine independently
+   * of which package version happens to be running. OPTIONAL like
+   * `foreignKeys`/`arweaveSeeds`/`watchList` above, same reasoning: existing
+   * consumers built before this field existed compile unchanged, and a
+   * codex that predates it stays `undefined` ("Unversioned") rather than
+   * being silently stamped as current.
+   *
+   * DISTINCT from `schemaVersion` above (device-local, explicitly does NOT
+   * travel in the export) and from `CODEX_PACKAGE_VERSION_OUTPUT` (a single
+   * GLOBAL build-time constant, not a per-codex-instance shape).
+   */
+  readonly Codex_Shape_Version?: string;
+  /** Master-key locks — which derived key positions are load-bearing and
+   *  must not be removed. Travels in the export: a restored codex that
+   *  forgot its locks would let the user delete the very key its Codex
+   *  Ouronet Master pays and is guarded by. See `masterKeyLocks.ts`. */
+  readonly masterKeyLocks?: readonly MasterKeyLock[];
+  /** The Codex Master Seed row — which three entities are the three faces of
+   *  this codex's one seed. Pure linkage, no secret material. Travels in the
+   *  export: a restored codex that forgot it would no longer know which of
+   *  its seeds is the one everything derives from. */
+  readonly codexMasterSeed?: CodexMasterSeed;
+  /** An eligibility migration that was started and not finished. Travels in
+   *  the export so a half-done run can be resumed on another device; carries
+   *  NO seed words (see `codex/migrationProgress.ts`). */
+  readonly migrationProgress?: MigrationProgress;
 }
 
 /**
@@ -240,4 +272,19 @@ export interface CodexExportV1_3<
   readonly pureKeypairs?: PureKeypair[];
   readonly arweaveSeeds?: ArweaveSeed[];
   readonly watchList?: WatchList[];
+  readonly Codex_Shape_Version?: string;
+  /** Master-key locks — which derived key positions are load-bearing and
+   *  must not be removed. Travels in the export: a restored codex that
+   *  forgot its locks would let the user delete the very key its Codex
+   *  Ouronet Master pays and is guarded by. See `masterKeyLocks.ts`. */
+  readonly masterKeyLocks?: readonly MasterKeyLock[];
+  /** The Codex Master Seed row — which three entities are the three faces of
+   *  this codex's one seed. Pure linkage, no secret material. Travels in the
+   *  export: a restored codex that forgot it would no longer know which of
+   *  its seeds is the one everything derives from. */
+  readonly codexMasterSeed?: CodexMasterSeed;
+  /** An eligibility migration that was started and not finished. Travels in
+   *  the export so a half-done run can be resumed on another device; carries
+   *  NO seed words (see `codex/migrationProgress.ts`). */
+  readonly migrationProgress?: MigrationProgress;
 }

@@ -91,6 +91,7 @@ export default defineConfig({
       // `exports` map (intentionally private). Tests reach them via these aliases;
       // external consumers cannot.
       { find: /^@ancientpantheon\/codex-ouronet\/rekey$/, replacement: `${codexOuronetSrc}/rekey/index.ts` },
+      { find: /^@ancientpantheon\/codex-ouronet\/structural-migration$/, replacement: `${codexOuronetSrc}/structural-migration/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/adapters$/, replacement: `${codexOuronetSrc}/adapters/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/provider$/, replacement: `${codexOuronetSrc}/provider/index.ts` },
       { find: /^@ancientpantheon\/codex-ouronet\/hooks$/, replacement: `${codexOuronetSrc}/hooks/index.ts` },
@@ -141,7 +142,7 @@ export default defineConfig({
     // maps); lucide-react has no `exports` map, so its bare barrel additionally
     // needs the explicit resolve.alias above to be pulled in-graph.
     // (@testing-library/react is nested and already resolves the right copy.)
-    server: { deps: { inline: [/zustand/, /lucide-react/, /@radix-ui\//] } },
+    server: { deps: { inline: [/zustand/, /lucide-react/, /@radix-ui\//, /@stoachain\/stoa-core/] } },
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "tests/**/*.test.tsx"],
   },
 });

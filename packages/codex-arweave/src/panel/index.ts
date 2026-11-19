@@ -21,6 +21,17 @@ export { ArweavePanel } from "./ArweavePanel.js";
 // `ArweavePanel`'s own tab-bar machinery, without duplicating any markup.
 export { CodexIdPage } from "./CodexIdPage.js";
 export type { CodexIdPageProps } from "./CodexIdPage.js";
+// The payload `CodexIdPage`'s `ensurePrimeArweaveSeed` reports progress
+// through. Exported BY NAME so the consumer that renders the live prime-search
+// line — `codex-ouronet`'s `LegacyPrimeMigrationWizard`, which cannot import
+// the rendering component itself without closing a package cycle — types
+// against THIS declaration rather than re-declaring the shape structurally and
+// drifting from it. A type-only import is fully erased, so naming it there
+// adds no runtime edge back into this heavy entry.
+export type {
+  EnsurePrimeArweaveSeedProgress,
+  EnsurePrimeArweaveSeedSearch,
+} from "./CodexIdPage.js";
 export {
   ArweavePanelProvider,
   ArweavePanelContext,

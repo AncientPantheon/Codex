@@ -5,10 +5,20 @@
  * are disabled mockups; the Controls riser only shows once something is
  * registered; and tapping "Codex" opens the tier-2 menu (Codex UI / Settings
  * / Export / Import — design.md §8) instead of navigating straight through.
+ *
+ * Every render wraps `<OuronetShellMock>` in a `<CodexProvider>` (via the
+ * `Shell` helper below) because the "Codex ID" menu item now independently
+ * calls `useNeedsStructuralUpgrade()` (docs/work/upgrade-prompt-ui, T3) —
+ * same requirement production already satisfies (OuronetShellMock is only
+ * ever mounted inside `App.tsx`'s `Dashboard`, itself inside `<CodexProvider>`).
  */
+import type { ReactNode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { ControlsProvider, useRegisterControls } from "@ancientpantheon/codex-ui/ui";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
+import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { STRUCTURAL_SHAPE_TARGET_VERSION } from "@ancientpantheon/codex-ouronet/structural-migration";
 import { OuronetShellMock, type OuronetShellMockProps } from "../src/OuronetShellMock";
 
 afterEach(() => cleanup());
@@ -26,12 +36,31 @@ function shellProps(overrides: Partial<OuronetShellMockProps> = {}): OuronetShel
   };
 }
 
+// The real ancestor stack OuronetShellMock always gets in production
+// (ControlsProvider from `Dashboard`, CodexProvider from `App`).
+function Shell({ children }: { children: ReactNode }) {
+  return (
+    <ControlsProvider>
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>{children}</CodexProvider>
+    </ControlsProvider>
+  );
+}
+
+// Exposes the per-mount store so a test can set Codex_Shape_Version
+// directly, same convention as codex-ouronet's own
+// tests/hooks-needs-structural-upgrade.test.tsx.
+let capturedStore: ReturnType<typeof useCodexStore> | null = null;
+function StoreGrabber() {
+  capturedStore = useCodexStore();
+  return null;
+}
+
 describe("OuronetShellMock — the 7-icon mockup bar", () => {
   it("renders all 7 tabs, including the real OuronetUI section names", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     for (const label of [...MOCK_TAB_LABELS, "Codex"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
@@ -40,9 +69,9 @@ describe("OuronetShellMock — the 7-icon mockup bar", () => {
 
   it("only the Codex tab is live — the other six are disabled mockups", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     const codexTab = screen.getByRole("button", { name: "Codex" });
     expect(codexTab).not.toBeDisabled();
@@ -55,9 +84,9 @@ describe("OuronetShellMock — the 7-icon mockup bar", () => {
 
   it("renders the wired children (the real embedded Codex content) inside the constrained stage", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ children: <div>the real codex dashboard</div> })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     expect(screen.getByText("the real codex dashboard")).toBeInTheDocument();
   });
@@ -66,9 +95,9 @@ describe("OuronetShellMock — the 7-icon mockup bar", () => {
 describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () => {
   it("has no Codex UI / Settings / Export / Import visible until 'Codex' is tapped", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     expect(screen.queryByRole("menuitem", { name: "Codex UI" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Export" })).toBeNull();
@@ -76,9 +105,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("tapping Codex opens the menu with all five items", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByRole("menuitem", { name: "Codex UI" })).toBeInTheDocument();
@@ -96,9 +125,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
   it("selecting 'Codex ID' calls onSelectView('codex-id') and closes the menu", () => {
     const onSelectView = vi.fn();
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ onSelectView })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Codex ID" }));
@@ -108,9 +137,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("marks 'Codex ID' active (aria-current) when activeView is 'codex-id', and the others not", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ activeView: "codex-id" })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByRole("menuitem", { name: "Codex ID" })).toHaveAttribute("aria-current", "true");
@@ -120,9 +149,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("the 'Codex ID' menu item has its own icon (an icon+label cell, same pattern as every other item)", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     const item = screen.getByRole("menuitem", { name: "Codex ID" });
@@ -131,9 +160,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("omits the Import item when onImport isn't provided (nothing loaded to replace yet)", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ onImport: undefined })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.queryByRole("menuitem", { name: "Import" })).toBeNull();
@@ -142,9 +171,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
   it("selecting 'Codex UI' calls onSelectView('ui') and closes the menu", () => {
     const onSelectView = vi.fn();
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ activeView: "settings", onSelectView })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Codex UI" }));
@@ -155,9 +184,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
   it("selecting 'Export' calls onExport and closes the menu", () => {
     const onExport = vi.fn();
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ onExport })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Export" }));
@@ -167,9 +196,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("marks the active view with aria-current in the menu", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps({ activeView: "settings" })} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveAttribute("aria-current", "true");
@@ -178,9 +207,9 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("lays out as ONE ROW of icon+label cells (the grid-auto-flow: column CSS class), not four stacked full-width rows", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     const menu = screen.getByRole("menu", { name: "Codex" });
@@ -195,15 +224,46 @@ describe("OuronetShellMock — the Codex-tap tier-2 menu (design.md §8)", () =>
 
   it("tapping outside the menu (the backdrop) closes it", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
     expect(screen.getByRole("menuitem", { name: "Codex UI" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /close codex menu/i }));
     expect(screen.queryByRole("menuitem", { name: "Codex UI" })).toBeNull();
+  });
+});
+
+// The flashing structural-upgrade badge on the mobile "Codex ID" menu item
+// (docs/work/upgrade-prompt-ui, T3) — driven by useNeedsStructuralUpgrade(),
+// the same hook/boolean the desktop ".cxpg-viewtab" and CodexIdPage's own
+// gating use, so all three can never disagree.
+describe("OuronetShellMock — the mobile 'Codex ID' menu item's structural-upgrade badge", () => {
+  it("shows the badge when the live codex needs a structural upgrade (fresh/unversioned Codex_Shape_Version)", () => {
+    render(
+      <Shell>
+        <StoreGrabber />
+        <OuronetShellMock {...shellProps()} />
+      </Shell>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.getByTestId("codex-id-upgrade-badge")).toBeInTheDocument();
+  });
+
+  it("hides the badge once Codex_Shape_Version is stamped at the current structural target", () => {
+    render(
+      <Shell>
+        <StoreGrabber />
+        <OuronetShellMock {...shellProps()} />
+      </Shell>,
+    );
+    act(() => {
+      capturedStore!.setState({ Codex_Shape_Version: STRUCTURAL_SHAPE_TARGET_VERSION });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.queryByTestId("codex-id-upgrade-badge")).toBeNull();
   });
 });
 
@@ -217,9 +277,9 @@ describe("OuronetShellMock — the Controls riser + drawer", () => {
 
   it("shows [0] (a permanent fixture, not hidden) when nothing is registered, and opens the empty drawer", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     const riser = screen.getByRole("button", { name: /controls — 0 actions/i });
     expect(riser).toBeInTheDocument();
@@ -230,10 +290,10 @@ describe("OuronetShellMock — the Controls riser + drawer", () => {
 
   it("shows the riser with the live count once something registers, and opens the drawer", () => {
     render(
-      <ControlsProvider>
+      <Shell>
         <Registrar />
         <OuronetShellMock {...shellProps()} />
-      </ControlsProvider>,
+      </Shell>,
     );
     const riser = screen.getByRole("button", { name: /controls — 1 actions/i });
     fireEvent.click(riser);

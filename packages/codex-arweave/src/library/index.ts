@@ -34,6 +34,25 @@ export type {
 // ----- composition flows + rebuild-from-chain (E-07 / E-08) -----
 
 export { uploadAndTrack, backupCodexToLibrary, pollStatus, openUrl } from "./flow.js";
+
+// ----- RESTORE. Built and unit-tested since the dual-key envelope landed,
+// but exported from nothing and called by nothing, which made it
+// unreachable: no restore flow could be written against it without reaching
+// into `library/flow.js` directly. Exporting it is what makes the second
+// unlock path (the Codex Stoic Identity's Standard-Apollo half) buildable at
+// all. NOTE this unlocks a backup you have ALREADY LOCATED — locating one
+// still requires the Master Seed; see docs/work/arweave-identity-restore.
+export {
+  restoreCodexFromBackupEnvelope,
+  determineBackupSourceRouting,
+  BackupPinRequiredError,
+  BackupSourceNotUsedError,
+} from "./flow.js";
+export type {
+  RestoreCodexFromBackupEnvelopeOptions,
+  BackupUnlockSource,
+  BackupSourceRouting,
+} from "./flow.js";
 export type {
   UploadAndTrackOptions,
   BackupCodexToLibraryOptions,

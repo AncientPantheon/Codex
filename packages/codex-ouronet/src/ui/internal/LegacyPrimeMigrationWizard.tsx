@@ -33,12 +33,13 @@
  * {@link computeExistingAccountCandidates}'s own doc comment for the real
  * model). Three choices, all account-based now:
  *   1. Keep the current account — always available. Tagged "Recommended"
- *      iff the CURRENT account's own `originSeedTab === "write-seed"`. When
- *      the current account's `originSeedTab === undefined` (no known
- *      recovery words at all), shows an additional, always-visible warning
- *      ({@link NO_KNOWN_WORDS_WARNING_TEXT}) — keeping it never actually
- *      achieves words-only-restore eligibility, the wizard's whole purpose;
- *      it stays selectable regardless, just honestly labeled.
+ *      iff the CURRENT account's own `originSeedTab === "write-seed"`. No
+ *      longer shows a "no known words" warning regardless of
+ *      `originSeedTab` — removed (`wizard-page2-and-dashboard-fixes`
+ *      round 3), since `originSeedTab` is a provenance tag stamped only
+ *      at account-SPAWN time, never derived from or verified against
+ *      the actual stored secret, and every account's real material is
+ *      now recoverable via `SeedRevealModal` regardless of its shape.
  *   2. Choose an existing account with a known word origin — a picker over
  *      every OTHER `IOuroAccount` (excluding the current one) whose
  *      `originSeedTab !== undefined` (see
@@ -170,8 +171,31 @@
  * a LATER plan's job entirely, per `design.md`'s own "Page 7 — Finalize"
  * section ("Always runs, regardless of which path got here").
  *
+ * Page 6 ("arweave") — the Arweave verification step
+ * (`docs/work/wizard-arweave-step/design.md`), between review and finalize.
+ * The owner asked for it twice and got invisible `runFinalize` logic both
+ * times: *"how can the codex be eligible, if the wizard has no step for
+ * verifying if the codex has arweave account?"* It renders the three checks
+ * the eligibility predicate actually performs — a matching Arweave seed,
+ * account #0, account #1 — as three separate rows from ONE
+ * `codexHoldsMasterArweaveAccounts` evaluation, and BINDS Continue to that
+ * answer (see `continueBlockedReason`'s `"arweave"` branch), so finalize is
+ * unreachable until the codex genuinely holds both accounts. Its Generate
+ * button is rendered but inert as of `wizard-arweave-step` T1; T2 wires it
+ * to `ensurePrimeArweaveSeed` with that derivation's own per-key progress.
+ * The master bitstring it checks against comes from
+ * {@link resolveFinalizeDerivation} and the predicate input from
+ * {@link evaluateMasterArweaveAccounts} — the SAME two functions the commit
+ * uses, never a parallel pair that could drift.
+ *
  * Page 7 ("finalize") — per `legacy-prime-migration-wizard/design.md`'s
  * "Page 7 — Finalize" section and `plan.md`'s T8. Reaching this step runs
+ * NOTHING: it arrives IDLE (`FinalizeStatus`'s `"awaiting-settle"`) and
+ * offers one button, {@link SETTLE_CHOICES_LABEL}, gated on the Settling
+ * Dashboard's four colours (`settleBlockedReason`). Owner, after live
+ * testing: *"the wizard has to end with a finalize button 'Settle Choices'.
+ * This button must be clickable once all the squares are lit… clicking it is
+ * the final action that settles the selected choices."* Pressing it runs
  * {@link runFinalize} (an internal, non-exported function, same discipline
  * as `handleContinue`/`handleBack`), which:
  *   1. Resolves `{accountId, bitString, words, method}` from whichever
@@ -189,13 +213,23 @@
  *      comes back `true`, shows {@link SWEEP_NOT_AVAILABLE_TEXT} and STOPS —
  *      no Arweave-seed step, no alignment stamp; this path is a deliberate
  *      dead end until the sweep engine exists, never a silent failure.
- *   3. If `sweepNeeded` is `false`, calls the optional `ensurePrimeArweaveSeed`
- *      prop (see {@link LegacyPrimeMigrationWizardProps.ensurePrimeArweaveSeed}).
- *      Absent, or if it throws, shows an honest "not available" state
- *      INSTEAD of stamping alignment — alignment is never stamped unless
- *      the Arweave-seed step genuinely completed.
- *   4. Otherwise calls the store's `stampPrimeAlignmentAligned()` and shows
- *      a success screen with {@link PRIME_TRIO_LOCKED_REMINDER_TEXT}.
+ *   3. Evaluates `codexHoldsMasterArweaveAccounts` — the SAME predicate the
+ *      Settling Dashboard's violet ticker reads — against the resolved master
+ *      bitstring. Already satisfied: nothing is derived. Otherwise it calls
+ *      the optional `ensurePrimeArweaveSeed` prop (see
+ *      {@link LegacyPrimeMigrationWizardProps.ensurePrimeArweaveSeed}) for the
+ *      missing positions, reporting its progress on the panel, and then
+ *      RE-EVALUATES the predicate. Absent, throwing, or still not satisfied
+ *      afterwards shows an honest "not available" state INSTEAD of recording
+ *      a pending plan (`arweave-master-accounts` T3 — a resolved call is not
+ *      the same fact as a codex that holds the accounts, which is exactly how
+ *      the old code came to print "eligible" beside a dark ticker).
+ *   4. Otherwise calls the store's `recordMigrationPending()` — writing the
+ *      PENDING PLAN Apply will later execute and seal — and shows a success
+ *      screen with {@link PRIME_TRIO_LOCKED_REMINDER_TEXT}. It deliberately
+ *      does NOT stamp alignment and does NOT clear the recorded run; see
+ *      `runFinalize`'s own "What Write 5 used to be" note and
+ *      `docs/work/migration-pending-apply/design.md`.
  *
  * Store access is via `useCodexStoreOptional()` (never the throwing
  * `useCodexStore()`) — mirrors `useEnsureCodexUnlockedOptional`'s own
@@ -231,8 +265,10 @@ import {
   UnsupportedFormatError,
 } from "@stoachain/stoa-core/crypto";
 import { seedWordsToBitString } from "@ouronet/dalos-crypto/gen1";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { CodexModalShell, modalInput } from "./CodexModalShell.js";
+import { InlineUnlockPrompt } from "./InlineUnlockPrompt.js";
 import { OuronetAddressHighlight } from "./OuronetAddressHighlight.js";
 import { detectOriginCurve, isExperimentalAccount } from "./originCurve.js";
 import { useAccountChainData } from "./useAccountChainData.js";
@@ -244,7 +280,21 @@ import { isPredAvailable, predGroups } from "../../guards/predicates.js";
 import type { GuardKeyResolution } from "../../guards/resolveGuardKeys.js";
 import { useCodexStoreOptional } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
-import type { IOuroAccount, IStoaChainSeed, OuroOriginSeedTab } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IPureKeypair, OuroOriginSeedTab } from "../../types/entities.js";
+import { normalizeSeedType } from "./keySource.js";
+import {
+  // `resolveArweaveMatchSeedId` is deliberately NOT imported any more — the
+  // violet ticker it used to drive now runs the one real predicate
+  // (`codexHoldsMasterArweaveAccounts`, see `resolveMasterArweaveHeld`). The
+  // function itself stays exported and tested for its other callers.
+  computeSeedDashboardCards, resolveAccountSeedId, findSeedIdForKey,
+  codexHoldsMasterArweaveAccounts,
+  pureKeypairBacksRole, accountOwnKeyBacksRole, paymentKeyOriginLabel, STOIC_DALOS_DERIVATION_LABEL,
+  type SeedDashboardCard, type SeedDashboardSubRow, type PaymentKeyOrigin,
+  type CodexHoldsMasterArweaveAccountsInput, type CodexHoldsMasterArweaveAccountsResult,
+} from "./seedDashboard.js";
+import { SeedRevealModal } from "./SeedRevealModal.js";
+import { AccountSeedRevealModal } from "./AccountSeedRevealModal.js";
 import { OURONET_CODEX_MASTER, MASTER_CHAINWEB_SEED, MASTER_ARWEAVE_SEED, masterChainwebSeedName, toPersistableAccountSelection, CODEX_MASTER_SEED } from "@ancientpantheon/codex-core";
 import type { MigrationSelection, MigrationCommitRecord } from "@ancientpantheon/codex-core";
 
@@ -265,6 +315,20 @@ export type LegacyPrimeMigrationWizardStep =
    *  all correct"* — a commit you cannot inspect first is a commit you have
    *  to undo to understand. */
   | "review"
+  /** The Arweave verification step (`docs/work/wizard-arweave-step/
+   *  design.md`). A REAL step, not logic hidden inside finalize: the owner
+   *  asked for it twice — *"how can the codex be eligible, if the wizard has
+   *  no step for verifying if the codex has arweave account? … There should
+   *  be a separate step regarding the arweave account verification."* — and
+   *  got invisible `runFinalize` logic both times.
+   *
+   *  Sits AFTER review on purpose: review is the stage 1 -> 2 gate
+   *  ("everything chosen, before anything is written") and generating Arweave
+   *  accounts WRITES to the codex. Continue out of it is bound to the same
+   *  predicate the finalize gate and the violet ticker read, so Finalize is
+   *  unreachable until the codex genuinely holds accounts #0 and #1 under the
+   *  Codex Master Seed. */
+  | "arweave"
   | "finalize";
 
 /** Page 2's resolved choice — which existing account becomes the Prime
@@ -286,7 +350,7 @@ export type LegacyPrimeMigrationAccountChoice =
  *  path derives). See the module doc's "Page 3" section for when
  *  `"advanced-native"` is offered. */
 /**
- * Page 3, section 1 - what the Ouronet Codex Master's PAYMENT key should be.
+ * Page 3, section 1 - what the Codex Ouronet Master's PAYMENT key should be.
  *
  * `"keep"` is offered because the owner asked for it. CORRECTED, this
  * session — the owner's own technical challenge to a prior, overstated
@@ -311,7 +375,7 @@ export type LegacyPrimeMigrationPaymentChoice =
   | { kind: "stoic-dalos-position-0" };
 
 /**
- * Page 3, section 2 - what the Ouronet Codex Master's GUARD should be.
+ * Page 3, section 2 - what the Codex Ouronet Master's GUARD should be.
  *
  *  - `"recommended-single-key"`: `keys-all` over the SINGLE position-1 key.
  *    Not a new rule - `ActivateStandardAccountModal.tsx` already builds
@@ -356,6 +420,68 @@ export interface LegacyPrimeMigrationWizardState {
   sweepNeeded: boolean;
 }
 
+/**
+ * The LIVE prime search behind the position currently in flight — the detail
+ * that makes a minutes-long RSA-4096 derivation watchable rather than merely
+ * silent.
+ *
+ * Every number here comes from the derivation itself; nothing in this shape
+ * may be interpolated, animated or inferred from a clock.
+ */
+export interface ArweaveDerivationSearch {
+  /** 1-based position being searched for: `completedCount + 1`. */
+  position: number;
+  /** How many positions the whole run was asked for. Fixed for the run. */
+  totalCount: number;
+  /** Which of the two RSA primes is being searched for right now. */
+  stage: "p" | "q";
+  /** Candidate draws in THIS search — RESTATED per draw by the library, not
+   *  accumulated. */
+  attempts: number;
+  /**
+   * Candidate draws across the WHOLE run so far. Already DERIVED upstream
+   * (from per-(index, stage) high-water marks) and must be rendered as given:
+   * summing `attempts` here would over-count badly, because the library
+   * restates that field on every draw instead of incrementing it.
+   */
+  grandAttempts: number;
+  /** The library's own `overallProgress` (0..1) as a whole percent — what the
+   *  bar is filled to. */
+  percent: number;
+}
+
+/**
+ * One Arweave-derivation progress event, as
+ * {@link LegacyPrimeMigrationWizardProps.ensurePrimeArweaveSeed} reports it
+ * (`arweave-master-accounts` T3). Carries the position in flight and how many
+ * of the requested positions are already stored — enough for an honest line,
+ * and nothing that could be fabricated without real events behind it (no
+ * elapsed time, no clock-driven movement).
+ *
+ * `index`/`delivered`/`total` are the ORIGINAL surface, unchanged. `search` is
+ * purely additive and OPTIONAL, so a provider that predates it still satisfies
+ * this interface structurally — which is how `codex-arweave`'s
+ * `EnsurePrimeArweaveSeedProgress` fits here WITHOUT this package importing
+ * it (that dependency runs the other way: `codex-arweave` depends on
+ * `codex-ouronet`, never the reverse).
+ */
+export interface ArweaveDerivationProgress {
+  /** The master position (`#0`/`#1`) in flight (a search) or just delivered. */
+  index: number;
+  /** How many of `total` positions have been delivered AND persisted. */
+  delivered: number;
+  /** How many positions this derivation was asked for. */
+  total: number;
+  /**
+   * Live search detail — present ONLY on a search event, and ABSENT on a
+   * delivered-key event. That absence is load-bearing, not an oversight: it is
+   * exactly how the bar tells "still hunting for a prime" from "that key is
+   * done", and a renderer that carries stale search detail across a delivery
+   * would be describing work that is no longer happening.
+   */
+  search?: ArweaveDerivationSearch;
+}
+
 export interface LegacyPrimeMigrationWizardProps {
   open: boolean;
   onClose: () => void;
@@ -376,6 +502,17 @@ export interface LegacyPrimeMigrationWizardProps {
    *  account dictionary-gated?" lookup are both filtered out of this list.
    *  Defaults to `[]`. */
   allAccounts?: readonly IOuroAccount[];
+  /** Every `IPureKeypair` in the codex — threaded to `CustomKeysetEditor`'s
+   *  picker (one selectable checkbox per entry, alongside every seed-
+   *  derived key) and to the Settling Dashboard's "Pure Keys" attribution
+   *  card (`docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "G —
+   *  Pure keys join the picker and the dashboard"). Optional/defaulted,
+   *  same "optional, additive" pattern `allAccounts` already uses — when
+   *  omitted, falls back to this component's own `useCodexStoreOptional()`
+   *  read (pre-existing, used by `detectPaymentKeyOrigin`'s "PureKey"
+   *  label), so `CodexIdPage.tsx`'s current call site (which does not yet
+   *  pass this prop) keeps working unchanged. */
+  pureKeypairs?: readonly IPureKeypair[];
   /** Optional inspection seam (T5): called with the wizard's full
    *  `LegacyPrimeMigrationWizardState` snapshot every time `step`,
    *  `accountChoice`, or `keysChoice` (and therefore the derived
@@ -394,8 +531,27 @@ export interface LegacyPrimeMigrationWizardProps {
    *  derive-and-install pattern — omitted here (including every one of
    *  this file's OWN tests that don't supply it), Finalize shows the same
    *  honest "not available" state T9 will eventually make real, and NEVER
-   *  stamps `primeAlignment: "aligned"` in that case. */
-  ensurePrimeArweaveSeed?: (words: { bitString: string; words?: readonly string[] }) => Promise<void>;
+   *  stamps `primeAlignment: "aligned"` in that case.
+   *
+   *  `arweave-master-accounts` T3 widened this with a SECOND, OPTIONAL
+   *  argument (so every existing one-argument call site still satisfies it):
+   *  - `missingIndexes` — exactly which of the master positions the
+   *    eligibility predicate found absent, so a codex already holding #0
+   *    derives only #1 instead of paying for an RSA-4096 key it has;
+   *  - `onProgress` — the derivation's OWN per-key events, rendered on the
+   *    finalize panel (each key costs seconds; a silent screen for that long
+   *    is indistinguishable from a hang).
+   *
+   *  Resolving does NOT mean the codex is now eligible — a PARTIAL delivery
+   *  resolves too. Eligibility is re-verified from the codex's end state
+   *  afterwards; see `runFinalize`'s Write 4. */
+  ensurePrimeArweaveSeed?: (
+    words: { bitString: string; words?: readonly string[] },
+    opts?: {
+      missingIndexes?: readonly number[];
+      onProgress?: (progress: ArweaveDerivationProgress) => void;
+    },
+  ) => Promise<void>;
   /** Resolve a qualified on-chain keyset name, for unfolding a guard that is
    *  a keyset REFERENCE. Injected (not imported) so this component stays
    *  testable without a chain. When absent, a reference guard renders as
@@ -407,17 +563,18 @@ export interface LegacyPrimeMigrationWizardProps {
 const ACCENT = "#ceac5f";
 
 /** Fix 1's `STEP_LABELS`-equivalent. The real navigation sequence is
- *  intro -> account -> payment -> guard -> review -> finalize; every
- *  transition is spelled out explicitly in `handleContinue`/`handleBack`
- *  below, nothing reads this map by array position. `STEP_DISPLAY_NUMBER`
- *  (below) supplies the subtitle's step NUMBER separately, since
- *  `"payment"`/`"guard"` share one conceptual "step 3". */
+ *  intro -> account -> payment -> guard -> review -> arweave -> finalize;
+ *  every transition is spelled out explicitly in `handleContinue`/
+ *  `handleBack` below, nothing reads this map by array position.
+ *  `STEP_DISPLAY_NUMBER` (below) supplies the subtitle's step NUMBER
+ *  separately, since `"payment"`/`"guard"` share one conceptual "step 3". */
 const STEP_LABELS: Record<LegacyPrimeMigrationWizardStep, string> = {
   intro: "Why & What",
   account: OURONET_CODEX_MASTER,
   payment: "Payment Key Setup",
   guard: "Ouronet Account Guard Setup",
   review: "Review & Commit",
+  arweave: "Arweave Accounts",
   finalize: "Finalize",
 };
 
@@ -426,15 +583,58 @@ const STEP_LABELS: Record<LegacyPrimeMigrationWizardStep, string> = {
  * because `"payment"`/`"guard"` are sub-steps of one conceptual "step 3"
  * (the owner's own "Step 3A"/"Step 3B" naming), not two more steps added to
  * the count. `"review"` stays "4" rather than becoming "5" — the overall
- * flow still reads as four stages to the user, the third one just has two
+ * flow reads as five stages to the user, the third one just has two
  * screens. `"finalize"` is never looked up here (see the subtitle
- * computation below, which special-cases it, same as before this change). */
+ * computation below, which special-cases it, same as before this change).
+ *
+ * `"arweave"` IS a genuine fifth numbered stage (`docs/work/
+ * wizard-arweave-step/design.md`), not a sub-step of review: it is a
+ * separate question (does this codex hold the master's Arweave accounts?)
+ * answered on its own screen, with its own gate, and — unlike 3A/3B, which
+ * are two halves of one "set up your keys" decision — nothing about it is
+ * part of the decision before it. */
 const STEP_DISPLAY_NUMBER: Record<Exclude<LegacyPrimeMigrationWizardStep, "finalize">, string> = {
   intro: "1",
   account: "2",
   payment: "3A",
   guard: "3B",
   review: "4",
+  arweave: "5",
+};
+
+/**
+ * How many numbered stages the subtitle counts out of. DERIVED from
+ * {@link STEP_DISPLAY_NUMBER}, never typed as a literal: the previous
+ * hardcoded `of 4` at the `CodexModalShell` call site is exactly what went
+ * stale the moment a real fifth step was added, and a count that cannot
+ * drift from the map it describes is the fix. Counts DISTINCT leading
+ * numbers rather than map entries, so `"3A"`/`"3B"` collapse back into the
+ * one stage they are.
+ */
+const STEP_DISPLAY_TOTAL = new Set(
+  Object.values(STEP_DISPLAY_NUMBER).map((n) => n.replace(/[^0-9]/g, "")),
+).size;
+
+/** Owner (live testing, `wizard-page2-and-dashboard-fixes` round 6):
+ *  "at every stage we show only the tickers that have been settled up
+ *  to that step... Going back should show no tickers, since going
+ *  back, means the forward selections are reverted, or not done yet."
+ *  Payment/guard default to a real (non-null) choice from the moment
+ *  the wizard mounts — `paymentChoice`/`guardChoice` being non-null is
+ *  NOT the same thing as "the user has actually reached that step".
+ *  This ordering lets the Settling Dashboard gate each role's own
+ *  ticker on whether `step` has reached (or passed) that role's own
+ *  step — purely a function of the CURRENT `step`, so navigating
+ *  backward un-gates (reverts) later roles automatically, with no
+ *  separate "furthest step ever reached" ratchet needed. */
+const STEP_ORDER: Record<LegacyPrimeMigrationWizardStep, number> = {
+  intro: 0,
+  account: 1,
+  payment: 2,
+  guard: 3,
+  review: 4,
+  arweave: 5,
+  finalize: 6,
 };
 
 /**
@@ -471,6 +671,21 @@ export const PRIME_TRIO_LOCKED_REMINDER_TEXT = "the Prime trio is now permanentl
  */
 export const ARWEAVE_SEED_NOT_AVAILABLE_TEXT =
   `The ${MASTER_ARWEAVE_SEED} step isn't available yet — nothing has been locked in, it's safe to close this wizard and try again later.`;
+
+/**
+ * Shown when the derivation RAN and resolved, but the codex still does not
+ * hold Arweave accounts #0 and #1 under the Codex Master Seed
+ * (`arweave-master-accounts` T3). A real, reachable state, not a theoretical
+ * one: a PARTIAL delivery resolves (only a zero-key derivation rejects), so
+ * "the call came back" has never been evidence of the end state.
+ *
+ * Says what is missing and that re-running finishes it, because that is the
+ * truth — the positions that DID arrive are kept, so a second attempt only
+ * pays for what is still absent. The alternative, which this replaces, was
+ * printing "This codex is now eligible." over a dark violet ticker.
+ */
+export const ARWEAVE_MASTER_ACCOUNTS_NOT_HELD_TEXT =
+  `This codex still doesn't hold Arweave accounts #0 and #1 derived from its ${CODEX_MASTER_SEED}, so it is not eligible yet. Nothing else is lost — every other choice is saved, and running Finalize again picks up from the accounts that are still missing.`;
 
 const introParagraphStyle: React.CSSProperties = {
   margin: 0,
@@ -539,18 +754,26 @@ export const NEW_ACCOUNT_ACTIVATION_WARNING_TEXT =
 export const NEW_ACCOUNT_EMPTY_WARNING_TEXT =
   "This account starts completely empty — no funds, no history.";
 
-/** Page 2's option-1 ("keep current") warning line — shown only when the
- *  current account's own `originSeedTab === undefined` (no known recovery
- *  words on record at all), per `legacy-prime-migration-wizard/design.md`'s
- *  rewritten "Page 2" section's "edge case, flagged for confirmation".
- *  Exported for the same reason as the two warnings above. */
-export const NO_KNOWN_WORDS_WARNING_TEXT =
-  "Keeping this account will not make seed-words-only restore possible — it has no known recovery words on record.";
-
-// Shared warning-box visuals — one role="alert" box style for all three of
-// this file's warning lines (the two option-3 ones above, plus
-// `NO_KNOWN_WORDS_WARNING_TEXT`) rather than three copies of the same
-// style object.
+// Shared warning-box visuals — one role="alert" box style for every
+// warning line in this file (the two option-3 ones above, Finalize's own
+// error box, etc.) rather than a separate copy of the same style object
+// per caller.
+//
+// Page 2's option-1 ("keep current") USED to show a warning here too —
+// "Keeping this account will not make seed-words-only restore possible
+// — it has no known recovery words on record" — whenever the current
+// account's own `originSeedTab === undefined`. Owner correction (live
+// testing, `wizard-page2-and-dashboard-fixes` round 3): "whatever
+// Ouronet Account you choose, it makes seed word recuperation possible,
+// so i dont know what you had to write that." Removed outright, not
+// just re-gated on a better signal: `originSeedTab` is a provenance tag
+// stamped only at account-SPAWN time, never derived from or verified
+// against the actual stored secret (the SAME reason
+// `resolveFinalizeDerivation`'s own doc comment, below, already stopped
+// hard-gating Finalize on it two rounds ago) — and `SeedRevealModal`
+// (this same round) now recovers real seed material for EVERY account/
+// seed shape, so there is no real account this warning was ever
+// correctly describing.
 const warningBoxStyle: React.CSSProperties = {
   padding: "8px 10px",
   borderRadius: 8,
@@ -646,6 +869,13 @@ function computeExistingAccountCandidates(
 // three options and, as of this task, Page 3's ("keys") two options. Named
 // generically (not "accountOptionStyle") since both pages now reuse the
 // exact same visual pattern.
+// owner (live testing, this session): "only the circled 1/2 can be
+// pressed, we need to be able to make the whole selection clickable" —
+// every option row below now carries its OWN onClick (duplicated from
+// its inner header button's, same handler) so a click ANYWHERE on the
+// card — the description text included — selects it, not just the
+// number badge/header row. `cursor: "pointer"` here is the matching
+// visual cue for the whole card, not just the header.
 const radioOptionStyle = (selected: boolean): React.CSSProperties => ({
   display: "flex",
   flexDirection: "column",
@@ -654,6 +884,7 @@ const radioOptionStyle = (selected: boolean): React.CSSProperties => ({
   borderRadius: 10,
   border: `1px solid ${selected ? ACCENT : "#262626"}`,
   backgroundColor: selected ? ACCENT + "0f" : "transparent",
+  cursor: "pointer",
 });
 
 const radioOptionHeaderButtonStyle: React.CSSProperties = {
@@ -784,6 +1015,34 @@ function NotRecommendedBadge(): React.ReactElement {
   return <MutedPillBadge>Not Recommended</MutedPillBadge>;
 }
 
+/** owner (live testing, this session): "the user has to see, hey my guard
+ *  currently is a keyset-ref" — this is the SAME blue "keyset-ref" pill
+ *  `GuardTree.tsx` (the Codex ID page's own guard renderer) already uses
+ *  for this exact shape (`KIND_COLORS["keyset-ref"]`: bg `#3b82f620`, fg
+ *  `#60a5fa`) — reused verbatim here rather than inventing new vocabulary,
+ *  so a user sees the SAME label for the SAME fact on both screens. */
+function KeysetRefBadge(): React.ReactElement {
+  return (
+    <span
+      data-testid="legacy-prime-migration-guard-keyset-ref-badge"
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: "0.04em",
+        color: "#60a5fa",
+        backgroundColor: "#3b82f620",
+        border: "1px solid #3b82f660",
+      }}
+    >
+      Keyset-ref
+    </span>
+  );
+}
+
 /** Fix 3's visible option numbering — a small numbered circle badge,
  *  mirroring the closest existing precedent for this exact visual shape in
  *  this package (`SpawnAccountModal.tsx`'s own curve/prefix circle badges:
@@ -827,7 +1086,13 @@ const stepParagraphStyle: React.CSSProperties = {
  *  option only calls `onChoose`, never performs account activation or any
  *  other side effect. */
 function AccountStep({
-  currentPrimeSeed,
+  // Owner (`wizard-page2-and-dashboard-fixes`, this round): option 1's own
+  // "(its Chainweb seed: X)" mention is gone (condensed per that round's
+  // "optimise option 1... to not use so much vertical space" ask) — this
+  // prop stays part of the component's own public signature (existing
+  // callers/tests still pass it) but is no longer read inside the
+  // component itself.
+  currentPrimeSeed: _currentPrimeSeed,
   currentPrimeAccount,
   allAccounts,
   choice,
@@ -835,6 +1100,7 @@ function AccountStep({
   getPassword,
   authenticate,
   passwordEpoch,
+  onProbeSettledChange,
 }: {
   currentPrimeSeed: IStoaChainSeed | null;
   currentPrimeAccount: IOuroAccount | null;
@@ -875,6 +1141,16 @@ function AccountStep({
    *  previously-failed probes. Carried as a plain value rather than read
    *  from the store here so `AccountStep` stays prop-driven/testable. */
   passwordEpoch?: number | null;
+  /** Owner (live testing, this round): "as long as the Ouronet Account
+   *  isnt selected... the View Seed button is disabled... Only when the
+   *  step 2 has popped [i.e. the probe has settled]... THEN the view seed
+   *  button is lit." The probe's settle state (`probePhase`) is otherwise
+   *  entirely private to this component — the Settling Dashboard lives in
+   *  the PARENT wizard, so it needs a way to observe the settle
+   *  transition. Fired from a `useEffect` (never during render) whenever
+   *  `probePhase` changes; optional so every existing non-probe caller
+   *  (tests, `getPassword` absent) keeps working unchanged. */
+  onProbeSettledChange?: (settled: boolean) => void;
 }): React.ReactElement {
   const existingCandidates = useMemo(
     () => computeExistingAccountCandidates(allAccounts, currentPrimeAccount?.id ?? null),
@@ -1017,6 +1293,16 @@ function AccountStep({
     done: 0,
     total: 0,
   });
+
+  // Owner (live testing, this round): the Settling Dashboard's "View
+  // seed" button must stay disabled until THIS step's own probe has
+  // settled (see `onProbeSettledChange`'s own doc for the full quote).
+  // Reported via effect, never read mid-render, so the parent's own
+  // state update happens as its own commit, not a render-phase side
+  // effect.
+  useEffect(() => {
+    onProbeSettledChange?.(probePhase === "settled");
+  }, [probePhase, onProbeSettledChange]);
 
   // Round 7: probe EVERY candidate, not just the ones whose metadata
   // claims no words. The probe now decides `recommended` too, and the
@@ -1369,10 +1655,26 @@ function AccountStep({
   // write-seed-origin; option 3 iff NEITHER the current account NOR any
   // option-2 candidate is already write-seed-origin.
   const currentIsWriteSeedOrigin = currentPrimeAccount?.originSeedTab === "write-seed";
-  const currentHasNoKnownWords = currentPrimeAccount?.originSeedTab === undefined;
   const anyWriteSeedCandidateExists = existingCandidates.some((c) => c.recommended);
   const keepRecommended = currentIsWriteSeedOrigin;
   const newWordsRecommended = !currentIsWriteSeedOrigin && !anyWriteSeedCandidateExists;
+
+  // Owner (`wizard-page2-and-dashboard-fixes`, this round): "a lot of
+  // ouronet Accounts... add to it a search bar that searches for a given
+  // name" — a plain client-side filter over the already-loaded candidate
+  // list (every candidate's own name is already in memory by the time
+  // this renders; no decrypt/network involved). An account with no
+  // `name` at all is excluded whenever the search box is non-empty,
+  // included whenever it's empty — matching Option 2's own existing
+  // name-or-address display fallback elsewhere in this component.
+  const [existingSearch, setExistingSearch] = useState("");
+  const filteredExistingCandidates = useMemo(() => {
+    const query = existingSearch.trim().toLowerCase();
+    if (!query) return sortedExistingCandidates;
+    return sortedExistingCandidates.filter(({ account: a }) =>
+      (a.name ?? "").toLowerCase().includes(query),
+    );
+  }, [sortedExistingCandidates, existingSearch]);
 
   // Page 2's own draft of newly-typed words, kept local so the textarea
   // stays controlled even across choice changes elsewhere (e.g. picking
@@ -1549,6 +1851,7 @@ function AccountStep({
         role="radio"
         aria-selected={isKeepSelected}
         style={radioOptionStyle(isKeepSelected)}
+        onClick={() => onChoose({ kind: "keep-current" })}
       >
         <button
           type="button"
@@ -1668,29 +1971,12 @@ function AccountStep({
             </div>
           </div>
         ) : null}
-        <p style={stepParagraphStyle}>
-          No identity change — keeps{" "}
-          {currentPrimeAccount ? (
-            <strong>
-              {currentAccountLabel ?? <OuronetAddressHighlight address={currentPrimeAccount.address} />}
-            </strong>
-          ) : (
-            "your current account"
-          )}{" "}
-          as your Prime Ouronet Account
-          {currentPrimeSeed?.name ? (
-            <>
-              {" "}
-              (its Chainweb seed: <strong>{currentPrimeSeed.name}</strong>)
-            </>
-          ) : null}
-          .
-        </p>
-        {currentHasNoKnownWords ? (
-          <div role="alert" style={warningBoxStyle}>
-            {NO_KNOWN_WORDS_WARNING_TEXT}
-          </div>
-        ) : null}
+        {/* Owner (`wizard-page2-and-dashboard-fixes`, this round):
+            "optimise option 1... to not use so much vertical space with
+            the explanation" — the chip above already shows this
+            account's name/address/curve unambiguously; this line no
+            longer repeats it in full prose. */}
+        <p style={stepParagraphStyle}>No identity change.</p>
       </div>
 
       {/* Option 2 — choose an EXISTING Standard Ouronet account. Owner
@@ -1818,12 +2104,27 @@ function AccountStep({
               Re-check {unresolved.length} account{unresolved.length === 1 ? "" : "s"}
             </button>
           ) : null}
+          <input
+            type="text"
+            data-testid="legacy-prime-migration-account-existing-search"
+            placeholder="Search by name…"
+            value={existingSearch}
+            onChange={(e) => setExistingSearch(e.target.value)}
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "6px 10px",
+              borderRadius: 6, border: "1px solid #333", backgroundColor: "#111",
+              color: "#d2d3d4", fontSize: 12,
+            }}
+          />
+          {/* Owner: "the Ouronet Account selector make it have its own
+              scroll" — bounded height + its own `overflowY`, scoped to
+              THIS list only, not the modal's own outer scroll. */}
           <div
             role="listbox"
             aria-label="Existing account to promote"
-            style={{ display: "flex", flexDirection: "column", gap: 6 }}
+            style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}
           >
-            {sortedExistingCandidates.map(({ account, recommended, hasKnownWords }) => {
+            {filteredExistingCandidates.map(({ account, recommended, hasKnownWords }) => {
               const selected = isExistingSelected && choice?.accountId === account.id;
               return (
                 <button
@@ -2014,6 +2315,7 @@ function AccountStep({
         role="radio"
         aria-selected={isNewSelected}
         style={radioOptionStyle(isNewSelected)}
+        onClick={() => onChoose({ kind: "new-words", words: newWordsDraft })}
       >
         <button
           type="button"
@@ -2024,11 +2326,13 @@ function AccountStep({
           Type new words
           {newWordsRecommended ? <RecommendedBadge /> : null}
         </button>
+        {/* Owner (`wizard-page2-and-dashboard-fixes`, this round):
+            "optimise option 1 and 3 to not use so much vertical space
+            with the explanation" — ONE combined alert instead of two
+            full-prose boxes stacked; both constants' exact wording is
+            preserved verbatim (`design.md`'s own text), just joined. */}
         <div role="alert" style={warningBoxStyle}>
-          {NEW_ACCOUNT_ACTIVATION_WARNING_TEXT}
-        </div>
-        <div role="alert" style={warningBoxStyle}>
-          {NEW_ACCOUNT_EMPTY_WARNING_TEXT}
+          {NEW_ACCOUNT_ACTIVATION_WARNING_TEXT}. {NEW_ACCOUNT_EMPTY_WARNING_TEXT}
         </div>
         <textarea
           data-testid="legacy-prime-migration-account-new-words-input"
@@ -2118,12 +2422,6 @@ function AccountStep({
     </div>
   );
 }
-
-/** The derivation path named whenever new keys are defined, per
- *  `legacy-prime-migration-wizard/design.md`'s "Page 3" section — exported
- *  so a future task/test can assert against the exact same string without
- *  re-typing it (same convention as {@link NEW_ACCOUNT_ACTIVATION_WARNING_TEXT}). */
-export const STOIC_DALOS_DERIVATION_LABEL = "Stoic Dalos Derivation";
 
 /** The derivation path named whenever the "Advanced" (native-format)
  *  method is active, per `legacy-prime-migration-wizard/design.md`'s
@@ -2216,6 +2514,48 @@ function currentPaymentKeyOf(seeds: readonly IStoaChainSeed[]): string | null {
   return seeds[0]?.accounts?.find((a) => a.index === 0)?.publicKey ?? null;
 }
 
+/** owner (live testing, this session): "when selecting option 2 (keep the
+ *  same payment key), then the Derivation method changes automatically to
+ *  the type of derivation that key is derived from. So it would be Koala,
+ *  Chainweaver or PureKey (since that key is in the codex, you could know
+ *  what to display here). If that payment key ISNT in the codex, or its
+ *  another type of non k: address, we simply display a warning."
+ *
+ *  Walks the same two places `identifyKeySource` (`keySource.ts`) already
+ *  walks — the codex's OWN seeds, then its pure keypairs — but returns a
+ *  clean discriminated kind instead of a display label/color, since the
+ *  caller here needs to pick its OWN wording ("Koala"/"Chainweaver"/
+ *  "PureKey"/a foreign-key warning), not `identifyKeySource`'s own
+ *  "SeedName #N" labelling (that's for naming a SPECIFIC account, not
+ *  classifying a key's origin TYPE). `c:`/`u:`/`w:` addresses are reported
+ *  as `"foreign"` too — the owner's own "or non k: address detected".
+ *
+ *  `PaymentKeyOrigin`/`paymentKeyOriginLabel` themselves now live in
+ *  `seedDashboard.ts` (`wizard-seed-dashboard-refinements`) — that module's
+ *  own sub-row-label computation needs them too, and importing them FROM
+ *  this file would be circular (this file already imports FROM
+ *  `seedDashboard.ts`). Imported back below. */
+function detectPaymentKeyOrigin(
+  key: string | null,
+  seeds: readonly IStoaChainSeed[],
+  pureKeypairs: readonly IPureKeypair[],
+): PaymentKeyOrigin | null {
+  if (!key) return null;
+  if (key.startsWith("c:") || key.startsWith("u:") || key.startsWith("w:")) {
+    return { kind: "foreign" };
+  }
+  const pub = key.startsWith("k:") ? key.slice(2) : key;
+  for (const seed of seeds) {
+    if ((seed.accounts ?? []).some((a) => a.publicKey === pub)) {
+      return { kind: "seed", seedType: normalizeSeedType(seed.seedType) };
+    }
+  }
+  for (const pk of pureKeypairs) {
+    if (pk.publicKey === pub) return { kind: "pure-keypair" };
+  }
+  return { kind: "foreign" };
+}
+
 /** A labelled row of hex that truncates instead of overflowing. */
 function KeyLine({
   label,
@@ -2289,16 +2629,75 @@ function KeysWordsBlock({
 }
 
 
+/** The RIGHT side of the payment step's "Current / Settled for" row — a
+ *  live summary of whatever `choice` currently is. "keep" restates the
+ *  SAME origin detection (`PaymentKeyOrigin`) the "Keep the current
+ *  payment key" option itself already shows, so the consequence reads
+ *  the same on both sides of the row. */
+function PaymentSettledSummary({
+  choice,
+  currentKey,
+  origin,
+  newKey,
+  preview,
+}: {
+  choice: LegacyPrimeMigrationPaymentChoice | null;
+  currentKey: string | null;
+  origin: PaymentKeyOrigin | null;
+  newKey: string | null;
+  preview: MasterKeyPreview;
+}): React.ReactElement {
+  if (!choice) {
+    return (
+      <p data-testid="legacy-prime-migration-payment-settled-none" style={stepParagraphStyle}>
+        Choose an option below.
+      </p>
+    );
+  }
+  if (choice.kind === "keep") {
+    const originNote =
+      origin === null ? "" : origin.kind === "foreign"
+        ? " It is not in this codex, or is a non-k: address."
+        : ` It is a ${paymentKeyOriginLabel(origin)} key.`;
+    return (
+      <div data-testid="legacy-prime-migration-payment-settled">
+        <p style={stepParagraphStyle}>Unchanged.{originNote}</p>
+        {currentKey ? <KeyLine label="" value={currentKey} /> : null}
+      </div>
+    );
+  }
+  // "stoic-dalos-position-0" — a new key, derived at position 0. The
+  // `testId` here is the SAME `legacy-prime-migration-payment-to` the
+  // now-removed standalone FROM/TO box used to carry on its own
+  // `KeyLine` — see that box's own removal note in `PaymentKeySection`.
+  return (
+    <div data-testid="legacy-prime-migration-payment-settled">
+      <p style={stepParagraphStyle}>
+        A new key, derived at position 0 of the {MASTER_CHAINWEB_SEED}.
+      </p>
+      {newKey ? (
+        <KeyLine label="" value={newKey} testId="legacy-prime-migration-payment-to" />
+      ) : (
+        <p style={stepParagraphStyle}>
+          {preview.status === "error" ? `Could not derive: ${preview.message}` : "Still deriving…"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Page 3, section 1 - the payment key. */
 function PaymentKeySection({
   currentKey,
   ties,
+  origin,
   preview,
   choice,
   onChoose,
 }: {
   currentKey: string | null;
   ties: { seedName: string; position: number } | null;
+  origin: PaymentKeyOrigin | null;
   preview: MasterKeyPreview;
   choice: LegacyPrimeMigrationPaymentChoice | null;
   onChoose: (c: LegacyPrimeMigrationPaymentChoice) => void;
@@ -2315,28 +2714,45 @@ function PaymentKeySection({
         {OURONET_CODEX_MASTER}&apos;s transactions.
       </p>
 
-      <div style={{ padding: 10, borderRadius: 8, backgroundColor: "#18181B", border: "1px solid #262626" }}>
-        {currentKey ? (
-          <>
-            <KeyLine label="Current payment key" value={currentKey}
-                     testId="legacy-prime-migration-payment-current" />
-            <p data-testid="legacy-prime-migration-payment-ties"
-               style={{ ...stepParagraphStyle, marginTop: 6 }}>
-              {ties
-                ? `Held in this codex as ${ties.seedName} - Key #${ties.position}.`
-                : "This key is not held anywhere in this codex."}
+      {/* owner (live testing, this session): same "Current / Settled for"
+          rectangle pair as the guard step now uses — the LEFT side is
+          this step's pre-existing "current payment key" content,
+          unchanged; the RIGHT side is new, summarizing whatever
+          `choice` currently is. */}
+      <CurrentSettledRow
+        current={
+          currentKey ? (
+            <>
+              <KeyLine label="Current payment key" value={currentKey}
+                       testId="legacy-prime-migration-payment-current" />
+              <p data-testid="legacy-prime-migration-payment-ties"
+                 style={{ ...stepParagraphStyle, marginTop: 6 }}>
+                {ties
+                  ? `Held in this codex as ${ties.seedName} - Key #${ties.position}.`
+                  : "This key is not held anywhere in this codex."}
+              </p>
+            </>
+          ) : (
+            <p data-testid="legacy-prime-migration-payment-current-none" style={stepParagraphStyle}>
+              This codex has no Chainweb key at position 0 yet, so there is no current payment key
+              to show.
             </p>
-          </>
-        ) : (
-          <p data-testid="legacy-prime-migration-payment-current-none" style={stepParagraphStyle}>
-            This codex has no Chainweb key at position 0 yet, so there is no current payment key
-            to show.
-          </p>
-        )}
-      </div>
+          )
+        }
+        settled={
+          <PaymentSettledSummary
+            choice={choice}
+            currentKey={currentKey}
+            origin={origin}
+            newKey={newKey}
+            preview={preview}
+          />
+        }
+      />
 
       <div data-testid="legacy-prime-migration-payment-option-derive"
-           role="radio" aria-selected={isDerive} style={radioOptionStyle(isDerive)}>
+           role="radio" aria-selected={isDerive} style={radioOptionStyle(isDerive)}
+           onClick={() => onChoose({ kind: "stoic-dalos-position-0" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "stoic-dalos-position-0" })}>
           <OptionNumberBadge n={1} />
@@ -2351,7 +2767,8 @@ function PaymentKeySection({
       </div>
 
       <div data-testid="legacy-prime-migration-payment-option-keep"
-           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}>
+           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}
+           onClick={() => onChoose({ kind: "keep" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "keep" })}>
           <OptionNumberBadge n={2} />
@@ -2362,31 +2779,122 @@ function PaymentKeySection({
           so it won&apos;t regenerate from your seed words alone &mdash; recovering it depends on
           a codex backup. It becomes non-removable from this codex so that backup stays complete.
         </p>
-      </div>
-
-      {isDerive ? (
-        <div data-testid="legacy-prime-migration-payment-fromto"
-             style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10,
-                      borderRadius: 8, backgroundColor: "#18181B", border: "1px solid #262626" }}>
-          {currentKey ? <KeyLine label="FROM" value={currentKey} /> : (
-            <p style={stepParagraphStyle}>FROM &mdash; nothing (no current payment key).</p>
-          )}
-          {preview.status === "loading" ? (
-            <p data-testid="legacy-prime-migration-payment-to-loading" style={stepParagraphStyle}>
-              TO &mdash; deriving from this account&apos;s words&hellip;
-            </p>
-          ) : preview.status === "error" ? (
-            <p data-testid="legacy-prime-migration-payment-to-error" role="alert"
+        {/* owner (live testing, this session): "the Derivation method
+            changes automatically to the type of derivation that key is
+            derived from... If that payment key ISNT in the codex, or its
+            another type of non k: address, we simply display a warning." */}
+        {origin ? (
+          origin.kind === "foreign" ? (
+            <p role="alert" data-testid="legacy-prime-migration-payment-keep-origin-warning"
                style={{ ...stepParagraphStyle, color: "#fca5a5" }}>
-              TO &mdash; could not derive: {preview.message}
+              Payment key is not in the codex, or non-k: address detected.
             </p>
           ) : (
-            <KeyLine label="TO" value={newKey!} testId="legacy-prime-migration-payment-to" />
-          )}
-        </div>
-      ) : null}
+            <p data-testid="legacy-prime-migration-payment-keep-origin" style={stepParagraphStyle}>
+              This key&apos;s own derivation: <strong>{paymentKeyOriginLabel(origin)}</strong>.
+            </p>
+          )
+        ) : null}
+      </div>
     </div>
   );
+}
+
+/** owner (live testing, this session): "we should present current guard...
+ *  and then the right rectangle... would show the guard you settled on.
+ *  Current detected, and the upcoming one you settled for in a simple
+ *  Current/Before and After Rectangle." Two side-by-side boxes, used by
+ *  BOTH the payment and guard steps so the same "what IS it / what will
+ *  it become" pattern reads identically on both — a small arrow between
+ *  them (the same gesture the owner's own screenshot annotation drew)
+ *  makes the left-to-right direction explicit rather than implied. */
+function CurrentSettledRow({
+  current,
+  settled,
+}: {
+  current: React.ReactNode;
+  settled: React.ReactNode;
+}): React.ReactElement {
+  const boxStyle: React.CSSProperties = {
+    flex: "1 1 0%",
+    minWidth: 0,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: "#18181B",
+    border: "1px solid #262626",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  };
+  const labelStyle: React.CSSProperties = {
+    margin: "0 0 2px",
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    color: "#8b8b96",
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+      <div data-testid="legacy-prime-migration-current-box" style={boxStyle}>
+        <p style={labelStyle}>Current</p>
+        {current}
+      </div>
+      <span aria-hidden="true" style={{ alignSelf: "center", color: "#555", fontSize: 16, flex: "0 0 auto" }}>
+        &rarr;
+      </span>
+      <div data-testid="legacy-prime-migration-settled-box" style={boxStyle}>
+        <p style={labelStyle}>Settled for</p>
+        {settled}
+      </div>
+    </div>
+  );
+}
+
+/** Reused by both {@link ReviewStep} (unchanged behavior, just no longer a
+ *  second copy of this exact ternary) and the Guard step's own new
+ *  "Settled for" box — the SAME "what will this guard choice actually
+ *  produce" computation, now with one definition instead of two. */
+/** The settled payment key — "derive" yields the freshly-derived position-0
+ *  key once `preview` is ready, "keep" yields `currentPaymentKey` unchanged.
+ *  Extracted so this ternary has exactly one definition (previously only
+ *  inlined in `ReviewStep`); the Seed Dashboard
+ *  (`docs/work/wizard-seed-dashboard/design.md`) needs the SAME value at
+ *  the top-level component, not a second copy. */
+function settledPaymentKeyOf(
+  paymentChoice: LegacyPrimeMigrationPaymentChoice | null,
+  preview: MasterKeyPreview,
+  currentPaymentKey: string | null,
+): string | null {
+  const derived = preview.status === "ready" ? preview : null;
+  return paymentChoice?.kind === "stoic-dalos-position-0" ? derived?.key0 ?? null : currentPaymentKey;
+}
+
+function summarizeGuardChoice(
+  guardChoice: LegacyPrimeMigrationGuardChoice | null,
+  preview: MasterKeyPreview,
+): { headline: string; keys: readonly string[] | null; pred: string } | null {
+  if (!guardChoice) return null;
+  if (guardChoice.kind === "keep") {
+    return { headline: "Unchanged.", keys: null, pred: "" };
+  }
+  const derived = preview.status === "ready" ? preview : null;
+  const keys =
+    guardChoice.kind === "recommended-single-key" || guardChoice.kind === "update-keyset-recommended"
+      ? (derived ? [derived.key1] : null)
+      : guardChoice.kind === "custom"
+        || guardChoice.kind === "update-keyset-custom"
+        || guardChoice.kind === "use-existing-keyset"
+        ? guardChoice.keys
+        : null;
+  const pred =
+    guardChoice.kind === "custom"
+      || guardChoice.kind === "update-keyset-custom"
+      || guardChoice.kind === "use-existing-keyset"
+      ? guardChoice.pred
+      : "keys-all";
+  if (!keys || keys.length === 0) return { headline: "Still deriving…", keys: null, pred };
+  return { headline: `A keyset of ${keys.length} key(s) under ${pred}.`, keys, pred };
 }
 
 /** Renders whatever the account's guard currently is, by shape. */
@@ -2421,7 +2929,7 @@ function CurrentGuardBlock({
     return (
       <div data-testid="legacy-prime-migration-guard-current-unresolved">
         <p style={stepParagraphStyle}>
-          Guarded by the on-chain keyset <strong>{resolution.ref}</strong>.
+          <KeysetRefBadge /> <strong>{resolution.ref}</strong>.
         </p>
         <p role="alert" style={{ ...stepParagraphStyle, color: "#fca5a5" }}>
           Its keys could not be read right now ({resolution.error}), so what it authorizes is
@@ -2438,15 +2946,28 @@ function CurrentGuardBlock({
       </p>
     );
   }
+  // owner (live testing, this session): "we gotta show that there AND
+  // expand it... the user has to see, hey my guard currently is a
+  // keyset-ref" — folding the reference name into a sentence ("Guarded by
+  // the on-chain keyset X...") wasn't legible enough as "this is a
+  // REFERENCE, not a direct keyset". `KeysetRefBadge` now makes that shape
+  // explicit and visually distinct — matching the same "keyset-ref" pill
+  // the Codex ID page's own GuardTree already uses for this exact shape,
+  // so the vocabulary is consistent across both screens.
   const viaRef = resolution.kind === "keyset-ref" ? resolution.ref
     : resolution.viaRef ?? null;
   return (
     <div data-testid="legacy-prime-migration-guard-current-keyset"
          style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <p style={stepParagraphStyle}>
-        {viaRef
-          ? `Guarded by the on-chain keyset ${viaRef}, which names ${resolution.keys.length} key(s) under ${resolution.pred}:`
-          : `Guarded by a keyset of ${resolution.keys.length} key(s) under ${resolution.pred}:`}
+        {viaRef ? (
+          <>
+            <KeysetRefBadge /> <strong>{viaRef}</strong> &mdash; names {resolution.keys.length} key(s)
+            under {resolution.pred}:
+          </>
+        ) : (
+          `Guarded by a keyset of ${resolution.keys.length} key(s) under ${resolution.pred}:`
+        )}
       </p>
       {resolution.keys.map((k) => (
         <KeyLine key={k} label="" value={k} />
@@ -2468,21 +2989,54 @@ function CurrentGuardBlock({
  */
 function CustomKeysetEditor({
   allSeeds,
+  pureKeypairs,
   selectedKeys,
   pred,
   onChange,
 }: {
   allSeeds: readonly IStoaChainSeed[];
+  /** Pure keypairs join the seed-derived keys below, each still its OWN
+   *  individually selectable checkbox — a predicate (e.g. keys-2-of-3)
+   *  needs real, distinct public keys, so a pure keypair can never
+   *  collapse into an unselectable blob HERE (only the Settling
+   *  Dashboard's attribution card does that, see `PureKeysCardView`).
+   *  `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "G". */
+  pureKeypairs: readonly IPureKeypair[];
   selectedKeys: readonly string[];
   pred: string;
   onChange: (keys: readonly string[], pred: string) => void;
 }): React.ReactElement {
-  const available = allSeeds.flatMap((seed, i) =>
-    (seed.accounts ?? []).map((acc) => ({
-      publicKey: acc.publicKey,
-      label: `${masterChainwebSeedName(i, seed.isPrime, seed.name)} - Key #${acc.index}`,
-    })),
-  );
+  // `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "E — Search +
+  // collapsed-by-default grouping in the picker": the flat `available` list
+  // T3 extended with pure keys is partitioned into one disclosure per seed
+  // (same `masterChainwebSeedName` naming this file already uses), plus one
+  // trailing "Pure Keys" group — a seed/pure-keypairs source with no rows
+  // contributes no group, same as the flat list contributed nothing for it.
+  const groups: { name: string; rows: { publicKey: string; label: string }[] }[] = [
+    ...allSeeds
+      .map((seed, i) => ({
+        name: masterChainwebSeedName(i, seed.isPrime, seed.name),
+        rows: (seed.accounts ?? []).map((acc) => ({
+          publicKey: acc.publicKey,
+          label: `${masterChainwebSeedName(i, seed.isPrime, seed.name)} - Key #${acc.index}`,
+        })),
+      }))
+      .filter((g) => g.rows.length > 0),
+    // Labelled using the same vocabulary `identifyKeySource` (`keySource.ts`)
+    // already established for a pure keypair's own label, rather than
+    // inventing new wording.
+    ...(pureKeypairs.length > 0
+      ? [{
+          name: "Pure Keys",
+          rows: pureKeypairs.map((pk) => ({
+            publicKey: pk.publicKey,
+            label: pk.label || "Pure Keypair",
+          })),
+        }]
+      : []),
+  ];
+  const available = groups.flatMap((g) => g.rows);
+
   const toggle = (k: string): void => {
     const next = selectedKeys.includes(k)
       ? selectedKeys.filter((x) => x !== k)
@@ -2490,6 +3044,30 @@ function CustomKeysetEditor({
     const stillOk = isPredAvailable(pred, next.length);
     onChange(next, stillOk ? pred : "keys-all");
   };
+
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  // A row matches on either its OWN label or its group's name — so typing
+  // "Pure Keys" surfaces every pure key even though an individual pure
+  // key's own label rarely mentions the group it's in.
+  const rowMatches = (
+    group: { name: string },
+    row: { label: string },
+  ): boolean => group.name.toLowerCase().includes(query) || row.label.toLowerCase().includes(query);
+
+  // Collapsed by default, except a group already holding a selected key —
+  // computed once, at genuine first mount (e.g. a resumed run can arrive
+  // with `selectedKeys` already non-empty), not re-derived on every
+  // `selectedKeys` change, so a later in-editor selection doesn't silently
+  // re-open/re-close a group the user already toggled by hand.
+  const [expanded, setExpanded] = useState<Record<number, boolean>>(() => {
+    const init: Record<number, boolean> = {};
+    groups.forEach((g, i) => {
+      init[i] = g.rows.some((r) => selectedKeys.includes(r.publicKey));
+    });
+    return init;
+  });
+  const toggleGroup = (i: number): void => setExpanded((prev) => ({ ...prev, [i]: !prev[i] }));
 
   return (
     <div data-testid="legacy-prime-migration-guard-custom-editor"
@@ -2501,18 +3079,62 @@ function CustomKeysetEditor({
       {available.length === 0 ? (
         <p style={stepParagraphStyle}>This codex holds no Chainweb keys to choose from.</p>
       ) : (
-        available.map((k) => (
-          <label key={k.publicKey}
-                 style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={selectedKeys.includes(k.publicKey)}
-              onChange={() => toggle(k.publicKey)}
-              aria-label={k.label}
-            />
-            <span style={{ ...stepParagraphStyle, color: "#d2d3d4" }}>{k.label}</span>
-          </label>
-        ))
+        <>
+          <input
+            type="text"
+            data-testid="legacy-prime-migration-guard-custom-search"
+            placeholder="Search keys…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "6px 10px",
+              borderRadius: 6, border: "1px solid #333", backgroundColor: "#111",
+              color: "#d2d3d4", fontSize: 12,
+            }}
+          />
+          {groups.map((g, i) => {
+            // While searching, a matching row force-expands its group
+            // (never hidden behind a collapse) and a non-matching group
+            // collapses, regardless of its own manual state; with the
+            // search box empty, the manual/initial `expanded` state rules.
+            const isExpanded = query ? g.rows.some((r) => rowMatches(g, r)) : !!expanded[i];
+            const visibleRows = query ? g.rows.filter((r) => rowMatches(g, r)) : g.rows;
+            return (
+              <div key={g.name + i}>
+                <button
+                  type="button"
+                  data-testid={`legacy-prime-migration-guard-custom-group-${i}`}
+                  aria-expanded={isExpanded}
+                  onClick={() => toggleGroup(i)}
+                  style={{
+                    display: "flex", width: "100%", justifyContent: "space-between",
+                    alignItems: "center", cursor: "pointer", background: "transparent",
+                    border: "1px solid #262626", borderRadius: 6, padding: "6px 8px",
+                    color: "#d2d3d4", fontSize: 12, fontWeight: 600,
+                  }}
+                >
+                  <span>{isExpanded ? "▾" : "▸"} {g.name}</span>
+                  <span style={{ color: "#8b8b96", fontWeight: 400 }}>{g.rows.length}</span>
+                </button>
+                {isExpanded
+                  ? visibleRows.map((k) => (
+                      <label key={k.publicKey}
+                             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                                      padding: "4px 8px 0 16px" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedKeys.includes(k.publicKey)}
+                          onChange={() => toggle(k.publicKey)}
+                          aria-label={k.label}
+                        />
+                        <span style={{ ...stepParagraphStyle, color: "#d2d3d4" }}>{k.label}</span>
+                      </label>
+                    ))
+                  : null}
+              </div>
+            );
+          })}
+        </>
       )}
 
       <label style={{ ...stepParagraphStyle, color: "#8b8b96", marginTop: 4 }} htmlFor="lpm-pred">
@@ -2842,11 +3464,13 @@ function GuardVariantA({
   choice,
   onChoose,
   allSeeds,
+  pureKeypairs,
 }: {
   preview: MasterKeyPreview;
   choice: LegacyPrimeMigrationGuardChoice | null;
   onChoose: (c: LegacyPrimeMigrationGuardChoice) => void;
   allSeeds: readonly IStoaChainSeed[];
+  pureKeypairs: readonly IPureKeypair[];
 }): React.ReactElement {
   const isKeep = choice?.kind === "keep";
   const isUpdateRecommended = choice?.kind === "update-keyset-recommended";
@@ -2860,7 +3484,8 @@ function GuardVariantA({
   return (
     <>
       <div data-testid="legacy-prime-migration-guard-option-keep"
-           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}>
+           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}
+           onClick={() => onChoose({ kind: "keep" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "keep" })}>
           <OptionNumberBadge n={0} />
@@ -2874,7 +3499,8 @@ function GuardVariantA({
       </div>
 
       <div data-testid="legacy-prime-migration-guard-option-update-keyset"
-           role="radio" aria-selected={isUpdateRecommended} style={radioOptionStyle(isUpdateRecommended)}>
+           role="radio" aria-selected={isUpdateRecommended} style={radioOptionStyle(isUpdateRecommended)}
+           onClick={() => onChoose({ kind: "update-keyset-recommended" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "update-keyset-recommended" })}>
           <OptionNumberBadge n={1} />
@@ -2891,7 +3517,8 @@ function GuardVariantA({
       </div>
 
       <div data-testid="legacy-prime-migration-guard-option-recommended"
-           role="radio" aria-selected={isDirectRecommended} style={radioOptionStyle(isDirectRecommended)}>
+           role="radio" aria-selected={isDirectRecommended} style={radioOptionStyle(isDirectRecommended)}
+           onClick={() => onChoose({ kind: "recommended-single-key" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "recommended-single-key" })}>
           <OptionNumberBadge n={2} />
@@ -2906,7 +3533,15 @@ function GuardVariantA({
       </div>
 
       <div data-testid="legacy-prime-migration-guard-option-custom"
-           role="radio" aria-selected={isCustomGroup} style={radioOptionStyle(isCustomGroup)}>
+           role="radio" aria-selected={isCustomGroup} style={radioOptionStyle(isCustomGroup)}
+           // code review (guard-step-variants, extended for the "whole card
+           // clickable" fix): same no-op-once-already-selected guard as the
+           // header button below — clicking anywhere in the expanded
+           // custom-editor area (which lives inside this same div) must
+           // never re-fire this and wipe the user's in-progress selection.
+           onClick={() => {
+             if (!isCustomGroup) onChoose({ kind: "update-keyset-custom", keys: [], pred: "keys-all" });
+           }}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 // code review (guard-step-variants): re-clicking this header
                 // while already in the custom group used to re-fire
@@ -2937,6 +3572,7 @@ function GuardVariantA({
             />
             <CustomKeysetEditor
               allSeeds={allSeeds}
+              pureKeypairs={pureKeypairs}
               selectedKeys={
                 choice?.kind === "update-keyset-custom" || choice?.kind === "custom" ? choice.keys : []
               }
@@ -2965,12 +3601,14 @@ function GuardVariantB({
   choice,
   onChoose,
   allSeeds,
+  pureKeypairs,
   describeKeyset,
 }: {
   preview: MasterKeyPreview;
   choice: LegacyPrimeMigrationGuardChoice | null;
   onChoose: (c: LegacyPrimeMigrationGuardChoice) => void;
   allSeeds: readonly IStoaChainSeed[];
+  pureKeypairs: readonly IPureKeypair[];
   describeKeyset?: (qualifiedName: string) => Promise<{ keys: readonly string[]; pred: string }>;
 }): React.ReactElement {
   const isDirectRecommended = choice?.kind === "recommended-single-key";
@@ -2991,7 +3629,8 @@ function GuardVariantB({
   return (
     <>
       <div data-testid="legacy-prime-migration-guard-option-recommended"
-           role="radio" aria-selected={isDirectRecommended} style={radioOptionStyle(isDirectRecommended)}>
+           role="radio" aria-selected={isDirectRecommended} style={radioOptionStyle(isDirectRecommended)}
+           onClick={() => onChoose({ kind: "recommended-single-key" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "recommended-single-key" })}>
           <OptionNumberBadge n={1} />
@@ -3006,7 +3645,8 @@ function GuardVariantB({
       </div>
 
       <div data-testid="legacy-prime-migration-guard-option-keep"
-           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}>
+           role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}
+           onClick={() => onChoose({ kind: "keep" })}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 onClick={() => onChoose({ kind: "keep" })}>
           <OptionNumberBadge n={2} />
@@ -3020,7 +3660,10 @@ function GuardVariantB({
       </div>
 
       <div data-testid="legacy-prime-migration-guard-option-custom"
-           role="radio" aria-selected={isCustomGroup} style={radioOptionStyle(isCustomGroup)}>
+           role="radio" aria-selected={isCustomGroup} style={radioOptionStyle(isCustomGroup)}
+           onClick={() => {
+             if (!isCustomGroup) onChoose({ kind: "custom", keys: [], pred: "keys-all" });
+           }}>
         <button type="button" style={radioOptionHeaderButtonStyle}
                 // code review (guard-step-variants): see GuardVariantA's
                 // identical guard — re-clicking this header while already
@@ -3064,6 +3707,7 @@ function GuardVariantB({
             {activeSub === 0 ? (
               <CustomKeysetEditor
                 allSeeds={allSeeds}
+                pureKeypairs={pureKeypairs}
                 selectedKeys={choice?.kind === "custom" ? choice.keys : []}
                 pred={choice?.kind === "custom" ? choice.pred : "keys-all"}
                 onChange={(keys, pred) => onChoose({ kind: "custom", keys, pred })}
@@ -3085,6 +3729,111 @@ function GuardVariantB({
   );
 }
 
+/** The RIGHT side of the guard step's "Current / Settled for" row — a
+ *  live summary of whatever `choice` currently is, via
+ *  {@link summarizeGuardChoice} (the SAME computation `ReviewStep` uses).
+ *
+ *  Owner (live testing, this round): "Settle for Unchanged is incorrect,
+ *  we should show the same keys as the one on left. instead of saying
+ *  Unchanged... And if its the same then we add (unchanged) in
+ *  parenthesis." `summarizeGuardChoice`'s own `"keep"` branch deliberately
+ *  returns no keys at all (`{headline:"Unchanged.", keys:null, pred:""}`)
+ *  — it's `ReviewStep`'s own "what will this choice PRODUCE" computation,
+ *  with no reason to re-derive keys that aren't changing. THIS box needs
+ *  the opposite for `"keep"`: the real CURRENT guard, from the SAME
+ *  `resolution` the left-hand `CurrentGuardBlock` already renders — so
+ *  the "keep" branch below mirrors THAT component's own per-kind
+ *  branching exactly (never fabricating a key list for an
+ *  unresolved/unsupported/unknown shape), just with "(unchanged)" folded
+ *  into whichever branch actually applies. */
+function GuardSettledSummary({
+  choice,
+  preview,
+  resolution,
+}: {
+  choice: LegacyPrimeMigrationGuardChoice | null;
+  preview: MasterKeyPreview;
+  resolution: GuardKeyResolution | null;
+}): React.ReactElement {
+  if (choice?.kind === "keep") {
+    if (resolution === null) {
+      return (
+        <p data-testid="legacy-prime-migration-guard-settled" style={stepParagraphStyle}>
+          Reading this account&apos;s guard&hellip;
+        </p>
+      );
+    }
+    if (resolution.kind === "none") {
+      return (
+        <p data-testid="legacy-prime-migration-guard-settled" style={stepParagraphStyle}>
+          No guard on record (unchanged).
+        </p>
+      );
+    }
+    if (resolution.kind === "unsupported") {
+      return (
+        <p data-testid="legacy-prime-migration-guard-settled" style={stepParagraphStyle}>
+          A {resolution.guardKind} guard, which does not name a fixed list of keys (unchanged).
+        </p>
+      );
+    }
+    if (resolution.kind === "keyset-ref-unresolved") {
+      return (
+        <div data-testid="legacy-prime-migration-guard-settled">
+          <p style={stepParagraphStyle}>
+            <KeysetRefBadge /> <strong>{resolution.ref}</strong> (unchanged).
+          </p>
+          <p role="alert" style={{ ...stepParagraphStyle, color: "#fca5a5" }}>
+            Its keys could not be read right now ({resolution.error}), so what it authorizes is
+            unknown &mdash; not empty.
+          </p>
+        </div>
+      );
+    }
+    if (resolution.kind === "unknown") {
+      return (
+        <p data-testid="legacy-prime-migration-guard-settled" style={stepParagraphStyle}>
+          This guard is in a shape this screen does not recognise (unchanged).
+        </p>
+      );
+    }
+    // Same `viaRef` computation `CurrentGuardBlock` uses for this exact
+    // final branch (`resolution.kind` narrowed to `"keyset" | "keyset-
+    // ref"` by the early returns above).
+    const viaRef = resolution.kind === "keyset-ref" ? resolution.ref : resolution.viaRef ?? null;
+    return (
+      <div data-testid="legacy-prime-migration-guard-settled"
+           style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <p style={stepParagraphStyle}>
+          {viaRef ? (
+            <>
+              <KeysetRefBadge /> <strong>{viaRef}</strong> &mdash; names {resolution.keys.length} key(s)
+              under {resolution.pred} (unchanged):
+            </>
+          ) : (
+            `A keyset of ${resolution.keys.length} key(s) under ${resolution.pred} (unchanged):`
+          )}
+        </p>
+        {resolution.keys.map((k) => <KeyLine key={k} label="" value={k} />)}
+      </div>
+    );
+  }
+  const summary = summarizeGuardChoice(choice, preview);
+  if (!summary) {
+    return (
+      <p data-testid="legacy-prime-migration-guard-settled-none" style={stepParagraphStyle}>
+        Choose an option below.
+      </p>
+    );
+  }
+  return (
+    <div data-testid="legacy-prime-migration-guard-settled">
+      <p style={stepParagraphStyle}>{summary.headline}</p>
+      {summary.keys?.map((k) => <KeyLine key={k} label="" value={k} />)}
+    </div>
+  );
+}
+
 /**
  * Dispatches to {@link GuardVariantA} / {@link GuardVariantB} by what the
  * account's CURRENT guard actually is (`docs/work/guard-step-variants/
@@ -3102,6 +3851,7 @@ function GuardSection({
   choice,
   onChoose,
   allSeeds,
+  pureKeypairs,
   describeKeyset,
 }: {
   resolution: GuardKeyResolution | null;
@@ -3109,6 +3859,7 @@ function GuardSection({
   choice: LegacyPrimeMigrationGuardChoice | null;
   onChoose: (c: LegacyPrimeMigrationGuardChoice) => void;
   allSeeds: readonly IStoaChainSeed[];
+  pureKeypairs: readonly IPureKeypair[];
   describeKeyset?: (qualifiedName: string) => Promise<{ keys: readonly string[]; pred: string }>;
 }): React.ReactElement {
   const isVariantA = resolution?.kind === "keyset-ref" || resolution?.kind === "keyset-ref-unresolved";
@@ -3126,19 +3877,31 @@ function GuardSection({
         {OURONET_CODEX_MASTER}.
       </p>
 
-      <div style={{ padding: 10, borderRadius: 8, backgroundColor: "#18181B", border: "1px solid #262626" }}>
-        <CurrentGuardBlock resolution={resolution} />
-      </div>
+      {/* owner (live testing, this session): "existing guard when
+          selected still doesnt detect its a keyset ref... we should
+          present current guard... and then the right rectangle would
+          show the guard you settled on." The LEFT side is the SAME
+          `CurrentGuardBlock` as before (already names the keyset-ref
+          shape explicitly via `KeysetRefBadge`); the RIGHT side is new —
+          a live summary of whatever `choice` currently is, via the same
+          computation `ReviewStep` uses, so the consequence is visible
+          immediately rather than only after reaching Review. */}
+      <CurrentSettledRow
+        current={<CurrentGuardBlock resolution={resolution} />}
+        settled={<GuardSettledSummary choice={choice} preview={preview} resolution={resolution} />}
+      />
 
       {isVariantA ? (
-        <GuardVariantA preview={preview} choice={choice} onChoose={onChoose} allSeeds={allSeeds} />
+        <GuardVariantA preview={preview} choice={choice} onChoose={onChoose} allSeeds={allSeeds}
+                       pureKeypairs={pureKeypairs} />
       ) : isVariantB ? (
         <GuardVariantB preview={preview} choice={choice} onChoose={onChoose} allSeeds={allSeeds}
-                       describeKeyset={describeKeyset} />
+                       pureKeypairs={pureKeypairs} describeKeyset={describeKeyset} />
       ) : (
         <>
           <div data-testid="legacy-prime-migration-guard-option-recommended"
-               role="radio" aria-selected={isRec} style={radioOptionStyle(isRec)}>
+               role="radio" aria-selected={isRec} style={radioOptionStyle(isRec)}
+               onClick={() => onChoose({ kind: "recommended-single-key" })}>
             <button type="button" style={radioOptionHeaderButtonStyle}
                     onClick={() => onChoose({ kind: "recommended-single-key" })}>
               <OptionNumberBadge n={1} />
@@ -3153,7 +3916,8 @@ function GuardSection({
           </div>
 
           <div data-testid="legacy-prime-migration-guard-option-keep"
-               role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}>
+               role="radio" aria-selected={isKeep} style={radioOptionStyle(isKeep)}
+               onClick={() => onChoose({ kind: "keep" })}>
             <button type="button" style={radioOptionHeaderButtonStyle}
                     onClick={() => onChoose({ kind: "keep" })}>
               <OptionNumberBadge n={2} />
@@ -3166,7 +3930,10 @@ function GuardSection({
           </div>
 
           <div data-testid="legacy-prime-migration-guard-option-custom"
-               role="radio" aria-selected={isCustom} style={radioOptionStyle(isCustom)}>
+               role="radio" aria-selected={isCustom} style={radioOptionStyle(isCustom)}
+               onClick={() => {
+                 if (!isCustom) onChoose({ kind: "custom", keys: [], pred: "keys-all" });
+               }}>
             <button type="button" style={radioOptionHeaderButtonStyle}
                     // code review (guard-step-variants): the same re-click-
                     // wipes-keys guard applied to GuardVariantA/GuardVariantB's
@@ -3188,6 +3955,7 @@ function GuardSection({
             {isCustom ? (
               <CustomKeysetEditor
                 allSeeds={allSeeds}
+                pureKeypairs={pureKeypairs}
                 selectedKeys={choice.kind === "custom" ? choice.keys : []}
                 pred={choice.kind === "custom" ? choice.pred : "keys-all"}
                 onChange={(keys, pred) => onChoose({ kind: "custom", keys, pred })}
@@ -3226,6 +3994,7 @@ function PaymentStep({
   currentPrimeAccount,
   allAccounts,
   allSeeds,
+  pureKeypairs,
   preview,
   choice,
   onChoose,
@@ -3236,6 +4005,7 @@ function PaymentStep({
   currentPrimeAccount: IOuroAccount | null;
   allAccounts: readonly IOuroAccount[];
   allSeeds: readonly IStoaChainSeed[];
+  pureKeypairs: readonly IPureKeypair[];
   preview: MasterKeyPreview;
   choice: LegacyPrimeMigrationKeysChoice | null;
   onChoose: (choice: LegacyPrimeMigrationKeysChoice) => void;
@@ -3244,6 +4014,7 @@ function PaymentStep({
 }): React.ReactElement {
   const currentPaymentKey = currentPaymentKeyOf(allSeeds);
   const paymentTies = currentPaymentKey ? findKeyTies(allSeeds, currentPaymentKey) : null;
+  const currentPaymentKeyOrigin = detectPaymentKeyOrigin(currentPaymentKey, allSeeds, pureKeypairs);
   // "Advanced" (native-format) derivation is offered ONLY when the Page-2-
   // chosen account's own words are dictionary-gated ("12-words"/
   // "24-words") — never for "write-seed"-origin or freshly-typed words
@@ -3255,6 +4026,26 @@ function PaymentStep({
   const isStoicDalosSelected = choice?.kind === "stoic-dalos";
   const isAdvancedSelected = choice?.kind === "advanced-native";
 
+  // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 7):
+  // "when making the 2nd selection, which is to keep the existing
+  // private key, the circled Dalos Derivation would have to change to
+  // Koala Derivation, because that's what the seed is using that is
+  // responsible for the key involved in the second selection."
+  // `STOIC_DALOS_DERIVATION_LABEL` is honest while payment is actually
+  // being DERIVED (it genuinely is the method in use) — but once
+  // payment is explicitly KEPT as an existing, non-Stoic-Dalos key
+  // (a real seed-backed origin — never shown for a foreign/pure-keypair
+  // origin, which has no seed-type label to show), nothing is deriving
+  // via Stoic Dalos for payment anymore, so this option's own label
+  // reflects the kept key's REAL origin instead. The `RECOMMENDED`
+  // badge goes with it — this is no longer a recommendation, it is a
+  // statement of the kept key's own fact.
+  const keptPaymentOrigin =
+    paymentChoice?.kind === "keep" && currentPaymentKeyOrigin?.kind === "seed" ? currentPaymentKeyOrigin : null;
+  const stoicDalosOptionLabel = keptPaymentOrigin
+    ? `${paymentKeyOriginLabel(keptPaymentOrigin)} Derivation`
+    : STOIC_DALOS_DERIVATION_LABEL;
+
   return (
     <div
       data-testid="legacy-prime-migration-keys"
@@ -3263,6 +4054,7 @@ function PaymentStep({
       <PaymentKeySection
         currentKey={currentPaymentKey}
         ties={paymentTies}
+        origin={currentPaymentKeyOrigin}
         preview={preview}
         choice={paymentChoice}
         onChoose={onChoosePayment}
@@ -3277,6 +4069,7 @@ function PaymentStep({
         role="radio"
         aria-selected={isStoicDalosSelected}
         style={radioOptionStyle(isStoicDalosSelected)}
+        onClick={() => onChoose({ kind: "stoic-dalos" })}
       >
         <button
           type="button"
@@ -3284,12 +4077,22 @@ function PaymentStep({
           onClick={() => onChoose({ kind: "stoic-dalos" })}
         >
           <OptionNumberBadge n={1} />
-          {STOIC_DALOS_DERIVATION_LABEL}
-          <RecommendedBadge />
+          {stoicDalosOptionLabel}
+          {keptPaymentOrigin ? null : <RecommendedBadge />}
         </button>
         <p style={stepParagraphStyle}>
-          Position 0 derives the payment key, position 1 derives the guard key — a
-          keys-all guard over both. Always available, always the default.
+          {keptPaymentOrigin ? (
+            <>
+              Your kept payment key is already {paymentKeyOriginLabel(keptPaymentOrigin)}-derived —
+              not via {STOIC_DALOS_DERIVATION_LABEL}. Position 1 still derives the guard key this
+              way unless you also keep the guard.
+            </>
+          ) : (
+            <>
+              Position 0 derives the payment key, position 1 derives the guard key — a
+              keys-all guard over both. Always available, always the default.
+            </>
+          )}
         </p>
       </div>
 
@@ -3299,6 +4102,7 @@ function PaymentStep({
           role="radio"
           aria-selected={isAdvancedSelected}
           style={radioOptionStyle(isAdvancedSelected)}
+          onClick={() => onChoose({ kind: "advanced-native" })}
         >
           <button
             type="button"
@@ -3330,6 +4134,7 @@ function PaymentStep({
  */
 function GuardStep({
   allSeeds,
+  pureKeypairs,
   preview,
   guardResolution,
   guardChoice,
@@ -3337,6 +4142,7 @@ function GuardStep({
   describeKeyset,
 }: {
   allSeeds: readonly IStoaChainSeed[];
+  pureKeypairs: readonly IPureKeypair[];
   preview: MasterKeyPreview;
   /** Lifted to the main component (see its own doc comment) — this step no
    *  longer resolves the guard itself, so navigating away and back to this
@@ -3365,6 +4171,7 @@ function GuardStep({
         choice={guardChoice}
         onChoose={onChooseGuard}
         allSeeds={allSeeds}
+        pureKeypairs={pureKeypairs}
         describeKeyset={describeKeyset}
       />
     </div>
@@ -3395,29 +4202,11 @@ function ReviewStep({
   preview: MasterKeyPreview;
   seedName: string | null;
 }): React.ReactElement {
-  const derived = preview.status === "ready" ? preview : null;
-  const newPayment =
-    paymentChoice?.kind === "stoic-dalos-position-0" ? derived?.key0 ?? null : currentPaymentKey;
-  // guard-step-variants (docs/work/guard-step-variants/design.md):
-  // "update-keyset-recommended" derives the SAME position-1 key
-  // "recommended-single-key" does — just via a different eventual on-chain
-  // action (update the reference's keyset, not switch away from it).
-  // "update-keyset-custom"/"use-existing-keyset" already carry their own
-  // real `keys` directly on the choice, same as "custom" does.
-  const guardKeys =
-    guardChoice?.kind === "recommended-single-key" || guardChoice?.kind === "update-keyset-recommended"
-      ? (derived ? [derived.key1] : [])
-      : guardChoice?.kind === "custom"
-        || guardChoice?.kind === "update-keyset-custom"
-        || guardChoice?.kind === "use-existing-keyset"
-        ? guardChoice.keys
-        : null;
-  const guardPred =
-    guardChoice?.kind === "custom"
-      || guardChoice?.kind === "update-keyset-custom"
-      || guardChoice?.kind === "use-existing-keyset"
-      ? guardChoice.pred
-      : "keys-all";
+  const newPayment = settledPaymentKeyOf(paymentChoice, preview, currentPaymentKey);
+  // code review (owner, this session): now the SAME computation the
+  // guard step's own new "Settled for" box uses — one definition, not
+  // two copies of the identical ternary.
+  const guardSummary = summarizeGuardChoice(guardChoice, preview);
 
   return (
     <div data-testid="legacy-prime-migration-review"
@@ -3450,14 +4239,10 @@ function ReviewStep({
 
       <div data-testid="legacy-prime-migration-review-guard" style={reviewBoxStyle}>
         <p style={{ ...stepParagraphStyle, color: "#8b8b96" }}>Guard</p>
-        {guardChoice?.kind === "keep" ? (
-          <p style={stepParagraphStyle}>Unchanged.</p>
-        ) : guardKeys && guardKeys.length > 0 ? (
+        {guardSummary ? (
           <>
-            <p style={stepParagraphStyle}>
-              A keyset of {guardKeys.length} key(s) under {guardPred}.
-            </p>
-            {guardKeys.map((k) => <KeyLine key={k} label="" value={k} />)}
+            <p style={stepParagraphStyle}>{guardSummary.headline}</p>
+            {guardSummary.keys?.map((k) => <KeyLine key={k} label="" value={k} />)}
           </>
         ) : (
           <p style={stepParagraphStyle}>Still deriving&hellip;</p>
@@ -3491,6 +4276,1067 @@ const reviewBoxStyle: React.CSSProperties = {
 };
 
 /**
+ * The Arweave step's own check state (`docs/work/wizard-arweave-step/
+ * design.md`). `"checking"` is a real, visible state, not a flicker: the
+ * check decrypts every Arweave seed the codex holds (a 600,000-iteration
+ * PBKDF2 each) to compare bitstrings, so it takes real time and must never
+ * be rendered as "missing" while it is still running — a premature "missing"
+ * would invite the user to generate accounts they already have.
+ */
+type ArweaveCheckState =
+  | { status: "checking" }
+  | {
+      status: "settled";
+      result: CodexHoldsMasterArweaveAccountsResult;
+      /** Set when the CODEX MASTER SEED's own bitstring could not be
+       *  resolved at all (a locked codex, a password that decrypts nothing,
+       *  no store) — i.e. the three rows read "missing" because nothing
+       *  could be checked, not because the codex was checked and found
+       *  wanting. Shown alongside the rows, because those two situations
+       *  need different actions from the user and printing only "missing"
+       *  for both is the kind of half-truth this topic exists to remove. */
+      masterUnresolved: string | null;
+      /** WHICH password failure left `masterUnresolved` set, when that is
+       *  what left it set (`wizard-arweave-step` T2). Non-null is the step's
+       *  cue to render {@link InlineUnlockPrompt} instead of leaving the
+       *  owner on a screen whose only way out is closing the wizard — the
+       *  dead end T1 reported. `null` for every other kind of unresolved
+       *  master (no derivation method chosen, a "new words" account), which
+       *  no password can fix and so must not be asked about. */
+      masterPasswordProblem: FinalizePasswordProblem | null;
+    };
+
+/**
+ * How the Arweave step's last Generate ended (`wizard-arweave-step` T2).
+ * `"settled"` says only that `ensurePrimeArweaveSeed` RESOLVED — never that
+ * it delivered, which is why it carries no verdict of its own: the verdict is
+ * the re-evaluated predicate.
+ */
+type ArweaveGenerateOutcome =
+  | { kind: "rejected"; message: string }
+  | { kind: "settled" };
+
+/** One check row's own resolved state.
+ *
+ *  `"unknown"` is NOT `"missing"`, and the difference is the whole point:
+ *  a locked codex — or one holding a password that decrypts nothing — cannot
+ *  be read at all, and printing "Missing" for that would invite the owner to
+ *  re-derive two RSA-4096 keys the codex may well already hold. "Checking…"
+ *  is in flight and will resolve on its own; "unknown" has resolved to
+ *  "nobody can currently tell", which needs an action (the password) that
+ *  the step now offers. */
+type ArweaveRowState = "checking" | "satisfied" | "missing" | "unknown";
+
+const ARWEAVE_ROW_WORD: Record<ArweaveRowState, string> = {
+  checking: "Checking…",
+  satisfied: "Satisfied",
+  missing: "Missing",
+  unknown: "Can't tell yet",
+};
+
+/**
+ * The Arweave step's own two password questions (`wizard-arweave-step` T2).
+ * Same two cases, same vocabulary, Finalize's own prompt uses
+ * ({@link FINALIZE_LOCKED_PROMPT_TEXT}) — phrased for what this screen is
+ * doing, which is checking rather than finishing.
+ */
+const ARWEAVE_STEP_LOCKED_PROMPT_TEXT =
+  "Your codex is locked, so these accounts can't be checked — enter your password to check them.";
+const ARWEAVE_STEP_WRONG_PASSWORD_PROMPT_TEXT =
+  "The password this codex currently holds could not decrypt this account, so these accounts can't be checked. Re-enter it to check them.";
+
+/**
+ * Generate with no `ensurePrimeArweaveSeed` prop in sight. Stated on the
+ * screen, not just as a `title`: the prop is optional (several hosts, and
+ * every one of this file's own prop-only tests, mount the wizard without
+ * it), so this is a reachable state rather than a defensive branch.
+ */
+const ARWEAVE_STEP_GENERATE_UNAVAILABLE_TEXT =
+  "Generating is not available on this screen — this wizard has no connection to the Arweave derivation. Nothing is lost by closing it: every choice is saved, and the accounts can be added from the Codex ID page.";
+
+/**
+ * Generate on a codex whose HELD password is not the one that was just
+ * proven here (`wizard-arweave-step` T2, a pre-existing hazard T1 reported).
+ *
+ * `ensurePrimeArweaveSeed` encrypts what it writes under the password the
+ * CODEX holds — it calls `getPassword()` inside its own package
+ * (`packages/codex-arweave`) and takes no password argument — while this
+ * step's check reads with the password it actually proved. Running the
+ * derivation across that gap would leave a real Arweave seed encrypted under
+ * a password nothing else in this codex uses: unreadable afterwards, and
+ * unable to ever satisfy this check. Blocking is the only honest option
+ * available from here; re-caching the proven password instead is not, because
+ * an already-unlocked codex's window is ABSOLUTE and must not be restarted
+ * (`src/zbom/hooks/useEnsureCodexUnlocked.ts`).
+ */
+const ARWEAVE_STEP_GENERATE_PASSWORD_MISMATCH_TEXT =
+  "This codex is still holding a different password than the one you just entered, and a new Arweave seed would be encrypted under the held one — unreadable afterwards. Lock this codex and unlock it again with the password you just used, then generate.";
+
+/**
+ * Why Continue out of the Arweave step is unavailable, NAMING what is
+ * missing — `null` when the codex genuinely holds both accounts.
+ *
+ * Module-level (not inline in `continueBlockedReason`) so the exact same
+ * sentence is available to anything else that has to explain this state, and
+ * so the distinguishable cases stay side by side where they read as one
+ * list: still checking, no matching seed at all, or a matching seed missing
+ * #0 and/or #1.
+ */
+function arweaveStepBlockedReason(check: ArweaveCheckState): string | null {
+  if (check.status === "checking") {
+    // Same "hang tight" register the account step's own in-flight gate uses.
+    return "Checking this codex's Arweave accounts — hang tight…";
+  }
+  // "COULD NOT BE CHECKED" IS ITS OWN ANSWER, and it comes first: the
+  // predicate reports a codex it cannot read as `{ok:false, seedId:null}`,
+  // which is indistinguishable, from here, from a codex that really holds no
+  // matching seed. Saying "holds no Arweave seed" about a locked codex is a
+  // half-truth that points the owner at the wrong action (generate) instead
+  // of the right one (the password prompt on this very step).
+  if (check.masterUnresolved !== null) {
+    return check.masterPasswordProblem !== null
+      ? "These checks can't run until this codex's password is entered — the prompt on this step is the way through."
+      : `These checks could not be run: ${check.masterUnresolved}`;
+  }
+  const { ok, seedId, missingIndexes } = check.result;
+  if (ok) return null;
+  if (seedId === null) {
+    return `This codex holds no Arweave seed matching its ${CODEX_MASTER_SEED} yet — generate it to continue.`;
+  }
+  const positions = missingIndexes.map((i) => `#${i}`).join(" and ");
+  return `Arweave account${missingIndexes.length > 1 ? "s" : ""} ${positions} ${
+    missingIndexes.length > 1 ? "are" : "is"
+  } still missing under that seed — generate ${missingIndexes.length > 1 ? "them" : "it"} to continue.`;
+}
+
+/**
+ * What the step says when a derivation FINISHED and the re-evaluated
+ * predicate still comes back unsatisfied (`wizard-arweave-step` T2).
+ *
+ * This is a real, reachable outcome and not a defensive branch: a PARTIAL
+ * delivery resolves — only a zero-key derivation rejects — so a call that
+ * came back is no evidence at all about the end state. That inference ("the
+ * call returned, therefore eligible") is the bug this whole topic exists to
+ * close, and this sentence is what the honest alternative looks like.
+ *
+ * It names the positions, and says the derived ones are kept, because both
+ * are true: a second attempt only pays for what is still absent. The
+ * finalize panel's own version of this is
+ * {@link ARWEAVE_MASTER_ACCOUNTS_NOT_HELD_TEXT}; this one is phrased for a
+ * step where nothing has been committed yet.
+ */
+function arweaveStillMissingText(result: CodexHoldsMasterArweaveAccountsResult): string {
+  const plural = result.missingIndexes.length > 1;
+  const positions = result.missingIndexes.map((i) => `#${i}`).join(" and ");
+  const tail =
+    " Nothing already derived is lost — generating again picks up from what is still absent.";
+  if (result.seedId === null) {
+    return `That finished, but this codex still holds no Arweave seed matching its ${CODEX_MASTER_SEED}, so account${
+      plural ? "s" : ""
+    } ${positions} ${plural ? "are" : "is"} still missing.${tail}`;
+  }
+  return `That finished, but Arweave account${plural ? "s" : ""} ${positions} ${
+    plural ? "are" : "is"
+  } still missing under that seed.${tail}`;
+}
+
+/**
+ * The Arweave derivation's progress bar — the SAME bar the owner already
+ * knows from the Arweave tab.
+ *
+ * THE ORIGINAL IS `RunProgress` in
+ * `packages/codex-arweave/src/panel/ArweaveSeedsArea.tsx` (the generate box's
+ * display). This is a deliberate, traceable DUPLICATE of its presentation
+ * decisions — the field vocabulary, the separator, the upper-cased stage, the
+ * thousands-separated attempt counts, the `role="progressbar"` shape and the
+ * `search`-present / `search`-absent split — because `codex-arweave` depends
+ * on this package and importing it back would invert that dependency. Keep the
+ * two in step: a change to `RunProgress`'s status line belongs here too.
+ *
+ * Every number rendered comes from the event. There is no timer, no
+ * interpolation and no animated crawl: a derivation that has not yet reported
+ * a search shows the delivered/total fallback (`RunProgress`'s own
+ * `storedPercent`) rather than pretending to move.
+ */
+function ArweaveDerivationProgressBar({
+  progress,
+  testId,
+}: {
+  progress: ArweaveDerivationProgress;
+  /** Base test id; the status line and the bar hang off it as `-search` and
+   *  `-bar`, so both screens stay separately addressable. */
+  testId: string;
+}): React.ReactElement {
+  const { index, delivered, total, search } = progress;
+  // `RunProgress`'s `storedPercent`: what is really persisted, used on its own
+  // whenever there is no live search to track.
+  const deliveredPercent = total === 0 ? 0 : Math.round((delivered / total) * 100);
+  const percent = search !== undefined ? search.percent : deliveredPercent;
+
+  return (
+    <div
+      data-testid={testId}
+      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+    >
+      <p style={{ ...stepParagraphStyle, color: ACCENT }}>
+        Deriving Arweave account #{index} &mdash; {delivered} of {total} done.
+      </p>
+
+      {search !== undefined ? (
+        // `RunProgress`'s status line, field for field:
+        // "Position N of T · prime P · X this search · Y total · Z%"
+        <div data-testid={`${testId}-search`} style={{ fontSize: 12, color: ACCENT }}>
+          {`Position ${search.position} of ${search.totalCount}` +
+            ` · prime ${search.stage.toUpperCase()}` +
+            ` · ${search.attempts.toLocaleString()} this search` +
+            ` · ${search.grandAttempts.toLocaleString()} total` +
+            ` · ${search.percent}%`}
+        </div>
+      ) : null}
+
+      <div
+        data-testid={`${testId}-bar`}
+        data-percent={String(percent)}
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        style={{
+          height: 4,
+          borderRadius: 999,
+          overflow: "hidden",
+          backgroundColor: "#1a1a1a",
+        }}
+      >
+        <div
+          style={{
+            width: `${percent}%`,
+            height: "100%",
+            backgroundColor: ACCENT,
+            transition: "width 200ms ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Page 6 ("arweave") — the Arweave verification step, per
+ * `docs/work/wizard-arweave-step/design.md`.
+ *
+ * States the owner's own three questions, in the owner's own order, each as
+ * its own separately-visible row with its own verdict:
+ *   1. is there an Arweave seed identical to the Codex Master Seed?
+ *   2. does account #0 exist under it?
+ *   3. does account #1 exist under it?
+ *
+ * All three come from ONE `codexHoldsMasterArweaveAccounts` evaluation (the
+ * same predicate finalize and the violet ticker read), never from three
+ * independent lookups that could disagree: the seed row is `seedId !== null`
+ * and the key rows are `missingIndexes`.
+ *
+ * GENERATE IS WIRED (T2) to the SAME `ensurePrimeArweaveSeed` prop
+ * `runFinalize` uses, asked for exactly the positions THIS evaluation found
+ * missing, reporting that derivation's own per-key events — and, when it
+ * settles, judged by a RE-EVALUATION of the predicate rather than by the
+ * promise having resolved. A partial delivery resolves (only a zero-key run
+ * rejects), so "the call came back" has never been evidence of anything; see
+ * `handleArweaveGenerate`.
+ *
+ * Generation is MANUAL by design, never automatic on arrival: each RSA-4096
+ * key costs seconds, and a multi-second derivation must not start behind the
+ * owner's back on a screen they are trying to read.
+ *
+ * When the check could not be RUN at all for a password reason, this screen
+ * asks for the password where the user stands ({@link InlineUnlockPrompt},
+ * the same panel Finalize and the Account step use) instead of leaving the
+ * dead end T1 reported: three unreadable rows, a blocked Continue, and
+ * closing the wizard as the only way out.
+ */
+function ArweaveStep({
+  check,
+  progress,
+  generating,
+  generateError,
+  generateUnavailableReason,
+  onGenerate,
+  onUnlock,
+}: {
+  check: ArweaveCheckState;
+  /** The in-flight derivation's own latest event, or `null` when nothing is
+   *  deriving. Driven ONLY by `ensurePrimeArweaveSeed`'s `onProgress` — no
+   *  timer, no synthetic percentage — exactly as the finalize panel's own
+   *  progress line is. */
+  progress: ArweaveDerivationProgress | null;
+  generating: boolean;
+  /** What went wrong on the LAST Generate: either the derivation rejected, or
+   *  it resolved and the re-evaluation still found accounts missing. */
+  generateError: string | null;
+  /** Why Generate cannot be pressed at all, or `null` when it can. Rendered
+   *  as its own visible line, not merely a `title`: a disabled control that
+   *  says nothing is indistinguishable from a broken one. */
+  generateUnavailableReason: string | null;
+  onGenerate: () => void;
+  onUnlock: (password: string) => Promise<{ ok: boolean; error?: string }>;
+}): React.ReactElement {
+  const settled = check.status === "settled" ? check.result : null;
+  const unresolved = check.status === "settled" ? check.masterUnresolved : null;
+  const rowState = (satisfied: boolean): ArweaveRowState =>
+    check.status === "checking"
+      ? "checking"
+      : unresolved !== null
+        // Nothing could be read, so nothing is known — and "unknown" must
+        // never be printed as "missing".
+        ? "unknown"
+        : satisfied ? "satisfied" : "missing";
+  const seedRow = rowState(settled !== null && settled.seedId !== null);
+  const keyRow = (index: number): ArweaveRowState =>
+    rowState(
+      settled !== null && settled.seedId !== null && !settled.missingIndexes.includes(index),
+    );
+
+  return (
+    <div
+      data-testid="legacy-prime-migration-arweave-step"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <p style={{ ...stepParagraphStyle, fontSize: 13, color: "#d2d3d4" }}>
+        Restoring this codex from its words alone needs Arweave accounts #0 and #1 derived
+        from your {CODEX_MASTER_SEED}. This step checks whether they are really here &mdash;
+        nothing else makes the codex eligible.
+      </p>
+
+      <ArweaveCheckRow
+        testId="legacy-prime-migration-arweave-check-seed"
+        label={`An Arweave seed identical to your ${CODEX_MASTER_SEED}`}
+        state={seedRow}
+      />
+      <ArweaveCheckRow
+        testId="legacy-prime-migration-arweave-check-key0"
+        label="Arweave account #0 under that seed"
+        state={keyRow(0)}
+      />
+      <ArweaveCheckRow
+        testId="legacy-prime-migration-arweave-check-key1"
+        label="Arweave account #1 under that seed"
+        state={keyRow(1)}
+      />
+
+      {/* The one genuinely slow thing on this screen: each Arweave account is
+          a full RSA-4096 derivation costing seconds, so the position in
+          flight, the live prime search behind it and the count delivered so
+          far are all named — the SAME bar the Arweave tab already shows
+          ({@link ArweaveDerivationProgressBar}), which the finalize panel
+          renders too. Driven ONLY by the derivation's
+          `onProgress` events, so it cannot claim movement that is not
+          happening, and rendered OUTSIDE the "unsatisfied" block below on
+          purpose: a key landing mid-run re-arms the check, and an in-flight
+          derivation must keep reporting itself across that re-check rather
+          than blinking out of existence. */}
+      {progress !== null ? (
+        <ArweaveDerivationProgressBar
+          progress={progress}
+          testId="legacy-prime-migration-arweave-progress"
+        />
+      ) : null}
+
+      {unresolved !== null ? (
+        <p
+          data-testid="legacy-prime-migration-arweave-master-unresolved"
+          style={{ ...stepParagraphStyle, color: "#fca5a5" }}
+        >
+          These checks could not be run: {unresolved}
+        </p>
+      ) : null}
+
+      {/* The way OUT of that state, rather than a description of it. Only for
+          the password reasons: nothing typed here can fix "no derivation
+          method chosen", so nothing is asked for in that case. */}
+      {check.status === "settled" && check.masterPasswordProblem !== null ? (
+        <InlineUnlockPrompt
+          message={
+            check.masterPasswordProblem === "locked"
+              ? ARWEAVE_STEP_LOCKED_PROMPT_TEXT
+              : ARWEAVE_STEP_WRONG_PASSWORD_PROMPT_TEXT
+          }
+          submitLabel="Unlock & Check"
+          onUnlock={onUnlock}
+        />
+      ) : null}
+
+      {settled !== null && settled.ok && unresolved === null ? (
+        <p style={{ ...stepParagraphStyle, color: "#86efac" }}>
+          Nothing to do &mdash; this codex already holds both accounts, and the existing
+          ones are kept exactly as they are. Continue to finalize.
+        </p>
+      ) : null}
+
+      {/* Rendered only when the check actually RAN and came back unsatisfied.
+          A codex nothing could be read on gets the prompt above instead —
+          offering to generate accounts that may already be there, on the
+          strength of a check that never happened, is the opposite of what
+          this screen exists for. */}
+      {settled !== null && !settled.ok && unresolved === null ? (
+        <>
+          <button
+            type="button"
+            data-testid="legacy-prime-migration-arweave-generate"
+            disabled={generating || generateUnavailableReason !== null}
+            onClick={onGenerate}
+            title={
+              generating
+                ? "Deriving — each account is a full RSA-4096 key, so this takes seconds."
+                : generateUnavailableReason ?? undefined
+            }
+            style={{
+              alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8, border: "none",
+              fontWeight: 700, fontSize: 13,
+              backgroundColor: generating || generateUnavailableReason !== null ? "#1a1a1a" : ACCENT,
+              color: generating || generateUnavailableReason !== null ? "#555" : "#0a0a0a",
+              cursor: generating || generateUnavailableReason !== null ? "not-allowed" : "pointer",
+            }}
+          >
+            {generating ? "Generating…" : "Generate what's missing"}
+          </button>
+
+          {generateUnavailableReason !== null ? (
+            <p
+              data-testid="legacy-prime-migration-arweave-generate-unavailable"
+              style={{ ...stepParagraphStyle, color: "#fca5a5" }}
+            >
+              {generateUnavailableReason}
+            </p>
+          ) : null}
+
+          {generateError !== null ? (
+            <p
+              data-testid="legacy-prime-migration-arweave-generate-error"
+              style={{ ...stepParagraphStyle, color: "#fca5a5" }}
+            >
+              {generateError}
+            </p>
+          ) : null}
+
+          <p style={{ ...stepParagraphStyle, color: "#8b8b96" }}>
+            Any Arweave seed already in this codex is left exactly where it is &mdash; a
+            matching one is added alongside it, never in place of it.
+          </p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ArweaveCheckRow({
+  testId,
+  label,
+  state,
+}: {
+  testId: string;
+  label: string;
+  state: ArweaveRowState;
+}): React.ReactElement {
+  const color = state === "satisfied" ? "#86efac" : state === "missing" ? "#fca5a5" : "#8b8b96";
+  return (
+    <div
+      data-testid={testId}
+      data-state={state}
+      style={{ ...reviewBoxStyle, flexDirection: "row", alignItems: "center", gap: 10 }}
+    >
+      <span aria-hidden style={{ color, fontWeight: 700, fontSize: 13 }}>
+        {state === "satisfied" ? "✓" : state === "missing" ? "✗" : state === "unknown" ? "?" : "…"}
+      </span>
+      <p style={{ ...stepParagraphStyle, color: "#d2d3d4", flex: 1 }}>{label}</p>
+      <span style={{ ...stepParagraphStyle, color, fontWeight: 700 }}>
+        {ARWEAVE_ROW_WORD[state]}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The "Seed Dashboard" (`docs/work/wizard-seed-dashboard/design.md`) — one
+ * rectangle per seed that backs at least one of: the chosen Ouronet
+ * account (blue), the settled payment key (dark green), a settled guard
+ * key (dark gold, with a count — a keyset can draw members from different
+ * seeds), or the codex's Prime Arweave address (violet). The first three
+ * come from `computeSeedDashboardRows` (pure public-key matching, see
+ * `seedDashboard.ts`); the violet one is async (decrypt-and-compare) and
+ * arrives later via `arweaveMatchSeedId` — `null` until resolved, so every
+ * row simply starts with its violet ticker unlit and re-renders once a
+ * real id lands (T3 of the plan wires that effect; this component only
+ * renders whatever it's given).
+ *
+ * Tickers 1-3 render inside their own bordered sub-box — the owner's own
+ * grouping: an account, its payment key, and its guard are one coherent
+ * "Ouronet string". Ticker 4 renders outside that sub-box, same rectangle
+ * — a distinct, Arweave-side concern.
+ *
+ * The expand chevron reveals WHICH key/position backs each lit ticker on
+ * THIS seed — it never reveals the seed's plaintext words, matching this
+ * file's own established "already securely stored, not re-displayed
+ * here" convention (see the Payment step's own copy).
+ */
+function SeedDashboard({
+  seeds,
+  accountSeedId,
+  paymentSeedId,
+  paymentIsStoicDerived,
+  guardSeedIds,
+  guardIsStoicDerived,
+  arweaveMatchSeedId,
+  getPassword,
+  viewSeedDisabled,
+  chosenAccount,
+  accountFallbackPaymentMatch,
+  accountFallbackGuardCount,
+  accountFallbackArweaveMatch,
+  pureKeysPaymentMatch,
+  pureKeysGuardCount,
+  unattributedGuardCount,
+}: {
+  seeds: readonly IStoaChainSeed[];
+  /** Already-resolved — see `SeedDashboardInput.accountSeedId`'s own doc
+   *  comment in `seedDashboard.ts` for why this is an id, not a key. */
+  accountSeedId: string | null;
+  /** Already-resolved seed id — see `SeedDashboardInput.paymentSeedId`'s
+   *  own doc comment in `seedDashboard.ts`. */
+  paymentSeedId: string | null;
+  paymentIsStoicDerived?: boolean;
+  guardSeedIds: readonly (string | null)[] | null;
+  guardIsStoicDerived?: boolean;
+  arweaveMatchSeedId: string | null;
+  /** Threaded down to each sub-row's "view seed" button
+   *  (`SeedRevealModal`) — optional, prop-driven, matching this wizard's
+   *  own established convention. */
+  getPassword?: () => string;
+  /** Owner (live testing, this round): "as long as the Ouronet Account
+   *  isnt selected... the View Seed button is disabled... Only when the
+   *  step 2 has popped... THEN the view seed button is lit." True while
+   *  the account step's own candidate-probe is still scanning — see
+   *  `AccountStep`'s `onProbeSettledChange`. Defaults to `false`
+   *  (enabled) so every other step/caller is unaffected. */
+  viewSeedDisabled?: boolean;
+  /** Owner (live testing, round 3/4): "Selecting AncientHolder, and then
+   *  clicking reveal seed, still doesn't show its Ouronet Seed." An
+   *  account genuinely unmatched by any recorded `IStoaChainSeed`
+   *  (common for the legacy/imported accounts this wizard exists to
+   *  rescue) never gets a card via `computeSeedDashboardCards` — there
+   *  is nothing to click that would ever reveal THAT account's own
+   *  material. When `accountSeedId` is `null` and a real account IS
+   *  chosen, an extra, always-present fallback card renders for it,
+   *  revealing its own secret directly (`AccountSeedRevealModal`),
+   *  independent of seed-entity matching entirely. */
+  chosenAccount?: IOuroAccount | null;
+  /** Owner (round 5): "with the default selection, this same Master
+   *  Seed would be responsible for the generation of the payment
+   *  key... thus also green ticker." The fallback card above has no
+   *  `seedId` to compare against (`accountSeedId` is `null` precisely
+   *  because it exists), so whether payment/guard ALSO derive from the
+   *  SAME seed-less account is tracked directly by the caller instead. */
+  accountFallbackPaymentMatch?: boolean;
+  accountFallbackGuardCount?: number;
+  /** Whether the codex holds Arweave accounts #0 and #1 under THAT seed-less
+   *  account's own bitstring (`docs/work/wizard-arweave-step/design.md`).
+   *  Separate from `arweaveMatchSeedId` for the same reason
+   *  `accountFallbackPaymentMatch` is separate from `paymentSeedId`: the
+   *  fallback card has no seed id, so id equality (`null === null`) would
+   *  spuriously match every time. Before the ticker was rewired onto
+   *  `codexHoldsMasterArweaveAccounts` this card's violet square was
+   *  hardcoded dark, honestly so — the OLD predicate compared an Arweave
+   *  seed's bitstring against CHAINWEB SEED ENTITIES, and this card exists
+   *  precisely because there is none. The new predicate compares against the
+   *  ACCOUNT's own bitstring, which this card does have, so a dark square
+   *  here would now be a lie for exactly the legacy/imported codices this
+   *  wizard exists to rescue. */
+  accountFallbackArweaveMatch?: boolean;
+  /** Drives the always-last "Pure Keys" card (`PureKeysCardView`,
+   *  `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "G") — a bare
+   *  pure keypair has no seed entity to attribute to at all, so (unlike
+   *  every other role above) this is never resolved via
+   *  `computeSeedDashboardCards`; the caller checks it directly against
+   *  the codex's own `pureKeypairs` and passes the result straight
+   *  through here. */
+  pureKeysPaymentMatch?: boolean;
+  pureKeysGuardCount?: number;
+  /** Drives the catch-all "Keys Not In This Codex" card
+   *  ({@link UnattributedKeysCardView}) — guard keys no other bucket could
+   *  claim. Exists so the per-card counts always SUM to the real keyset
+   *  size (owner: "If a keyset is made of 9 keys, the total numbers shown
+   *  would have to add up to 9"), instead of a key this codex doesn't hold
+   *  silently vanishing from the dashboard. */
+  unattributedGuardCount?: number;
+}): React.ReactElement | null {
+  const cards = computeSeedDashboardCards(seeds, {
+    accountSeedId, paymentSeedId, paymentIsStoicDerived, guardSeedIds, guardIsStoicDerived, arweaveMatchSeedId,
+  });
+  const showAccountFallback = accountSeedId === null && (chosenAccount ?? null) !== null;
+  const showPureKeys = pureKeysPaymentMatch === true || (pureKeysGuardCount ?? 0) > 0;
+  const showUnattributed = (unattributedGuardCount ?? 0) > 0;
+  if (cards.length === 0 && !showAccountFallback && !showPureKeys && !showUnattributed) return null;
+  const bySeedId = new Map(seeds.map((s) => [s.id, s] as const));
+  return (
+    <div
+      data-testid="legacy-prime-migration-settling-dashboard"
+      style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}
+    >
+      <p style={{ ...stepParagraphStyle, fontSize: 13, color: "#d2d3d4" }}>
+        <strong>Settling Dashboard.</strong> What each seed in this codex is backing for your
+        current selections.
+      </p>
+      {/* Owner (live testing, this round): "it seems the blue ticker isnt
+          appearing anymore... or it did, but took a while. we should at
+          least show some sort of progress that its being decrypted or
+          something." Every ticker/button below already goes dark/disabled
+          for this exact `viewSeedDisabled` window (the account step's own
+          candidate probe, or an in-flight account-switch resolution) —
+          this single status line is the only thing that was missing: it
+          tells the user SOMETHING is happening, rather than leaving every
+          card looking silently stuck. One line for the whole dashboard,
+          not repeated per card — every card's disablement already shares
+          this one cause. */}
+      {viewSeedDisabled === true ? (
+        <p
+          data-testid="legacy-prime-migration-settling-dashboard-checking"
+          style={{ ...stepParagraphStyle, fontSize: 12, color: "#8b8b96", fontStyle: "italic" }}
+        >
+          Checking which seed backs your current selections&hellip;
+        </p>
+      ) : null}
+      {/* Owner (live testing, round 7, screenshot 2): "the Master Seed
+          must always be shown on the first position... the Other Seeds
+          that are responsible for the Selected Keys, must follow
+          beneath it." The fallback card — when present — IS the
+          chosen account's own identity (there is no real seed entity
+          for it, but it plays the SAME "Master" role), so it renders
+          BEFORE every seed-matched card, never after.
+          `computeSeedDashboardCards` itself already sorts its OWN
+          account-matching card first among `cards` for the case where
+          a real seed DOES back the account — the two mechanisms are
+          mutually exclusive (`showAccountFallback` is only true when
+          `accountSeedId` is `null`, i.e. no card in `cards` can ever be
+          the account's own match at the same time). */}
+      {showAccountFallback && chosenAccount ? (
+        <AccountFallbackCardView
+          account={chosenAccount}
+          getPassword={getPassword}
+          viewSeedDisabled={viewSeedDisabled}
+          paymentMatch={accountFallbackPaymentMatch}
+          guardCount={accountFallbackGuardCount}
+          arweaveMatch={accountFallbackArweaveMatch}
+        />
+      ) : null}
+      {cards.map((card) => {
+        const seed = bySeedId.get(card.seedId);
+        if (!seed) return null;
+        return (
+          <SeedDashboardCardView
+            key={card.seedId}
+            card={card}
+            seed={seed}
+            getPassword={getPassword}
+            viewSeedDisabled={viewSeedDisabled}
+          />
+        );
+      })}
+      {/* Always LAST — one entry, regardless of how many distinct pure
+          keypairs are actually involved this run (`docs/work/wizard-
+          keyset-scale-and-sidebar/design.md`'s "G"). */}
+      {showPureKeys ? (
+        <PureKeysCardView
+          paymentMatch={pureKeysPaymentMatch === true}
+          guardCount={pureKeysGuardCount ?? 0}
+        />
+      ) : null}
+      {/* Truly last — the leftovers, so every card's counts SUM to the
+          real keyset size (see `unattributedGuardCount`'s own doc). */}
+      {showUnattributed ? (
+        <UnattributedKeysCardView guardCount={unattributedGuardCount ?? 0} />
+      ) : null}
+    </div>
+  );
+}
+
+/** The chosen account's own fallback card (see `SeedDashboard`'s
+ *  `chosenAccount` doc) — this card exists precisely BECAUSE no seed
+ *  entity matched, but the account can still back OTHER roles too, the
+ *  exact same way a real seed card can (owner, round 5: "with the
+ *  default selection, this same Master Seed would be responsible for
+ *  the generation of the payment key... thus also green ticker"). Shows
+ *  the SAME four-ticker layout every real card shows (owner: "each
+ *  entry must keep they square tickers, and we light up only that which
+ *  fits") — account/payment/guard inside the ticker group, Arweave
+ *  outside it, ALWAYS present, lighting only the roles that actually
+ *  apply. The Arweave one included: this card IS the Codex Master Seed
+ *  for a seed-less account (see `accountFallbackArweaveMatch`), so its
+ *  violet square answers the same one question every other violet
+ *  square does. Its "View seed" button reveals the account's own secret
+ *  directly via `AccountSeedRevealModal`, never a `IStoaChainSeed`. */
+function AccountFallbackCardView({
+  account, getPassword, viewSeedDisabled, paymentMatch, guardCount, arweaveMatch,
+}: {
+  account: IOuroAccount;
+  getPassword?: () => string;
+  viewSeedDisabled?: boolean;
+  paymentMatch?: boolean;
+  guardCount?: number;
+  arweaveMatch?: boolean;
+}): React.ReactElement {
+  const [revealOpen, setRevealOpen] = useState(false);
+  const testidBase = "legacy-prime-migration-settling-dashboard-account-fallback";
+  const disabled = viewSeedDisabled === true;
+  // Owner (live testing, round 8): "it should then Read Codex Master
+  // Seed (Ancient Hodler), as in we use in parenthesis the Ouronet
+  // Account that Settled The Codex Master Seed." This card has no real
+  // `IStoaChainSeed` of its own, but it plays the SAME "Codex Master
+  // Seed" role a real account-matching card does (round 5/8) — titled
+  // the same way, with the chosen account's own name in parentheses so
+  // it reads as THE codex's own master identity, not just another
+  // account entry.
+  const fallbackTitle = `${CODEX_MASTER_SEED} (${account.name ?? "This Ouronet Account"})`;
+  return (
+    <div data-testid={`${testidBase}-card`} style={{ ...reviewBoxStyle, gap: 8 }}>
+      <span style={{ ...stepParagraphStyle, color: "#d2d3d4", fontWeight: 700 }}>
+        {fallbackTitle}
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            data-testid={`${testidBase}-expand`}
+            disabled={disabled}
+            onClick={() => setRevealOpen(true)}
+            style={{
+              background: "transparent", border: "1px solid #262626", borderRadius: 4,
+              color: "#8b8b96", cursor: disabled ? "not-allowed" : "pointer",
+              padding: "2px 8px", fontSize: 11, flexShrink: 0,
+              opacity: disabled ? 0.45 : 1,
+            }}
+          >
+            View seed
+          </button>
+          <div
+            data-testid={`${testidBase}-ticker-group`}
+            style={{ display: "flex", gap: 4, padding: 4, borderRadius: 4, border: "1px solid #262626" }}
+          >
+            <SeedTicker
+              testid={`${testidBase}-ticker-account`}
+              lit={!disabled}
+              color={SEED_TICKER_COLORS.account}
+            />
+            <SeedTicker
+              testid={`${testidBase}-ticker-payment`}
+              lit={paymentMatch === true && !disabled}
+              color={SEED_TICKER_COLORS.payment}
+            />
+            <SeedTicker
+              testid={`${testidBase}-ticker-guard`}
+              lit={(guardCount ?? 0) > 0 && !disabled}
+              color={SEED_TICKER_COLORS.guard}
+              count={guardCount}
+            />
+          </div>
+          {/* Gated on `!disabled` like its siblings: while the dashboard's
+              own resolving window is open, nothing on this card claims to
+              know anything yet. */}
+          <SeedTicker
+            testid={`${testidBase}-ticker-arweave`}
+            lit={arweaveMatch === true && !disabled}
+            color={SEED_TICKER_COLORS.arweave}
+          />
+          <span style={stepParagraphStyle}>
+            {account.name ?? "This account"} ({STOIC_DALOS_DERIVATION_LABEL})
+          </span>
+        </div>
+        <span style={{ ...stepParagraphStyle, fontSize: 11, color: "#666" }}>
+          No matching Chainweb seed on record — this account&rsquo;s own words, directly.
+        </span>
+      </div>
+      <AccountSeedRevealModal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        account={account}
+        getPassword={getPassword}
+      />
+    </div>
+  );
+}
+
+/** The "Pure Keys" attribution card (`docs/work/wizard-keyset-scale-and-
+ *  sidebar/design.md`'s "G — Pure keys join the picker and the
+ *  dashboard") — ONE entry, regardless of how many distinct pure keypairs
+ *  actually back payment/guard this run: unlike a seed, a bare pure
+ *  keypair has no entity to individuate by, so (unlike
+ *  `AccountFallbackCardView`'s per-account card) it never multiplies.
+ *  Reuses the SAME four-ticker ticker-group layout every other card
+ *  shows, but simpler: the account and Arweave tickers are PERMANENTLY
+ *  dark (an Ouronet account is always Dalos/seed-derived, never a bare
+ *  pure key, and there is no Arweave bitstring to decrypt-and-compare
+ *  against one), and "View seed" is PERMANENTLY disabled — no click
+ *  handler, no reveal modal at all, since there is no seed entity to
+ *  ever reveal (not even probe-gated, unlike every other card's own
+ *  button). */
+function PureKeysCardView({
+  paymentMatch,
+  guardCount,
+}: {
+  paymentMatch: boolean;
+  guardCount: number;
+}): React.ReactElement {
+  const testidBase = "legacy-prime-migration-settling-dashboard-pure-keys";
+  return (
+    <div data-testid={`${testidBase}-card`} style={{ ...reviewBoxStyle, gap: 8 }}>
+      <span style={{ ...stepParagraphStyle, color: "#d2d3d4", fontWeight: 700 }}>
+        Pure Keys
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            data-testid={`${testidBase}-view-seed`}
+            disabled
+            style={{
+              background: "transparent", border: "1px solid #262626", borderRadius: 4,
+              color: "#8b8b96", cursor: "not-allowed",
+              padding: "2px 8px", fontSize: 11, flexShrink: 0,
+              opacity: 0.45,
+            }}
+          >
+            View seed
+          </button>
+          <div
+            data-testid={`${testidBase}-ticker-group`}
+            style={{ display: "flex", gap: 4, padding: 4, borderRadius: 4, border: "1px solid #262626" }}
+          >
+            <SeedTicker testid={`${testidBase}-ticker-account`} lit={false} color={SEED_TICKER_COLORS.account} />
+            <SeedTicker testid={`${testidBase}-ticker-payment`} lit={paymentMatch} color={SEED_TICKER_COLORS.payment} />
+            <SeedTicker
+              testid={`${testidBase}-ticker-guard`}
+              lit={guardCount > 0}
+              color={SEED_TICKER_COLORS.guard}
+              count={guardCount}
+            />
+          </div>
+          <SeedTicker testid={`${testidBase}-ticker-arweave`} lit={false} color={SEED_TICKER_COLORS.arweave} />
+          <span style={stepParagraphStyle}>Pure Keys</span>
+        </div>
+        <span style={{ ...stepParagraphStyle, fontSize: 11, color: "#666" }}>
+          Bare keypairs held directly by this codex — no seed to reveal.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The catch-all attribution card — guard keys this codex cannot place in
+ *  ANY other bucket (no seed holds them, no pure keypair matches them, and
+ *  they are not the chosen account's own identity/payment key).
+ *
+ *  Owner (live testing, repeatedly): "If a keyset is made of 9 keys, the
+ *  total numbers shown would have to add up to 9." Without this card, an
+ *  unplaceable key silently disappeared from the dashboard and the per-card
+ *  counts summed to LESS than the real keyset size — which is both wrong
+ *  arithmetic and, worse, hides the single most security-relevant fact a
+ *  guard can carry: that it authorises a key this codex does not hold. */
+function UnattributedKeysCardView({
+  guardCount,
+}: {
+  guardCount: number;
+}): React.ReactElement {
+  const testidBase = "legacy-prime-migration-settling-dashboard-unattributed";
+  return (
+    <div data-testid={`${testidBase}-card`} style={{ ...reviewBoxStyle, gap: 8 }}>
+      <span style={{ ...stepParagraphStyle, color: "#d2d3d4", fontWeight: 700 }}>
+        Keys Not In This Codex
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            data-testid={`${testidBase}-view-seed`}
+            disabled
+            style={{
+              background: "transparent", border: "1px solid #262626", borderRadius: 4,
+              color: "#8b8b96", cursor: "not-allowed",
+              padding: "2px 8px", fontSize: 11, flexShrink: 0,
+              opacity: 0.45,
+            }}
+          >
+            View seed
+          </button>
+          <div
+            data-testid={`${testidBase}-ticker-group`}
+            style={{ display: "flex", gap: 4, padding: 4, borderRadius: 4, border: "1px solid #262626" }}
+          >
+            <SeedTicker testid={`${testidBase}-ticker-account`} lit={false} color={SEED_TICKER_COLORS.account} />
+            <SeedTicker testid={`${testidBase}-ticker-payment`} lit={false} color={SEED_TICKER_COLORS.payment} />
+            <SeedTicker
+              testid={`${testidBase}-ticker-guard`}
+              lit={guardCount > 0}
+              color={SEED_TICKER_COLORS.guard}
+              count={guardCount}
+            />
+          </div>
+          <SeedTicker testid={`${testidBase}-ticker-arweave`} lit={false} color={SEED_TICKER_COLORS.arweave} />
+          <span style={stepParagraphStyle}>Keys Not In This Codex</span>
+        </div>
+        <span style={{ ...stepParagraphStyle, fontSize: 11, color: "#666" }}>
+          Named by this guard, but held by no seed, pure keypair, or account here — nothing to
+          reveal, and nothing this codex could sign with.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const SEED_TICKER_COLORS = {
+  account: "#3b82f6",
+  payment: "#15803d",
+  guard: "#92400e",
+  arweave: "#7c3aed",
+} as const;
+
+function SeedTicker({
+  testid, lit, color, count,
+}: {
+  testid: string; lit: boolean; color: string; count?: number;
+}): React.ReactElement {
+  return (
+    <span
+      data-testid={testid}
+      data-lit={lit ? "true" : "false"}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        minWidth: 14, height: 14,
+        padding: count !== undefined && count > 0 ? "0 4px" : 0,
+        borderRadius: 3,
+        backgroundColor: lit ? color : "transparent",
+        border: `1px solid ${lit ? color : "#3a3a3a"}`,
+        color: "#0a0a0a", fontSize: 10, fontWeight: 700,
+      }}
+    >
+      {lit && count !== undefined && count > 0 ? count : ""}
+    </span>
+  );
+}
+
+/** One CARD — one seed's own "Seed Words" entry — containing one sub-row
+ *  per distinct derivation label in play for it this run. */
+function SeedDashboardCardView({
+  card, seed, getPassword, viewSeedDisabled,
+}: {
+  card: SeedDashboardCard;
+  seed: IStoaChainSeed;
+  getPassword?: () => string;
+  viewSeedDisabled?: boolean;
+}): React.ReactElement {
+  const cardTestidBase = `legacy-prime-migration-settling-dashboard-card-${card.seedId}`;
+  return (
+    <div data-testid={cardTestidBase} style={{ ...reviewBoxStyle, gap: 8 }}>
+      <span style={{ ...stepParagraphStyle, color: "#d2d3d4", fontWeight: 700 }}>{card.seedName}</span>
+      {card.subRows.map((subRow, index) => (
+        <SeedDashboardSubRowView
+          key={subRow.label}
+          testidBase={`${cardTestidBase}-subrow-${index}`}
+          card={card}
+          subRow={subRow}
+          seed={seed}
+          getPassword={getPassword}
+          viewSeedDisabled={viewSeedDisabled}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One sub-row within a card — one specific derivation label and its own
+ *  ticker set. The button opens the REAL seed-reveal modal for this
+ *  card's OWN seed (owner, this round: "a button that shows the seed in
+ *  a new popup, similar to what the codex already has... we reuse what
+ *  we already have") — never a separate Arweave-seed reveal, even for a
+ *  sub-row whose violet ticker is the one that's lit: cards are keyed by
+ *  the Chainweb seed's own identity, so this naturally shows real words
+ *  whenever THIS seed has them on record. Enabled whenever the sub-row
+ *  exists at all — a card is only ever rendered for a seed present in
+ *  `allSeeds`, so there is nothing further to gate on. */
+function SeedDashboardSubRowView({
+  testidBase, card, subRow, seed, getPassword, viewSeedDisabled,
+}: {
+  testidBase: string;
+  card: SeedDashboardCard;
+  subRow: SeedDashboardSubRow;
+  seed: IStoaChainSeed;
+  getPassword?: () => string;
+  viewSeedDisabled?: boolean;
+}): React.ReactElement {
+  const [revealOpen, setRevealOpen] = useState(false);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {/* Left to right (owner, this round): "Let's place the button on
+            the left part, 4 checkers. Then the name of the seed." */}
+        <button
+          type="button"
+          data-testid={`${testidBase}-expand`}
+          disabled={viewSeedDisabled === true}
+          onClick={() => setRevealOpen(true)}
+          style={{
+            background: "transparent", border: "1px solid #262626", borderRadius: 4,
+            color: "#8b8b96", cursor: viewSeedDisabled === true ? "not-allowed" : "pointer",
+            padding: "2px 8px", fontSize: 11, flexShrink: 0,
+            opacity: viewSeedDisabled === true ? 0.45 : 1,
+          }}
+        >
+          View seed
+        </button>
+        <div
+          data-testid={`${testidBase}-ticker-group`}
+          style={{ display: "flex", gap: 4, padding: 4, borderRadius: 4, border: "1px solid #262626" }}
+        >
+          {/* Owner (live testing, this round): "during loading when the
+              View seed is disabled, the blue tick should also be
+              disabled... because it becomes lit, when the first
+              ouronet account is selected in step 2" — the account role
+              can resolve (via the synchronous `currentPrimeSeed`
+              shortcut) WHILE the account step's own candidate probe is
+              still scanning. Only the TICKER's visual lit state is
+              overridden here (never `subRow.accountMatch` itself,
+              which still drives whether this card/sub-row exists at
+              all and whether the "View seed" button renders) — forcing
+              `accountMatch` to `false` upstream would make a card
+              backed ONLY by the account role vanish mid-probe instead
+              of staying visible with a disabled button, which is the
+              behavior `ui-seed-dashboard.test.tsx`'s own probe-pass
+              test already relies on. */}
+          <SeedTicker
+            testid={`${testidBase}-ticker-account`}
+            lit={subRow.accountMatch && viewSeedDisabled !== true}
+            color={SEED_TICKER_COLORS.account}
+          />
+          <SeedTicker testid={`${testidBase}-ticker-payment`} lit={subRow.paymentMatch} color={SEED_TICKER_COLORS.payment} />
+          <SeedTicker
+            testid={`${testidBase}-ticker-guard`}
+            lit={subRow.guardCount > 0}
+            color={SEED_TICKER_COLORS.guard}
+            count={subRow.guardCount}
+          />
+        </div>
+        <SeedTicker testid={`${testidBase}-ticker-arweave`} lit={subRow.arweaveMatch} color={SEED_TICKER_COLORS.arweave} />
+        <span style={stepParagraphStyle}>{card.seedName} ({subRow.label})</span>
+      </div>
+      <SeedRevealModal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        seed={seed}
+        getPassword={getPassword}
+      />
+    </div>
+  );
+}
+
+/**
  * Page 7 ("finalize", T8, Wave 5) — resolves the `{accountId, bitString,
  * words, method}` triple `ensurePrimeSeedAccountPairingAndPromote` (T7,
  * `state/store.ts`) needs, from whichever Page-2/Page-3 choice is active —
@@ -3506,10 +5352,14 @@ const reviewBoxStyle: React.CSSProperties = {
  *    `secret` (via `getPassword()` → `smartDecrypt`, the SAME seam
  *    `SeedWordsTab.tsx`'s `revealPrivateKey`/`handleView` already use) —
  *    this is the first point in the wizard that is allowed to, since
- *    Finalize is a real action, not Page 2/3's selection-only UI. Requires
- *    `originSeedTab !== undefined` (a real, known word origin); an account
- *    with no known words (the `NO_KNOWN_WORDS_WARNING_TEXT` case) cannot be
- *    finalized at all.
+ *    Finalize is a real action, not Page 2/3's selection-only UI. Does
+ *    NOT require `originSeedTab !== undefined` — that provenance tag is
+ *    stamped only at account-SPAWN time, never derived from or verified
+ *    against the actual stored secret, so its absence proves nothing;
+ *    the REAL decrypt attempt right above this comment's own code is the
+ *    only gate. An account whose decrypt genuinely fails still cannot be
+ *    finalized — that failure surfaces as a plain error, not a
+ *    pre-emptive "no known words" refusal.
  *  - `bitString`'s meaning differs by method, matching
  *    `ensurePrimeSeedAccountPairingAndPromote`'s own landed implementation
  *    exactly: for `"stoic-dalos"`, the real DALOS encoding
@@ -3521,9 +5371,31 @@ const reviewBoxStyle: React.CSSProperties = {
  *    is supposed to decrypt back to: the mnemonic, never a DALOS
  *    bitstring).
  */
+/**
+ * Which of the TWO password failures Finalize can hit
+ * (`docs/work/wizard-unlock-lifecycle/design.md`). Same two names, and the
+ * same meanings, the Account step's own `probeNeedsPassword` already uses —
+ * deliberately, so the wizard speaks about this one problem in one vocabulary:
+ *
+ *   "locked" — `getPassword()` threw (no cache / the absolute TTL expired
+ *              mid-wizard, which for a flow this long is the normal case).
+ *   "wrong"  — `getPassword()` SUCCEEDED, but what it returned does not
+ *              decrypt this account. `authenticate()` caches whatever it is
+ *              handed and never validates it, so a stale/typo'd password sits
+ *              in the cache looking perfectly healthy.
+ *
+ * Neither is terminal: both ask for the password where the user stands, via
+ * {@link InlineUnlockPrompt}, and re-run the attempt.
+ */
+type FinalizePasswordProblem = "locked" | "wrong";
+
 type FinalizeDerivationResult =
   | { ok: true; accountId: string; bitString: string; words: readonly string[]; method: "stoic-dalos" | "advanced-native" }
-  | { ok: false; error: string };
+  /** `passwordProblem` set ⇒ recoverable by re-entering the password, so the
+   *  finalize panel prompts instead of rendering `error` as a red dead end.
+   *  `error` is still carried for both: it is the honest fallback text if a
+   *  caller cannot prompt (e.g. no store to authenticate against). */
+  | { ok: false; error: string; passwordProblem?: FinalizePasswordProblem };
 
 async function resolveFinalizeDerivation(args: {
   accountChoice: LegacyPrimeMigrationAccountChoice | null;
@@ -3552,20 +5424,47 @@ async function resolveFinalizeDerivation(args: {
   if (!targetAccount) {
     return { ok: false, error: "No Prime Ouronet Account was chosen." };
   }
-  if (targetAccount.originSeedTab === undefined) {
-    return {
-      ok: false,
-      error:
-        "This account has no known recovery words on record — there is nothing to derive the Prime Chainweb Seed from.",
-    };
-  }
-
-  let wordsPlain: string;
+  // owner (live testing, this session): a real "AncientHodler" account with
+  // a genuinely working, chain-verified seed (confirmed via the Codex ID
+  // page's own "View Seed" + chain-match indicators) still failed here with
+  // "no known recovery words on record". Root cause: `originSeedTab` is a
+  // provenance tag stamped only at account-SPAWN time (`SpawnAccountModal`'s
+  // own write path) — it is never derived from, or verified against, the
+  // actual stored secret, and this file's OWN Page-2 probe comments already
+  // document it as unreliable both ways ("accounts they know are ungated
+  // stamped as gated (or not stamped at all)"). A hard gate on
+  // `=== undefined` before ever attempting the real decrypt treated a
+  // missing PROVENANCE tag as proof of "no recoverable words", which is
+  // exactly backwards for the legacy accounts this wizard exists to rescue.
+  // The real decrypt attempt immediately below is the actual test — this
+  // never needed a second, less-informed one in front of it.
+  //
+  // The two password failures are classified SEPARATELY (wizard-unlock-
+  // lifecycle, T2), by splitting what used to be a single
+  // `smartDecrypt(secret, getPassword())` expression in one try block. That
+  // single block is exactly what made Finalize a dead end: a locked codex and
+  // a cached-but-wrong password both arrived here as one red line
+  // ("Could not decrypt this account's words: AES-GCM auth-tag failure" —
+  // what the owner actually saw), with no way forward from where they stood.
+  // Which failure it is decides which question the user is asked, so the
+  // `getPassword()` call gets its own try.
+  let password: string;
   try {
-    wordsPlain = await smartDecrypt(targetAccount.secret, getPassword());
+    password = getPassword();
   } catch (e) {
     return {
       ok: false,
+      passwordProblem: "locked",
+      error: e instanceof Error ? e.message : "This codex is locked.",
+    };
+  }
+  let wordsPlain: string;
+  try {
+    wordsPlain = await smartDecrypt(targetAccount.secret, password);
+  } catch (e) {
+    return {
+      ok: false,
+      passwordProblem: "wrong",
       error:
         e instanceof Error
           ? `Could not decrypt this account's words: ${e.message}`
@@ -3577,10 +5476,121 @@ async function resolveFinalizeDerivation(args: {
   return { ok: true, accountId: targetAccount.id, bitString, words, method: keysChoice.kind };
 }
 
-/** Page 7's own internal status machine — `"running"` while
+/**
+ * THE ONE PLACE the Arweave-accounts predicate's input is assembled. Both
+ * callers in this file — the Arweave STEP's own check
+ * (`docs/work/wizard-arweave-step/design.md`) and `runFinalize`'s
+ * before/after evaluation — go through here, deliberately: a second copy of
+ * this input is precisely how the violet ticker and the finalize gate ended
+ * up asking different questions about the same fact (that topic's design.md
+ * §"The violet ticker and the eligibility gate ask different questions").
+ * The step and the commit must agree by construction, not by two
+ * independently-maintained expressions happening to match.
+ *
+ * `readCodexState` is a FUNCTION, not a snapshot: both callers need the
+ * codex's CURRENT `arweaveSeeds`/`foreignKeys`, read at evaluation time —
+ * `runFinalize` to observe writes `ensurePrimeArweaveSeed` made during its
+ * own run, and the step to observe writes its Generate button just made. A
+ * captured render-closure array cannot see either.
+ *
+ * The password degradation is the same everywhere it appears in this file:
+ * `getPassword()` throwing means "locked", which reaches the predicate as a
+ * `null` password — reported as "not proven", never as a free pass.
+ * `fallbackPassword` is the one the caller may already hold in hand (the
+ * finalize prompt's freshly-typed, already-proven password) for the case
+ * where the unlock window closed mid-run.
+ */
+function evaluateMasterArweaveAccounts(args: {
+  masterBitString: string | null;
+  readCodexState: () => Pick<CodexHoldsMasterArweaveAccountsInput, "arweaveSeeds" | "foreignKeys"> | null;
+  getPassword?: () => string;
+  fallbackPassword?: string | null;
+}): Promise<CodexHoldsMasterArweaveAccountsResult> {
+  const state = args.readCodexState();
+  const fallback = args.fallbackPassword ?? null;
+  let password: string | null;
+  try {
+    password = args.getPassword ? args.getPassword() : fallback;
+  } catch {
+    password = fallback;
+  }
+  return codexHoldsMasterArweaveAccounts({
+    masterBitString: args.masterBitString,
+    arweaveSeeds: state?.arweaveSeeds ?? [],
+    foreignKeys: state?.foreignKeys ?? [],
+    password,
+    smartDecrypt,
+  });
+}
+
+/**
+ * THE ONE PIPELINE behind "does this codex hold Arweave accounts #0 and #1
+ * under the Codex Master Seed" — resolve the CHOSEN ACCOUNT's bitstring
+ * ({@link resolveFinalizeDerivation}, the only thing in this file that knows
+ * what the master bitstring IS), then ask
+ * {@link evaluateMasterArweaveAccounts}. All three consumers go through here:
+ * the Settling Dashboard's violet ticker, the Arweave STEP's own check, and
+ * `runFinalize`'s before/after evaluation.
+ *
+ * That is the entire point (`docs/work/wizard-arweave-step/design.md` §"One
+ * predicate, actually"). The ticker used to ask a DIFFERENT question —
+ * `resolveArweaveMatchSeedId`, "does any Arweave seed's bitstring match some
+ * CHAINWEB seed's?", which never looked at accounts #0/#1 at all — so an
+ * Arweave seed row with zero Arweave accounts lit the square while finalize
+ * (correctly) refused, and the owner reported the contradiction twice. Two
+ * expressions of one fact is how that happened; this is the structural answer
+ * rather than a third expression kept in sync by hand.
+ *
+ * The `derivation` is returned alongside the verdict because the STEP needs
+ * it for more than the bitstring: it reports WHY the master could not be
+ * resolved (locked codex vs. wrong password vs. no account chosen), and
+ * Generate derives from this exact resolution rather than taking a second one
+ * of its own. The ticker ignores it — a master it cannot resolve is simply a
+ * square it cannot light.
+ *
+ * Never throws: `getPassword` being absent is passed on as a thrower that
+ * {@link resolveFinalizeDerivation} catches into `passwordProblem: "locked"`,
+ * {@link evaluateMasterArweaveAccounts} swallows its own `getPassword()`
+ * failure into a `null` password, and the predicate reports a null password as
+ * "nothing proven". A locked codex therefore degrades to an unlit square and
+ * an honest "could not be checked", never to a crash or a prompt.
+ */
+async function resolveMasterArweaveHeld(args: {
+  accountChoice: LegacyPrimeMigrationAccountChoice | null;
+  keysChoice: LegacyPrimeMigrationKeysChoice | null;
+  currentPrimeAccount: IOuroAccount | null;
+  allAccounts: readonly IOuroAccount[];
+  getPassword?: () => string;
+  readCodexState: () => Pick<CodexHoldsMasterArweaveAccountsInput, "arweaveSeeds" | "foreignKeys"> | null;
+}): Promise<{
+  derivation: FinalizeDerivationResult;
+  result: CodexHoldsMasterArweaveAccountsResult;
+}> {
+  const derivation = await resolveFinalizeDerivation({
+    accountChoice: args.accountChoice,
+    keysChoice: args.keysChoice,
+    currentPrimeAccount: args.currentPrimeAccount,
+    allAccounts: args.allAccounts,
+    // The `getPassword()`-in-a-try idiom this file uses everywhere else: no
+    // store means no password, which resolves to "locked" INSIDE
+    // `resolveFinalizeDerivation` rather than throwing out of an effect.
+    getPassword:
+      args.getPassword
+      ?? (() => { throw new Error("this wizard has no connection to the codex"); }),
+  });
+  const result = await evaluateMasterArweaveAccounts({
+    masterBitString: derivation.ok ? derivation.bitString : null,
+    readCodexState: args.readCodexState,
+    getPassword: args.getPassword,
+  });
+  return { derivation, result };
+}
+
+/** Page 7's own internal status machine — starts `"awaiting-settle"` (idle,
+ *  nothing attempted), goes `"running"` while
  *  {@link resolveFinalizeDerivation}/`ensurePrimeSeedAccountPairingAndPromote`/
- *  `ensurePrimeArweaveSeed`/`stampPrimeAlignmentAligned` are in flight,
- *  settling into exactly one of the other four terminal states. */
+ *  `ensurePrimeArweaveSeed`/`recordMigrationPending` are in flight, and
+ *  settles into exactly one of the other four terminal states. */
 /**
  * `"committed-pending-transactions"` replaces the old `"sweep-needed"` dead
  * end. The difference is real, not cosmetic: the old state meant "nothing
@@ -3589,7 +5599,33 @@ async function resolveFinalizeDerivation(args: {
  * from exactly that state.
  */
 type FinalizeStatus =
+  /**
+   * THE IDLE STATE, and the INITIAL one (`migration-pending-apply` T4).
+   *
+   * Nothing has been attempted and nothing has been written: the step is
+   * showing the {@link SETTLE_CHOICES_LABEL} button and waiting for the user
+   * to press it. This status existing at all is the fix — `finalizeStatus`
+   * used to initialise to `"running"`, so the panel structurally assumed the
+   * commit was already in flight by the time it mounted, which is exactly
+   * what it meant for the commit to be a side effect of the step transition.
+   *
+   * Owner: *"the wizard has to end with a finalize button 'Settle Choices'…
+   * clicking it is the final action that settles the selected choices."*
+   *
+   * It is the ONLY status from which {@link handleBack} will leave finalize —
+   * see that function's `"finalize"` branch.
+   */
+  | "awaiting-settle"
   | "running"
+  /** A recoverable PASSWORD problem, not a failure (wizard-unlock-lifecycle,
+   *  T2): the panel shows {@link InlineUnlockPrompt} and the run resumes from
+   *  here once a working password is entered. Deliberately NOT `"error"` — it
+   *  is reached by the same codex that would have finalized fine a minute
+   *  earlier, and nothing has been abandoned. Not `"running"` either: the only
+   *  thing in flight is the user's typing, and the shared "Close" button below
+   *  must be available as the way out (closing leaves every staged selection
+   *  recorded, so reopening resumes exactly here). */
+  | "needs-password"
   /** Eligible — stage 2 is complete and the codex really can be restored
    *  from its words — but the key changes the user CHOSE are not on chain
    *  yet (stage 3A). Distinct from `"success"` so the screen can say so
@@ -3598,6 +5634,35 @@ type FinalizeStatus =
   | "arweave-unavailable"
   | "error"
   | "success";
+
+/** The two questions Finalize can ask (wizard-unlock-lifecycle, T2). Phrased
+ *  as "to finish", not "to unlock": the user is mid-action, and what they want
+ *  to know is that typing this completes the thing they already started. */
+const FINALIZE_LOCKED_PROMPT_TEXT =
+  "Your codex is locked — enter your password to finish.";
+const FINALIZE_WRONG_PASSWORD_PROMPT_TEXT =
+  "The password this codex currently holds could not decrypt this account. Re-enter it to finish.";
+
+/** The owner's own words for the wizard's last action, used verbatim. */
+const SETTLE_CHOICES_LABEL = "Settle Choices";
+
+/** What the idle finalize screen says ABOVE the button, so the user knows
+ *  what pressing it costs. Deliberately plain about irreversibility: this is
+ *  the click that promotes an account and makes keys non-removable. */
+const SETTLE_CHOICES_INTRO_TEXT =
+  "Nothing has been written yet. Pressing " + SETTLE_CHOICES_LABEL +
+  " settles every choice you made: it pairs your " + OURONET_CODEX_MASTER + " with its " +
+  "Master Chainweb Seed, records the Codex Master Seed row, makes the keys your master " +
+  "depends on non-removable, and writes the plan the Apply button will seal.";
+
+/** What the idle screen says when the codex is LOCKED — the one case where
+ *  the squares are dark for a reason pressing the button actually FIXES.
+ *  See {@link LegacyPrimeMigrationWizard}'s `settleBlockedReason` for why
+ *  this is a notice rather than a block. */
+const SETTLE_LOCKED_NOTICE_TEXT =
+  "Your codex is locked, so this screen cannot read your account's keys — that is why some of "
+  + "the squares are dark. Press " + SETTLE_CHOICES_LABEL
+  + " anyway: it will ask for your password here, and then settle your choices.";
 
 const finalizeInfoBoxStyle: React.CSSProperties = {
   padding: "12px 14px",
@@ -3620,33 +5685,175 @@ const finalizeSuccessBoxStyle: React.CSSProperties = {
   lineHeight: 1.6,
 };
 
-/** Page 7 ("finalize") — renders exactly one of the five states
- *  {@link FinalizeStatus} can be in. A single shared "Close" button for
- *  every TERMINAL state (every state but `"running"`) calls `onClose` —
- *  there is nothing more for the user to decide once Finalize has settled,
- *  per the module doc's "Page 7" section. */
+/** Page 7 ("finalize") — renders exactly one of the states
+ *  {@link FinalizeStatus} can be in, starting at the IDLE
+ *  `"awaiting-settle"` one, which offers {@link SETTLE_CHOICES_LABEL} and
+ *  has written nothing.
+ *
+ *  A single shared "Close" button renders in every state but `"running"`.
+ *  That used to mean "every TERMINAL state" and now ALSO covers the idle one
+ *  — deliberately, not by oversight: closing from idle has written nothing,
+ *  every staged selection is already recorded, and reopening the wizard
+ *  resumes exactly here, so it is the same honest "nothing is lost by
+ *  closing this" the `"needs-password"` state already promises. The only
+ *  state with no way out remains the one where writes are genuinely in
+ *  flight. */
 function FinalizeStep({
   status,
   errorMessage,
   onClose,
   committed,
+  needsPassword,
+  onUnlock,
+  arweaveProgress,
+  settleBlockedReason,
+  settleLockedNotice,
+  onSettle,
+  onBack,
 }: {
   status: FinalizeStatus;
   errorMessage: string | null;
   onClose: () => void;
+  /** Why {@link SETTLE_CHOICES_LABEL} cannot be pressed, or `null` when it
+   *  can — the wizard's own `settleBlockedReason()`, already evaluated. Shown
+   *  as a visible line AND as the button's `title`: a disabled control that
+   *  says nothing is indistinguishable from a broken one. */
+  settleBlockedReason: string | null;
+  /** {@link SETTLE_LOCKED_NOTICE_TEXT} when the codex is locked, else
+   *  `null`. Separate from `settleBlockedReason` because a locked codex does
+   *  NOT block settling — pressing the button is what brings up the password
+   *  prompt — but the user still has to be told why the squares are dark. */
+  settleLockedNotice: string | null;
+  /** The commit. The ONE action that starts stage 2. */
+  onSettle: () => void;
+  /** Back to the Arweave step. Offered ONLY in the idle state, where nothing
+   *  has been written — it is the way out of a colour that can never light
+   *  (a guard resolving to `"none"`, a payment key this codex cannot
+   *  attribute), which would otherwise strand the user here. */
+  onBack: () => void;
+  /** The in-flight Arweave derivation's own latest event, or `null` when no
+   *  derivation is running (`arweave-master-accounts` T3). Driven ONLY by
+   *  `ensurePrimeArweaveSeed`'s `onProgress` callback — never a timer — so the
+   *  line cannot claim progress that is not really happening. */
+  arweaveProgress?: ArweaveDerivationProgress | null;
   /** What stage 2 actually wrote, so the result screen reports facts rather
    *  than a generic "done". */
   committed?: MigrationCommitRecord;
+  /** Which password question to ask while `status === "needs-password"`. */
+  needsPassword?: FinalizePasswordProblem | null;
+  /** Re-attempt the finalize with the typed password. Resolves the
+   *  `{ok, error}` shape {@link InlineUnlockPrompt} expects. */
+  onUnlock?: (password: string) => Promise<{ ok: boolean; error?: string }>;
 }): React.ReactElement {
   return (
     <div
       data-testid="legacy-prime-migration-finalize"
       style={{ display: "flex", flexDirection: "column", gap: 14 }}
     >
+      {/* THE IDLE STATE (`migration-pending-apply` T4) — the wizard's last
+          screen before anything is written. The button lives HERE, in the
+          step body, rather than in `navRow()`: that row is two icon-only
+          chevrons in the modal's title bar, with no precedent for a
+          text-labelled action, and `headerExtra` is `undefined` on finalize
+          by design (the "no Back/Continue on finalize" contract). */}
+      {status === "awaiting-settle" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={stepParagraphStyle}>{SETTLE_CHOICES_INTRO_TEXT}</p>
+          {settleLockedNotice !== null ? (
+            <p
+              data-testid="legacy-prime-migration-settle-locked"
+              style={{ ...stepParagraphStyle, color: "#ceac5f", margin: 0 }}
+            >
+              {settleLockedNotice}
+            </p>
+          ) : null}
+          {settleBlockedReason !== null ? (
+            <p
+              data-testid="legacy-prime-migration-settle-blocked"
+              style={{ ...stepParagraphStyle, color: "#8b8b96", margin: 0 }}
+            >
+              {settleBlockedReason}
+            </p>
+          ) : null}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              data-testid="legacy-prime-migration-settle-choices"
+              onClick={onSettle}
+              disabled={settleBlockedReason !== null}
+              title={settleBlockedReason ?? undefined}
+              style={{
+                padding: "10px 20px",
+                borderRadius: 8,
+                border: "none",
+                fontWeight: 700,
+                fontSize: 13,
+                backgroundColor: settleBlockedReason === null ? ACCENT : "#1a1a1a",
+                color: settleBlockedReason === null ? "#0a0a0a" : "#555",
+                cursor: settleBlockedReason === null ? "pointer" : "not-allowed",
+              }}
+            >
+              {SETTLE_CHOICES_LABEL}
+            </button>
+            {/* The escape hatch. See `onBack`'s own doc comment and
+                `handleBack`'s `"finalize"` branch for why this exists only
+                while the status is idle. */}
+            <button
+              type="button"
+              data-testid="legacy-prime-migration-settle-back"
+              onClick={onBack}
+              style={{
+                padding: "10px 16px", borderRadius: 8,
+                border: "1px solid #262626", backgroundColor: "transparent",
+                color: "#8b8b96", fontSize: 12, cursor: "pointer",
+              }}
+            >
+              Back — change a choice
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {status === "running" ? (
         <p data-testid="legacy-prime-migration-finalize-running" style={stepParagraphStyle}>
           Finalizing your Prime trio…
         </p>
+      ) : null}
+
+      {/* The one genuinely slow step: each Arweave key is a full RSA-4096
+          derivation costing seconds, so the panel shows the SAME bar the
+          Arweave step and the Arweave tab show
+          ({@link ArweaveDerivationProgressBar}) — position in flight, live
+          prime search, count delivered. Rendered only while a derivation is
+          actually reporting events, and it disappears the moment that
+          derivation settles. */}
+      {arweaveProgress ? (
+        <ArweaveDerivationProgressBar
+          progress={arweaveProgress}
+          testId="legacy-prime-migration-finalize-arweave-progress"
+        />
+      ) : null}
+
+      {/* wizard-unlock-lifecycle (T2): the recoverable password states. The
+          prompt replaces the red terminal box these two used to render — the
+          staged selections stay exactly as they are, and submitting resumes
+          the SAME finalize attempt rather than restarting the wizard. */}
+      {status === "needs-password" && needsPassword && onUnlock ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <InlineUnlockPrompt
+            message={
+              needsPassword === "locked"
+                ? FINALIZE_LOCKED_PROMPT_TEXT
+                : FINALIZE_WRONG_PASSWORD_PROMPT_TEXT
+            }
+            submitLabel="Unlock & Finish"
+            onUnlock={onUnlock}
+          />
+          <p style={{ ...stepParagraphStyle, color: "#8b8b96" }}>
+            Nothing is lost by closing this: every choice you made is saved, and
+            reopening picks up exactly here.
+          </p>
+        </div>
       ) : null}
 
       {status === "eligible-rotation-outstanding" ? (
@@ -3737,16 +5944,44 @@ export function LegacyPrimeMigrationWizard({
   currentPrimeAccount = null,
   allSeeds = [],
   allAccounts = [],
+  // Not defaulted to `[]` directly here (unlike `allSeeds`/`allAccounts`)
+  // — `undefined` must stay distinguishable from an explicitly-passed `[]`
+  // so the merge with this component's own store-sourced fallback (below,
+  // next to `pureKeypairs`'s other store reads) can tell "caller omitted
+  // this prop entirely" from "caller passed zero pure keypairs on
+  // purpose". See `LegacyPrimeMigrationWizardProps.pureKeypairs`'s own doc
+  // comment.
+  pureKeypairs: pureKeypairsProp,
   onStateChange,
   ensurePrimeArweaveSeed,
   describeKeyset,
 }: LegacyPrimeMigrationWizardProps): React.ReactElement | null {
   const [step, setStep] = useState<LegacyPrimeMigrationWizardStep>("intro");
+  // Owner (live testing, this round): the Settling Dashboard's "View
+  // seed" button must stay disabled while the account step's own
+  // candidate-probe is still scanning — `AccountStep` reports its own
+  // settle state up via `onProbeSettledChange` below. Defaults to
+  // `false` (disabled) so a fresh mount of the account step never shows
+  // a prematurely-enabled button before the probe effect has even had a
+  // chance to run once.
+  const [accountProbeSettled, setAccountProbeSettled] = useState(false);
   // Page 2's own resolved choice — Page 3 (T5, same file) reads this
   // directly to build its key choices. Selection UI only: no account
   // activation or other side effect happens from setting this.
+  //
+  // Owner (`wizard-seed-dashboard-refinements`, this round): "In the very
+  // beginning... by default the codex prime account is selected (there is
+  // no state of no account selected)." Defaults to `{kind:"keep-current"}`
+  // — matching `paymentChoice`/`guardChoice`/`keysChoice` below, which
+  // already default to their own recommended choice rather than starting
+  // unchosen. This is a LOCAL preview-state default only; it does NOT
+  // call `recordSelectionIfComplete` or write anything to the store on
+  // its own — the "writes nothing merely by arriving" invariant
+  // (`ui-wizard-stage-boundaries.test.tsx`) governs RECORDING, which still
+  // only ever happens from an explicit `onChoose` handler, never from
+  // this initial value.
   const [accountChoice, setAccountChoice] = useState<LegacyPrimeMigrationAccountChoice | null>(
-    null,
+    { kind: "keep-current" },
   );
   // Page 3's own resolved choice (T5) — `sweepNeeded` is always derived
   // from this, never stored separately, so it can never drift out of sync
@@ -3781,8 +6016,70 @@ export function LegacyPrimeMigrationWizard({
     startedAt: string | null;
     notices: string[];
   } | null>(null);
-  const [finalizeStatus, setFinalizeStatus] = useState<FinalizeStatus>("running");
+  // IDLE on arrival (`migration-pending-apply` T4). This used to be
+  // `"running"`, which is what made the commit a side effect of a step
+  // transition: the panel could not render any other way, so `handleContinue`
+  // had to fire `runFinalize()` the moment it set the step.
+  const [finalizeStatus, setFinalizeStatus] = useState<FinalizeStatus>("awaiting-settle");
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  /** Which password question Finalize is asking, or `null` when it is not
+   *  asking one (wizard-unlock-lifecycle, T2). Mirrors the Account step's own
+   *  `probeNeedsPassword`, same two values, same meanings — see
+   *  {@link FinalizePasswordProblem}. */
+  const [finalizeNeedsPassword, setFinalizeNeedsPassword] =
+    useState<FinalizePasswordProblem | null>(null);
+  /** The in-flight Arweave derivation's latest reported event, or `null` when
+   *  none is running (`arweave-master-accounts` T3). Set ONLY from
+   *  `ensurePrimeArweaveSeed`'s own `onProgress` callback and cleared the
+   *  moment that call settles — there is no timer behind it, so the panel can
+   *  never show movement the derivation is not actually making. */
+  const [finalizeArweaveProgress, setFinalizeArweaveProgress] =
+    useState<ArweaveDerivationProgress | null>(null);
+  /** The Arweave STEP's own check (`docs/work/wizard-arweave-step/
+   *  design.md`) — what its three rows render and what gates Continue out
+   *  of it. Starts `"checking"`: "not yet known" must never render as
+   *  "missing". */
+  const [arweaveCheck, setArweaveCheck] = useState<ArweaveCheckState>({ status: "checking" });
+  /** The Arweave STEP's own derivation, in flight (`wizard-arweave-step` T2).
+   *  Same three pieces of state the finalize panel keeps for the same work,
+   *  kept separately because the two screens can be in different places: the
+   *  step's progress line is driven ONLY by `ensurePrimeArweaveSeed`'s
+   *  `onProgress`, and cleared the moment that call settles either way. */
+  const [arweaveStepProgress, setArweaveStepProgress] =
+    useState<ArweaveDerivationProgress | null>(null);
+  const [arweaveGenerating, setArweaveGenerating] = useState(false);
+  /** How the last Generate ENDED, or `null` when none has run since the
+   *  codex last satisfied the check. Deliberately not a sentence: the
+   *  sentence is derived from the current verdict
+   *  ({@link arweaveGenerateErrorText}) so this line and the three rows
+   *  cannot drift apart. `"settled"` means the derivation resolved — which is
+   *  not the same as having delivered anything. */
+  const [arweaveGenerateOutcome, setArweaveGenerateOutcome] =
+    useState<ArweaveGenerateOutcome | null>(null);
+  /** A password the user typed into the Arweave step's own unlock prompt that
+   *  then PROVED itself by decrypting the chosen account's words
+   *  (`wizard-arweave-step` T2).
+   *
+   *  It takes precedence over the codex's cached password for this step's
+   *  check, deliberately: the "wrong held password" case is exactly a codex
+   *  that is unlocked and whose cached password is useless here, so re-reading
+   *  the cache would fail the same way forever on a password the user has
+   *  already corrected. Held in state (not a ref) because the check effect
+   *  below must RE-RUN the moment one is proven.
+   *
+   *  Not written into the codex's cache: `authenticate()` may only be called
+   *  on a genuinely LOCKED codex, or it silently restarts an absolute window
+   *  (`src/zbom/hooks/useEnsureCodexUnlocked.ts`). That is decided in
+   *  `handleArweaveStepUnlock`, once, under a `wasUnlocked` snapshot. */
+  const [arweaveProvenPassword, setArweaveProvenPassword] = useState<string | null>(null);
+  /** The master derivation the Arweave step's CURRENT verdict was computed
+   *  from — what Generate hands to `ensurePrimeArweaveSeed`. A ref, not
+   *  state: it carries the account's plaintext words, which have no business
+   *  being passed down into a presentational component's props, and nothing
+   *  renders from it. Written by the check effect below (under its own
+   *  request token), so Generate and the three rows can only ever be talking
+   *  about the same account. */
+  const arweaveDerivationRef = useRef<{ bitString: string; words: readonly string[] } | null>(null);
 
   // Store access (T8) — via the NON-throwing `useCodexStoreOptional()`,
   // never `useCodexStore()`: whether a `<CodexProvider>` ancestor exists is
@@ -3809,6 +6106,26 @@ export function LegacyPrimeMigrationWizard({
   const recordedRun = codexStore
     ? codexStore((s: CodexStoreState) => s.migrationProgress)
     : undefined;
+  // owner (live testing, this session): needed to tell a KEPT payment key
+  // that's a standalone "PureKey" apart from one genuinely not in this
+  // codex at all (`detectPaymentKeyOrigin`'s second lookup pass).
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const pureKeypairsFromStore = codexStore ? codexStore((s: CodexStoreState) => s.pureKeypairs) : [];
+  // `wizard-keyset-scale-and-sidebar` T3: `pureKeypairs` is now also a
+  // real, explicit PROP (`allAccounts`'s own pattern) — a caller that
+  // supplies it (even an empty array, explicitly) wins; `undefined`
+  // (every current caller, including `CodexIdPage.tsx`, which does not
+  // pass this prop yet) falls back to the pre-existing store read above,
+  // so nothing already relying on it regresses.
+  const pureKeypairs = pureKeypairsProp !== undefined ? pureKeypairsProp : pureKeypairsFromStore;
+  const arweaveSeeds = codexStore ? codexStore((s: CodexStoreState) => s.arweaveSeeds) : [];
+  // SUBSCRIBED (not read through `getState()`) for the same reason
+  // `arweaveSeeds` above is: the Arweave step's check must RE-RUN when the
+  // codex's Arweave accounts actually change, so a write landing while that
+  // step is on screen (Generate, or any other panel) updates its three rows
+  // instead of leaving a stale verdict behind. The evaluation itself still
+  // reads `getState()` at call time — see `evaluateMasterArweaveAccounts`.
+  const foreignKeys = codexStore ? codexStore((s: CodexStoreState) => s.foreignKeys) : [];
 
   // LIFTED preview (position 0 + 1 derived from the Page-2-chosen account's
   // words) — the one `useEffect` in this component, here specifically so
@@ -3854,8 +6171,18 @@ export function LegacyPrimeMigrationWizard({
       }
     })();
     return () => { cancelled = true; };
+    // `passwordCache?.expiresAt` ALSO in deps (`wizard-seed-dashboard-
+    // refinements`, this round): `accountChoice` now defaults to
+    // `{kind:"keep-current"}` instead of `null` (no more "nothing
+    // selected" state), so `chosenSecretForPreview` is non-null from the
+    // very FIRST render — often BEFORE the codex has been authenticated
+    // yet. Without this, the effect fires once, hits a locked
+    // `getPassword()`, records the error, and then NEVER retries once
+    // authentication actually happens, because `chosenSecretForPreview`
+    // itself never changes value again — the effect's only prior
+    // dependency gives it no reason to re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosenSecretForPreview]);
+  }, [chosenSecretForPreview, passwordCache?.expiresAt ?? null]);
 
   // LIFTED guard resolution — same reasoning as the preview effect just
   // above, plus one more: `runFinalize`'s "keep" lock (see that function's
@@ -3874,7 +6201,49 @@ export function LegacyPrimeMigrationWizard({
   // permanently lock keys belonging to the wrong account, while the real
   // guard of the account actually being promoted goes unprotected.
   const [guardResolution, setGuardResolution] = useState<GuardKeyResolution | null>(null);
-  const currentGuardForResolution = chosenAccountForPreview?.guard ?? null;
+  // Owner (live testing, asked MANY times, and the real reason every
+  // previous attempt failed): "you still havent shown that the current
+  // guard is a keyset-ref… In the codex it is properly recognised as a
+  // keyset ref. WHY can't you do it here as well."
+  //
+  // Because this screen was reading a DIFFERENT VALUE than the Codex tab,
+  // not rendering the same value differently. `OuronetAccountsTab`
+  // displays `hydrate(account, byAddress[account.address])`, which
+  // OVERLAYS live URC_0027 chain state — `d["ouronet-account-guard"]` —
+  // on top of the stored record ("chain fields win when present", per
+  // that function's own doc). The LIVE guard is the real
+  // `{keysetref:{ns,ksn}}` shape; the codex's own at-rest
+  // `account.guard` copy is an older EXPANDED `{pred, keys}` snapshot
+  // carrying no reference annotation at all. So no amount of fixing the
+  // DISPLAY here could ever surface a reference that wasn't in the value
+  // being displayed.
+  //
+  // This reads the same live field, with `hydrate`'s own exact
+  // precedence rule (present-and-not-`false` wins, else the stored
+  // value), so the wizard and the Codex tab can no longer disagree about
+  // what an account's guard even is. The stored copy remains the
+  // fallback for an offline/unreadable chain — never a silent downgrade
+  // to "no guard".
+  const chosenAccountAddresses = useMemo(
+    () => (chosenAccountForPreview?.address ? [chosenAccountForPreview.address] : []),
+    [chosenAccountForPreview?.address],
+  );
+  // `loading` IS read (`migration-pending-apply` T4) — it used to be
+  // discarded. The chain read below is what `currentGuardForResolution`
+  // overlays, so while it is in flight the guard this screen is about is not
+  // yet known, and the Settle gate must say "still reading" rather than
+  // measure a half-resolved guard. The hook short-circuits for non-Dalos
+  // addresses without ever setting this, so it costs nothing where there is
+  // no read to wait for.
+  const { byAddress: liveGuardByAddress, loading: liveGuardLoading } =
+    useAccountChainData(chosenAccountAddresses);
+  const liveAccountGuard = chosenAccountForPreview
+    ? liveGuardByAddress[chosenAccountForPreview.address]?.["ouronet-account-guard"]
+    : undefined;
+  const currentGuardForResolution: unknown =
+    liveAccountGuard != null && liveAccountGuard !== false
+      ? liveAccountGuard
+      : chosenAccountForPreview?.guard ?? null;
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     let cancelled = false;
@@ -3892,6 +6261,573 @@ export function LegacyPrimeMigrationWizard({
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(currentGuardForResolution)]);
+
+  // Seed Dashboard inputs (docs/work/wizard-seed-dashboard/design.md) — the
+  // SAME settled values the Payment/Guard/Review steps already render,
+  // resolved once here rather than re-derived per step.
+  const seedDashboardPaymentPublicKey = settledPaymentKeyOf(
+    paymentChoice, reviewPreview, currentPaymentKeyOf(allSeeds),
+  );
+  // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 8):
+  // "Keep this guard as is, would have to show the Seed Words that are
+  // responsible for the two keys the guard currently has." —
+  // `summarizeGuardChoice`'s own "keep" branch never resolves the
+  // CURRENT keys at all (`{headline:"Unchanged.", keys:null, pred:""}`)
+  // — it's the REVIEW page's own "what will this produce" ternary, which
+  // has no reason to re-derive keys that aren't changing. The Settling
+  // Dashboard needs the OPPOSITE: for "keep" specifically, the keys that
+  // ARE already in effect, which `guardResolution` (the live, decrypt-
+  // free chain-shape read already happening for the guard step's own
+  // CURRENT display) already has on hand via `keysOf`.
+  const seedDashboardGuardPublicKeys = guardChoice?.kind === "keep"
+    ? (guardResolution ? keysOf(guardResolution) : null)
+    : summarizeGuardChoice(guardChoice, reviewPreview)?.keys ?? null;
+
+  // The violet (Arweave) ticker — async (decrypt-and-compare), so it is
+  // resolved separately from the other three, which are plain public-key
+  // string matches. `false` until proven (every row's violet ticker simply
+  // starts unlit, same graceful-degradation precedent as this file's other
+  // "can't prove it yet" spots). Guarded by a monotonically-incrementing
+  // request token (same discipline `ExistingKeysetPicker`'s own
+  // `requestIdRef`/`bumpRequest` already uses elsewhere in this file) so a
+  // slow, now-superseded decrypt can never overwrite a newer result.
+  //
+  // WHAT IT MEANS (`docs/work/wizard-arweave-step/design.md` §"One predicate,
+  // actually"): the codex HOLDS Arweave accounts #0 AND #1 under the Codex
+  // Master Seed — the verdict of `resolveMasterArweaveHeld`, i.e. the exact
+  // same predicate, fed from the exact same resolution, as the Arweave step
+  // and `runFinalize`. It used to be `resolveArweaveMatchSeedId`, which asked
+  // whether any Arweave seed's bitstring matched some CHAINWEB seed's and
+  // never looked at accounts #0/#1 at all — so an Arweave seed row holding
+  // ZERO accounts lit this square while finalize refused, which is the
+  // contradiction the owner reported twice. `resolveArweaveMatchSeedId`
+  // itself is untouched and still exported (other callers test it); it just
+  // no longer drives this ticker.
+  //
+  // A BOOLEAN, not a seed id, because the predicate's own `seedId` is the
+  // ARWEAVE seed's id and the dashboard's cards are keyed by CHAINWEB seed
+  // id — it is not a card id and must never be handed to
+  // `computeSeedDashboardCards` as the old function's return value was. Which
+  // CARD the square belongs on is a separate question with an exact answer:
+  // the Codex Master Seed's card, which is by definition the card the chosen
+  // ACCOUNT resolved to (`seedDashboardAccountSeedId` — the blue ticker's
+  // card), or the account's own fallback card when it matches no Chainweb
+  // seed at all. Composed below, where that id is in scope.
+  const [seedDashboardArweaveAccountsHeld, setSeedDashboardArweaveAccountsHeld] = useState(false);
+  /**
+   * Whether the boolean above is still being WORKED OUT
+   * (`migration-pending-apply` T4). Owner, on the Settle gate: *"there might
+   * be some moment where the squares are not lit, as readings are being
+   * done."*
+   *
+   * The violet role was the one with no in-flight flag at all:
+   * `seedDashboardArweaveAccountsHeld` starts `false`, so "not yet asked",
+   * "asked, and no" and "a locked codex that cannot be asked" were a single
+   * indistinguishable value — fine for a square that is simply unlit, fatal
+   * for a gate, which would read a re-read in progress as a settled "no" and
+   * block with the wrong reason.
+   *
+   * Starts `true` for exactly that reason (nothing has been asked yet), and
+   * is set/cleared by the SAME request-id-guarded effect below, under the
+   * same token — a superseded resolution must not clear a newer one's flag
+   * any more than it may overwrite its verdict.
+   */
+  const [seedDashboardArweaveResolving, setSeedDashboardArweaveResolving] = useState(true);
+  const seedDashboardRequestIdRef = useRef(0);
+  const arweaveSeedsSnapshotKey = JSON.stringify(arweaveSeeds.map((s) => [s.id, s.isPrime === true, s.secret]));
+  const candidateSeedsSnapshotKey = JSON.stringify(allSeeds.map((s) => [s.id, s.secret]));
+  // Shared with the Arweave STEP's own check below — both now watch the
+  // codex's Arweave ACCOUNTS (`(seedId, index)` foreign-key entries), not
+  // merely its Arweave seed rows, so both must re-run when those change.
+  const foreignKeysSnapshotKey = JSON.stringify(
+    foreignKeys.map((k) => [k.seedId ?? null, k.index ?? null]),
+  );
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const myRequestId = ++seedDashboardRequestIdRef.current;
+    // Synchronously, before the first await: the gate downstream of this must
+    // never see a stale `held` value without also seeing that a fresh answer
+    // is on its way.
+    setSeedDashboardArweaveResolving(true);
+    // The password degradation is unchanged in substance, only in location:
+    // `getPassword` is handed over as a FUNCTION and the two shared seams
+    // (`resolveFinalizeDerivation`, `evaluateMasterArweaveAccounts`) each
+    // swallow its failure into "locked"/`null` — so a locked codex still
+    // leaves this square dark and still never prompts, exactly as the
+    // `try { … } catch { password = null }` here used to guarantee
+    // (`docs/work/wizard-unlock-lifecycle/design.md` T4: "left alone").
+    void resolveMasterArweaveHeld({
+      accountChoice,
+      keysChoice,
+      currentPrimeAccount: currentPrimeAccount ?? null,
+      allAccounts,
+      getPassword: actions?.getPassword,
+      readCodexState: () => codexStore?.getState() ?? null,
+    }).then(
+      ({ result }) => {
+        if (seedDashboardRequestIdRef.current !== myRequestId) return; // superseded — discard
+        setSeedDashboardArweaveAccountsHeld(result.ok);
+        setSeedDashboardArweaveResolving(false);
+      },
+      () => {
+        // `resolveMasterArweaveHeld` is documented never to reject (every
+        // password/decrypt failure inside it degrades to "nothing proven"),
+        // and this handler exists so that promise contract can never be the
+        // thing that strands the Settle gate: an unanswerable question is an
+        // unlit square, not an eternal "still checking".
+        if (seedDashboardRequestIdRef.current !== myRequestId) return; // superseded — discard
+        setSeedDashboardArweaveAccountsHeld(false);
+        setSeedDashboardArweaveResolving(false);
+      },
+    );
+    // Keyed on PRIMITIVE identities of everything the verdict actually reads
+    // (`allAccounts`/`accountChoice` are re-created by callers on every
+    // render, so depending on them directly would re-run this forever) —
+    // which account is chosen (`chosenSecretForPreview`/`keysChoice?.kind`,
+    // since the master bitstring comes from THAT account's own words), the
+    // codex's Arweave seeds AND accounts, and the password epoch.
+    // `candidateSeedsSnapshotKey` is deliberately NOT here any more: the
+    // Chainweb seed list was only ever an input to the OLD question.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    chosenSecretForPreview,
+    keysChoice?.kind,
+    arweaveSeedsSnapshotKey,
+    foreignKeysSnapshotKey,
+    passwordCache?.expiresAt ?? null,
+  ]);
+
+  // ── THE ARWEAVE STEP'S OWN CHECK (docs/work/wizard-arweave-step/design.md).
+  //
+  // Runs ONLY while that step is on screen: it decrypts every Arweave seed
+  // the codex holds (a 600,000-iteration PBKDF2 each) plus the chosen
+  // account's own secret, which is not work to do on a step that is not
+  // asking the question.
+  //
+  // The master bitstring comes from `resolveFinalizeDerivation` — the SAME
+  // resolution `runFinalize` uses, not a second decrypt path: this step must
+  // be asking about the CHOSEN account's bitstring, which is exactly what
+  // that function (and nothing else in this file) resolves. A resolution
+  // failure is passed on as a `null` bitstring, which the predicate reports
+  // as "nothing proven", with the real reason rendered beside the rows.
+  //
+  // Same monotonic request-token discipline as the two effects above: a slow,
+  // now-superseded check must never overwrite a newer verdict — the gate on
+  // Continue is downstream of this state, so a stale `ok: true` landing late
+  // would unlock Finalize for a codex that no longer qualifies.
+  const arweaveCheckRequestIdRef = useRef(0);
+
+  /**
+   * ONE implementation of the step's check, run by the effect below on
+   * arrival and by Generate again afterwards (`wizard-arweave-step` T2).
+   *
+   * The re-run after a derivation is the ACTUAL guarantee behind Generate's
+   * success — `ensurePrimeArweaveSeed` RESOLVING proves nothing, because a
+   * partial delivery resolves and only a zero-key run rejects. So it has to
+   * be the same question, asked the same way, as the one that settled the
+   * three rows in the first place; a second expression of it is exactly how
+   * the violet ticker and the finalize gate came to disagree (this topic's
+   * design.md). Returns the verdict it applied, or `null` if it was
+   * superseded (`requestId`, the same monotonic token every other async
+   * resolution in this component uses).
+   *
+   * THE PASSWORD: a password PROVEN here (the step's own unlock prompt, which
+   * only resolves after a successful decrypt) wins over the codex's cached
+   * one, which may be the very thing that is wrong. `evaluateMasterArweave-
+   * Accounts`'s own precedence is the opposite (cache first, caller's
+   * password as the fallback) because `runFinalize` wants exactly that — the
+   * generator it calls encrypts under the CACHED password — so this passes
+   * the proven one AS the `getPassword`, rather than widening that shared
+   * function with a second policy.
+   */
+  async function runArweaveStepCheck(
+    requestId: number,
+  ): Promise<CodexHoldsMasterArweaveAccountsResult | null> {
+    const provenPassword = arweaveProvenPassword;
+    const getPassword: (() => string) | undefined =
+      provenPassword !== null ? () => provenPassword : actions?.getPassword;
+    // The SAME pipeline the violet ticker runs, by construction — see
+    // `resolveMasterArweaveHeld`'s own doc comment for why that matters.
+    const { derivation: resolved, result } = await resolveMasterArweaveHeld({
+      accountChoice,
+      keysChoice,
+      currentPrimeAccount,
+      allAccounts,
+      getPassword,
+      readCodexState: () => codexStore?.getState() ?? null,
+    });
+    if (arweaveCheckRequestIdRef.current !== requestId) return null; // superseded — discard
+    // Generate derives from the SAME resolution these rows were computed
+    // from, never a second one of its own.
+    arweaveDerivationRef.current = resolved.ok
+      ? { bitString: resolved.bitString, words: resolved.words }
+      : null;
+    setArweaveCheck({
+      status: "settled",
+      result,
+      masterUnresolved: resolved.ok ? null : resolved.error,
+      masterPasswordProblem: resolved.ok ? null : resolved.passwordProblem ?? null,
+    });
+    return result;
+  }
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (step !== "arweave") return;
+    const myRequestId = ++arweaveCheckRequestIdRef.current;
+    setArweaveCheck({ status: "checking" });
+    void (async () => {
+      const result = await runArweaveStepCheck(myRequestId);
+      // A satisfied codex has nothing still missing, so the last attempt's
+      // complaint is retired rather than left to resurface if the verdict
+      // ever goes the other way again.
+      if (result !== null && result.ok) setArweaveGenerateOutcome(null);
+    })();
+    // Keyed on PRIMITIVE identities of everything the check actually reads —
+    // `allAccounts`/`accountChoice` are re-created by callers on every render
+    // (including this file's own tests, which pass array literals), so
+    // depending on them directly would re-run this effect forever, each run
+    // setting state that triggers the next.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    step,
+    chosenSecretForPreview,
+    keysChoice?.kind,
+    arweaveSeedsSnapshotKey,
+    foreignKeysSnapshotKey,
+    passwordCache?.expiresAt ?? null,
+    // A password PROVEN at this step's own prompt re-arms the check — that is
+    // what makes the prompt a way forward rather than a notice. It is the
+    // only trigger on the "unlocked but holding a useless password" path,
+    // where nothing about the cache (and so nothing about `expiresAt`)
+    // changes at all.
+    arweaveProvenPassword,
+  ]);
+
+  // The blue (account) ticker's own seed — owner correction (this round,
+  // real-data screenshot: "as soon as i select the Ouronet Account it
+  // dissapeared"): a real Prime account's own stored key is known to
+  // drift from any seed's recorded key list on legacy/imported codices
+  // (the class of account this wizard exists to rescue) — true for
+  // "keep current" (fixed two rounds ago via the `currentPrimeSeed`
+  // structural shortcut below) AND equally true for "existing" (picking a
+  // DIFFERENT, non-prime account), which had NO equivalent fallback until
+  // now: `resolveAccountSeedId` decrypts the chosen account's own words
+  // and compares the resulting bitstring against each candidate seed's
+  // own decrypted secret — reliable for ANY chosen account, not just the
+  // structurally-known prime one. `currentPrimeSeed?.id` stays the
+  // synchronous, zero-decrypt first choice for "keep current" when
+  // supplied; every other case (and "keep current" without that prop)
+  // falls through to the async match. Same request-token discipline as
+  // the Arweave effect just above.
+  const [seedDashboardAccountSeedId, setSeedDashboardAccountSeedId] = useState<string | null>(null);
+  // Owner (live testing, this round): "clicking reveal seed, still
+  // showed the seed of the prime codex account. But after closing it,
+  // waiting a bit, clicking view seed again, finally was showing its
+  // correct seed... it had to get a time to switch what it shows and i
+  // clicked reveal seed to fast." The request-id guard above already
+  // stops a STALE resolution from clobbering a newer one once it
+  // settles — but it never stopped the dashboard from showing the OLD
+  // card, with a perfectly clickable "View seed" button, for the whole
+  // window WHILE a newly-chosen account's own resolution is still in
+  // flight. `true` for the entire async gap (set right before the
+  // decrypt-and-compare starts, cleared once its result — whichever
+  // request turns out to be the LATEST one — is actually applied);
+  // always `false` on the synchronous "keep current" path, which has no
+  // such gap to guard. Threaded into `viewSeedDisabled` below alongside
+  // the account-step's own probe-settle gate, so every "View seed"
+  // button in the dashboard (including the unmatched-account fallback
+  // card) stays disabled until the content it would show is actually
+  // current.
+  const [accountSeedResolving, setAccountSeedResolving] = useState(false);
+  const accountSeedRequestIdRef = useRef(0);
+  // Owner (`settled-master-identity/design.md` §2): "why is there a
+  // latency period between when i choose the Ouronet Account and when the
+  // Blue square gets light up? i dont get it?" Every account switch
+  // re-ran the WHOLE candidate scan — up to N serial 600,000-iteration
+  // PBKDF2 decrypts of the very same seeds, whose bitstrings cannot have
+  // changed since the previous switch. This memo (CALLER-owned by
+  // contract — `resolveAccountSeedId` keeps that module pure and
+  // React-free, so a module-level cache there would leak across callers
+  // and tests) lives for this wizard's mounted lifetime, making a return
+  // visit to an already-resolved account decrypt-free.
+  const seedBitsCacheRef = useRef<Map<string, string | null>>(new Map());
+  // The epoch the live memo belongs to. Discarding it on an epoch change
+  // is explicitly the caller's job (`ResolveAccountSeedIdInput.
+  // seedBitsCache`'s own doc): the map is keyed by seed id ALONE, with no
+  // password and no seed-revision identity in the key, so the function
+  // cannot tell a stale entry from a fresh one.
+  const seedBitsCacheEpochRef = useRef<string | null>(null);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    // Owner (live testing, this round): "as i changed the selected
+    // Ouronet Account, the displayed seed didnt change. moreover when i
+    // change again to the prime codex ouronet account from selecting
+    // AncientHodler account, the settle dashboard dissapeared." Root
+    // cause: this request id MUST be bumped on every effect run,
+    // UNCONDITIONALLY — including the synchronous "keep current" path
+    // below, which used to `return` before ever touching it. Without
+    // that bump, switching "existing" → "keep current" left the OLD
+    // "existing" selection's still-in-flight async request holding the
+    // SAME request id the (synchronous) new one would have used, so
+    // when that stale request finally settled, its result sailed
+    // straight past the `!== myRequestId` guard below and clobbered the
+    // correct, already-applied synchronous value.
+    const myRequestId = ++accountSeedRequestIdRef.current;
+    // EPOCH CHECK, before the synchronous shortcut below can `return` —
+    // a password change that lands while "keep current" is selected must
+    // still throw the memo away, or the next "existing" selection would
+    // be answered from entries belonging to the previous unlock.
+    //
+    // What makes an epoch:
+    // - The PASSWORD (`passwordCache.expiresAt`, which changes on every
+    //   fresh `authenticate()` anywhere in the app — see `AccountStep`'s
+    //   own `passwordEpoch` prop). A SUCCESSFUL bitstring is actually
+    //   password-independent (it is a property of the seed), but a
+    //   memoised `null` is NOT: it may mean nothing worse than "the
+    //   password in force at the time was wrong", and replaying it after
+    //   the user has unlocked correctly would report a perfectly good
+    //   seed as unresolvable — the exact silent-failure class the
+    //   probe's own `passwordEpoch` re-arm exists to kill.
+    // - The SEED LIST (`candidateSeedsSnapshotKey`, already a dependency
+    //   here, already hashing `[id, secret]` for every seed). A seed's
+    //   bitstring is immutable for a given seed id, but a seed id is NOT
+    //   a promise that the ROW behind it is the same row: a re-import or
+    //   restore can legitimately put a DIFFERENT secret under a reused
+    //   id, and answering that forever from the old bitstring would
+    //   mis-attribute the seed behind a funds-bearing account — the same
+    //   class of error §2 refuses to risk by trusting `parentSeedId`.
+    //   Folding it in costs nothing that matters: switching accounts
+    //   does not touch this key, so the decrypt-free return visit is
+    //   unaffected.
+    //
+    // REPLACED, never `.clear()`ed: a superseded resolution may still be
+    // in flight, holding the Map it was handed by reference, and it will
+    // keep writing results derived under the OLD epoch into it after it
+    // settles. Swapping in a new object means those stale writes land in
+    // a map nobody reads any more; clearing in place would let them
+    // repopulate the live one. Done here, synchronously in the effect
+    // body rather than in a separate epoch-watching effect, so the
+    // resolution started below is guaranteed the map matching its own
+    // epoch with no window in between.
+    const seedBitsEpoch = `${passwordCache?.expiresAt ?? "locked"}|${candidateSeedsSnapshotKey}`;
+    if (seedBitsCacheEpochRef.current !== seedBitsEpoch) {
+      seedBitsCacheEpochRef.current = seedBitsEpoch;
+      seedBitsCacheRef.current = new Map();
+    }
+    if ((accountChoice === null || accountChoice.kind === "keep-current") && currentPrimeSeed) {
+      setSeedDashboardAccountSeedId(currentPrimeSeed.id);
+      setAccountSeedResolving(false);
+      return;
+    }
+    setAccountSeedResolving(true);
+    let password: string | null = null;
+    try {
+      password = actions?.getPassword ? actions.getPassword() : null;
+    } catch {
+      password = null;
+    }
+    void resolveAccountSeedId({
+      account: chosenAccountForPreview, candidateSeeds: allSeeds, password, smartDecrypt,
+      // Read (not captured as a ref) at call time, so this resolution is
+      // bound to the epoch's map that existed when it STARTED — the same
+      // discipline as `myRequestId` above.
+      seedBitsCache: seedBitsCacheRef.current,
+    }).then((result) => {
+      if (accountSeedRequestIdRef.current !== myRequestId) return; // superseded — discard
+      setSeedDashboardAccountSeedId(result);
+      setAccountSeedResolving(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountChoice, currentPrimeSeed, chosenAccountForPreview, candidateSeedsSnapshotKey, passwordCache?.expiresAt ?? null]);
+
+  // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 5):
+  // "Master Chainweb seed becomes the seed that is responsible for the
+  // Payment Key. It shifted. This musnt be possible... with the default
+  // selection, this same Master Seed would be responsible for the
+  // generation of the payment key... thus also green ticker." A freshly-
+  // DERIVED payment/guard key (the "derive a new one"/"recommended-
+  // single-key" DEFAULT choices) is never recorded in any seed's own
+  // `accounts[]` yet, so a key search (`findSeedIdForKey`) could never
+  // attribute it anywhere — it must instead be attributed directly to
+  // whichever id the ACCOUNT role itself resolved to, since deriving
+  // happens FROM that exact same account material. An EXISTING,
+  // already-recorded key (the "keep" choices) still resolves via
+  // `findSeedIdForKey`, exactly as before.
+  // Owner (live testing, round 6): "at every stage we show only the
+  // tickers that have been settled up to that step." Payment/guard
+  // default to a real, non-null choice from the moment the wizard
+  // mounts — that default existing is NOT the same thing as the user
+  // having actually reached (and therefore settled) that step. Gating
+  // on `STEP_ORDER` — not merely "is there a choice value" — is what
+  // makes a card/fallback's payment/guard ticker stay dark while still
+  // on an earlier step, and go dark again on navigating BACK past that
+  // step (no separate "furthest reached" ratchet — see `STEP_ORDER`'s
+  // own doc comment).
+  const paymentStepReached = STEP_ORDER[step] >= STEP_ORDER.payment;
+  const guardStepReached = STEP_ORDER[step] >= STEP_ORDER.guard;
+
+  // WHICH CARD the violet square lights on, now that the predicate behind it
+  // answers a yes/no about the codex rather than naming a Chainweb seed (see
+  // `seedDashboardArweaveAccountsHeld` above). The square belongs to the
+  // CODEX MASTER SEED, and in this dashboard that is — by the owner's own
+  // definition, round 5: "The Master Seed is the seed responsible for the
+  // Selected Ouronet Account. PERIOD." — whichever card the ACCOUNT resolved
+  // to, i.e. the blue ticker's own card. Composed here rather than inside the
+  // effect so the two resolutions stay independent: the account's card can
+  // change (a different account chosen) without re-asking the Arweave
+  // question, and vice versa, each still guarded by its own request token.
+  const seedDashboardArweaveMatchSeedId =
+    seedDashboardArweaveAccountsHeld ? seedDashboardAccountSeedId : null;
+  // ... and when the chosen account matches NO Chainweb seed — the common
+  // case for the legacy/imported accounts this wizard exists to rescue — the
+  // master role is played by the account's own fallback card (titled with the
+  // literal `CODEX_MASTER_SEED`), which has no seed id to compare against,
+  // exactly like `accountFallbackPaymentMatch` below.
+  const accountFallbackArweaveMatch =
+    seedDashboardArweaveAccountsHeld
+    && seedDashboardAccountSeedId === null && chosenAccountForPreview !== null;
+
+  const paymentIsStoicDerived = paymentChoice?.kind === "stoic-dalos-position-0";
+  const seedDashboardPaymentSeedId = !paymentStepReached
+    ? null
+    : paymentIsStoicDerived
+      ? seedDashboardAccountSeedId
+      : findSeedIdForKey(seedDashboardPaymentPublicKey, allSeeds);
+  const guardIsStoicDerived =
+    guardChoice?.kind === "recommended-single-key" || guardChoice?.kind === "update-keyset-recommended";
+  const seedDashboardGuardSeedIds = !guardStepReached
+    ? null
+    : guardIsStoicDerived
+      ? [seedDashboardAccountSeedId]
+      : (seedDashboardGuardPublicKeys ?? []).map((k) => findSeedIdForKey(k, allSeeds));
+
+  // The chosen account's own fallback card (`SeedDashboard`'s
+  // `chosenAccount`/`AccountFallbackCardView`, `wizard-page2-and-
+  // dashboard-fixes` round 4) has no `seedId` of its own to compare
+  // against — it exists precisely BECAUSE `seedDashboardAccountSeedId`
+  // is `null`. Deriving payment/guard from that SAME (seed-less)
+  // account's own words must still light its own payment/guard
+  // tickers, so this is tracked directly rather than via id equality
+  // (which, both being `null`, would otherwise always spuriously
+  // "match") — gated on the SAME step-reached rule as above.
+  const accountFallbackPaymentMatch =
+    paymentStepReached
+    && seedDashboardAccountSeedId === null && chosenAccountForPreview !== null && paymentIsStoicDerived;
+  // Owner (live testing, this round, real-data report): "the guard is
+  // made of 2 keys, so it should say 2 instead of 1... If a keyset is
+  // made of 9 keys, the total numbers shown would have to add up to 9."
+  // The DERIVE case (`guardIsStoicDerived`) was already counted (always
+  // exactly 1 — a freshly-derived key never has siblings). The gap: a
+  // KEPT guard (not derived) can include the seed-less account's own
+  // direct `publicKey` as one of its members (a real self-guard pattern —
+  // the account's STOA payment/identity key, included in its own guard
+  // keyset) — that key is neither in any seed's `accounts[]` nor in
+  // `pureKeypairs[]`, so without this it silently fell through
+  // unattributed, and the total shown across every card undercounted the
+  // real keyset size. Counts every such self-matching member, not just
+  // one — a keyset could in principle name the account's own key more
+  // than once (degenerate, but the count must still be honest).
+  const accountFallbackGuardCount = !guardStepReached || seedDashboardAccountSeedId !== null
+    || chosenAccountForPreview === null
+    ? 0
+    : guardIsStoicDerived
+      ? 1
+      : (seedDashboardGuardPublicKeys ?? [])
+          .filter((k) => accountOwnKeyBacksRole(k, chosenAccountForPreview)).length;
+
+  // The Settling Dashboard's "Pure Keys" attribution card
+  // (`docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "G") — a bare
+  // pure keypair has no seed to attribute to at all, so it is checked
+  // directly against `pureKeypairs` here, alongside the seed search above,
+  // gated by the SAME `paymentStepReached`/`guardStepReached` booleans
+  // every other role already obeys (`false`/`0` before that step is
+  // reached, matching `accountFallbackPaymentMatch`/
+  // `accountFallbackGuardCount` just above).
+  const pureKeysPaymentMatch =
+    paymentStepReached && pureKeypairBacksRole(seedDashboardPaymentPublicKey, pureKeypairs);
+  const pureKeysGuardCount = !guardStepReached
+    ? 0
+    : (seedDashboardGuardPublicKeys ?? []).filter((k) => pureKeypairBacksRole(k, pureKeypairs)).length;
+
+  // Owner (live testing, said three separate times now): "the guard is
+  // made of 2 keys, so it should say 2 instead of 1... If a keyset is
+  // made of 9 keys, the total numbers shown would have to add up to 9."
+  //
+  // Every attribution bucket above answers "which card does THIS key
+  // belong to" — seed (`findSeedIdForKey`), pure keypair
+  // (`pureKeypairBacksRole`), or the chosen seed-less account's own two
+  // key fields (`accountOwnKeyBacksRole`). A key matching NONE of them
+  // used to simply vanish from the dashboard, silently breaking that
+  // invariant — and chasing it one newly-discovered key field at a time
+  // (first `publicKey`, then `stoaChainLedger`…) is exactly how it kept
+  // coming back. This is the structural answer instead: whatever is left
+  // over after every real bucket has claimed its own gets counted HERE,
+  // so the totals add up to the real keyset size NO MATTER WHAT a given
+  // key turns out to be — including a genuinely foreign key this codex
+  // has never held, which is itself worth showing rather than hiding.
+  const unattributedGuardCount = !guardStepReached || guardIsStoicDerived
+    ? 0
+    : (seedDashboardGuardPublicKeys ?? []).filter((k) =>
+        findSeedIdForKey(k, allSeeds) === null
+        && !pureKeypairBacksRole(k, pureKeypairs)
+        && !(seedDashboardAccountSeedId === null && accountOwnKeyBacksRole(k, chosenAccountForPreview)),
+      ).length;
+
+  // ── THE SETTLE GATE'S FOUR COLOURS (`migration-pending-apply` T4) ──────
+  //
+  // Owner: *"This button must be clickable once all the squares are lit."*
+  // Asked what that means: *"all squares lit, by this i mean, one blue one
+  // red one brown one pink, in the sense that we have all the colour lit."*
+  //
+  // So: each ROLE lit SOMEWHERE in the Settling Dashboard — never every
+  // square on every card. Roles legitimately split across cards (the owner's
+  // own screenshot has blue+violet on one card and green+gold on another),
+  // and both the "Pure Keys" and "Keys Not In This Codex" cards hardcode
+  // three of their four squares dark by design (see `SeedTicker lit={false}`
+  // at those call sites) — a per-square rule would therefore never pass at
+  // all.
+  //
+  // ONE named value, derived once from the very same inputs `SeedDashboard`
+  // is handed below, so the gate and the squares cannot disagree: a second
+  // expression of "is this lit" is exactly how the violet ticker and the
+  // finalize gate came to contradict each other before
+  // (`docs/work/wizard-arweave-step/design.md`).
+  const settleRolesLit = {
+    /** BLUE. Either a Chainweb seed was matched to the chosen account, or —
+     *  the common case for the legacy/imported accounts this wizard exists
+     *  to rescue — the account's own fallback card plays the Codex Master
+     *  Seed's part and carries the square itself. */
+    account: seedDashboardAccountSeedId !== null || chosenAccountForPreview !== null,
+    /** GREEN. A seed's card, the chosen account's own fallback card, or the
+     *  Pure Keys card — whichever one claimed the payment key. */
+    payment:
+      seedDashboardPaymentSeedId !== null
+      || accountFallbackPaymentMatch
+      || pureKeysPaymentMatch,
+    /** GOLD/BROWN. ONE attributed member is enough: a keyset's members are
+     *  spread across whichever cards hold them, and `unattributedGuardCount`
+     *  is itself a lit square (the "Keys Not In This Codex" card), which is
+     *  a real answer about the guard rather than an absent one. */
+    guard:
+      (seedDashboardGuardSeedIds ?? []).some((id) => id !== null)
+      || accountFallbackGuardCount > 0
+      || pureKeysGuardCount > 0
+      || unattributedGuardCount > 0,
+    /** VIOLET. The one yes/no about the codex itself rather than about a
+     *  key: does it hold Arweave accounts #0 AND #1 under the Codex Master
+     *  Seed. Whichever card the square renders on
+     *  (`seedDashboardArweaveMatchSeedId` / `accountFallbackArweaveMatch`),
+     *  this is the fact behind it. */
+    arweave: seedDashboardArweaveAccountsHeld,
+  } as const;
+
+  /** Whether this codex currently holds a usable password. The same
+   *  `cache !== null && cache.expiresAt > Date.now()` test
+   *  `handleArweaveStepUnlock` already takes its `wasUnlocked` snapshot
+   *  with — kept identical deliberately, so "locked" means one thing in
+   *  this file. */
+  const codexLocked = passwordCache === null || passwordCache.expiresAt <= Date.now();
 
   // Imperative notify-on-change otherwise, matching this file's existing
   // style of explicit setter calls (the preview effect just above is the
@@ -3958,27 +6894,75 @@ export function LegacyPrimeMigrationWizard({
   }
 
   // Page 7 ("finalize", T8) — see the module doc's "Page 7" section for the
-  // full call sequence this implements. Runs once, triggered by
-  // `handleContinue`'s "keys" branch below; never re-entrant (that branch
-  // only fires once per "keys" -> "finalize" transition).
+  // full call sequence this implements. Triggered by `handleSettleChoices`
+  // below (the "Settle Choices" button) or by the inline unlock prompt's
+  // retry, and by nothing else; `handleSettleChoices`'s own idle-status
+  // guard is what keeps it non-re-entrant.
   /**
    * STAGE 2 — THE COMMIT.
    *
-   * Four writes, each recorded in `migrationProgress.committed` as it lands
-   * so a resumed commit skips it instead of redoing it, and the alignment
-   * stamp LAST so a codex never reads as eligible on a partial commit.
+   * Five writes. The first four are each recorded in
+   * `migrationProgress.committed` as they land, so a resumed commit skips one
+   * instead of redoing it; the fifth is the PENDING PLAN, and it goes LAST so
+   * a codex never offers to apply a partial commit.
    *
    *   1. pair + promote the seed   -> committed.seedId / .accountId
    *   2. the Codex Master Seed row -> committed.rowWritten
    *   3. the master-key locks      -> committed.locksWritten
-   *   4. stamp alignment           -> committed.alignmentStamped
+   *   4. the ArWeave face          -> committed.arweaveSeedId
+   *   5. the pending plan          -> migrationProgress.pending
    *
    * Recording is best-effort throughout: it makes a resume cheaper, and must
    * never be what fails a migration that otherwise succeeded.
+   *
+   * ## What Write 5 used to be, and why it is not that any more
+   *
+   * `docs/work/migration-pending-apply/design.md`. Write 5 used to be the
+   * ALIGNMENT STAMP, and the `"success"` path then called
+   * `completeMigration()`, which deletes the recorded run outright (persists
+   * `null`, so the adapter removes the shard). Both halves contradicted the
+   * owner's model — *"using the wizard for the first time places the codex in
+   * a pending state. This pending state can be placed in a new pending state
+   * forever, until the apply button seals it forever. The finalize at the end
+   * simply writes a new pending state."*
+   *
+   *  - The stamp is the SEAL. Once `primeAlignment` is `"aligned"` both
+   *    `ensurePrimeSeedAccountPairingAndPromote` and
+   *    `promoteSeedAndAccountToPrime` throw permanently, and nothing anywhere
+   *    un-stamps it — so stamping here dead-ended Write 1 of every later run.
+   *    It moved to `sealMigration()`, which Apply calls. The store-side guards
+   *    are unchanged; they simply now trip at Apply.
+   *  - The record IS the pending state, so deleting it left nothing to apply.
+   *
+   * So Finalize now REPLACES the pending plan (a new finalize is a new plan)
+   * and seals nothing.
    */
-  async function runFinalize(): Promise<void> {
-    setFinalizeStatus("running");
+  /**
+   * `passwordOverride` — a password the user JUST typed into the finalize
+   * panel's own prompt (wizard-unlock-lifecycle, T2). Used in place of the
+   * cached one for the decrypt, because the "wrong" case is precisely a codex
+   * that is unlocked and whose cached password is useless here: re-reading the
+   * cache would fail the same way forever. Returns which password problem
+   * stopped the run, or `null` — so the prompt can report the attempt without
+   * reading state it cannot see yet.
+   */
+  async function runFinalize(passwordOverride?: string): Promise<FinalizePasswordProblem | null> {
+    // A RETRY from the inline prompt must leave the panel showing that prompt
+    // while it works, rather than flipping back to "Finalizing your Prime
+    // trio…": unrendering the prompt UNMOUNTS it, which throws away the
+    // password the user typed AND the "Incorrect password — try again." line
+    // the retry is about to produce (its state lives in the component, per
+    // `InlineUnlockPrompt`'s auth-free design). The prompt shows its own
+    // in-flight state ("Checking…") meanwhile.
+    const isPromptRetry = passwordOverride !== undefined;
+    if (!isPromptRetry) {
+      setFinalizeStatus("running");
+      setFinalizeNeedsPassword(null);
+    }
     setFinalizeError(null);
+    // A retry must not open showing the previous attempt's last derivation
+    // event — nothing is deriving yet.
+    setFinalizeArweaveProgress(null);
     void actions?.beginMigrationCommit().catch(() => {});
 
     if (!actions) {
@@ -3986,7 +6970,7 @@ export function LegacyPrimeMigrationWizard({
       setFinalizeError(
         "Finalize is not available right now — this wizard has no connection to the codex.",
       );
-      return;
+      return null;
     }
 
     const resolved = await resolveFinalizeDerivation({
@@ -3994,15 +6978,77 @@ export function LegacyPrimeMigrationWizard({
       keysChoice,
       currentPrimeAccount,
       allAccounts,
-      getPassword: actions.getPassword,
+      getPassword:
+        passwordOverride !== undefined ? () => passwordOverride : actions.getPassword,
     });
     if (!resolved.ok) {
+      // A PASSWORD problem is a question, not a verdict: ask it inline and
+      // leave every staged selection untouched, so submitting an answer
+      // resumes this same attempt (the old behaviour — one red line and a
+      // "Close" button — was the owner's reported dead end).
+      if (resolved.passwordProblem) {
+        setFinalizeNeedsPassword(resolved.passwordProblem);
+        setFinalizeStatus("needs-password");
+        return resolved.passwordProblem;
+      }
       setFinalizeStatus("error");
       setFinalizeError(resolved.error);
-      return;
+      return null;
+    }
+
+    // The password question (if there was one) is answered — the rest of the
+    // run is real work again.
+    if (isPromptRetry) {
+      setFinalizeNeedsPassword(null);
+      setFinalizeStatus("running");
+    }
+
+    // A freshly-typed password that genuinely decrypts. Start the codex's
+    // unlock window ONLY if it was really locked — the window is ABSOLUTE,
+    // not sliding (`zbom/hooks/useEnsureCodexUnlocked.ts` documents the bug
+    // that unconditional `authenticate()` calls caused: every operation
+    // silently reset the TTL, so the visible "re-authenticate in X" countdown
+    // was a lie). The snapshot is taken here, from the store, immediately
+    // before the decision — same rule, same shape, as that hook's
+    // `wasUnlocked`.
+    //
+    // This runs AFTER the decrypt proved the password right, deliberately:
+    // caching a wrong one would leave the codex "unlocked" with a password
+    // that decrypts nothing — the exact `"wrong"` state above — and would then
+    // suppress its own fix, since the window would no longer be startable.
+    // The authentication must also land BEFORE the writes below:
+    // `ensurePrimeArweaveSeed` calls `getPassword()` inside its own package
+    // (packages/codex-arweave) and only ever reads the cache.
+    if (isPromptRetry) {
+      const cache = codexStore?.getState().passwordCache ?? null;
+      const wasUnlocked = cache !== null && cache.expiresAt > Date.now();
+      if (!wasUnlocked) {
+        actions.authenticate(passwordOverride, codexStore?.getState().uiSettings?.passwordCacheMinutes);
+      }
     }
 
     let guardRotationNeeded: boolean;
+    /**
+     * The Chainweb seed Write 1 paired this account with — hoisted out of the
+     * `try` (same shape `guardRotationNeeded` already uses) because WRITE 2
+     * needs it and `result` is block-scoped to the pairing itself.
+     *
+     * Owner-reported bug: Write 2 used to read this id back out of
+     * `migrationProgress.committed.seedId`, which Write 1 publishes through a
+     * deliberately FIRE-AND-FORGET `recordMigrationCommit` — and that
+     * recording is best-effort by design (it must never fail a migration that
+     * otherwise succeeded, and it is a plain no-op whenever there is no
+     * recorded run to merge into). Whenever the read came up empty the `if`
+     * fell through, the Codex Master Seed row was silently never written, and
+     * the codex went on to be stamped eligible while the Codex ID page kept
+     * saying "This codex has not settled on a Codex Master Seed yet".
+     *
+     * So the id now comes from the value already in hand. The store read
+     * stays only as the RESUMED-commit fallback — a run whose Write 1 landed
+     * in an earlier session has no `result` this time, but does have the id
+     * recorded.
+     */
+    let pairedSeedId: string | undefined;
     try {
       const result = await actions.ensurePrimeSeedAccountPairingAndPromote(resolved.accountId, {
         bitString: resolved.bitString,
@@ -4010,6 +7056,7 @@ export function LegacyPrimeMigrationWizard({
         method: resolved.method,
       });
       guardRotationNeeded = result.guardRotationNeeded;
+      pairedSeedId = result.seedId;
       // Write 1 landed.
       void actions.recordMigrationCommit({
         seedId: result.seedId,
@@ -4018,22 +7065,56 @@ export function LegacyPrimeMigrationWizard({
     } catch (e) {
       setFinalizeStatus("error");
       setFinalizeError(e instanceof Error ? e.message : "Could not finalize this codex's Prime trio.");
-      return;
+      return null;
     }
     // ── Write 2: the Codex Master Seed row. ALWAYS — nothing about which
     //    three entities are the faces of this seed depends on a sweep.
-    const committedSeedId = codexStore?.getState().migrationProgress?.committed?.seedId;
+    //
+    //    `chainwebSeedId` is NOT optional on a `CodexMasterSeed` (and
+    //    `setCodexMasterSeed` refuses a row that cannot name both faces), so
+    //    the id genuinely has to come from somewhere: the pairing's own
+    //    result first, the recorded run second (a resumed commit).
+    const chainwebSeedId =
+      pairedSeedId ?? codexStore?.getState().migrationProgress?.committed?.seedId;
+    /**
+     * A row that did not land must leave EVIDENCE, not silence. It stays
+     * non-fatal — the row is descriptive and re-runnable, and a failure here
+     * must not throw away a migration that otherwise succeeded — but the old
+     * bare `catch {}` is half of why the reported bug was invisible: a row
+     * that genuinely failed looked exactly like one that was never needed.
+     *
+     * `rowWritten: false` is the durable half (a later reader or a resumed
+     * commit can tell "attempted and failed" from "not attempted"), recorded
+     * best-effort like every other commit record; the console report is the
+     * half that survives even when there is no recorded run to merge into,
+     * which is precisely the state this bug occurred in.
+     */
+    function noteCodexMasterSeedRowMissed(cause: unknown): void {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[LegacyPrimeMigrationWizard] the Codex Master Seed row did not land — " +
+          "this codex may still read as having no Codex Master Seed",
+        cause,
+      );
+      void actions?.recordMigrationCommit({ rowWritten: false }).catch(() => {});
+    }
     try {
-      if (committedSeedId) {
+      if (chainwebSeedId) {
         await actions.setCodexMasterSeed({
           ouroAccountId: resolved.accountId,
-          chainwebSeedId: committedSeedId,
+          chainwebSeedId,
           establishedAt: new Date().toISOString(),
         });
         void actions.recordMigrationCommit({ rowWritten: true }).catch(() => {});
+      } else {
+        // Unreachable in practice — the pairing above returns a seed id on
+        // every success — but a skipped row must say so rather than vanish.
+        noteCodexMasterSeedRowMissed(
+          new Error("no Chainweb seed id available to name in the Codex Master Seed row"),
+        );
       }
-    } catch {
-      // Non-fatal: the row is descriptive, and re-runnable.
+    } catch (e) {
+      noteCodexMasterSeedRowMissed(e);
     }
 
     // ── Write 3: the master-key locks, from the keys actually in use.
@@ -4059,6 +7140,25 @@ export function LegacyPrimeMigrationWizard({
     //    display; `keysOf` turns it into the same null-vs-[] distinction
     //    `computeMasterKeyLockDelta` already expects (a genuinely unresolved
     //    reference must still suppress releases, never silently unlock).
+    //
+    // The three values this write settles are HOISTED out of the `try` (same
+    // shape `pairedSeedId` already uses) because Write 5's pending plan has to
+    // name them, and `migration-pending-apply` T2's own rule is that the plan
+    // reuses what is in scope rather than re-deriving — two code paths
+    // answering "which keys did this run choose?" is exactly how this file's
+    // earlier bugs came about. They are assigned where they are COMPUTED
+    // rather than after `secureMasterAccount` resolves: the plan records what
+    // this finalize DECIDED (which is what Apply would execute), while
+    // `committed.locksWritten` stays the separate record of what landed.
+    // `null`, not `undefined`, on both key fields: that is the "unresolved"
+    // value `secureMasterAccount` and `computeMasterKeyLockDelta` are defined
+    // over (see `masterKeyLockDelta.ts`), and narrowing it here would make
+    // this hoist change behaviour rather than just widen a scope.
+    let paymentPublicKey: string | null = null;
+    let guardPublicKeys: readonly string[] | null = null;
+    /** Only from a choice that genuinely carries one — a derived single-key
+     *  guard names no predicate of its own here. */
+    let guardPred: string | undefined;
     try {
       // guard-step-variants (docs/work/guard-step-variants/design.md): the
       // three newest kinds lock the SAME way "recommended-single-key"/
@@ -4114,12 +7214,23 @@ export function LegacyPrimeMigrationWizard({
             // Re-resolving here, synchronously before the lock, is the
             // same `resolveGuardKeys` call `guardResolution`'s own effect
             // uses, just taken at the moment that actually matters.
-            : keysOf(await resolveGuardKeys(chosenAccountForPreview?.guard ?? null, {
+            //
+            // It reads `currentGuardForResolution` — the LIVE-chain-first
+            // value (see its own doc above), not the codex's at-rest
+            // `account.guard` copy this used to read. Locking the stale
+            // copy was the sharper edge of the same bug that hid the
+            // keyset-ref badge: "keep" would pin whatever keys the codex
+            // last wrote down, which is exactly NOT "what the guard
+            // actually is right now" when the two have diverged.
+            : keysOf(await resolveGuardKeys(currentGuardForResolution, {
                 describeKeyset:
                   describeKeyset ??
                   (async () => { throw new Error("no chain connection available on this screen"); }),
               }));
-      const paymentPublicKey =
+      guardPublicKeys = guardKeys;
+      guardPred =
+        guardKeys && guardChoice && "pred" in guardChoice ? guardChoice.pred : undefined;
+      paymentPublicKey =
         paymentChoice?.kind === "stoic-dalos-position-0"
           ? deriveStoaDalosKeypairAtIndex(resolved.bitString, 0).publicKey
           : currentPaymentKeyOf(allSeeds);
@@ -4138,19 +7249,169 @@ export function LegacyPrimeMigrationWizard({
     // ── Write 4: the ArWeave face, when it can be established. Its absence
     //    no longer blocks the two writes above — it only leaves the Master
     //    Seed row at two faces, which the Codex ID page already states.
+    //
+    // REWRITTEN (`arweave-master-accounts` T3, owner-reported bug): this used
+    // to set `arweaveOutstanding` ONLY when the prop was absent or threw —
+    // i.e. it inferred eligibility from "the call didn't throw" and never
+    // checked whether the codex ended up holding the Arweave accounts at all.
+    // It did not: the derivation was discarding its key, so the codex gained
+    // an Arweave seed row and ZERO accounts while this screen printed "This
+    // codex is now eligible." next to a DARK violet ticker — the Settling
+    // Dashboard's independent read of the very same fact. Owner: *"it says it
+    // made my codex eligible, but it never did check if the codex has arweave
+    // accounts... it first has to have shown a purple square box on the Codex
+    // Master Seed... And if it doesn't it would have to make it on the spot."*
+    //
+    // So eligibility is now a VERIFIED PREDICATE over the codex's end state,
+    // evaluated TWICE around the derivation:
+    //   BEFORE — a codex that already holds #0 and #1 derives nothing (two
+    //            RSA-4096 keys it already has cost the user seconds for no
+    //            change at all), and a codex holding only one of them asks
+    //            for only the other;
+    //   AFTER  — the derivation RESOLVING proves nothing on its own, because
+    //            a PARTIAL delivery resolves (only a zero-key derivation
+    //            rejects, see `ensurePrimeArweaveSeed`'s own contract). The
+    //            re-evaluation is the actual guarantee behind the claim, not
+    //            a formality.
+    // It is the SAME predicate the violet ticker reads
+    // (`codexHoldsMasterArweaveAccounts`), so the two can no longer disagree.
     let arweaveOutstanding = false;
-    if (!ensurePrimeArweaveSeed) {
+    /**
+     * Re-read from `getState()` every time, never from this render's closure:
+     * the whole point of the second evaluation is to observe writes that
+     * `ensurePrimeArweaveSeed` made DURING this run, which a captured
+     * `arweaveSeeds`/`foreignKeys` snapshot cannot see.
+     *
+     * The password is the codex's own held one — the same `getPassword()` the
+     * generator encrypts the seed it writes under, so the two agree by
+     * construction. `passwordOverride` is the fallback for the window closing
+     * mid-run (it is the password that just proved itself on the decrypt
+     * above); a predicate with no password simply reports "not proven",
+     * never a free pass.
+     *
+     * Both of those rules now live in ONE place,
+     * {@link evaluateMasterArweaveAccounts}, shared with the Arweave STEP's
+     * own check (`docs/work/wizard-arweave-step/design.md`) — the step and
+     * the commit must be asking the identical question, and two copies of
+     * this input is how the ticker and this gate came to disagree.
+     */
+    const evaluateArweaveAccounts = () => evaluateMasterArweaveAccounts({
+      masterBitString: resolved.bitString,
+      readCodexState: () => codexStore?.getState() ?? null,
+      getPassword: actions.getPassword,
+      fallbackPassword: passwordOverride ?? null,
+    });
+
+    const heldBeforeDerivation = await evaluateArweaveAccounts();
+    /**
+     * THE AUTHORITATIVE verdict on the Arweave face, and the single source of
+     * the seed id Write 4b stamps below: the post-derivation re-check whenever
+     * a derivation ran, the pre-check when the codex was already complete and
+     * nothing was derived.
+     *
+     * It is deliberately the SAME evaluation `arweaveOutstanding` is set from,
+     * never a fresh scan of its own. The predicate already identifies the
+     * matching seed (`seedId`) on its way to the verdict, and this file's own
+     * history is what the rule comes from: two code paths answering "which
+     * Arweave seed is the master's?" is exactly how the violet ticker and the
+     * eligibility claim came to disagree.
+     *
+     * Left at `heldBeforeDerivation` on both failing branches (no derivation
+     * available, derivation threw), where it carries `ok: false` and is
+     * therefore not stampable — which is the intended answer there.
+     */
+    let masterArweaveHeld = heldBeforeDerivation;
+    if (heldBeforeDerivation.ok) {
+      // Already complete — write nothing, derive nothing, claim it honestly.
+    } else if (!ensurePrimeArweaveSeed) {
       arweaveOutstanding = true;
     } else {
       try {
-        await ensurePrimeArweaveSeed({ bitString: resolved.bitString, words: resolved.words });
+        await ensurePrimeArweaveSeed(
+          { bitString: resolved.bitString, words: resolved.words },
+          {
+            missingIndexes: heldBeforeDerivation.missingIndexes,
+            onProgress: setFinalizeArweaveProgress,
+          },
+        );
+        // THE CHECK THE REPORTED BUG WAS MISSING.
+        const heldAfterDerivation = await evaluateArweaveAccounts();
+        masterArweaveHeld = heldAfterDerivation;
+        if (!heldAfterDerivation.ok) {
+          arweaveOutstanding = true;
+          setFinalizeError(ARWEAVE_MASTER_ACCOUNTS_NOT_HELD_TEXT);
+        }
       } catch (e) {
         arweaveOutstanding = true;
         setFinalizeError(e instanceof Error ? e.message : ARWEAVE_SEED_NOT_AVAILABLE_TEXT);
+      } finally {
+        // The progress line reports an IN-FLIGHT derivation; this one has
+        // settled, whichever way it went.
+        setFinalizeArweaveProgress(null);
       }
     }
 
-    // ── Write 5: alignment.
+    // ── Write 4b: the master Arweave seed's ID onto the Codex Master Seed
+    //    row, completing its third face.
+    //
+    // Owner, after finalizing: *"The newly made Master Arweave Seed should be
+    // on position one colour golden, and the one existing as Master Arweave
+    // Seed, should have become Arweave Seed One."* The RENAMING was already
+    // fixed; the ordering and the gold still followed `isPrime`, which is a
+    // "first Arweave seed ever added" provenance marker and deliberately does
+    // NOT move (`addArweaveSeed` refuses a second explicit prime with
+    // `CodexKickstartError("id-conflict")`). On a codex that already had an
+    // Arweave seed that made the DEMOTED seed keep gold and position one while
+    // the real master sat grey further down — the inverse of the requirement.
+    //
+    // So the display follows an authoritative IDENTITY field instead, exactly
+    // as `codex/masterNames.ts` already does for account names — and this is
+    // the one write that establishes it. `CodexMasterSeed.arweaveSeedId` was
+    // declared, persisted and exported, but nothing in the codebase ever set
+    // it.
+    //
+    // Three rules, all of them the surrounding block's own:
+    //  * the id comes from `masterArweaveHeld` — the ONE authoritative
+    //    evaluation above — never from a second scan (see its doc);
+    //  * only on `ok: true` with a real `seedId`: a codex that is not actually
+    //    holding #0 and #1 under that seed must not be stamped as having a
+    //    master Arweave seed, same "verify the end state, do not trust that
+    //    the call returned" rule the whole block exists for;
+    //  * non-fatal, because a seed-id stamp must never fail a migration that
+    //    otherwise succeeded — but REPORTED, never swallowed.
+    //
+    // `setCodexMasterSeed` MERGES this partial into the existing row and
+    // THROWS if the result cannot name both mandatory faces, so the write is
+    // safe here only because Write 2 established the row earlier in this same
+    // run. Write 2 is itself non-fatal: when it missed (`rowWritten: false`),
+    // this throws — which is handled the same observable way rather than
+    // weakening the action's two-mandatory-faces guard.
+    /** The master Arweave seed Write 5's plan names — the SAME authoritative
+     *  value this block stamps, hoisted rather than re-read (see the block's
+     *  own "never a second scan" rule above). Set from the VERIFIED
+     *  evaluation, not from the row write landing: a stamp that failed to
+     *  persist does not change which seed this codex proved it holds. */
+    let masterArweaveSeedId: string | undefined;
+    if (masterArweaveHeld.ok && masterArweaveHeld.seedId) {
+      const arweaveSeedId = masterArweaveHeld.seedId;
+      masterArweaveSeedId = arweaveSeedId;
+      try {
+        await actions.setCodexMasterSeed({ arweaveSeedId });
+        // Best-effort, like every other commit record here — and into the
+        // `arweaveSeedId` field `MigrationCommitRecord` already declares for
+        // exactly this, so a resumed commit can see what landed.
+        void actions.recordMigrationCommit({ arweaveSeedId }).catch(() => {});
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "[LegacyPrimeMigrationWizard] the Codex Master Seed row's Arweave seed id did not land — " +
+            "this codex's Arweave seed list may keep ordering and colouring by `isPrime`",
+          e,
+        );
+      }
+    }
+
+    // ── Write 5: the PENDING PLAN.
     //
     // CORRECTED (owner, 2026-10-30): this used to wait on `sweepNeeded`,
     // which is NOT an asset check at all — it is a comparison of the
@@ -4165,27 +7426,228 @@ export function LegacyPrimeMigrationWizard({
     // to move old assets (stage 3B) are separate, optional, and reported
     // rather than blocking.
     //
-    // The ArWeave seed is the one real precondition: without it there is no
-    // prime ArWeave address to compare against, so eligibility genuinely
-    // cannot be claimed.
+    // The ArWeave face is the one real precondition, and — since
+    // `arweave-master-accounts` — specifically the Arweave ACCOUNTS #0 and #1
+    // under the Codex Master Seed, not merely a seed row: without them there
+    // is no prime ArWeave address to compare against, so eligibility
+    // genuinely cannot be claimed. `arweaveOutstanding` above is now set from
+    // the VERIFIED end state, never from "the derivation call returned".
+    //
+    // It is also what keeps an INCOMPLETE migration out of the pending state:
+    // an unfinished commit has nothing to apply, and a plan written here would
+    // let Apply stamp alignment over a codex that is not eligible at all. The
+    // early return below therefore stays exactly where it is — ahead of the
+    // plan write, as it was ahead of the stamp it replaced.
     if (arweaveOutstanding) {
       setFinalizeStatus("arweave-unavailable");
-      return;
+      return null;
     }
 
-    await actions.stampPrimeAlignmentAligned();
-    void actions.recordMigrationCommit({ alignmentStamped: true }).catch(() => {});
+    /**
+     * The plan Apply will execute and seal, REPLACING any previous one (see
+     * `recordMigrationPending`'s own contract — a new finalize is a new plan,
+     * exactly as re-partitioning replaces the previous layout).
+     *
+     * Written on BOTH remaining terminal statuses, deliberately.
+     * `"eligible-rotation-outstanding"` and `"success"` are the same completed
+     * commit; they differ only in whether the user's chosen key changes are
+     * already on chain — which Apply's own popup computes separately, from
+     * `computeOutstandingKeyChanges`. Writing the plan on only one of them
+     * would deny the Apply button to precisely the users who have something to
+     * execute.
+     *
+     * Non-fatal and REPORTED, the same rule Writes 2 and 4b already follow
+     * here: a persistence failure must not throw away a migration that
+     * otherwise succeeded, but it must not be silent either — without the plan
+     * there is no Apply button, and the user has to run the wizard again.
+     */
+    try {
+      await actions.recordMigrationPending({
+        finalizedAt: new Date().toISOString(),
+        accountId: resolved.accountId,
+        ...(chainwebSeedId ? { seedId: chainwebSeedId } : {}),
+        ...(masterArweaveSeedId ? { arweaveSeedId: masterArweaveSeedId } : {}),
+        ...(paymentPublicKey ? { paymentPublicKey } : {}),
+        ...(guardPublicKeys ? { guardPublicKeys: [...guardPublicKeys] } : {}),
+        ...(guardPred ? { guardPred } : {}),
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[LegacyPrimeMigrationWizard] the pending migration plan did not land — " +
+          "this codex will not offer an Apply button for this run",
+        e,
+      );
+    }
 
     if (guardRotationNeeded) {
       // Eligible, but the user's CHOSEN key changes are not on chain yet.
       // The run is deliberately NOT cleared: it records what was chosen, and
-      // stage 3A resumes from exactly this.
+      // Apply resumes from exactly this.
       setFinalizeStatus("eligible-rotation-outstanding");
-      return;
+      return null;
     }
 
-    void actions.completeMigration().catch(() => {});
     setFinalizeStatus("success");
+    return null;
+  }
+
+  /**
+   * The finalize panel's own `InlineUnlockPrompt` submit (wizard-unlock-
+   * lifecycle, T2) — re-runs the interrupted finalize with the typed password
+   * and reports the outcome in the `{ok, error}` shape that component expects.
+   *
+   * Note what is NOT here: no `authenticate()` call of its own. Whether the
+   * codex's absolute unlock window may be started is decided inside
+   * `runFinalize`, once the password has actually proved itself, under the
+   * `wasUnlocked` snapshot — see the comment at that call.
+   */
+  async function handleFinalizeUnlock(password: string): Promise<{ ok: boolean; error?: string }> {
+    const problem = await runFinalize(password);
+    if (problem !== null) {
+      // Both problems reduce to the same thing from here: this password did
+      // not work. Same wording the Account step's own prompt uses.
+      return { ok: false, error: "Incorrect password — try again." };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The ARWEAVE STEP's own `InlineUnlockPrompt` submit (`wizard-arweave-step`
+   * T2) — the way out of the dead end T1 reported, where a locked codex (or
+   * one holding a password that decrypts nothing) left three unreadable rows,
+   * a blocked Continue, and closing the wizard as the only option.
+   *
+   * It PROVES the password the only way a password can be proven — by
+   * decrypting the chosen account with it, through the same
+   * `resolveFinalizeDerivation` the check itself uses — and only then:
+   *
+   *   - starts the codex's unlock window IF the codex was genuinely locked.
+   *     The window is ABSOLUTE, never sliding: an already-unlocked codex must
+   *     keep counting down from where it was, or the visible "re-authenticate
+   *     in X" countdown becomes a lie (`src/zbom/hooks/useEnsureCodexUnlocked
+   *     .ts` documents exactly that bug). The `wasUnlocked` snapshot is taken
+   *     from the store immediately before the decision, same shape as that
+   *     hook's and as `runFinalize`'s.
+   *   - records it as this step's proven password, which re-arms the check
+   *     (see that effect's deps) and is what Generate's own password-
+   *     agreement guard is measured against.
+   *
+   * Authenticating BEFORE the decrypt would be the worse mistake available
+   * here: `authenticate()` caches whatever it is handed without validating
+   * it, so a wrong password would leave the codex "unlocked" with a password
+   * that decrypts nothing — and then suppress its own fix, since the window
+   * would no longer be startable.
+   */
+  async function handleArweaveStepUnlock(password: string): Promise<{ ok: boolean; error?: string }> {
+    const resolved = await resolveFinalizeDerivation({
+      accountChoice,
+      keysChoice,
+      currentPrimeAccount,
+      allAccounts,
+      getPassword: () => password,
+    });
+    if (!resolved.ok) {
+      // A password failure gets the prompt's own default wording ("Incorrect
+      // password — try again.", same as Finalize's); anything else is a
+      // problem this password cannot fix, so it is quoted as-is.
+      if (resolved.passwordProblem) return { ok: false };
+      return { ok: false, error: resolved.error };
+    }
+    const cache = codexStore?.getState().passwordCache ?? null;
+    const wasUnlocked = cache !== null && cache.expiresAt > Date.now();
+    if (!wasUnlocked) {
+      actions?.authenticate(password, codexStore?.getState().uiSettings?.passwordCacheMinutes);
+    }
+    setArweaveProvenPassword(password);
+    return { ok: true };
+  }
+
+  /**
+   * Why Generate cannot be pressed, or `null` when it can
+   * (`wizard-arweave-step` T2). Shaped exactly like
+   * {@link continueBlockedReason}, for the same reason: a control that looks
+   * live and ignores clicks is a bug, and a disabled one that says nothing is
+   * barely better.
+   */
+  function arweaveGenerateUnavailableReason(): string | null {
+    if (!ensurePrimeArweaveSeed) return ARWEAVE_STEP_GENERATE_UNAVAILABLE_TEXT;
+    if (arweaveCheck.status !== "settled" || arweaveDerivationRef.current === null) {
+      return "This codex's Arweave accounts are still being checked — generating waits for that answer.";
+    }
+    // THE PASSWORD-AGREEMENT GUARD. The generator encrypts what it writes
+    // under the password the CODEX holds (it calls `getPassword()` inside
+    // `packages/codex-arweave` and takes no password argument), while this
+    // step reads with the password it actually proved. When those differ,
+    // deriving would write a real Arweave seed that nothing can read back —
+    // see {@link ARWEAVE_STEP_GENERATE_PASSWORD_MISMATCH_TEXT}.
+    if (arweaveProvenPassword !== null) {
+      const held =
+        passwordCache !== null && passwordCache.expiresAt > Date.now() ? passwordCache.value : null;
+      if (held !== arweaveProvenPassword) return ARWEAVE_STEP_GENERATE_PASSWORD_MISMATCH_TEXT;
+    }
+    return null;
+  }
+
+  /**
+   * What the step says went wrong with the LAST Generate, or `null`.
+   *
+   * DERIVED from the current verdict rather than stored as a sentence: the
+   * rows and this line must never be able to disagree, and the re-check that
+   * follows a derivation can be superseded by the effect's own re-run (the
+   * writes it just made re-arm it). Computing the text from whatever verdict
+   * is current means whichever check lands last is the one being described.
+   */
+  function arweaveGenerateErrorText(): string | null {
+    if (arweaveGenerateOutcome === null) return null;
+    if (arweaveCheck.status !== "settled" || arweaveCheck.result.ok) return null;
+    return arweaveGenerateOutcome.kind === "rejected"
+      ? arweaveGenerateOutcome.message
+      : arweaveStillMissingText(arweaveCheck.result);
+  }
+
+  /**
+   * Generate (`wizard-arweave-step` T2) — the step's one action.
+   *
+   * Same three-beat shape `runFinalize`'s own Arweave block has (search
+   * `heldBeforeDerivation`), interactively: the positions to derive come from
+   * THIS step's current evaluation, the derivation's own `onProgress` events
+   * drive the progress line, and then — the beat the reported bug was missing
+   * — the predicate is RE-EVALUATED. A resolved promise is not a finished
+   * derivation: a partial delivery resolves, and only a zero-key run rejects.
+   * So nothing here treats the call coming back as success; success is the
+   * re-evaluated verdict, which is also what unblocks Continue.
+   */
+  async function handleArweaveGenerate(): Promise<void> {
+    if (arweaveGenerating || arweaveGenerateUnavailableReason() !== null) return;
+    const derivation = arweaveDerivationRef.current;
+    if (!ensurePrimeArweaveSeed || derivation === null || arweaveCheck.status !== "settled") return;
+    // Exactly what is missing — never a blanket [0, 1]: re-deriving an
+    // RSA-4096 key the codex already holds costs the user seconds for no
+    // change at all.
+    const missingIndexes = arweaveCheck.result.missingIndexes;
+    setArweaveGenerateOutcome(null);
+    setArweaveStepProgress(null);
+    setArweaveGenerating(true);
+    let rejected: string | null = null;
+    try {
+      await ensurePrimeArweaveSeed(
+        { bitString: derivation.bitString, words: derivation.words },
+        { missingIndexes, onProgress: setArweaveStepProgress },
+      );
+    } catch (e) {
+      rejected = e instanceof Error ? e.message : ARWEAVE_SEED_NOT_AVAILABLE_TEXT;
+    }
+    // The progress line reports an IN-FLIGHT derivation; this one has
+    // settled, whichever way it went.
+    setArweaveStepProgress(null);
+    // THE CHECK THAT DECIDES IT — the same one the rows came from, asked
+    // again against the codex as it is NOW.
+    await runArweaveStepCheck(++arweaveCheckRequestIdRef.current);
+    setArweaveGenerateOutcome(
+      rejected !== null ? { kind: "rejected", message: rejected } : { kind: "settled" },
+    );
+    setArweaveGenerating(false);
   }
 
   // T4 (Wave 2) wired "intro" -> "account" for real. T5 wires "account" ->
@@ -4213,10 +7675,26 @@ export function LegacyPrimeMigrationWizard({
    */
   function continueBlockedReason(): string | null {
     if (step === "intro") return null;
+    // Owner (live testing): "i resumed a started session, it seems there
+    // is no blue box for Ouronet Account, it hasnt loaded… while the
+    // codex still looks keys up and the blue box isnt fixed, the next
+    // button on the wizard must be disabled."
+    //
+    // This gate used to live INSIDE the `"account"` branch, so it only
+    // ever fired on the step where the user picks an account. A RESUMED
+    // session restores its choices and lands straight on a LATER step
+    // (payment/guard/review) with that same resolution still in flight —
+    // the dashboard shows its "Checking…" line and an unlit account
+    // ticker, while Continue sat fully enabled. Hoisted above the
+    // per-step branches so it holds on EVERY step past intro: until we
+    // know which seed backs the chosen account, nothing downstream of it
+    // can be trusted enough to advance past.
+    if (accountChoice?.kind === "existing" && accountSeedResolving) {
+      return "Checking this account's details — hang tight…";
+    }
     if (step === "account") {
-      return accountChoice == null
-        ? "Choose which account becomes your Ouronet Codex Master first."
-        : null;
+      if (accountChoice == null) return `Choose which account becomes your ${OURONET_CODEX_MASTER} first.`;
+      return null;
     }
     if (step === "payment") {
       return paymentChoice == null ? "Choose what the payment key should be." : null;
@@ -4244,6 +7722,95 @@ export function LegacyPrimeMigrationWizard({
         return "Resolve a keyset with at least one key for your custom guard.";
       }
       return null;
+    }
+    // THE ARWEAVE GATE (docs/work/wizard-arweave-step/design.md). Continue is
+    // bound to the CHECK, never to "the user pressed Generate": a derivation
+    // that ran is not the same fact as a codex that holds the accounts (a
+    // partial delivery resolves), and inferring one from the other is the bug
+    // the whole topic exists to close. So Finalize stays unreachable until
+    // the predicate itself says `ok` — the owner's *"after successfully
+    // adding them or detected that they exist... the finalize button THEN
+    // becomes available."*
+    if (step === "arweave") {
+      // A derivation in flight is its own reason, ahead of the verdict it is
+      // about to change: the positions it has already delivered can make the
+      // check pass while the rest are still deriving, and leaving the step
+      // mid-derivation would abandon work the user is watching.
+      if (arweaveGenerating) {
+        return "Deriving this codex's Arweave accounts — hang tight…";
+      }
+      return arweaveStepBlockedReason(arweaveCheck);
+    }
+    return null;
+  }
+
+  /**
+   * Why {@link SETTLE_CHOICES_LABEL} cannot be pressed, or `null` when it
+   * can (`migration-pending-apply` T4). Shaped exactly like
+   * {@link continueBlockedReason} and {@link arweaveGenerateUnavailableReason},
+   * for the same reason those exist: a control that looks live and ignores
+   * clicks is a bug, and a disabled one that says nothing is barely better.
+   *
+   * THE GATE is the owner's: *"This button must be clickable once all the
+   * squares are lit (there might be some moment where the squares are not
+   * lit, as readings are being done)."* That parenthetical is half the
+   * requirement — "still being read" and "settled dark" are different facts
+   * and the user is owed the difference, so every in-flight resolution is
+   * reported as such BEFORE any colour is judged. A colour that is dark
+   * because its answer has not arrived yet is not a colour that cannot
+   * light.
+   *
+   * THE LOCKED CODEX IS THE ONE DELIBERATE NON-BLOCK, and it is not a hole
+   * in the gate — it is the only way the gate is not a trap. A locked codex
+   * cannot resolve its Arweave accounts at all (`resolveMasterArweaveHeld`
+   * degrades a locked `getPassword()` to "nothing proven", by design — it
+   * must never prompt from a ticker: `ui-seed-dashboard.test.tsx` pins blue
+   * and violet staying dark there with no prompt), so the colour rules below
+   * could never pass and would leave the user on the last step with a
+   * permanently dead button. `runFinalize` itself is the thing that CAN ask:
+   * it reaches `"needs-password"` and the panel renders
+   * {@link InlineUnlockPrompt}, whose submit resumes this very commit. So
+   * pressing Settle IS the route to the password prompt, and the visible line
+   * beside the button says exactly that rather than a bare "not ready".
+   */
+  function settleBlockedReason(): string | null {
+    if (codexLocked) {
+      return null;
+    }
+    // ── "readings are being done" ──────────────────────────────────────
+    if (accountSeedResolving) {
+      return "Still checking which seed backs this account — the blue square is not lit yet.";
+    }
+    if (liveGuardLoading) {
+      return "Still checking this account's live guard on chain — the brown square is not lit yet.";
+    }
+    if (reviewPreview.status === "loading") {
+      return "Still checking this account's derived keys — the green and brown squares are not lit yet.";
+    }
+    if (guardResolution === null) {
+      return "Still checking what this account's guard is made of — the brown square is not lit yet.";
+    }
+    if (seedDashboardArweaveResolving) {
+      return "Still checking this codex's Arweave accounts — the violet square is not lit yet.";
+    }
+    // ── settled, and dark ──────────────────────────────────────────────
+    if (!settleRolesLit.account) {
+      return "The BLUE (account) square is not lit: no account is chosen for your "
+        + OURONET_CODEX_MASTER + " yet. Go back and choose one.";
+    }
+    if (!settleRolesLit.payment) {
+      return "The GREEN (payment key) square is not lit: the payment key you chose belongs to no "
+        + "seed, no pure keypair, and not to the account itself, so this codex cannot show where "
+        + "it comes from. Go back and choose a payment key this codex holds.";
+    }
+    if (!settleRolesLit.guard) {
+      return "The BROWN (guard) square is not lit: this account's guard names no keys this codex "
+        + "can account for — a capability/user guard, or a keyset reference that could not be "
+        + "read. Go back and choose a guard instead of keeping this one.";
+    }
+    if (!settleRolesLit.arweave) {
+      return "The VIOLET (Arweave) square is not lit: this codex does not hold Arweave accounts "
+        + "#0 and #1 under its Codex Master Seed. Go back to the Arweave step and generate them.";
     }
     return null;
   }
@@ -4327,16 +7894,57 @@ export function LegacyPrimeMigrationWizard({
       return;
     }
     if (step === "review") {
-      // STAGE 2 starts HERE, explicitly.
+      // The Arweave verification step comes between the review and the
+      // commit (design.md: generating Arweave accounts WRITES, so it belongs
+      // after the "nothing has been written yet" boundary, and the commit
+      // belongs after the accounts are proven present).
+      setStep("arweave");
+      notifyStateChange({ step: "arweave", accountChoice, keysChoice });
+      return;
+    }
+    if (step === "arweave") {
+      // Blocked until the check passes — `disabled` on the button is the
+      // visible half, this is the half that holds for a programmatic or
+      // keyboard activation too.
+      if (continueBlockedReason() !== null) return;
+      // NAVIGATION ONLY (`migration-pending-apply` T4). This used to also
+      // `void runFinalize()`, which made stage 2 a side effect of a step
+      // transition — the owner: *"the wizard has to end with a finalize
+      // button 'Settle Choices'… clicking it is the final action that settles
+      // the selected choices. Right now I don't think it works this way."*
+      // Finalize now arrives IDLE (`finalizeStatus: "awaiting-settle"`) and
+      // starts nothing; {@link handleSettleChoices} is the boundary.
       setStep("finalize");
       notifyStateChange({ step: "finalize", accountChoice, keysChoice });
-      void runFinalize();
     }
+  }
+
+  /**
+   * STAGE 1 -> 2, AS AN EXPLICIT ACT (`migration-pending-apply` T4) — the
+   * "Settle Choices" button's one job.
+   *
+   * Re-checks {@link settleBlockedReason} rather than trusting the button's
+   * `disabled` attribute, exactly as every `handleContinue` branch re-checks
+   * `continueBlockedReason()`: the gate has to hold for a keyboard or
+   * programmatic activation too, and this is the click that promotes an
+   * account and makes keys non-removable.
+   *
+   * Also non-re-entrant: only the idle status may start a commit, so a second
+   * click (or one landing while `runFinalize` is mid-flight) cannot start a
+   * second one.
+   */
+  function handleSettleChoices(): void {
+    if (finalizeStatus !== "awaiting-settle") return;
+    if (settleBlockedReason() !== null) return; // disabled; defensive only
+    void runFinalize();
   }
 
   // Post-build fix round, Issue 4: the "Back" counterpart to
   // `handleContinue` above — "account" -> "intro", "payment" -> "account",
-  // "guard" -> "payment", "review" -> "guard". Never reachable from "intro"
+  // "guard" -> "payment", "review" -> "guard", "arweave" -> "review", and —
+  // ONLY while the commit has not started — "finalize" -> "arweave" (see
+  // that branch's own comment for why that exception exists and where it
+  // stops). Never reachable from "intro"
   // (there is nothing before it — the button itself is simply not rendered
   // there, below). Deliberately does NOT reset `accountChoice`/
   // `paymentChoice`/`guardChoice`/`keysChoice`: going back and then forward
@@ -4366,6 +7974,42 @@ export function LegacyPrimeMigrationWizard({
       // review sits BEFORE the commit rather than after it.
       setStep("guard");
       notifyStateChange({ step: "guard", accountChoice, keysChoice });
+      return;
+    }
+    if (step === "arweave") {
+      // Still free: the Arweave step CHECKS on arrival and only writes when
+      // Generate is pressed, so backing out of it to revise a decision costs
+      // nothing.
+      setStep("review");
+      notifyStateChange({ step: "review", accountChoice, keysChoice });
+      return;
+    }
+    if (step === "finalize") {
+      // THE ONE EXCEPTION, and why it exists (`migration-pending-apply` T4).
+      //
+      // `"finalize"` used to be strictly forward-only, and that was right as
+      // long as ARRIVING there meant the commit had already run: there is no
+      // backing out of an account that has been promoted and keys that have
+      // been made non-removable. It arrives IDLE now, with nothing written at
+      // all, so backing out of THAT is as free as backing out of the review
+      // step — and it is the only escape from a Settle gate that can
+      // legitimately never open.
+      //
+      // Several colours can be permanently dark through no fault of the
+      // user: a guard whose `resolveGuardKeys` yields `"none"` /
+      // `"unsupported"` / `"keyset-ref-unresolved"` / `"unknown"`, or a kept
+      // payment key belonging to no seed, no pure keypair and not to the
+      // account itself. Without this branch, such a user reads the reason on
+      // the last screen and has nowhere to act on it. With it, the reason
+      // names the colour and Back is how they change the choice behind it.
+      //
+      // STRICTLY idle-only: once `runFinalize` has started (any other
+      // status), the writes are real and there is nothing safe to go back
+      // to — `FinalizeStep` renders this button only in the idle state, and
+      // this guard is the half that holds for a programmatic call.
+      if (finalizeStatus !== "awaiting-settle") return;
+      setStep("arweave");
+      notifyStateChange({ step: "arweave", accountChoice, keysChoice });
     }
   }
 
@@ -4408,13 +8052,89 @@ export function LegacyPrimeMigrationWizard({
       subtitle={
         step === "finalize"
           ? STEP_LABELS[step]
-          : `Step ${STEP_DISPLAY_NUMBER[step]} of 4 — ${STEP_LABELS[step]}`
+          : `Step ${STEP_DISPLAY_NUMBER[step]} of ${STEP_DISPLAY_TOTAL} — ${STEP_LABELS[step]}`
       }
       onClose={onClose}
       accent={ACCENT}
-      maxWidth={560}
+      // `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "F" — the
+      // modal widens once the Settling Dashboard moves into `sidebar`
+      // (every step except "intro", the same gate `sidebar`/`topBar`
+      // below already use), sized to comfortably fit `sidebarWidth`
+      // plus the existing step content width. `"intro"`'s own width is
+      // unaffected — there's nothing to show in a sidebar yet on that
+      // step.
+      //
+      // Owner (live testing, this round): the default 260px sidebar was
+      // too narrow for a card's "View seed" button + 4-ticker group +
+      // account-name label to share one row — the label wrapped word-by-
+      // word instead of dropping cleanly to its own line. Widened to
+      // 320px here (this wizard's own call site only — `CodexModalShell`'s
+      // own default, used by every other caller that never sets this
+      // prop, stays 260) and `maxWidth` grown by the same +60 so the step
+      // content column's own width is unaffected.
+      sidebarWidth={320}
+      maxWidth={step !== "intro" ? 920 : 560}
       dialogTestId="legacy-prime-migration-wizard-modal"
       closeTestId="legacy-prime-migration-wizard-close"
+      headerExtra={step !== "finalize" ? navRow() : undefined}
+      // Owner (live testing, this round, issue 3): "i scroll down... you
+      // can see the title with the next prev buttons, as well as the
+      // Settle Dashboard Move. They have to be fixed, non movable." A
+      // manual `position: sticky` wrapper around the blocked-reason line
+      // + Settling Dashboard (tried first, two rounds ago) did NOT fix
+      // this: `CodexModalShell`'s own title-bar row lives in the SAME
+      // scrolling box as everything in `children` whenever `footerSplit`
+      // is false — the case for THIS call site on desktop, since nothing
+      // here used to supply `footer`/`topBar`/`fillBody` — so `position:
+      // sticky`'s "nearest scrolling ancestor" was the WHOLE card,
+      // header included, not a dedicated scroll region; the header (not
+      // itself sticky) scrolled away, dragging the visual anchor the
+      // sticky block was pinned relative to along with it. Handing this
+      // content to `topBar` instead pins it STRUCTURALLY — rendered
+      // outside the scrolling `-body` element by `CodexModalShell`
+      // itself, not merely styled to look fixed. `splitOnDesktop` (new,
+      // opt-in — every other `CodexModalShell` caller is unaffected)
+      // extends that split to desktop, matching where the owner's own
+      // repro happened.
+      splitOnDesktop
+      topBar={
+        step !== "intro" && step !== "finalize" && continueBlockedReason() !== null ? (
+          <div
+            data-testid="legacy-prime-migration-continue-blocked"
+            style={{ ...stepParagraphStyle, color: "#8b8b96", marginBottom: 10 }}
+          >
+            {continueBlockedReason()}
+          </div>
+        ) : undefined
+      }
+      // Settling Dashboard (docs/work/wizard-seed-dashboard-refinements/
+      // design.md, moved into `CodexModalShell`'s own `sidebar` column by
+      // `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "F") —
+      // every step except "intro" (nothing is chosen yet there; this
+      // whole `sidebar` is `undefined` on that step, so `CodexModalShell`
+      // doesn't even engage the split there).
+      sidebar={
+        step !== "intro" ? (
+          <SeedDashboard
+            seeds={allSeeds}
+            accountSeedId={seedDashboardAccountSeedId}
+            paymentSeedId={seedDashboardPaymentSeedId}
+            paymentIsStoicDerived={paymentIsStoicDerived}
+            guardSeedIds={seedDashboardGuardSeedIds}
+            guardIsStoicDerived={guardIsStoicDerived}
+            arweaveMatchSeedId={seedDashboardArweaveMatchSeedId}
+            getPassword={actions?.getPassword}
+            viewSeedDisabled={(step === "account" && !accountProbeSettled) || accountSeedResolving}
+            chosenAccount={chosenAccountForPreview}
+            accountFallbackPaymentMatch={accountFallbackPaymentMatch}
+            accountFallbackGuardCount={accountFallbackGuardCount}
+            accountFallbackArweaveMatch={accountFallbackArweaveMatch}
+            pureKeysPaymentMatch={pureKeysPaymentMatch}
+            pureKeysGuardCount={pureKeysGuardCount}
+            unattributedGuardCount={unattributedGuardCount}
+          />
+        ) : undefined
+      }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {resumeInfo !== null ? (
@@ -4442,7 +8162,7 @@ export function LegacyPrimeMigrationWizard({
               data-testid="legacy-prime-migration-resume-startover"
               onClick={() => {
                 void actions?.abandonMigration().catch(() => {});
-                setAccountChoice(null);
+                setAccountChoice({ kind: "keep-current" });
                 // Back to the SAME starting point a fresh open lands on —
                 // option 1 pre-selected on both decisions, not a blank
                 // slate — so "start over" and "never opened before" read
@@ -4463,13 +8183,6 @@ export function LegacyPrimeMigrationWizard({
             </button>
           </div>
         ) : null}
-        {/* Owner, this session: the sticky copy has to sit ABOVE the step's
-            own content to do any good — placed after the step content (like
-            the bottom copy, below) it would only start sticking once
-            scrolled PAST everything, by which point the bottom copy is
-            already in view. Placed here, it is pinned from the first frame
-            a step with real overflow renders. */}
-        {step !== "finalize" ? navRow("top") : null}
         {step === "intro" ? <IntroStep /> : null}
         {step === "account" ? (
           <AccountStep
@@ -4481,6 +8194,7 @@ export function LegacyPrimeMigrationWizard({
             getPassword={actions?.getPassword}
             authenticate={actions?.authenticate}
             passwordEpoch={passwordCache?.expiresAt ?? null}
+            onProbeSettledChange={setAccountProbeSettled}
           />
         ) : null}
         {step === "payment" ? (
@@ -4489,6 +8203,7 @@ export function LegacyPrimeMigrationWizard({
             currentPrimeAccount={currentPrimeAccount}
             allAccounts={allAccounts}
             allSeeds={allSeeds}
+            pureKeypairs={pureKeypairs}
             preview={reviewPreview}
             choice={keysChoice}
             onChoose={handleChooseKeys}
@@ -4514,6 +8229,7 @@ export function LegacyPrimeMigrationWizard({
         {step === "guard" ? (
           <GuardStep
             allSeeds={allSeeds}
+            pureKeypairs={pureKeypairs}
             preview={reviewPreview}
             guardResolution={guardResolution}
             guardChoice={guardChoice}
@@ -4549,122 +8265,91 @@ export function LegacyPrimeMigrationWizard({
             }
           />
         ) : null}
+        {step === "arweave" ? (
+          <ArweaveStep
+            check={arweaveCheck}
+            progress={arweaveStepProgress}
+            generating={arweaveGenerating}
+            generateError={arweaveGenerateErrorText()}
+            generateUnavailableReason={arweaveGenerateUnavailableReason()}
+            onGenerate={() => { void handleArweaveGenerate(); }}
+            onUnlock={handleArweaveStepUnlock}
+          />
+        ) : null}
         {step === "finalize" ? (
           <FinalizeStep
             status={finalizeStatus}
             errorMessage={finalizeError}
             onClose={onClose}
             committed={recordedRun?.committed}
+            needsPassword={finalizeNeedsPassword}
+            onUnlock={handleFinalizeUnlock}
+            arweaveProgress={finalizeArweaveProgress}
+            settleBlockedReason={settleBlockedReason()}
+            settleLockedNotice={codexLocked ? SETTLE_LOCKED_NOTICE_TEXT : null}
+            onSettle={handleSettleChoices}
+            onBack={handleBack}
           />
         ) : null}
-        {step !== "finalize" ? navRow("bottom") : null}
       </div>
     </CodexModalShell>
   );
 
   /**
-   * Back / Continue, rendered TWICE — owner, this session: *"the prev next
-   * buttons, have to also be placed on top... they have to stay fixed
-   * there, even if i scroll... so theyre always there for pressing."* A
-   * step with many entries to pick through (the custom keyset editor,
-   * dozens of codex keys) could put Continue a long scroll below the fold;
-   * the bottom copy stays too, for anyone who scrolls down anyway.
-   *
-   * ONE function, not two copies — `variant` only changes the wrapper's
-   * position/testid-suffix; the buttons' logic (`handleBack`,
-   * `handleContinue`, `continueBlockedReason`) is the SAME call, so the two
-   * copies can never read as out of sync with each other.
-   *
-   * `position: sticky` (not `fixed`): this row lives inside `children`,
-   * nested in `CodexModalShell`'s own scrolling card — `fixed` would
-   * position against the viewport and escape the card entirely on a tall
-   * page. `sticky` pins it to the TOP of that same scrolling box the
-   * instant it would otherwise scroll past, which is exactly "stay fixed
-   * while the rest scrolls" scoped to this card, not the whole screen.
-   * `top` keeps the bottom copy exactly where it already was — unchanged,
-   * not sticky, not touched by this change.
+   * Back / Continue. Owner (this round): "make back and next button part
+   * of the region where the steps are presented as simple secure buttons
+   * with arrows... making the prev and next button part of the title
+   * dashboard the one that presents the steps." Rendered via
+   * `CodexModalShell`'s `headerExtra` prop (passed at this component's own
+   * `<CodexModalShell>` call site above) — the modal's title bar is
+   * ALREADY outside the scrolling body by construction, so these no
+   * longer need their own `position: sticky` wrapper the way the old
+   * bordered nav rectangle did; `legacy-prime-migration-nav` (that
+   * rectangle's own testid) is retired. `legacy-prime-migration-back`/
+   * `-continue` are PRESERVED on these buttons — dozens of pre-existing
+   * tests throughout this file call them by name. The blocked-reason text
+   * (`legacy-prime-migration-continue-blocked`) moved out of this
+   * function entirely — it now renders as its own line in the wizard's
+   * sticky wrapper, above the Settling Dashboard (see that call site).
    */
-  function navRow(variant: "top" | "bottom"): React.ReactElement {
-    const suffix = variant === "top" ? "-top" : "";
+  function navRow(): React.ReactElement {
     const blockedReason = continueBlockedReason();
     return (
-      <div
-        data-testid={`legacy-prime-migration-nav${suffix}`}
-        style={{
-          display: "flex",
-          // Post-build fix round, Issue 4: "Back" (when present) sits on
-          // the opposite end of the SAME row from "Continue" — there is
-          // no existing Close/Cancel precedent in THIS row to mirror (the
-          // only other button, the modal's own × close, lives in
-          // `CodexModalShell`'s separate header row), so "space-between"
-          // is this row's own, simplest two-button layout once a second
-          // button exists; Page 1 keeps the original single-button
-          // "flex-end" since it never renders "Back" at all.
-          justifyContent: step === "intro" ? "flex-end" : "space-between",
-          ...(variant === "top"
-            ? {
-                position: "sticky", top: 0, zIndex: 1,
-                backgroundColor: "#0a0a0a", marginTop: -4,
-                paddingTop: 10, paddingBottom: 10,
-                borderBottom: "1px solid #262626",
-              }
-            : { borderTop: "1px solid #262626", paddingTop: 14 }),
-        }}
-      >
+      <React.Fragment>
         {step !== "intro" ? (
           <button
             type="button"
-            data-testid={`legacy-prime-migration-back${suffix}`}
+            data-testid="legacy-prime-migration-back"
             onClick={handleBack}
+            aria-label="Back"
             style={{
-              padding: "10px 20px",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: 13,
-              // Secondary/outline treatment — mirrors this package's own
-              // established "Cancel"-style secondary button
-              // (`CreateStoaChainSeedModal.tsx`'s own Cancel button:
-              // transparent fill, muted border + text) rather than
-              // repeating "Continue"'s solid accent fill, so the two
-              // buttons read as primary vs. secondary, not two equally-
-              // weighted actions.
-              border: "1px solid #262626",
-              background: "transparent",
-              color: "#888",
-              cursor: "pointer",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+              background: "#141414", border: "1px solid #262626", color: "#888", cursor: "pointer",
             }}
           >
-            Back
+            <ChevronLeft size={16} />
           </button>
-        ) : null}
-        {blockedReason !== null ? (
-          <span
-            data-testid={`legacy-prime-migration-continue-blocked${suffix}`}
-            style={{ ...stepParagraphStyle, color: "#8b8b96", marginRight: 12 }}
-          >
-            {blockedReason}
-          </span>
         ) : null}
         <button
           type="button"
-          data-testid={`legacy-prime-migration-continue${suffix}`}
+          data-testid="legacy-prime-migration-continue"
           onClick={handleContinue}
           disabled={blockedReason !== null}
           title={blockedReason ?? undefined}
+          aria-label="Continue"
           style={{
-            padding: "10px 20px",
-            borderRadius: 8,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
             border: "none",
-            fontWeight: 700,
-            fontSize: 13,
             backgroundColor: blockedReason === null ? ACCENT : "#1a1a1a",
             color: blockedReason === null ? "#0a0a0a" : "#555",
             cursor: blockedReason === null ? "pointer" : "not-allowed",
           }}
         >
-          Continue
+          <ChevronRight size={16} />
         </button>
-      </div>
+      </React.Fragment>
     );
   }
 }

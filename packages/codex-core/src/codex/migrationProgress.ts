@@ -124,6 +124,36 @@ export interface MigrationExecutionStep {
   readonly error?: string;
 }
 
+/**
+ * What the last COMPLETED finalize decided — the "pending state", in the
+ * owner's partition-manager sense: *"you can reset them as much as you want,
+ * but they get written once you click apply"*.
+ *
+ * Written ONLY at the end of a successful finalize, and REPLACED wholesale
+ * each time (a new finalize is a new plan). Deliberately separate from
+ * {@link MigrationSelection}, which is written at radio-click time to power
+ * resume: cancelling a wizard must never change what Apply would execute.
+ *
+ * SECRET-FREE by construction, same guarantee as the rest of this row —
+ * public keys, ids and timestamps only, and
+ * {@link containsSuspectedSecret} is the test-enforced scan over it. No
+ * field here may ever carry key material.
+ */
+export interface MigrationPendingPlan {
+  /** When the finalize that produced this plan completed. */
+  readonly finalizedAt: string;
+  /** The Ouronet account the migration settled on. */
+  readonly accountId: string;
+  readonly seedId?: string;
+  readonly arweaveSeedId?: string;
+  /** PUBLIC payment key the finalize derived, if any. */
+  readonly paymentPublicKey?: string;
+  /** PUBLIC guard keys the finalize resolved, if any. */
+  readonly guardPublicKeys?: readonly string[];
+  /** The guard predicate those keys are to be held under (`keys-all`, …). */
+  readonly guardPred?: string;
+}
+
 export interface MigrationProgress {
   readonly stage: MigrationStage;
   readonly startedAt: string;
@@ -131,6 +161,14 @@ export interface MigrationProgress {
   readonly selection?: MigrationSelection;
   readonly committed?: MigrationCommitRecord;
   readonly execution?: { readonly steps: readonly MigrationExecutionStep[] };
+  /** What Apply would execute and seal. See {@link MigrationPendingPlan}. */
+  readonly pending?: MigrationPendingPlan;
+  /**
+   * When Apply SEALED this migration. Its presence is the seal: once set,
+   * further modification is impossible and the plan above becomes the record
+   * of what was applied rather than something still to apply.
+   */
+  readonly appliedAt?: string;
 }
 
 /** The live wizard's account choice, which MAY carry plaintext words. */
@@ -170,6 +208,32 @@ export function isResumableSelection(
 ): boolean {
   if (!selection) return false;
   return selection.account.kind !== "new-words";
+}
+
+/**
+ * True once Apply has SEALED the migration — i.e. `appliedAt` is set.
+ *
+ * This is permanent by design: there is no un-seal anywhere, because a
+ * sealed codex's Prime trio is locked (`primeAlignment: "aligned"`).
+ */
+export function isMigrationSealed(
+  progress: MigrationProgress | undefined | null
+): boolean {
+  return Boolean(progress?.appliedAt);
+}
+
+/**
+ * True when a finalized plan is waiting to be applied — a plan exists and
+ * the migration is NOT yet sealed.
+ *
+ * A sealed row KEEPS its plan as the record of what was applied, so "has a
+ * plan" alone would keep offering Apply forever; the seal is checked here so
+ * every caller gets the same answer.
+ */
+export function hasMigrationPending(
+  progress: MigrationProgress | undefined | null
+): boolean {
+  return Boolean(progress?.pending) && !isMigrationSealed(progress);
 }
 
 /** Deep scan for anything that looks like stored secret material. Used by

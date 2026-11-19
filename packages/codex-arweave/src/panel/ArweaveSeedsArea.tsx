@@ -86,7 +86,9 @@ import { APOLLO } from "@ouronet/dalos-crypto/historical";
 
 import { resolveSeedBitString, SEED_BIT_LENGTH } from "../seeds/index.js";
 import { planIndexRanges, type IndexSelection } from "../seeds/planIndexRanges.js";
+import { resolveMasterArweaveSeed } from "./resolveMasterArweaveSeed.js";
 import { runSeededBatch } from "../keygen/KeygenRunner.js";
+import { MASTER_ARWEAVE_SEED, FORMER_MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 
 /* ────────────────────────────── the model ────────────────────────────── */
 
@@ -171,6 +173,28 @@ export interface ArweaveSeedDeletion {
 export interface ArweaveSeedsAreaProps {
   /** The known Arweave seeds. Seeds defined in-session are merged in on top. */
   seeds?: readonly ArweaveSeedRecord[];
+  /** `codexMasterSeed.arweaveSeedId` — the id of the seed the CODEX has
+   *  settled on as its Master ArWeave Seed. It decides which row sits first
+   *  and wears the gold treatment; see {@link resolveMasterArweaveSeed} for
+   *  the full precedence and why the `isPrime` flag alone is the wrong
+   *  answer. INJECTED, like every other input here (`ArweavePanel.tsx` reads
+   *  it from the codex store) — this component reaches into no store itself.
+   *  Absent on every codex that has not re-run the eligibility wizard, which
+   *  must keep ordering and colouring exactly as it always has. */
+  masterArweaveSeedId?: string;
+  /** The ids of every seed the codex has on record as a FORMER Master ArWeave
+   *  Seed — `codexMasterSeed.formerArweaveSeedIds`, already run through
+   *  codex-core's `isFormerMasterArweaveSeed` (so: not the current holder, and
+   *  only on a SEALED codex — *"the designation follows the SEAL, not the
+   *  finalize"*). Each such row renders `FORMER_MASTER_ARWEAVE_SEED` as its
+   *  designation with its own stored name beneath, in a muted treatment — never
+   *  the gold, which exactly one row wears.
+   *
+   *  INJECTED and pre-resolved, exactly like {@link masterArweaveSeedId}:
+   *  `ArweavePanel.tsx` owns the store read and the seal gate, and this
+   *  component reaches into no store. Absent on every codex that has never
+   *  moved its master ArWeave seed. */
+  formerMasterArweaveSeedIds?: readonly string[];
   /** Persistence seam for a newly defined seed. */
   onSeedDefined?: (seed: ArweaveSeedRecord) => void;
   /** Every Arweave key the Codex holds — drives the Codex-wide cap AND the
@@ -270,11 +294,79 @@ export interface ArweaveSeedsAreaProps {
 
 /* ───────────────────────────── the constants ──────────────────────────── */
 
-/** The name of the FIRST-EVER Arweave seed. It is not a default the user may
- *  overwrite: the Prime seed is the row the whole surface is built around, and
- *  the permanence warning, the `· Prime` marker and the delete copy all name it
- *  by this name. Only SUBSEQUENT seeds carry a user-chosen name. */
-export const PRIME_SEED_LABEL = "Prime Arweave Seed";
+/**
+ * The codex's Master ArWeave Seed's GOLDEN DESIGNATION — the name the product
+ * gives the row holding the master role.
+ *
+ * It is NOT a stored name and never has been one legitimately: it is DERIVED
+ * from `codexMasterSeed.arweaveSeedId` (via {@link resolveMasterArweaveSeed})
+ * at render time, which is the only thing that decides the role. A seed's own
+ * `name` belongs to its user alone — so the master row shows TWO names, this
+ * designation plus the seed's own, exactly as the owner specified: *"a prime
+ * seed or account has 2 names: its golden prime name, and its normal name, as
+ * every other account and seed has [...] because as non-prime accounts become
+ * prime, their names mangle."* (`docs/work/prime-two-name-model/design.md`.)
+ *
+ * Writing it INTO a seed's `name` — which this surface and `CodexIdPage.tsx`
+ * both used to do — is the drift the owner reproduced twice: two rows both
+ * reading "Master ArWeave Seed", and a stored title saying one thing while the
+ * gold and the position said another. Do not re-introduce it.
+ */
+export const PRIME_SEED_LABEL = MASTER_ARWEAVE_SEED;
+
+/**
+ * WHICH designation a row wears, if any — the one notion of the role every
+ * naming decision below reads from.
+ *
+ * Both inputs are IDENTITY verdicts, never names and never
+ * `ArweaveSeedRecord.isPrime`: `isMasterRow` comes from
+ * {@link resolveMasterArweaveSeed} and `isFormerMasterRow` from codex-core's
+ * seal-gated `isFormerMasterArweaveSeed`, resolved in `ArweavePanel.tsx`
+ * (see {@link ArweaveSeedsAreaProps.formerMasterArweaveSeedIds}).
+ *
+ * The master wins outright when a row is somehow both — the resolver can name
+ * the very seed that is on the former list (its settled id points at a deleted
+ * seed, so it falls back to the `isPrime` row). One row, one designation.
+ */
+function seedDesignation(isMasterRow: boolean, isFormerMasterRow: boolean): string | null {
+  if (isMasterRow) return PRIME_SEED_LABEL;
+  return isFormerMasterRow ? FORMER_MASTER_ARWEAVE_SEED : null;
+}
+
+/**
+ * What a seed is CALLED on screen: its derived designation when it has one,
+ * its own stored name otherwise.
+ *
+ * `designation` is {@link seedDesignation}'s verdict. The generic fallback
+ * covers a seed stored without a name at all (a blank row reads as a rendering
+ * fault); a designated row never needs it, because its designation exists.
+ */
+function seedDisplayName(label: string, designation: string | null): string {
+  if (designation !== null) return designation;
+  return label.trim() !== "" ? label : "Arweave Seed";
+}
+
+/**
+ * The seed's OWN name, as a designated row's muted second line — or `null`
+ * when there is nothing honest to put there.
+ *
+ * Three suppressions, all deliberate:
+ *   - no designation: the row already shows its own name as its title;
+ *   - no stored name at all: the designation stands alone, rather than above an
+ *     empty line that reads as a broken render;
+ *   - a stored name that is itself one of the golden designations: every codex
+ *     that ran the pre-fix code has a row stored as "Master ArWeave Seed" on
+ *     disk (and `ForeignChainsWiring.tsx`'s own stored-seed label fallback can
+ *     re-assert it). On the master row that would print the title twice; on a
+ *     displaced row it would claim, underneath "Former Master Arweave Seed",
+ *     that the seed still holds the role it just lost.
+ */
+function seedOwnNameLine(label: string, designation: string | null): string | null {
+  if (designation === null) return null;
+  const own = label.trim();
+  if (own === "" || own === PRIME_SEED_LABEL || own === FORMER_MASTER_ARWEAVE_SEED) return null;
+  return own;
+}
 
 /** The per-run ceiling while the Codex holds ZERO Arweave keys (~11 min). */
 export const FIRST_RUN_INDEX_CAP = 100;
@@ -1174,6 +1266,8 @@ function useMobileSeedPageSize(): {
 
 export function ArweaveSeedsArea({
   seeds: seedsProp,
+  masterArweaveSeedId,
+  formerMasterArweaveSeedIds,
   onSeedDefined,
   existingKeys = [],
   ouronetAccounts = [],
@@ -1208,11 +1302,28 @@ export function ArweaveSeedsArea({
     for (const seed of localSeeds) byId.set(seed.id, seed);
     for (const id of deletedSeedIds) byId.delete(id);
     const all = [...byId.values()];
-    const prime = all.find((s) => s.isPrime === true) ?? all[0];
-    return prime === undefined ? [] : [prime, ...all.filter((s) => s !== prime)];
-  }, [seedsProp, localSeeds, deletedSeedIds]);
+    // Resolved AFTER the session overlay is folded in (local additions on
+    // top, deletions removed), never before: the master the codex names can
+    // be a seed that only exists in this session's `localSeeds` yet, and a
+    // master that has just been deleted must fall back like any other
+    // dangling id. One resolution, one place — `primeSeed` below is the only
+    // notion of "which row is the master" the rows ever read.
+    const master = resolveMasterArweaveSeed(all, masterArweaveSeedId);
+    return master === undefined ? [] : [master, ...all.filter((s) => s !== master)];
+  }, [seedsProp, localSeeds, deletedSeedIds, masterArweaveSeedId]);
 
+  /** The MASTER row — first position, gold treatment. Named `primeSeed` for
+   *  continuity with the rest of this file; it is NOT `IArweaveSeed.isPrime`
+   *  (see {@link resolveMasterArweaveSeed}). */
   const primeSeed = seeds[0];
+
+  /** Membership test for the injected former-master ids — see
+   *  {@link ArweaveSeedsAreaProps.formerMasterArweaveSeedIds}. A Set so a long
+   *  history costs the row list nothing. */
+  const formerMasterSeedIds = useMemo(
+    () => new Set(formerMasterArweaveSeedIds ?? []),
+    [formerMasterArweaveSeedIds],
+  );
 
   /** Option 2 offers ONLY dalos-curve accounts: an APOLLO account's 1024-bit
    *  bitstring is refused downstream, so offering it would be a dead option. */
@@ -1431,6 +1542,34 @@ export function ArweaveSeedsArea({
     }
   }, [directKind, directWidth, directBitStringText, directInt10Text, directInt49Text, directBitmap]);
 
+  /**
+   * The name a newly defined seed is stored under — the user's own, whatever
+   * role the seed is about to take.
+   *
+   * This used to force `PRIME_SEED_LABEL` onto the first-ever seed and discard
+   * `labelText` outright. That was data loss: the golden designation is DERIVED
+   * from `codexMasterSeed.arweaveSeedId` (see `resolveMasterArweaveSeed` and
+   * `SeedRow`'s two-name header), the entity's `name` is the user's alone, and
+   * Arweave seeds have NO rename UI — so a name overwritten here was gone for
+   * good. The owner's model: *"a prime seed or account has 2 names: its golden
+   * prime name, and its normal name [...] because as non-prime accounts become
+   * prime, their names mangle."*
+   *
+   * `""` for a first-ever seed the user left unnamed: no stored name at all, so
+   * the row renders its derived designation alone rather than a generic
+   * placeholder that would then read as a real, user-chosen name. A LATER seed
+   * keeps its positional `Arweave Seed N` fallback, which is the only name it
+   * would otherwise have.
+   */
+  const chosenSeedName = useCallback(
+    (willBeFirstSeed: boolean): string => {
+      const typed = labelText.trim();
+      if (typed !== "") return typed;
+      return willBeFirstSeed ? "" : `Arweave Seed ${seeds.length + 1}`;
+    },
+    [labelText, seeds.length],
+  );
+
   const confirmDefine = useCallback(async (): Promise<void> => {
     setDefineError(null);
     setDefining0(true);
@@ -1452,11 +1591,7 @@ export function ArweaveSeedsArea({
           DIRECT_INPUT_KINDS.find((kind) => kind.testId === directKind)?.label ?? directKind;
         const record: ArweaveSeedRecord = {
           id: nextSeedId(),
-          label: isPrime
-            ? PRIME_SEED_LABEL
-            : labelText.trim() !== ""
-              ? labelText.trim()
-              : `Arweave Seed ${seeds.length + 1}`,
+          label: chosenSeedName(isPrime),
           bits: directResolution.bits,
           isPrime,
           bitLength: directResolution.width,
@@ -1572,13 +1707,7 @@ export function ArweaveSeedsArea({
       const isPrime = primeSeed === undefined;
       const record: ArweaveSeedRecord = {
         id: nextSeedId(),
-        // The Prime seed's name is FIXED — the form shows it read-only, and the
-        // record ignores `labelText` entirely so no forced value can land here.
-        label: isPrime
-          ? PRIME_SEED_LABEL
-          : labelText.trim() !== ""
-            ? labelText.trim()
-            : `Arweave Seed ${seeds.length + 1}`,
+        label: chosenSeedName(isPrime),
         bits: resolved.bits,
         isPrime,
         sourceLabel,
@@ -1604,9 +1733,8 @@ export function ArweaveSeedsArea({
     revealAccountSecret,
     chainwebSeeds,
     selectedChainwebId,
-    labelText,
+    chosenSeedName,
     primeSeed,
-    seeds.length,
     onSeedDefined,
   ]);
 
@@ -1757,6 +1885,7 @@ export function ArweaveSeedsArea({
             <SeedRow
               seed={seed}
               isPrime={seed === primeSeed}
+              isFormerMaster={seed !== primeSeed && formerMasterSeedIds.has(seed.id)}
               fullScreenPortalTarget={fullScreenPortalTarget}
               open={openSeedId === seed.id}
               onToggle={() => setOpenSeedId((prev) => (prev === seed.id ? null : seed.id))}
@@ -2058,7 +2187,12 @@ export function ArweaveSeedsArea({
       }
       const record: ArweaveSeedRecord = {
         id: nextSeedId(),
-        label: PRIME_SEED_LABEL,
+        // NO stored name: Quick Define is a one-click flow with no name field
+        // at all, so there is no user-chosen name to record — and the golden
+        // designation is DERIVED (see {@link PRIME_SEED_LABEL}), so stamping
+        // it here would be the stored-title drift all over again. The row
+        // renders its designation alone.
+        label: "",
         bits: resolved.bits,
         isPrime: true,
         sourceLabel: `CodexPrime Ouronet account "${entry.label}" (Quick Define)`,
@@ -2090,7 +2224,15 @@ export function ArweaveSeedsArea({
     if (run !== null && run.status === "running") {
       const runningSeed = seeds.find((s) => s.id === run.seedId);
       onRunActivityChange?.({
-        seedLabel: runningSeed?.label ?? PRIME_SEED_LABEL,
+        // What the ROW calls it (see {@link seedDisplayName}) — the master row
+        // stores no designation, so reading its `label` raw would name the
+        // seed `""` in the "leave this generation?" dialog. Deliberately only
+        // the MASTER designation: a former holder has a stored name of its own,
+        // and that name identifies it to its user better than a role it lost.
+        seedLabel:
+          runningSeed === undefined
+            ? PRIME_SEED_LABEL
+            : seedDisplayName(runningSeed.label, runningSeed === primeSeed ? PRIME_SEED_LABEL : null),
         cancel: cancelRun,
       });
       return () => onRunActivityChange?.(null);
@@ -2607,6 +2749,7 @@ function SeedRowActions({
 function SeedRow({
   seed,
   isPrime,
+  isFormerMaster,
   open,
   onToggle,
   keys,
@@ -2622,7 +2765,22 @@ function SeedRow({
   ensureCodexUnlocked,
 }: {
   seed: ArweaveSeedRecord;
+  /** TRUE for THE MASTER ROW — the one the codex calls its Master ArWeave
+   *  Seed, which sits first and wears the gold treatment. It is NOT
+   *  `ArweaveSeedRecord.isPrime` ("the first seed ever added"), and the two
+   *  genuinely disagree once the eligibility wizard has settled a master on a
+   *  codex that already had a seed. That exact name collision is how the
+   *  demoted seed kept the gold while the real master sat grey — the value
+   *  comes from {@link resolveMasterArweaveSeed} via `primeSeed`, and nothing
+   *  in this row may consult `seed.isPrime` instead. */
   isPrime: boolean;
+  /** TRUE for a row the codex has on record as a FORMER Master ArWeave Seed
+   *  (seal-gated, resolved in `ArweavePanel.tsx` — see
+   *  {@link ArweaveSeedsAreaProps.formerMasterArweaveSeedIds}). It gets the
+   *  same TWO-line shape the master row has, in a muted treatment: the gold,
+   *  the lock glyph, the Prime badge and the first position stay the master's
+   *  alone. Never true at the same time as `isPrime`. */
+  isFormerMaster: boolean;
   open: boolean;
   onToggle: () => void;
   keys: readonly ForeignKeyEntry[];
@@ -2697,6 +2855,23 @@ function SeedRow({
     [keys, seed.id],
   );
 
+  /** This row's DESIGNATION, or `null`: the master's golden one, the displaced
+   *  holder's muted "Former …" one. See {@link seedDesignation}. */
+  const designation = seedDesignation(isPrime, isFormerMaster);
+  /** This row's TITLE: its derived designation when it has one, the seed's own
+   *  stored name on every other. Used for the copy and the aria-labels too —
+   *  an unnamed master must not read as `Delete ""`. */
+  const displayName = seedDisplayName(seed.label, designation);
+  /** A designated row's SECOND name — the seed's own. `null` on every other row
+   *  (they already show their own name as their title) and on a designated row
+   *  with no stored name of its own. See {@link seedOwnNameLine}. */
+  const ownNameLine = seedOwnNameLine(seed.label, designation);
+  /** The designation line's colour: the master's gold, or the displaced
+   *  holder's muted silver — which is deliberately neither the gold (exactly
+   *  one row is the master) nor the plain `#d2d3d4` an ordinary row's own name
+   *  wears, so a designation still reads as a designation. */
+  const designationColor = isPrime ? "#ceac5f" : isFormerMaster ? "#9a9a9a" : "#d2d3d4";
+
   return (
     <div
       data-testid={isPrime ? "arweave-prime-seed-row" : `arweave-seed-row-${seed.id}`}
@@ -2760,17 +2935,38 @@ function SeedRow({
             )}
             <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
               <span
+                {...(designation !== null
+                  ? { "data-testid": `arweave-seed-designation-${seed.id}` }
+                  : {})}
                 style={{
                   fontWeight: 600,
                   fontSize: 14,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  color: isPrime ? "#ceac5f" : "#d2d3d4",
+                  color: designationColor,
                 }}
               >
-                {seed.label}
+                {displayName}
               </span>
+              {/* The name the designation displaced — demoted beneath,
+                  never destroyed. Same muted shape as
+                  `OuronetAccountsTab.tsx`'s own displaced-name line. */}
+              {ownNameLine !== null && (
+                <span
+                  data-testid={`arweave-seed-own-name-${seed.id}`}
+                  style={{
+                    fontSize: 11,
+                    color: "#888",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={`This seed's own name — it is the ${designation}`}
+                >
+                  {ownNameLine}
+                </span>
+              )}
               {/* Bit size ONLY — no "DALOS seed"/"· Prime" suffix (that
                   text is what round 25 asks to drop). */}
               <span style={{ fontSize: 11, color: "#666" }}>
@@ -2829,15 +3025,30 @@ function SeedRow({
             )}
             <span style={{ flex: 1 }}>
               <span
+                {...(designation !== null
+                  ? { "data-testid": `arweave-seed-designation-${seed.id}` }
+                  : {})}
                 style={{
                   fontWeight: 600,
                   fontSize: 14,
                   display: "block",
-                  color: isPrime ? "#ceac5f" : "#d2d3d4",
+                  color: designationColor,
                 }}
               >
-                {seed.label}
+                {displayName}
               </span>
+              {/* The name the designation displaced — demoted beneath,
+                  never destroyed. Same muted shape as
+                  `OuronetAccountsTab.tsx`'s own displaced-name line. */}
+              {ownNameLine !== null && (
+                <span
+                  data-testid={`arweave-seed-own-name-${seed.id}`}
+                  style={{ display: "block", fontSize: 11, color: "#888" }}
+                  title={`This seed's own name — it is the ${designation}`}
+                >
+                  {ownNameLine}
+                </span>
+              )}
               {/* The seed BITS are key material and are never rendered — only their
                   width, which is a fixed, public property of every Arweave seed.
                   `bitLength` is absent for every Seed-Based seed (always 1600,
@@ -2888,7 +3099,7 @@ function SeedRow({
           <button
             type="button"
             data-testid={`arweave-seed-reveal-${seed.id}`}
-            aria-label={`View ${seed.label}`}
+            aria-label={`View ${displayName}`}
             title="View this seed's key material"
             onClick={() => setRevealOpen(true)}
             style={{
@@ -2912,7 +3123,7 @@ function SeedRow({
           <button
             type="button"
             data-testid={`arweave-seed-delete-${seed.id}`}
-            aria-label={`Delete ${seed.label}`}
+            aria-label={`Delete ${displayName}`}
             title="Delete this seed and every Arweave key derived from it"
             onClick={onRequestDelete}
             style={{
@@ -2946,7 +3157,7 @@ function SeedRow({
           }}
         >
           <span style={{ flex: 1, minWidth: 220 }}>
-            {`Delete "${seed.label}" and the ${derivedCount} Arweave ${
+            {`Delete "${displayName}" and the ${derivedCount} Arweave ${
               derivedCount === 1 ? "key" : "keys"
             } derived from it? Those keys cannot be regenerated without this seed.`}
           </span>
@@ -3029,7 +3240,7 @@ function SeedRow({
         return isMobile ? (
           <MobilePortal target={fullScreenPortalTarget}>
             <CodexModalShell
-              title={`${seed.label} — Keys`}
+              title={`${displayName} — Keys`}
               onClose={onToggle}
               dialogTestId={`arweave-seed-expand-modal-${seed.id}`}
               closeTestId="arweave-seed-expand-close"
@@ -3057,7 +3268,7 @@ function SeedRow({
         // bounded to this tab's own Zone 3 rectangle.
         <MobilePortal target={fullScreenPortalTarget}>
           <CodexModalShell
-            title={`View ${seed.label}`}
+            title={`View ${displayName}`}
             onClose={() => setRevealOpen(false)}
             maxWidth={880}
             dialogTestId={`arweave-seed-reveal-modal-${seed.id}`}
@@ -4791,26 +5002,28 @@ function DefineSeedFormFooter({
     (directResolution === null || "error" in directResolution);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* The FIRST-EVER seed's name is not a choice: it is always the Prime
-          Arweave Seed. The field stays visible (so the name is stated where a
-          name is expected) but is read-only, and `confirmDefine` ignores
-          `labelText` for a prime definition regardless of what reaches it.
-          Shared across BOTH generator modes — a Direct-defined seed still
-          gets a name (or the locked Prime one), same as a Seed-Based one. */}
+      {/* EVERY seed's name is its user's, the first-ever one included. This
+          field used to be read-only and pre-filled with `PRIME_SEED_LABEL`
+          for a prime definition, with `confirmDefine` discarding `labelText`
+          on top — so the one row with no rename UI anywhere was also the one
+          row whose name the user could never choose. The master designation
+          is DERIVED from `codexMasterSeed.arweaveSeedId` at render time
+          (`SeedRow`'s two-name header), never typed and never stored, so
+          there is nothing left for this field to state on the seed's behalf.
+          Shared across BOTH generator modes, unchanged. */}
       <input
         type="text"
         data-testid="arweave-seed-label-input"
         aria-label="Seed name"
-        value={primeDefinition ? PRIME_SEED_LABEL : labelText}
-        readOnly={primeDefinition}
-        title={primeDefinition ? "The first Arweave seed is always the Prime Arweave Seed." : undefined}
+        value={labelText}
+        title={
+          primeDefinition
+            ? "This seed's own name. It keeps it even while it is the Master ArWeave Seed."
+            : undefined
+        }
         placeholder="Name (optional)"
         onChange={(e) => setLabelText(e.target.value)}
-        style={
-          primeDefinition
-            ? { ...inputStyle, color: "#888", cursor: "not-allowed" }
-            : inputStyle
-        }
+        style={inputStyle}
       />
 
       {error !== null && (

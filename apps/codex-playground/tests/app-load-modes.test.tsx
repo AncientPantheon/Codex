@@ -95,10 +95,10 @@ describe("Dashboard — renders a plaintext-hydrated store directly (dev/test se
     expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
 
     // Chainweb → Seeds surfaces the fixture's ONE StoaChain seed — the index-0
-    // seed renders as "Prime Codex Seed", proving the real store hydrated from
+    // seed renders as "Master Chainweb Seed", proving the real store hydrated from
     // the fixture (not an empty codex, which shows the empty-state text).
     const seeds = await openChainwebSeeds(user);
-    expect(await within(seeds).findByText(/prime codex seed/i)).toBeInTheDocument();
+    expect(await within(seeds).findByText(/master chainweb seed/i)).toBeInTheDocument();
   });
 
   it("mounts the empty fixture and renders an empty codex dashboard (no StoaChain seeds)", async () => {
@@ -144,10 +144,10 @@ describe("App — encrypted backup: load screen → upload → restore → unloc
 
     // The dashboard now renders, hydrated from the restored backup: the backup's
     // ONE StoaChain seed is present (restore mapped kadenaWallets → kadenaSeeds); the
-    // index-0 seed renders as "Prime Codex Seed" under Chainweb → Seeds.
+    // index-0 seed renders as "Master Chainweb Seed" under Chainweb → Seeds.
     await screen.findByRole("tab", { name: /blockchain accounts/i });
     const seeds = await openChainwebSeeds(user);
-    expect(await within(seeds).findByText(/prime codex seed/i)).toBeInTheDocument();
+    expect(await within(seeds).findByText(/master chainweb seed/i)).toBeInTheDocument();
   });
 
   it("surfaces a secret-free error and offers the load screen (never hangs) when a wrong-version backup is uploaded", async () => {

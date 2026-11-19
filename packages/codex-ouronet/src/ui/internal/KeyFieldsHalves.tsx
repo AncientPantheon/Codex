@@ -91,6 +91,23 @@ export interface KeyFieldsHalvesProps {
   decryptPrivate: () => Promise<string>;
 }
 
+/**
+ * Discriminates a genuine lock-state failure (both real callers —
+ * `SeedWordsTab.tsx`'s `revealPrivateKey`, `PureKeypairsTab.tsx`'s
+ * `decryptFor` — throw exactly `new Error("locked")` for that case, never
+ * any other sentinel) from any other thrown error, so a decrypt/derivation
+ * failure on an already-unlocked codex surfaces its own real message
+ * instead of the misleading "Unlock the codex..." text
+ * (docs/work/debug/two-real-codex-bugs.md, bug 2b).
+ */
+function describeKeyError(err: unknown, action: "view" | "copy"): string {
+  if (err instanceof Error && err.message === "locked") {
+    return `Unlock the codex to ${action} the private key.`;
+  }
+  const detail = err instanceof Error ? err.message : String(err);
+  return `Could not ${action} the private key: ${detail}`;
+}
+
 export function KeyFieldsHalves({ publicKey, decryptPrivate }: KeyFieldsHalvesProps) {
   const isMobile = useIsMobile();
   const [priv, setPriv] = useState<string | null>(null);
@@ -112,14 +129,14 @@ export function KeyFieldsHalves({ publicKey, decryptPrivate }: KeyFieldsHalvesPr
     if (priv) { setPriv(null); return; }
     setErr(null); setBusy(true);
     try { setPriv(await decryptPrivate()); }
-    catch { setErr("Unlock the codex to view the private key."); }
+    catch (err) { setErr(describeKeyError(err, "view")); }
     finally { setBusy(false); }
   };
 
   const copyPriv = async () => {
     setErr(null);
     try { copyTo(priv ?? (await decryptPrivate()), setCopiedPriv); }
-    catch { setErr("Unlock the codex to copy the private key."); }
+    catch (err) { setErr(describeKeyError(err, "copy")); }
   };
 
   // MOBILE's own switcher — tapping it to reveal the private key decrypts
@@ -129,7 +146,7 @@ export function KeyFieldsHalves({ publicKey, decryptPrivate }: KeyFieldsHalvesPr
     if (!showPrivate && !priv) {
       setErr(null); setBusy(true);
       try { setPriv(await decryptPrivate()); }
-      catch { setErr("Unlock the codex to view the private key."); return; }
+      catch (err) { setErr(describeKeyError(err, "view")); return; }
       finally { setBusy(false); }
     }
     setShowPrivate((v) => !v);
@@ -139,7 +156,7 @@ export function KeyFieldsHalves({ publicKey, decryptPrivate }: KeyFieldsHalvesPr
     setErr(null);
     if (showPrivate) {
       try { copyTo(priv ?? (await decryptPrivate()), setCopiedPriv); }
-      catch { setErr("Unlock the codex to copy the private key."); }
+      catch (err) { setErr(describeKeyError(err, "copy")); }
     } else {
       copyTo(publicKey, setCopiedPub);
     }

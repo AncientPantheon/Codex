@@ -20,3 +20,4 @@ export * from "./zbomProfiles.js";
 export * from "./toast/toastManager.js";
 export * from "./hooks/useEnsureCodexUnlocked.js";
 export * from "./ui/ActionTooltip.js";
+export * from "./describeKeyset.js";

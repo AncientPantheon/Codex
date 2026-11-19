@@ -550,10 +550,10 @@ describe("Arweave seeds — Option 2 is fed from the mounted codex", () => {
 describe("Arweave seeds — Option 3 is fed from the codex's Chainweb seeds", () => {
   it("lists the Codex's Chainweb seeds in the picker, labelled from the seed", async () => {
     // WHY: unwired, Option 3 is disabled ("No Chainweb seed exists in this
-    // Codex") even for a Codex whose Prime Codex Seed is right there — the
+    // Codex") even for a Codex whose Master Chainweb Seed is right there — the
     // no-typing capture path design.md calls for is simply unreachable.
     //
-    // The FIRST seed is the one the store flags as the Prime Codex Seed on load
+    // The FIRST seed is the one the store flags as the Master Chainweb Seed on load
     // (`store.ts`: a codex with seeds but none flagged gets index 0 promoted),
     // and a prime seed carries no `name` — hence the two expected labels.
     const primeSeed = chainwebSeedFixture({ id: "chainweb-seed-prime-wired" });
@@ -574,18 +574,18 @@ describe("Arweave seeds — Option 3 is fed from the codex's Chainweb seeds", ()
     const select = screen.getByTestId("arweave-seed-chainweb-select");
     expect(
       within(select).getAllByRole("option").map((o) => o.textContent),
-    ).toEqual(["Prime Codex Seed", namedSeed.name]);
+    ).toEqual(["Master Chainweb Seed", namedSeed.name]);
   });
 
-  it("labels the prime seed 'Prime Codex Seed' and marks it the default", () => {
-    // WHY: design.md's Option 3 default IS the Prime Codex Seed; the prime seed
+  it("labels the prime seed 'Master Chainweb Seed' and marks it the default", () => {
+    // WHY: design.md's Option 3 default IS the Master Chainweb Seed; the prime seed
     // carries no `name`, so without the mapping it would render as a blank row.
     const prime = chainwebSeedFixture({ id: "chainweb-prime", isPrime: true });
     const other = chainwebSeedFixture({ id: "chainweb-other", name: "Second" });
 
     const [first, second] = toArweaveSeedChainwebSources([prime, other]);
 
-    expect(first).toMatchObject({ id: prime.id, label: "Prime Codex Seed", isDefault: true });
+    expect(first).toMatchObject({ id: prime.id, label: "Master Chainweb Seed", isDefault: true });
     expect(second).toMatchObject({ id: other.id, label: other.name });
     expect(second.isDefault).toBe(false);
   });

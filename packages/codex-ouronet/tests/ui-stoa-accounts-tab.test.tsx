@@ -161,7 +161,7 @@ describe("<StoaAccountsTab>", () => {
       }),
     ]);
     // First (and only) seed surfaces as the Prime Codex Seed group.
-    expect(await screen.findByText("Prime Codex Seed")).toBeTruthy();
+    expect(await screen.findByText("Master Chainweb Seed")).toBeTruthy();
     // One row per account, each carrying its full k: address on the data attr.
     expect(container.querySelector(`[data-stoa-address="k:${"a".repeat(64)}"]`)).toBeTruthy();
     expect(container.querySelector(`[data-stoa-address="k:${"b".repeat(64)}"]`)).toBeTruthy();
@@ -769,7 +769,7 @@ describe("<StoaAccountsTab> — mobile: the flat fixed-row pagination engine (ro
     // sitting above several rows) on mobile anymore — round 12 put it back
     // as a thin per-ROW pill instead (alongside the colour-coded corner
     // dot for TYPE), so it legitimately appears once per row now.
-    expect(screen.getAllByText("Prime Codex Seed").length).toBe(4);
+    expect(screen.getAllByText("Master Chainweb Seed").length).toBe(4);
     expect(screen.getByText("Key #0")).toBeTruthy();
     expect(screen.getByText("Key #3")).toBeTruthy();
     expect(screen.queryByText("Key #4")).toBeNull();
@@ -793,13 +793,13 @@ describe("<StoaAccountsTab> — mobile: the flat fixed-row pagination engine (ro
     // thin per-row name pill legitimately shows each seed's name once per
     // ROW, so the text itself now appears (3 times for the 3-entry seed,
     // once for the 1-entry seed).
-    expect(screen.getAllByText("Prime Codex Seed").length).toBe(3);
+    expect(screen.getAllByText("Master Chainweb Seed").length).toBe(3);
     expect(screen.getAllByText("Seed B").length).toBe(1);
     // "Key #0" is ambiguous across the two seeds (both start their own
     // index at 0) — assert the corner badge exists on every row instead.
     expect(screen.getAllByText("Key #0").length).toBe(2);
     expect(screen.getAllByLabelText(/^From /i).length).toBe(4);
-    expect(screen.getAllByLabelText("From Prime Codex Seed").length).toBe(3);
+    expect(screen.getAllByLabelText("From Master Chainweb Seed").length).toBe(3);
     expect(screen.getAllByLabelText("From Seed B").length).toBe(1);
   });
 
@@ -825,7 +825,7 @@ describe("<StoaAccountsTab> — mobile: the flat fixed-row pagination engine (ro
   it("desktop (no CodexUiRoot ancestor) is unaffected — grouped GroupRow list, no Prev/Next controls, every account renders unconditionally regardless of count", async () => {
     await renderTab([seedFx({ id: "s1", accounts: nAccounts(6) })]);
     for (let i = 0; i < 6; i++) expect(screen.getByText(`Key #${i}`)).toBeTruthy();
-    expect(screen.getByText("Prime Codex Seed")).toBeTruthy();
+    expect(screen.getByText("Master Chainweb Seed")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /prev/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
   });
@@ -1474,9 +1474,9 @@ describe("<StoaAccountsTab> — mobile: Collapse-All is GONE entirely (round 11 
     // Round 12 owner correction: the seed's NAME legitimately shows now,
     // once per row, via a thin pill — it just never shows as a shared
     // GROUP header spanning multiple rows the way it used to pre-round-11.
-    expect(screen.getByText("Prime Codex Seed")).toBeTruthy();
+    expect(screen.getByText("Master Chainweb Seed")).toBeTruthy();
     expect(screen.getByText("Second")).toBeTruthy();
-    expect(screen.getByLabelText("From Prime Codex Seed")).toBeTruthy();
+    expect(screen.getByLabelText("From Master Chainweb Seed")).toBeTruthy();
     expect(screen.getByLabelText("From Second")).toBeTruthy();
   });
 
@@ -1641,7 +1641,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "kadena",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     expect(screen.queryByLabelText("Send STOA")).toBeNull();
   });
 
@@ -1650,7 +1650,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "stoa",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     expect(await screen.findByLabelText("Send STOA")).toBeTruthy();
   });
 
@@ -1659,7 +1659,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "kadena",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     expect(await screen.findByLabelText("Send KDA")).toBeTruthy();
   });
 
@@ -1668,7 +1668,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "stoa",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     expect(screen.queryByLabelText("Send KDA")).toBeNull();
   });
 
@@ -1677,7 +1677,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "kadena",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     fireEvent.click(await screen.findByLabelText("Send KDA"));
     expect(await screen.findByLabelText(/receiver address/i)).toHaveProperty("id", "send-kadena-receiver");
   });
@@ -1714,7 +1714,7 @@ describe("<StoaAccountsTab activeNetwork> — 2026-09-26, owner directive: 'lets
       "kadena",
       [seedFx({ id: "s1", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] })],
     );
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     // Expand the row (the outer clickable div toggles `open`, revealing the
     // per-chain grid) — click the row's own clickable header, scoped to
     // THIS address row specifically (the tab's own mode-toggle buttons

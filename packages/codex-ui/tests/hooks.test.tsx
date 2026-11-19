@@ -19,7 +19,7 @@
  */
 
 import * as React from "react";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 
 import { CodexProvider, useCodexStore } from "../src/provider/index.js";
@@ -47,8 +47,20 @@ import {
   createCodexStore,
   type CodexStoreState,
 } from "@ancientpantheon/codex-ouronet/state";
-import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import {
+  MemoryCodexAdapter,
+  emptySnapshot,
+} from "@ancientpantheon/codex-ouronet/adapters";
 import { CodexPrimeProtectedError } from "@ancientpantheon/codex-ouronet/errors";
+
+// Direct from-source import (test-only, mirrors this file's own
+// `CodexImportError` import above): `buildDefaultBackupFilename` is a plain
+// named export of the hook module, not re-exported through the package's
+// public `hooks/index.ts` barrel — it is downloadAsJson's own filename
+// template, pulled out to a pure function purely so the "unversioned"
+// branch (impossible to reach end-to-end post-T1, see below) is directly
+// unit-testable.
+import { buildDefaultBackupFilename } from "../src/hooks/useCodexBackup.js";
 import type {
   IStoaChainSeed,
   IOuroAccount,
@@ -455,6 +467,304 @@ describe("useCodexBackup", () => {
     expect(parsed.foreignKeys.keys[0].encryptedKeyfile).toBe(fkEntry.encryptedKeyfile);
   });
 
+  /**
+   * Owner-reported incident: "i loaded a codex, upgraded it, then exported
+   * it. It is now versioned. I loaded again, it still says its not
+   * versioned."
+   *
+   * Their real export (checked on disk) DOES carry
+   * `Codex_Shape_Version: "1.0.0"` at the top level — the writer side is
+   * fine, and the filename even reads `OuronetCodex_v1.0.0_...`. The loss
+   * is on the READ side: `importFromCloud` rebuilds a `CodexSnapshot`
+   * field by field and simply never assigned this one, so every import
+   * silently dropped the stamp and the codex came back "not versioned".
+   *
+   * Exactly the same class as the `watchList` / `arweaveSeeds` /
+   * `foreignKeys` losses this hook's own comments already document — the
+   * fourth instance of it, missed because nothing tested the stamp across
+   * a round trip.
+   */
+  it("an UNFINISHED migration survives an export -> import round trip, so it can resume on another device", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const run = {
+      stage: "selection" as const,
+      startedAt: "2026-10-29T10:00:00.000Z",
+      updatedAt: "2026-10-29T10:01:00.000Z",
+      selection: {
+        account: { kind: "existing" as const, accountId: "ouro-7" },
+        payment: { kind: "stoic-dalos-position-0" as const },
+        guard: { kind: "recommended-single-key" as const },
+      },
+    };
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-10-29T10:01:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+      migrationProgress: run,
+    });
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // Persisted, so re-opening the wizard here can resume it...
+    expect((await adapter.loadAll()).migrationProgress).toEqual(run);
+    // ...and it rides back out, so the half-done run follows the codex on.
+    const reExported = await act(async () => result.current.backup.exportForCloud());
+    expect(JSON.parse(reExported as unknown as string).migrationProgress).toEqual(run);
+  });
+
+  it("the Codex Master Seed row survives an export -> import round trip", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const row = {
+      ouroAccountId: "ouro-1",
+      chainwebSeedId: "seed-1",
+      arweaveSeedId: "arw-1",
+      establishedAt: "2026-10-28T10:00:00.000Z",
+    };
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-10-28T10:00:00.000Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+      codexMasterSeed: row,
+    });
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    expect((await adapter.loadAll()).codexMasterSeed).toEqual(row);
+
+    // ...and it rides back out, so a restored codex can be re-exported
+    // without forgetting which seed it is built on.
+    const reExported = await act(async () => result.current.backup.exportForCloud());
+    expect(JSON.parse(reExported as unknown as string).codexMasterSeed).toEqual(row);
+  });
+
+  it("masterKeyLocks survive an export -> import round trip (a restored codex that forgot its locks re-permits deleting the master's payment key)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const locks = [
+      { seedId: "seed-1", position: 0, reason: "master-payment-key" as const },
+      { seedId: "seed-1", position: 1, reason: "master-guard-key" as const },
+      // A custom guard keyset reaching into a SECOND seed — the many-to-many
+      // case that is the whole reason this is a registry and not a flag.
+      { seedId: "seed-2", position: 7, reason: "master-guard-key" as const },
+    ];
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-10-27T11:00:40.651Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+      masterKeyLocks: locks,
+    });
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    const restored = await adapter.loadAll();
+    expect(restored.masterKeyLocks).toEqual(locks);
+
+    // And they ride straight back out on the next export, so a re-export
+    // of a restored codex does not quietly drop the guarantee.
+    const reExported = await act(async () => result.current.backup.exportForCloud());
+    expect(JSON.parse(reExported as unknown as string).masterKeyLocks).toEqual(locks);
+  });
+
+  it("an import that PREDATES locks does NOT wipe this device's existing locks", async () => {
+    // Deliberately the opposite of Codex_Shape_Version's no-fallback rule.
+    // The stamp describes the shape of the imported data, so absence is the
+    // datum. A lock protects a key position from deletion, so absence means
+    // only "this backup is older than the feature" — inheriting nothing
+    // would silently re-permit deleting the master's payment key.
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const base = {
+      version: "1.3",
+      exportedAt: "2026-10-27T11:00:40.651Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+    };
+    const locks = [
+      { seedId: "seed-1", position: 0, reason: "master-payment-key" as const },
+    ];
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(
+        JSON.stringify({ ...base, masterKeyLocks: locks })
+      );
+    });
+    expect((await adapter.loadAll()).masterKeyLocks).toEqual(locks);
+
+    // A legacy backup with no locks field at all.
+    await act(async () => {
+      await result.current.backup.importFromCloud(JSON.stringify(base));
+    });
+    expect((await adapter.loadAll()).masterKeyLocks).toEqual(locks);
+  });
+
+  it("Codex_Shape_Version survives an export -> import round trip (owner incident: an upgraded codex came back 'not versioned')", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    // A versioned codex on the wire — exactly what their file looks like.
+    const payload = JSON.stringify({
+      version: "1.3",
+      exportedAt: "2026-10-27T11:00:40.651Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings: {
+        passwordCacheMinutes: 1,
+        patronSelectionMode: "wealthiest" as const,
+        selectedNode: "node2" as const,
+        customNodeUrl: "",
+        customNodeGasLimit: 1_600_000,
+        legacyKoalaSigning: false,
+        experimentalCurvesEnabled: false,
+      },
+      Codex_Shape_Version: "1.0.0",
+    });
+
+    await act(async () => {
+      await result.current.backup.importFromCloud(payload);
+    });
+
+    // Persisted...
+    const restored = await adapter.loadAll();
+    expect(restored.Codex_Shape_Version).toBe("1.0.0");
+    // ...and live in the store, which is what the Codex ID page reads to
+    // decide "versioned" vs "not versioned".
+    await waitFor(() => {
+      expect(result.current.codex.Codex_Shape_Version).toBe("1.0.0");
+    });
+
+    // And it rides straight back out on the next export.
+    let json = "";
+    await act(async () => {
+      json = await result.current.backup.exportForCloud();
+    });
+    expect(JSON.parse(json).Codex_Shape_Version).toBe("1.0.0");
+  });
+
+  it("an UNVERSIONED backup imported over a versioned codex does NOT inherit the old stamp (the imported data is legacy-shaped; claiming otherwise would skip the migration it needs)", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const { result } = renderHook(
+      () => ({ backup: useCodexBackup(), codex: useCodex() }),
+      { wrapper: mkWrapper(adapter) }
+    );
+    await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+    const uiSettings = {
+      passwordCacheMinutes: 1,
+      patronSelectionMode: "wealthiest" as const,
+      selectedNode: "node2" as const,
+      customNodeUrl: "",
+      customNodeGasLimit: 1_600_000,
+      legacyKoalaSigning: false,
+      experimentalCurvesEnabled: false,
+    };
+    const base = {
+      version: "1.3",
+      exportedAt: "2026-10-27T11:00:40.651Z",
+      kadenaWallets: [],
+      ouronetWallets: [],
+      addressBook: [],
+      uiSettings,
+    };
+
+    // First: a versioned codex.
+    await act(async () => {
+      await result.current.backup.importFromCloud(
+        JSON.stringify({ ...base, Codex_Shape_Version: "1.0.0" })
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.codex.Codex_Shape_Version).toBe("1.0.0");
+    });
+
+    // Then: a LEGACY export with no stamp. The stamp describes the SHAPE OF
+    // THE DATA being imported, so unlike the funds-critical keyrings it must
+    // NOT fall back to whatever this device happened to hold — that would
+    // mark unmigrated data as migrated and skip its structural upgrade.
+    await act(async () => {
+      await result.current.backup.importFromCloud(JSON.stringify(base));
+    });
+    await waitFor(() => {
+      expect(result.current.codex.Codex_Shape_Version).toBeUndefined();
+    });
+    expect((await adapter.loadAll()).Codex_Shape_Version).toBeUndefined();
+  });
+
   it("importFromCloud rehydrates seeds + ouroAccounts + pureKeypairs", async () => {
     const adapter = new MemoryCodexAdapter("dev");
     const { result } = renderHook(
@@ -840,5 +1150,193 @@ describe("useCodexBackup", () => {
     await expect(
       result.current.importFromCloud(JSON.stringify({ version: "2.0" }))
     ).rejects.toThrow(CodexImportError);
+  });
+
+  // ----------------------------------------------------------------
+  // downloadAsJson's default filename — docs/work/codex-shape-version-stamp.
+  // A fresh-shaped (post-T3) codex's export filename must itself carry the
+  // live `Codex_Shape_Version`, so a user with several exports in a
+  // Downloads folder can tell at a glance which shape each one is in,
+  // without opening the file.
+  // ----------------------------------------------------------------
+
+  describe("downloadAsJson default filename (Codex_Shape_Version)", () => {
+    // Each test re-spies `document.createElement`; without restoring between
+    // tests the second spy wraps the first test's already-mocked function,
+    // which then recurses into itself (stack overflow).
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** Stubs the browser download mechanism the same way the existing
+     *  `<LogoutConfirmModal>` "back up now" test already does (jsdom lacks
+     *  `URL.createObjectURL`), PLUS spies on `document.createElement` to
+     *  capture the `<a>` that `downloadAsJson` builds — needed here (unlike
+     *  that test) because we must read the resulting `.download` string,
+     *  not merely confirm a download was attempted. */
+    function stubDownloadMechanism() {
+      const createObjectURL = vi.fn(() => "blob:codex");
+      const revokeObjectURL = vi.fn();
+      window.URL.createObjectURL =
+        createObjectURL as unknown as typeof window.URL.createObjectURL;
+      window.URL.revokeObjectURL =
+        revokeObjectURL as unknown as typeof window.URL.revokeObjectURL;
+
+      const realCreateElement = document.createElement.bind(document);
+      let anchor: HTMLAnchorElement | null = null;
+      vi.spyOn(document, "createElement").mockImplementation(
+        (tag: string, ...rest: unknown[]) => {
+          const el = (
+            realCreateElement as (
+              tag: string,
+              ...rest: unknown[]
+            ) => HTMLElement
+          )(tag, ...rest);
+          if (tag === "a") anchor = el as HTMLAnchorElement;
+          return el;
+        }
+      );
+      return { getAnchor: () => anchor };
+    }
+
+    it("downloadAsJson() with no filename argument carries the live Codex_Shape_Version in a.download (regression guard: a fresh T3-stamped codex must not download looking unversioned)", async () => {
+      const adapter = new MemoryCodexAdapter("dev");
+      await adapter.saveAll({
+        ...emptySnapshot("dev"),
+        Codex_Shape_Version: "1.0.0",
+      });
+      const { getAnchor } = stubDownloadMechanism();
+
+      const { result } = renderHook(
+        () => ({ backup: useCodexBackup(), codex: useCodex() }),
+        { wrapper: mkWrapper(adapter) }
+      );
+      await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+      await act(async () => {
+        await result.current.backup.downloadAsJson();
+      });
+
+      expect(getAnchor()?.download).toMatch(/^OuronetCodex_v1\.0\.0_.+\.json$/);
+    });
+
+    // `codex-id-step-flow`: the export filename must reflect Permaweb
+    // eligibility too, not just the shape version — "the codex now finally
+    // has the proper shape going forward" (owner, this session).
+    it("downloadAsJson() with no filename argument carries a '_permaweb-eligible' marker when primeAlignment is 'aligned'", async () => {
+      const adapter = new MemoryCodexAdapter("dev");
+      // `primeAlignment` is NOT YET a declared field on the shared
+      // `CodexSnapshot` type (it lives on codex-ouronet's own widened
+      // `CodexSnapshotWithPrimeAlignment` internally) — same cast
+      // `packages/codex-ouronet/tests/state-store.test.ts` already uses to
+      // seed/read it through a plain `CodexSnapshot`-typed adapter call.
+      await adapter.saveAll({
+        ...emptySnapshot("dev"),
+        Codex_Shape_Version: "1.0.0",
+        primeAlignment: "aligned",
+      } as unknown as Parameters<typeof adapter.saveAll>[0]);
+      const { getAnchor } = stubDownloadMechanism();
+
+      const { result } = renderHook(
+        () => ({ backup: useCodexBackup(), codex: useCodex() }),
+        { wrapper: mkWrapper(adapter) }
+      );
+      await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+      await act(async () => {
+        await result.current.backup.downloadAsJson();
+      });
+
+      expect(getAnchor()?.download).toMatch(
+        /^OuronetCodex_v1\.0\.0_permaweb-eligible_.+\.json$/
+      );
+    });
+
+    it("downloadAsJson() with no filename argument omits the marker when primeAlignment is 'legacy' (the default)", async () => {
+      const adapter = new MemoryCodexAdapter("dev");
+      await adapter.saveAll({
+        ...emptySnapshot("dev"),
+        Codex_Shape_Version: "1.0.0",
+      });
+      const { getAnchor } = stubDownloadMechanism();
+
+      const { result } = renderHook(
+        () => ({ backup: useCodexBackup(), codex: useCodex() }),
+        { wrapper: mkWrapper(adapter) }
+      );
+      await waitFor(() => expect(result.current.codex.isReady).toBe(true));
+
+      await act(async () => {
+        await result.current.backup.downloadAsJson();
+      });
+
+      const download = getAnchor()?.download ?? "";
+      expect(download).toMatch(/^OuronetCodex_v1\.0\.0_.+\.json$/);
+      expect(download).not.toContain("permaweb-eligible");
+    });
+
+    it("downloadAsJson(filename) still overrides the shape-version default entirely (explicit filename must win, unchanged pre-existing behaviour)", async () => {
+      const adapter = new MemoryCodexAdapter("dev");
+      await adapter.saveAll({
+        ...emptySnapshot("dev"),
+        Codex_Shape_Version: "1.0.0",
+      });
+      const { getAnchor } = stubDownloadMechanism();
+
+      const { result } = renderHook(() => useCodexBackup(), {
+        wrapper: mkWrapper(adapter),
+      });
+      await waitFor(() => expect(result.current.isDirty).toBe(false));
+
+      await act(async () => {
+        await result.current.downloadAsJson("my-custom-backup-name.json");
+      });
+
+      expect(getAnchor()?.download).toBe("my-custom-backup-name.json");
+    });
+  });
+});
+
+// ----------------------------------------------------------------
+// buildDefaultBackupFilename — the pure filename-template helper
+// `downloadAsJson` builds its default from. No real post-T1 export can ever
+// have an `undefined` Codex_Shape_Version (every live codex is at least
+// stamped "1.0.0"), so the "unversioned" branch can only be exercised by a
+// direct unit test of the template logic itself, never end-to-end through
+// the full downloadAsJson flow.
+// ----------------------------------------------------------------
+
+describe("buildDefaultBackupFilename", () => {
+  it("renders the vX.Y.Z branch when a shape version is present", () => {
+    expect(
+      buildDefaultBackupFilename("1.0.0", "2026-10-18T00-00-00-000Z")
+    ).toBe("OuronetCodex_v1.0.0_2026-10-18T00-00-00-000Z.json");
+  });
+
+  it("renders the 'unversioned' branch when the shape version is undefined", () => {
+    expect(
+      buildDefaultBackupFilename(undefined, "2026-10-18T00-00-00-000Z")
+    ).toBe("OuronetCodex_vunversioned_2026-10-18T00-00-00-000Z.json");
+  });
+
+  // `codex-id-step-flow`: once BOTH versioning AND Permaweb eligibility are
+  // checked, the codex "finally has the proper shape going forward" (owner,
+  // this session) — reflected as a `_permaweb-eligible` filename marker.
+  it("appends a '_permaweb-eligible' marker when primeAlignment is 'aligned'", () => {
+    expect(
+      buildDefaultBackupFilename("1.0.0", "2026-10-18T00-00-00-000Z", "aligned")
+    ).toBe("OuronetCodex_v1.0.0_permaweb-eligible_2026-10-18T00-00-00-000Z.json");
+  });
+
+  it("omits the marker when primeAlignment is 'legacy'", () => {
+    expect(
+      buildDefaultBackupFilename("1.0.0", "2026-10-18T00-00-00-000Z", "legacy")
+    ).toBe("OuronetCodex_v1.0.0_2026-10-18T00-00-00-000Z.json");
+  });
+
+  it("omits the marker when primeAlignment is not supplied at all (backward compatible)", () => {
+    expect(
+      buildDefaultBackupFilename("1.0.0", "2026-10-18T00-00-00-000Z")
+    ).toBe("OuronetCodex_v1.0.0_2026-10-18T00-00-00-000Z.json");
   });
 });

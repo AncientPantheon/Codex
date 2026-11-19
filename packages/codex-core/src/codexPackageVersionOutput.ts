@@ -1,7 +1,21 @@
 /**
- * CODEX_FORM_VERSION — the product-facing "shape of the codex" milestone
- * version, distinct from every OTHER thing already named "schema version" in
- * this codebase.
+ * CODEX_PACKAGE_VERSION_OUTPUT — a single GLOBAL, build-time constant
+ * answering "what version of the Codex *package/app* produced this
+ * output," distinct from every OTHER thing already named "schema version"
+ * in this codebase.
+ *
+ * DISTINCT FROM `Codex_Shape_Version` (`codex/shapeVersion.ts` /
+ * `codex/types.ts`'s `PlaintextCodex.Codex_Shape_Version`): that field is
+ * PER-CODEX-INSTANCE — it answers "what shape is THIS specific codex's
+ * data in," grows independently per codex as the migration engine advances
+ * it, and travels in the export. THIS constant is the opposite axis: one
+ * value, shared by every codex opened against a given build, that never
+ * changes based on which codex you're looking at. A prior name for this
+ * constant was itself part of a real confusion — it read as if it
+ * described the codex's own data shape, when it actually describes the
+ * package/app build. Do not let a future reader conflate the two again:
+ * if you need "what shape is this codex in," use `Codex_Shape_Version` /
+ * `detectCodexShapeVersion`, never this constant.
  *
  * WHY THIS IS A SEPARATE CONSTANT, NOT A REPURPOSING OF AN EXISTING ONE.
  * Owner ask (2026-09-26): "schema version reads 0, now that we settled the
@@ -53,4 +67,4 @@
  * alongside the native Ouronet/StoaChain side — i.e. the aggregate's current
  * two-chain-module shape is the form this version freezes as a baseline.
  */
-export const CODEX_FORM_VERSION = "1.0.0" as const;
+export const CODEX_PACKAGE_VERSION_OUTPUT = "1.0.0" as const;

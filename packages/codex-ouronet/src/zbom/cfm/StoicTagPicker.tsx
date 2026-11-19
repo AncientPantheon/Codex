@@ -13,7 +13,9 @@
 import { useState, useRef, useEffect } from "react";
 import { Landmark, ChevronDown } from "lucide-react";
 import { useWallet } from "./seam.js";
-import { useAddressBook } from "../../hooks/index.js";
+import { useAddressBook, useCodex } from "../../hooks/index.js";
+import { masterOuronetAccountName } from "@ancientpantheon/codex-core";
+import { codexIdPrimeName } from "@ancientpantheon/codex-ui/ui";
 
 export interface StoicTagPickerProps {
   onSelect: (value: string) => void;
@@ -32,6 +34,7 @@ export function StoicTagPicker({ onSelect, className }: StoicTagPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { ouro } = useWallet();
+  const { codexMasterSeed } = useCodex();
   const { entries: abEntries } = useAddressBook();
   const getAddressesByType = (t: string) => abEntries.filter((e) => e.type === t);
 
@@ -44,12 +47,28 @@ export function StoicTagPicker({ onSelect, className }: StoicTagPickerProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // The settled master (codexMasterSeed.ouroAccountId) outranks position when
+  // the codex has one; null means "never settled", which keeps the positional
+  // rule. See @ancientpantheon/codex-core's masterOuronetAccountName.
+  const settledMasterAccountId = codexMasterSeed?.ouroAccountId ?? null;
+
   const entries: TagEntry[] = [];
   // (a) tags attached to the user's own codex accounts
   ouro.forEach((acc, idx) => {
     const tag = acc.stoicTag;
     if (typeof tag === "string" && tag.length > 0 && !entries.some(e => e.tag === tag)) {
-      const displayName = idx === 0 ? "CodexPrime" : (acc.name || `Account #${idx + 1}`);
+      const resolvedName = masterOuronetAccountName(idx, acc.name, undefined, {
+        accountId: acc.id,
+        settledMasterAccountId,
+      });
+      // One line only here (the §tag already owns the other), so the settled
+      // master's former name goes INLINE — "Codex Ouronet Master (AncientHodler)".
+      // Only the SETTLED master gets it: on a codex that never settled one,
+      // index 0 keeps reading as the bare role name exactly as it does today.
+      const displayName =
+        !!settledMasterAccountId && acc.id === settledMasterAccountId
+          ? codexIdPrimeName(resolvedName, acc.name)
+          : resolvedName;
       entries.push({ tag, name: displayName, group: "My Account Tags" });
     }
   });

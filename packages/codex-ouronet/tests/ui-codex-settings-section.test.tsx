@@ -13,10 +13,11 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
-import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
+import { MemoryCodexAdapter, emptySnapshot } from "@ancientpantheon/codex-ouronet/adapters";
 import { useCodex } from "@ancientpantheon/codex-ouronet/hooks";
 import { CodexSettingsSection } from "@ancientpantheon/codex-ouronet/ui";
 import type { NetworkSettingsModel } from "@ancientpantheon/codex-core";
+import { smartEncrypt } from "@stoachain/stoa-core/crypto";
 
 function ReadyGate() {
   const { isReady } = useCodex();
@@ -133,6 +134,124 @@ describe("<CodexSettingsSection>", () => {
   it("uses the provided consumerName for the embedded ConsumerSettingsCard", async () => {
     await renderSection({ consumerName: "Mnemosyne", initialTab: "advanced" });
     expect(screen.getByText(/Consumer Settings — Mnemosyne/)).toBeTruthy();
+  });
+});
+
+describe("<CodexSettingsSection> default change-password seam — bug 1 regression", () => {
+  // docs/work/debug/two-real-codex-bugs.md, bug 1: `rekeyCodex` correctly
+  // SKIPS (never drops) a secret it can't decrypt under the old password —
+  // proven in rekey.test.ts. But the default UI seam here used to discard
+  // that `skipped` report entirely and report plain success, leaving the
+  // stranded secret on its old password with zero signal to the user. The
+  // next time it's needed for signing, decrypting it with the now-current
+  // password genuinely fails (a real AES-GCM auth-tag mismatch) — the exact
+  // symptom hit live on Rotate Payment Key / Rotate Guard.
+  const OLD = "old-majority-password";
+  const STRANDED_OLD = "a-different-old-password";
+  const NEW = "brand-new-password-1";
+
+  it("surfaces an error — not silent success — when a secret must stay on its old password", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const majorityBlob = await smartEncrypt("plain-majority-key", OLD, "1.0");
+    const strandedBlob = await smartEncrypt("plain-stranded-key", STRANDED_OLD, "1.0");
+    await adapter.saveAll({
+      ...emptySnapshot("dev"),
+      pureKeypairs: [
+        {
+          id: "pk-majority",
+          label: "Majority",
+          publicKey: "b".repeat(64),
+          encryptedPrivateKey: majorityBlob,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "pk-stranded",
+          label: "Stranded",
+          publicKey: "c".repeat(64),
+          encryptedPrivateKey: strandedBlob,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    render(
+      <CodexProvider adapter={adapter}>
+        <ReadyGate />
+        <CodexSettingsSection initialTab="security" />
+      </CodexProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("ready").textContent).toBe("yes"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /change password/i }));
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: OLD },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: NEW },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: NEW },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^submit/i }));
+
+    // Must name the problem, not silently close as if everything moved.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/could not be moved to the new password/i),
+      ).toBeTruthy(),
+    );
+    // The form must still be open — a silent-success close here would mean
+    // the user has no idea anything needs attention.
+    expect(screen.getByLabelText("Current password")).toBeTruthy();
+  });
+
+  it("reports plain success (no error) when nothing needed to be skipped", async () => {
+    const adapter = new MemoryCodexAdapter("dev");
+    const blob = await smartEncrypt("plain-key", OLD, "1.0");
+    await adapter.saveAll({
+      ...emptySnapshot("dev"),
+      pureKeypairs: [
+        {
+          id: "pk-only",
+          label: "Only",
+          publicKey: "b".repeat(64),
+          encryptedPrivateKey: blob,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    render(
+      <CodexProvider adapter={adapter}>
+        <ReadyGate />
+        <CodexSettingsSection initialTab="security" />
+      </CodexProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("ready").textContent).toBe("yes"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /change password/i }));
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: OLD },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: NEW },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: NEW },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^submit/i }));
+
+    // The form closes (no error path) exactly as it did before this fix —
+    // the regression test above must not have widened the error to the
+    // happy path too.
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Current password")).toBeNull(),
+    );
+    expect(screen.queryByText(/could not be moved to the new password/i)).toBeNull();
   });
 });
 

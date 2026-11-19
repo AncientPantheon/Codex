@@ -87,7 +87,7 @@ describe("<OuronetAccountsTab> — single-account codex, accounts[0] IS the only
         <OuronetAccountsTab />
       </CodexProvider>,
     );
-    const card = (await screen.findByText("CodexPrime")).closest("[data-account-id]") as HTMLElement;
+    const card = (await screen.findByText("Codex Ouronet Master")).closest("[data-account-id]") as HTMLElement;
     expandRow(card);
 
     const calls = await waitFor(() => {

@@ -201,6 +201,62 @@ describe("codex-ouronet CodexModalShell — mobile: topBar pinned above the scro
   });
 });
 
+describe("CodexModalShell — splitOnDesktop (wizard-page2-and-dashboard-fixes, issue 3: 'the title with next prev buttons, as well as the Settle Dashboard Move. They have to be fixed, non movable.')", () => {
+  // Owner's own repro was on a desktop-width window — `footerSplit`
+  // (the fixed-header/scrolling-body split topBar/footer/fillBody
+  // already enable) was previously MOBILE-ONLY, so a desktop caller's
+  // header scrolled away together with its body no matter what. This
+  // new, opt-in prop (default `false`, every EXISTING caller untouched)
+  // lets a caller request the SAME split on desktop too.
+  function renderWithTopBarDesktop(splitOnDesktop?: boolean) {
+    return render(
+      <CodexModalShell
+        title="Test Modal"
+        onClose={() => {}}
+        dialogTestId="test-modal"
+        topBar={<button data-testid="topbar-btn">Switch</button>}
+        splitOnDesktop={splitOnDesktop}
+      >
+        <p>body</p>
+      </CodexModalShell>,
+    );
+  }
+
+  it("desktop + splitOnDesktop: topBar renders OUTSIDE the scrolling body — a sibling BEFORE it, same as the mobile split", () => {
+    renderWithTopBarDesktop(true);
+    const body = screen.getByTestId("test-modal-body");
+    const topBarBtn = screen.getByTestId("topbar-btn");
+    expect(body.contains(topBarBtn)).toBe(false);
+    expect(topBarBtn.parentElement?.nextElementSibling).toBe(body);
+  });
+
+  it("desktop + splitOnDesktop: the card itself doesn't scroll (overflow hidden) — the body does, independently, with a bounded flex height", () => {
+    renderWithTopBarDesktop(true);
+    const card = screen.getByTestId("test-modal").firstElementChild as HTMLElement;
+    expect(card.style.overflowY).toBe("hidden");
+    expect(card.style.display).toBe("flex");
+    expect(card.style.flexDirection).toBe("column");
+    const body = screen.getByTestId("test-modal-body");
+    expect(body.style.overflowY).toBe("auto");
+    expect(body.style.flex).toBe("1 1 0%");
+  });
+
+  it("desktop + splitOnDesktop: the card still keeps its normal capped width — not a mobile full-bleed sheet", () => {
+    renderWithTopBarDesktop(true);
+    const card = screen.getByTestId("test-modal").firstElementChild as HTMLElement;
+    expect(card.style.maxWidth).not.toBe("none");
+  });
+
+  it("desktop WITHOUT splitOnDesktop (every existing caller, default omitted): topBar still renders INSIDE the body — byte-identical to before this prop existed", () => {
+    renderWithTopBarDesktop(undefined);
+    const body = screen.getByTestId("test-modal-body");
+    const topBarBtn = screen.getByTestId("topbar-btn");
+    expect(body.contains(topBarBtn)).toBe(true);
+    const card = screen.getByTestId("test-modal").firstElementChild as HTMLElement;
+    expect(card.style.overflowY).toBe("auto");
+  });
+});
+
 describe("CodexModalShell — zIndex override (mirrors codex-ui's own copy; owner-reported bug: a signed action on a locked codex hung forever on 'Processing…' because the password prompt opened invisibly behind an already-open ZbomModalFrame)", () => {
   it("defaults to 9999 when omitted — every existing caller stays byte-identical", () => {
     FakeResizeObserver.nextWidth = 1920;
@@ -227,5 +283,145 @@ describe("CodexModalShell — zIndex override (mirrors codex-ui's own copy; owne
     );
     const z = Number(screen.getByRole("dialog").style.zIndex);
     expect(z).toBeGreaterThan(10050);
+  });
+});
+
+describe("CodexModalShell — headerExtra (wizard-seed-dashboard-refinements)", () => {
+  it("renders headerExtra inside the title bar, as a sibling of the title block", () => {
+    render(
+      <CodexModalShell
+        title="T"
+        onClose={() => {}}
+        headerExtra={<button data-testid="extra-btn">X</button>}
+      >
+        body
+      </CodexModalShell>,
+    );
+    const extra = screen.getByTestId("extra-btn");
+    expect(extra).toBeTruthy();
+    // Sibling of the title's own flex:1 block, not inside `children`.
+    expect(screen.getByText("T").closest("div")?.parentElement?.contains(extra)).toBe(true);
+    expect(screen.getByText("body").contains(extra)).toBe(false);
+  });
+
+  it("renders no extra node, and the title bar's own children are unaffected, when headerExtra is omitted", () => {
+    render(<CodexModalShell title="T" onClose={() => {}}>body</CodexModalShell>);
+    expect(screen.queryByTestId("extra-btn")).toBeNull();
+    expect(screen.getByText("T")).toBeTruthy();
+    expect(screen.getByLabelText("Close")).toBeTruthy();
+  });
+
+  it("applies the themed-scrollbar class to both the outer card and the body element", () => {
+    render(
+      <CodexModalShell title="T" onClose={() => {}} dialogTestId="shell">
+        body
+      </CodexModalShell>,
+    );
+    const card = screen.getByRole("dialog").firstElementChild as HTMLElement;
+    const body = screen.getByTestId("shell-body");
+    expect(card.className).toContain("codex-modal-shell-scroll");
+    expect(body.className).toContain("codex-modal-shell-scroll");
+  });
+});
+
+describe("CodexModalShell — sidebar (wizard-keyset-scale-and-sidebar, design.md §F: 'the card becomes a two-column flex row below the title bar')", () => {
+  it("desktop: renders a left sidebar column (fixed width, own scroll, right border) beside the existing title-bar/topBar/body/footer column", () => {
+    render(
+      <CodexModalShell
+        title="Test Modal"
+        onClose={() => {}}
+        dialogTestId="test-modal"
+        sidebar={<nav data-testid="sidebar-nav">Nav</nav>}
+      >
+        <p>body</p>
+      </CodexModalShell>,
+    );
+    const nav = screen.getByTestId("sidebar-nav");
+    const leftColumn = nav.parentElement as HTMLElement;
+    expect(leftColumn.style.width).toBe("260px");
+    expect(leftColumn.style.flexShrink).toBe("0");
+    expect(leftColumn.style.overflowY).toBe("auto");
+    expect(leftColumn.style.borderRight).toBe("1px solid rgb(38, 38, 38)");
+    // Owner (live testing, `wizard-keyset-scale-and-sidebar` follow-up):
+    // "the left settle side of the popup have the same separators towards
+    // the margin as the right side has... the rectangle is flush to its
+    // area." The right column's own scrolling body always gets
+    // `padding: 20` — this column must match it, not sit flush.
+    expect(leftColumn.style.padding).toBe("20px");
+
+    const row = leftColumn.parentElement as HTMLElement;
+    expect(row.style.display).toBe("flex");
+    expect(row.children[0]).toBe(leftColumn);
+
+    // The right column is the SAME structure the body test id already
+    // targets — just nested one level deeper, as a sibling of the
+    // sidebar column instead of the title bar.
+    const body = screen.getByTestId("test-modal-body");
+    const rightColumn = row.children[1] as HTMLElement;
+    expect(rightColumn.contains(body)).toBe(true);
+  });
+
+  it("mobile: sidebar renders stacked inside the fixed region, immediately before topBar — not as a column", () => {
+    FakeResizeObserver.nextWidth = 390;
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    render(
+      <CodexUiRoot>
+        <CodexModalShell
+          title="Test Modal"
+          onClose={() => {}}
+          dialogTestId="test-modal"
+          sidebar={<nav data-testid="sidebar-nav">Nav</nav>}
+          topBar={<button data-testid="topbar-btn">Switch</button>}
+        >
+          <p>body</p>
+        </CodexModalShell>
+      </CodexUiRoot>,
+    );
+    const nav = screen.getByTestId("sidebar-nav");
+    const body = screen.getByTestId("test-modal-body");
+    expect(body.contains(nav)).toBe(false);
+
+    const topBarBtn = screen.getByTestId("topbar-btn");
+    // sidebar's own fixed block is the immediate previous sibling of
+    // topBar's own fixed block — stacked above it, in the same region.
+    expect(nav.parentElement?.nextElementSibling).toBe(topBarBtn.parentElement);
+  });
+
+  it("sidebar omitted (every existing caller): no new wrapper element inserted — byte-identical to before this prop existed", () => {
+    render(
+      <CodexModalShell
+        title="Test Modal"
+        onClose={() => {}}
+        dialogTestId="test-modal"
+        topBar={<button data-testid="topbar-btn">Switch</button>}
+      >
+        <p>body</p>
+      </CodexModalShell>,
+    );
+    const body = screen.getByTestId("test-modal-body");
+    const topBarBtn = screen.getByTestId("topbar-btn");
+    // Desktop without splitOnDesktop: topBar still renders INSIDE body.
+    expect(body.contains(topBarBtn)).toBe(true);
+    // The card's own direct children are exactly the title bar, then the
+    // body div itself — no sidebar row/column wraps it.
+    const card = screen.getByTestId("test-modal").firstElementChild as HTMLElement;
+    expect(card.children.length).toBe(2);
+    expect(card.children[1]).toBe(body);
+  });
+
+  it("sidebarWidth overrides the left column's inline width (defaults to 260px otherwise)", () => {
+    render(
+      <CodexModalShell
+        title="Test Modal"
+        onClose={() => {}}
+        dialogTestId="test-modal"
+        sidebar={<nav data-testid="sidebar-nav">Nav</nav>}
+        sidebarWidth={340}
+      >
+        <p>body</p>
+      </CodexModalShell>,
+    );
+    const nav = screen.getByTestId("sidebar-nav");
+    expect((nav.parentElement as HTMLElement).style.width).toBe("340px");
   });
 });

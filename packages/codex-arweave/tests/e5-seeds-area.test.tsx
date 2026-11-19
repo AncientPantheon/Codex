@@ -34,7 +34,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, act, within } from "@testing-library/react";
 
-import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { CodexMasterSeed, ForeignKeyEntry, MigrationProgress } from "@ancientpantheon/codex-core";
+import { FORMER_MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk } from "@ancientpantheon/arweave-core";
 
 import type { GatewayPool } from "@ancientpantheon/arweave-core";
@@ -48,7 +49,7 @@ import { SEED_BIT_LENGTH } from "../src/seeds/index";
 import type { KeygenWorkerMsg } from "../src/keygen/KeygenRunner";
 import type { LibraryStore } from "../src/library/types";
 import type { ReactNode } from "react";
-import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
 
@@ -100,7 +101,7 @@ const PRIME_BITS = "1".repeat(SEED_BIT_LENGTH);
 
 const PRIME_SEED: ArweaveSeedRecord = {
   id: "prime",
-  label: "Prime Arweave Seed",
+  label: "Master ArWeave Seed",
   bits: PRIME_BITS,
   isPrime: true,
 };
@@ -242,7 +243,7 @@ describe("ArweaveSeedsArea — the Prime Arweave Seed row (T7 a)", () => {
 
     const prime = screen.getByTestId("arweave-prime-seed-row");
     expect(prime).toHaveAttribute("data-defined", "true");
-    expect(prime.textContent).toContain("Prime Arweave Seed");
+    expect(prime.textContent).toContain("Master ArWeave Seed");
     expect(prime.textContent).toContain(String(SEED_BIT_LENGTH));
     // The raw seed bits are key material — never rendered.
     expect(screen.getByTestId("arweave-seeds-area").textContent).not.toContain(PRIME_BITS);
@@ -1421,34 +1422,45 @@ describe("ArweaveSeedsArea — deleting a seed cascades to its keys (T10)", () =
 });
 
 /**
- * The FIRST-EVER Arweave seed is named "Prime Arweave Seed", full stop (T12 · 1).
+ * The FIRST-EVER Arweave seed carries the name ITS USER typed — the golden
+ * designation is DERIVED, never stored (`docs/work/prime-two-name-model/
+ * design.md`, `former-master-record` T1).
  *
- * The Prime seed is the one row the whole surface is built around — the design's
- * "A Prime Arweave Seed always occupies the first row" — and every later
- * reference to it (the permanence warning, the `· Prime` marker, the delete
- * copy) names it by that name. Letting the first definition carry a free-text
- * name means the row users are told is permanent can ship called "asdf", with no
- * way to rename it afterwards. Only SUBSEQUENT seeds are user-named.
+ * This describe block used to assert the opposite: the first seed's name field
+ * was read-only, pre-filled with the master designation, and `confirmDefine`
+ * discarded `labelText` outright for a prime definition. That was live DATA
+ * LOSS — Arweave seeds have no rename UI at all, so a name thrown away here
+ * could never be recovered. The owner's model: *"a prime seed or account has 2
+ * names: its golden prime name, and its normal name, as every other account and
+ * seed has [...] because as non-prime accounts become prime, their names
+ * mangle."*
+ *
+ * Each case guards a distinct regression:
+ *   (editable) with the field locked, a user simply cannot name their first
+ *       seed — the master row is the one row with no rename escape hatch.
+ *   (typed) the name reaching the record is the one the user typed, not the
+ *       designation. This is THE data-loss assertion.
+ *   (unnamed) no name typed means NO name stored — the row still reads as the
+ *       master because the designation comes from the resolver, so inventing
+ *       a stored title here would re-introduce the drift the model removes.
  */
-describe("ArweaveSeedsArea — the first seed's name is locked (T12 · 1)", () => {
-  it("shows the Prime seed's name as a FIXED, non-editable field reading `Prime Arweave Seed`", () => {
+describe("ArweaveSeedsArea — the first seed's name is the USER's (former-master-record T1)", () => {
+  it("offers the first seed's name as an EDITABLE, empty field — the designation is not a stored name", () => {
     renderArea();
     openDefineForm();
 
     const name = screen.getByTestId("arweave-seed-label-input") as HTMLInputElement;
-    expect(name.value).toBe("Prime Arweave Seed");
-    expect(name).toHaveAttribute("readonly");
+    expect(name.value).toBe("");
+    expect(name).not.toHaveAttribute("readonly");
   });
 
-  it("stores the first seed as `Prime Arweave Seed` even when the name field is forced to another value", async () => {
+  it("stores the first seed under the name the user typed, even though it becomes the master", async () => {
     const onSeedDefined = vi.fn();
     renderArea({ onSeedDefined });
     openDefineForm();
 
-    // A readOnly input still accepts a programmatic change — the LABEL, not the
-    // field, is what must be fixed.
     fireEvent.change(screen.getByTestId("arweave-seed-label-input"), {
-      target: { value: "asdf" },
+      target: { value: "My cold storage seed" },
     });
     fireEvent.change(screen.getByTestId("arweave-seed-words-input"), {
       target: { value: "hello world" },
@@ -1456,7 +1468,50 @@ describe("ArweaveSeedsArea — the first seed's name is locked (T12 · 1)", () =
     fireEvent.click(screen.getByTestId("arweave-seed-confirm"));
 
     await waitFor(() => expect(onSeedDefined).toHaveBeenCalledTimes(1));
-    expect((onSeedDefined.mock.calls[0][0] as ArweaveSeedRecord).label).toBe("Prime Arweave Seed");
+    const seed = onSeedDefined.mock.calls[0][0] as ArweaveSeedRecord;
+    expect(seed.label).toBe("My cold storage seed");
+    // It really is the prime/first seed — the name survived THAT role, which is
+    // the whole point.
+    expect(seed.isPrime).toBe(true);
+  });
+
+  it("stores NO name for a first seed the user left unnamed — it is not stamped with the designation", async () => {
+    const onSeedDefined = vi.fn();
+    renderArea({ onSeedDefined });
+    openDefineForm();
+
+    fireEvent.change(screen.getByTestId("arweave-seed-words-input"), {
+      target: { value: "hello world" },
+    });
+    fireEvent.click(screen.getByTestId("arweave-seed-confirm"));
+
+    await waitFor(() => expect(onSeedDefined).toHaveBeenCalledTimes(1));
+    const seed = onSeedDefined.mock.calls[0][0] as ArweaveSeedRecord;
+    expect(seed.label).toBe("");
+    expect(seed.label).not.toBe(PRIME_SEED_LABEL);
+  });
+
+  // The Direct generator builds its OWN record, on its own code path — the
+  // Seed-Based fix above does not reach it, and a user who defines their
+  // first-ever seed from a bitstring loses their name just the same.
+  it("keeps the typed name on a first seed defined through the DIRECT generator too", async () => {
+    const onSeedDefined = vi.fn();
+    renderArea({ onSeedDefined });
+    openDefineForm();
+    fireEvent.click(screen.getByTestId("arweave-seed-mode-direct"));
+    fireEvent.click(screen.getByTestId("arweave-seed-direct-tile-bitstring"));
+    fireEvent.change(screen.getByTestId("arweave-seed-direct-bitstring-input"), {
+      target: { value: "01".repeat(800) },
+    });
+    fireEvent.change(screen.getByTestId("arweave-seed-label-input"), {
+      target: { value: "Paper-wallet bits" },
+    });
+    fireEvent.click(screen.getByTestId("arweave-seed-confirm"));
+
+    await waitFor(() => expect(onSeedDefined).toHaveBeenCalledTimes(1));
+    const seed = onSeedDefined.mock.calls[0][0] as ArweaveSeedRecord;
+    expect(seed.label).toBe("Paper-wallet bits");
+    expect(seed.isPrime).toBe(true);
   });
 
   it("leaves a LATER seed's name free text, and uses what the user typed", async () => {
@@ -2459,7 +2514,7 @@ describe("ArweaveSeedsArea — gold Prime styling + separator (B)", () => {
     // `#ceac5f40` (25% alpha gold), exactly `SeedWordsTab.tsx`'s value.
     expect(getComputedStyle(prime).borderColor).toBe("rgba(206, 172, 95, 0.25)");
 
-    const label = screen.getByText("Prime Arweave Seed");
+    const label = screen.getByText("Master ArWeave Seed");
     expect(getComputedStyle(label).color).toBe("rgb(206, 172, 95)");
 
     expect(screen.getByTestId("arweave-prime-badge").textContent).toBe("🔒 Prime");
@@ -2511,6 +2566,336 @@ describe("ArweaveSeedsArea — gold Prime styling + separator (B)", () => {
     renderArea({ seeds: [PRIME_SEED] });
 
     expect(screen.queryByTestId("arweave-seed-separator")).toBeNull();
+  });
+});
+
+/**
+ * WHICH row is the master — ordering and gold follow the codex's settled
+ * `codexMasterSeed.arweaveSeedId`, not the `isPrime` flag.
+ *
+ * The owner's report, after the eligibility wizard finalized on a codex that
+ * ALREADY had an Arweave seed: *"The newly made Master Arweave Seed should be
+ * on position one colour golden, and the one existing as Master Arweave Seed,
+ * should have become Arweave Seed One."* The RENAME half already works — but
+ * `isPrime` is a creation-time provenance marker ("the first seed ever added")
+ * and is deliberately NOT moved, so the DEMOTED seed kept position one and the
+ * gold while the real new master sat grey further down.
+ *
+ * Each case guards a distinct regression:
+ *   (settled) the reported bug itself — with a stale `isPrime` on the demoted
+ *       seed, the row the codex calls its master must be first AND gold, and
+ *       the demoted one grey and below it.
+ *   (unsettled) BACKWARDS COMPATIBILITY, a hard requirement: a codex that
+ *       never ran the wizard passes no master id at all and must order and
+ *       colour exactly as it always has. Breaking it would silently re-paint
+ *       every existing codex's seed list.
+ *   (no arweave face) a settled master seed row whose ArWeave face has not
+ *       been derived yet (`arweaveSeedId` absent — the row's own documented
+ *       optional field) is NOT an identity, and must not blank out the rule.
+ *   (dangling) an id naming a seed that is no longer in the list must fall
+ *       back, never leave the surface with no gold row at all.
+ */
+describe("ArweaveSeedsArea — the master row follows codexMasterSeed.arweaveSeedId", () => {
+  /** The pre-existing seed: still flagged `isPrime` (first ever added), but
+   *  RENAMED by the wizard's finalize step — it is no longer the master. */
+  const DEMOTED_SEED: ArweaveSeedRecord = {
+    id: "legacy",
+    label: "Arweave Seed 1",
+    bits: PRIME_BITS,
+    isPrime: true,
+  };
+  /** The seed the wizard just derived: carries the master TITLE, and no
+   *  `isPrime` (that flag cannot be relocated — `addArweaveSeed` throws
+   *  `id-conflict` on a second explicit prime). */
+  const NEW_MASTER_SEED: ArweaveSeedRecord = {
+    id: "new-master",
+    label: "Master ArWeave Seed",
+    bits: PRIME_BITS,
+  };
+  const BOTH = [DEMOTED_SEED, NEW_MASTER_SEED];
+
+  /** The gold label/border and the ordinary grey ones, as jsdom reports them. */
+  const GOLD_TEXT = "rgb(206, 172, 95)";
+  const GOLD_BORDER = "rgba(206, 172, 95, 0.25)";
+  const PLAIN_TEXT = "rgb(210, 211, 212)";
+  const PLAIN_BORDER = "rgb(38, 38, 38)";
+
+  function masterRow(): HTMLElement {
+    // One row, and only ever one, wears the master treatment.
+    const rows = screen.getAllByTestId("arweave-prime-seed-row");
+    expect(rows).toHaveLength(1);
+    return rows[0]!;
+  }
+
+  it("puts the seed codexMasterSeed names FIRST and gold, with the demoted isPrime seed grey and below it", () => {
+    renderArea({ seeds: BOTH, masterArweaveSeedId: "new-master" });
+
+    const master = masterRow();
+    expect(master).toHaveAttribute("data-seed-id", "new-master");
+    expect(getComputedStyle(master).borderColor).toBe(GOLD_BORDER);
+    expect(getComputedStyle(within(master).getByText("Master ArWeave Seed")).color).toBe(GOLD_TEXT);
+
+    const demoted = screen.getByTestId("arweave-seed-row-legacy");
+    expect(getComputedStyle(demoted).borderColor).toBe(PLAIN_BORDER);
+    expect(getComputedStyle(within(demoted).getByText("Arweave Seed 1")).color).toBe(PLAIN_TEXT);
+    expect(within(demoted).queryByTestId("arweave-prime-badge")).toBeNull();
+
+    // eslint-disable-next-line no-bitwise
+    expect(master.compareDocumentPosition(demoted) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps today's isPrime-first behaviour when the codex has settled no master arweave seed id", () => {
+    renderArea({ seeds: BOTH });
+
+    const master = masterRow();
+    expect(master).toHaveAttribute("data-seed-id", "legacy");
+    expect(getComputedStyle(master).borderColor).toBe(GOLD_BORDER);
+
+    const other = screen.getByTestId("arweave-seed-row-new-master");
+    expect(getComputedStyle(other).borderColor).toBe(PLAIN_BORDER);
+    // eslint-disable-next-line no-bitwise
+    expect(master.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps today's isPrime-first behaviour when the settled master seed row has no arweave face yet (empty id)", () => {
+    renderArea({ seeds: BOTH, masterArweaveSeedId: "" });
+
+    expect(masterRow()).toHaveAttribute("data-seed-id", "legacy");
+  });
+
+  it("falls back to isPrime — still exactly ONE gold row — when the settled id names a seed no longer in the list", () => {
+    renderArea({ seeds: BOTH, masterArweaveSeedId: "deleted-seed" });
+
+    const master = masterRow();
+    expect(master).toHaveAttribute("data-seed-id", "legacy");
+    expect(getComputedStyle(master).borderColor).toBe(GOLD_BORDER);
+  });
+});
+
+/**
+ * The master row's TWO names (`former-master-record` T1).
+ *
+ * The owner: *"a prime seed or account has 2 names: its golden prime name, and
+ * its normal name, as every other account and seed has. This has to be properly
+ * constructed like so, because as non-prime accounts become prime, their names
+ * mangle."* So the master row renders the DERIVED designation
+ * ("Master ArWeave Seed", gold) as its title and the seed's OWN stored name as
+ * a muted second line beneath it — the same shape
+ * `OuronetAccountsTab.tsx`'s displaced-name line already uses.
+ *
+ * Each case guards a distinct regression:
+ *   (two names) with the designation stored in `name` (the model this task
+ *       replaces) the user's own name was simply gone from the screen — the
+ *       visible half of the data loss.
+ *   (unnamed) a seed with no stored name must show the designation ALONE: an
+ *       empty muted line reads as a rendering fault, and inventing a
+ *       placeholder would be the stored-title drift all over again.
+ *   (repeat) seeds ALREADY on disk carry `name: "Master ArWeave Seed"` from
+ *       before this fix (and the playground's own stored-seed label fallback
+ *       can re-assert it). Rendering it as the second line would print the
+ *       title twice on one row.
+ *   (identity) a NON-master seed whose stored name happens to equal the
+ *       designation must get NO master treatment — the name-vs-identity guard.
+ *       This is exactly the drift that made two rows both read "Master ArWeave
+ *       Seed" with the real master indistinguishable.
+ */
+describe("ArweaveSeedsArea — the master row shows the designation AND the seed's own name", () => {
+  const GOLD_TEXT = "rgb(206, 172, 95)";
+  const MUTED_TEXT = "rgb(136, 136, 136)";
+  const PLAIN_BORDER = "rgb(38, 38, 38)";
+
+  /** The master seed, carrying the name ITS USER chose. */
+  const NAMED_MASTER: ArweaveSeedRecord = {
+    id: "master",
+    label: "My cold storage seed",
+    bits: PRIME_BITS,
+  };
+
+  it("renders the golden designation as the title and the stored name muted beneath it", () => {
+    renderArea({ seeds: [NAMED_MASTER], masterArweaveSeedId: "master" });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    const designation = within(row).getByTestId("arweave-seed-designation-master");
+    expect(designation.textContent).toBe("Master ArWeave Seed");
+    expect(getComputedStyle(designation).color).toBe(GOLD_TEXT);
+
+    const ownName = within(row).getByTestId("arweave-seed-own-name-master");
+    expect(ownName.textContent).toBe("My cold storage seed");
+    expect(getComputedStyle(ownName).color).toBe(MUTED_TEXT);
+  });
+
+  it("shows the designation ALONE for a master seed with no stored name — no empty second line", () => {
+    renderArea({ seeds: [{ ...NAMED_MASTER, label: "" }], masterArweaveSeedId: "master" });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    expect(within(row).getByTestId("arweave-seed-designation-master").textContent).toBe(
+      "Master ArWeave Seed",
+    );
+    expect(within(row).queryByTestId("arweave-seed-own-name-master")).toBeNull();
+  });
+
+  it("does not repeat the designation as the second line for a legacy row stored under that very name", () => {
+    renderArea({
+      seeds: [{ ...NAMED_MASTER, label: PRIME_SEED_LABEL }],
+      masterArweaveSeedId: "master",
+    });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    expect(within(row).queryByTestId("arweave-seed-own-name-master")).toBeNull();
+    expect(within(row).getAllByText(PRIME_SEED_LABEL)).toHaveLength(1);
+  });
+
+  it("gives a NON-master seed named 'Master ArWeave Seed' no designation and no master treatment", () => {
+    const decoy: ArweaveSeedRecord = {
+      id: "decoy",
+      label: PRIME_SEED_LABEL,
+      bits: PRIME_BITS,
+      // Stale provenance: the first seed the codex ever got, no longer its
+      // master. `isPrime` must not win over the settled id here either.
+      isPrime: true,
+    };
+    renderArea({ seeds: [decoy, NAMED_MASTER], masterArweaveSeedId: "master" });
+
+    // Exactly ONE row wears the master treatment, and it is the one the
+    // resolver names — not the one whose stored name says so.
+    const masterRows = screen.getAllByTestId("arweave-prime-seed-row");
+    expect(masterRows).toHaveLength(1);
+    expect(masterRows[0]).toHaveAttribute("data-seed-id", "master");
+
+    const decoyRow = screen.getByTestId("arweave-seed-row-decoy");
+    expect(getComputedStyle(decoyRow).borderColor).toBe(PLAIN_BORDER);
+    expect(within(decoyRow).queryByTestId("arweave-prime-badge")).toBeNull();
+    expect(within(decoyRow).queryByTestId("arweave-seed-designation-decoy")).toBeNull();
+    // Its own name is still its own name — shown as any other seed's is.
+    expect(getComputedStyle(within(decoyRow).getByText(PRIME_SEED_LABEL)).color).toBe(
+      "rgb(210, 211, 212)",
+    );
+  });
+});
+
+/**
+ * The DISPLACED seed's own designation (`former-master-record` T2/T3).
+ *
+ * The owner: *"the one being Master Arweave Seed needs to be Master Arweave
+ * Seed, and the one that isn't anymore would be designated **Former Master
+ * Arweave Seed**."* So a seed the codex has on record as a former holder
+ * (`codexMasterSeed.formerArweaveSeedIds`, seal-gated by
+ * `isFormerMasterArweaveSeed` — resolved in `ArweavePanel.tsx` and INJECTED,
+ * since this surface reaches into no store) renders on the SAME two-line shape
+ * the master row uses: the derived designation as its title, its own stored
+ * name muted beneath. Never gold: exactly one row is the master.
+ *
+ * Each case guards a distinct regression:
+ *   (two names) with no designation at all the displaced seed is
+ *       indistinguishable from any unrelated seed — the whole point of
+ *       recording the former id is that the user can still see what it was.
+ *   (not gold) painting it gold would put TWO gold rows on screen, which is
+ *       the exact confusion ("two rows both reading Master ArWeave Seed") this
+ *       topic exists to end.
+ *   (legacy title) a seed displaced from the role on a codex that ran the
+ *       pre-fix code carries `name: "Master ArWeave Seed"` on disk; printing
+ *       that under "Former Master Arweave Seed" would claim it still holds the
+ *       role it just lost.
+ *   (master wins) the resolver can name the very seed that is on the former
+ *       list as today's master (its settled id points at a deleted seed, so it
+ *       falls back to `isPrime`). One row must not wear both treatments.
+ */
+describe("ArweaveSeedsArea — the displaced seed reads 'Former Master Arweave Seed'", () => {
+  const GOLD_TEXT = "rgb(206, 172, 95)";
+  /** The former designation's own muted-silver treatment — deliberately NOT
+   *  the gold the master wears, and not the plain `#d2d3d4` either. */
+  const FORMER_TEXT = "rgb(154, 154, 154)";
+  const MUTED_TEXT = "rgb(136, 136, 136)";
+  const PLAIN_BORDER = "rgb(38, 38, 38)";
+
+  const MASTER: ArweaveSeedRecord = { id: "master", label: "", bits: PRIME_BITS };
+  /** The seed the master role moved away from, under the name its user chose. */
+  const DISPLACED: ArweaveSeedRecord = {
+    id: "displaced",
+    label: "My cold storage seed",
+    bits: PRIME_BITS,
+    // Stale provenance: it was the first seed this codex ever added.
+    isPrime: true,
+  };
+
+  it("renders the former designation as the title and the seed's own name muted beneath", () => {
+    renderArea({
+      seeds: [DISPLACED, MASTER],
+      masterArweaveSeedId: "master",
+      formerMasterArweaveSeedIds: ["displaced"],
+    });
+
+    const row = screen.getByTestId("arweave-seed-row-displaced");
+    const designation = within(row).getByTestId("arweave-seed-designation-displaced");
+    expect(designation.textContent).toBe(FORMER_MASTER_ARWEAVE_SEED);
+    expect(getComputedStyle(designation).color).toBe(FORMER_TEXT);
+
+    const ownName = within(row).getByTestId("arweave-seed-own-name-displaced");
+    expect(ownName.textContent).toBe("My cold storage seed");
+    expect(getComputedStyle(ownName).color).toBe(MUTED_TEXT);
+  });
+
+  it("leaves the former row ungilded — exactly ONE row keeps the master treatment", () => {
+    renderArea({
+      seeds: [DISPLACED, MASTER],
+      masterArweaveSeedId: "master",
+      formerMasterArweaveSeedIds: ["displaced"],
+    });
+
+    const masterRows = screen.getAllByTestId("arweave-prime-seed-row");
+    expect(masterRows).toHaveLength(1);
+    expect(masterRows[0]).toHaveAttribute("data-seed-id", "master");
+    expect(getComputedStyle(within(masterRows[0]!).getByText(PRIME_SEED_LABEL)).color).toBe(
+      GOLD_TEXT,
+    );
+
+    const row = screen.getByTestId("arweave-seed-row-displaced");
+    expect(getComputedStyle(row).borderColor).toBe(PLAIN_BORDER);
+    expect(within(row).queryByTestId("arweave-prime-badge")).toBeNull();
+    expect(getComputedStyle(within(row).getByText(FORMER_MASTER_ARWEAVE_SEED)).color).not.toBe(
+      GOLD_TEXT,
+    );
+  });
+
+  it("shows the former designation ALONE for a legacy row stored under the master title", () => {
+    renderArea({
+      seeds: [{ ...DISPLACED, label: PRIME_SEED_LABEL }, MASTER],
+      masterArweaveSeedId: "master",
+      formerMasterArweaveSeedIds: ["displaced"],
+    });
+
+    const row = screen.getByTestId("arweave-seed-row-displaced");
+    expect(within(row).getByTestId("arweave-seed-designation-displaced").textContent).toBe(
+      FORMER_MASTER_ARWEAVE_SEED,
+    );
+    expect(within(row).queryByTestId("arweave-seed-own-name-displaced")).toBeNull();
+    // ...and it does not re-assert the title it lost anywhere on the row.
+    expect(within(row).queryByText(PRIME_SEED_LABEL)).toBeNull();
+  });
+
+  it("gives a seed that is BOTH on the former list and today's resolved master the master treatment only", () => {
+    // The settled id names a seed that is gone, so `resolveMasterArweaveSeed`
+    // falls back to the `isPrime` row — which is the one on the former list.
+    renderArea({
+      seeds: [DISPLACED],
+      masterArweaveSeedId: "deleted-seed",
+      formerMasterArweaveSeedIds: ["displaced"],
+    });
+
+    const row = screen.getByTestId("arweave-prime-seed-row");
+    expect(row).toHaveAttribute("data-seed-id", "displaced");
+    expect(within(row).getByTestId("arweave-seed-designation-displaced").textContent).toBe(
+      PRIME_SEED_LABEL,
+    );
+    expect(screen.queryByText(FORMER_MASTER_ARWEAVE_SEED)).toBeNull();
+  });
+
+  it("renders no designation at all for a seed the codex has no record of", () => {
+    renderArea({ seeds: [DISPLACED, MASTER], masterArweaveSeedId: "master" });
+
+    const row = screen.getByTestId("arweave-seed-row-displaced");
+    expect(within(row).queryByTestId("arweave-seed-designation-displaced")).toBeNull();
+    expect(within(row).getByText("My cold storage seed")).toBeInTheDocument();
   });
 });
 
@@ -3065,13 +3450,16 @@ describe("ArweaveSeedsArea — Direct Deterministic RSA Generation", () => {
     expect(seed.label).toBe("My Direct Seed");
   });
 
-  it("locks the Seed name to the Prime label in Direct mode too, for the very first seed", () => {
+  // `former-master-record` T1 — was "locks the Seed name to the Prime label in
+  // Direct mode too". The Seed name field is the USER's in every mode now; the
+  // master designation is derived from the master id, not typed into this box.
+  it("offers an editable, empty Seed name in Direct mode for the very first seed too", () => {
     renderArea();
     openDirect();
 
     const nameField = screen.getByTestId("arweave-seed-label-input") as HTMLInputElement;
-    expect(nameField.value).toBe(PRIME_SEED_LABEL);
-    expect(nameField.readOnly).toBe(true);
+    expect(nameField.value).toBe("");
+    expect(nameField.readOnly).toBe(false);
   });
 
   it("switching from BitString to Bitmap paints the ACTUAL grid with the converted bits — not just the internal state, the visible SCREEN", () => {
@@ -3366,7 +3754,10 @@ describe("ArweaveSeedsArea — Quick vs Custom Define (D)", () => {
     await waitFor(() => expect(onSeedDefined).toHaveBeenCalledTimes(1));
     const defined = onSeedDefined.mock.calls[0][0] as ArweaveSeedRecord;
     expect(defined.isPrime).toBe(true);
-    expect(defined.label).toBe("Prime Arweave Seed");
+    // `former-master-record` T1 — Quick Define has no name field, so it stores
+    // NO name. It used to store the master designation; that designation is
+    // derived from the master id now, never persisted on the row.
+    expect(defined.label).toBe("");
     expect(screen.queryByTestId("arweave-seed-define-form")).toBeNull();
 
     // …and the run starts on its own, driving the SAME injected worker.
@@ -3436,7 +3827,7 @@ describe("ArweaveSeedsArea — onRunActivityChange (T1 · 7)", () => {
 
     await waitFor(() =>
       expect(onRunActivityChange).toHaveBeenCalledWith(
-        expect.objectContaining({ seedLabel: "Prime Arweave Seed" }),
+        expect.objectContaining({ seedLabel: "Master ArWeave Seed" }),
       ),
     );
     const lastActivity = onRunActivityChange.mock.calls.at(-1)![0] as {
@@ -3603,7 +3994,7 @@ describe("ArweavePanel — warn before leaving an in-flight generation (T2)", ()
     fireEvent.click(screen.getByTestId("arweave-subtab-accounts"));
 
     const dialog = screen.getByTestId("arweave-leave-generation-dialog");
-    expect(dialog).toHaveTextContent("Prime Arweave Seed");
+    expect(dialog).toHaveTextContent("Master ArWeave Seed");
     // The category has NOT switched yet — Seeds is still mounted.
     expect(screen.getByTestId("arweave-seeds-area")).toBeInTheDocument();
     expect(screen.queryByTestId("arweave-accounts-area")).toBeNull();
@@ -4279,7 +4670,7 @@ describe("ArweaveSeedsArea — reports pagination upward instead of inline once 
   it("reports null once everything fits on one page", () => {
     const handleRef: { current: PaginationHandle } = { current: null };
     renderReporting(0, handleRef);
-    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+    expect(screen.getByText("Master ArWeave Seed")).toBeTruthy();
     expect(handleRef.current).toBeNull();
   });
 });
@@ -4499,7 +4890,7 @@ describe("ArweaveSeedsArea — mobile: compact two-line seed row (round 25)", ()
 
   it("shows the name and bit size only — no 'DALOS seed'/'· Prime' suffix text", () => {
     renderMobile();
-    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+    expect(screen.getByText("Master ArWeave Seed")).toBeTruthy();
     expect(screen.getByText("1600-bit")).toBeTruthy();
     expect(screen.queryByText(/1600-bit DALOS seed/i)).toBeNull();
     expect(screen.queryByText(/· Prime/i)).toBeNull();
@@ -4512,7 +4903,7 @@ describe("ArweaveSeedsArea — mobile: compact two-line seed row (round 25)", ()
     // The lock glyph + gold name color are still there, doing the same job.
     const toggle = screen.getByTestId("arweave-seed-toggle-prime");
     expect(toggle.innerHTML).toContain("<rect"); // the lock glyph's body
-    expect(getComputedStyle(screen.getByText("Prime Arweave Seed")).color).toBe("rgb(206, 172, 95)");
+    expect(getComputedStyle(screen.getByText("Master ArWeave Seed")).color).toBe("rgb(206, 172, 95)");
   });
 
   it("still shows the key count and the triple-dot menu trigger", () => {
@@ -4563,7 +4954,7 @@ describe("ArweaveSeedsArea — mobile: the drag-following swipe carousel (round 
     // its safe default (4/page) — 9 extra seeds is comfortably 2+ pages.
     renderManySeeds(9);
     const surface = screen.getByTestId("arweave-seeds-page-surface");
-    expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+    expect(screen.getByText("Master ArWeave Seed")).toBeTruthy();
 
     const swipe = (fromX: number, toX: number) => {
       fireEvent.touchStart(surface, { touches: [{ clientX: fromX, clientY: 0 }] });
@@ -4572,10 +4963,10 @@ describe("ArweaveSeedsArea — mobile: the drag-following swipe carousel (round 
     };
 
     swipe(300, 200);
-    await waitFor(() => expect(screen.queryByText("Prime Arweave Seed")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Master ArWeave Seed")).toBeNull());
 
     swipe(200, 300);
-    await waitFor(() => expect(screen.getByText("Prime Arweave Seed")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Master ArWeave Seed")).toBeTruthy());
   });
 
   it("visually follows the finger while dragging, resists past the first page, and ignores a vertical gesture", () => {
@@ -4695,5 +5086,219 @@ describe("ArweaveSeedsArea — mobile: the define-seed form layout fixes (round 
     fireEvent.click(screen.getByTestId("arweave-add-seed"));
     const textarea = screen.getByTestId("arweave-seed-words-input") as HTMLTextAreaElement;
     expect(textarea.style.maxHeight).toBe("70vh");
+  });
+});
+
+/**
+ * ArweavePanel WIRES the codex's settled master seed id into the Seeds area.
+ *
+ * The area itself takes `masterArweaveSeedId` as an injected prop (it reaches
+ * into no store — see its module doc), so without this wiring the owner's
+ * reported bug is fixed only in tests. These cases drive the REAL data path:
+ * the `codexMasterSeed` row in the codex store, which the eligibility wizard's
+ * finalize step writes.
+ *
+ * Each case guards a distinct regression:
+ *   (wired) the panel reads the ArWeave face specifically — threading the
+ *       wrong field (e.g. `ouroAccountId`) or nothing at all leaves the
+ *       demoted seed gold on every real codex.
+ *   (reactive) the id is SUBSCRIBED, not read once through `getState()`:
+ *       finalize writes the row while this panel is already mounted, and a
+ *       non-reactive read would not re-order until some unrelated re-render.
+ *   (no arweave face / no row) backwards compatibility through the real path —
+ *       a codex mid-migration (Ouronet + Chainweb faces settled, ArWeave not
+ *       derived yet) and a codex that never ran the wizard both keep today's
+ *       isPrime-first list.
+ */
+describe("ArweavePanel — wires codexMasterSeed.arweaveSeedId into the Seeds area", () => {
+  const DEMOTED_SEED: ArweaveSeedRecord = {
+    id: "legacy",
+    label: "Arweave Seed 1",
+    bits: PRIME_BITS,
+    isPrime: true,
+  };
+  const NEW_MASTER_SEED: ArweaveSeedRecord = {
+    id: "new-master",
+    label: "Master ArWeave Seed",
+    bits: PRIME_BITS,
+  };
+
+  let panelStore: ReturnType<typeof useCodexStore> | null = null;
+  function StoreGrabber(): null {
+    // Same `StoreGrabber` convention as `e4-panel-codex-id.test.tsx`'s own.
+    panelStore = useCodexStore();
+    return null;
+  }
+
+  /** Mounts the panel on the Seeds category with both seeds wired through the
+   *  host's `arweaveSeeds` seam, and the codex store reachable. */
+  async function renderSeedsPanel() {
+    const deps = {
+      arweaveSeeds: [DEMOTED_SEED, NEW_MASTER_SEED],
+    } as unknown as ArweavePanelDeps;
+    render(
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+        <StoreGrabber />
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(panelStore!.getState().ready).toBe(true));
+    fireEvent.click(screen.getByTestId("arweave-subtab-seeds"));
+  }
+
+  function masterRowSeedId(): string | null {
+    const rows = screen.getAllByTestId("arweave-prime-seed-row");
+    expect(rows).toHaveLength(1);
+    return rows[0]!.getAttribute("data-seed-id");
+  }
+
+  function settleMasterSeed(arweaveSeedId?: string): void {
+    act(() => {
+      panelStore!.setState({
+        codexMasterSeed: {
+          ouroAccountId: "ouro-1",
+          chainwebSeedId: "chainweb-1",
+          ...(arweaveSeedId === undefined ? {} : { arweaveSeedId }),
+          establishedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies CodexMasterSeed,
+      });
+    });
+  }
+
+  afterEach(() => {
+    panelStore = null;
+  });
+
+  it("re-orders and re-colours to the settled master the moment the codex row names an arweave seed", async () => {
+    await renderSeedsPanel();
+    // Before finalize: the stale `isPrime` stamp still decides.
+    expect(masterRowSeedId()).toBe("legacy");
+
+    settleMasterSeed("new-master");
+
+    expect(masterRowSeedId()).toBe("new-master");
+    expect(getComputedStyle(screen.getByTestId("arweave-seed-row-legacy")).borderColor).toBe(
+      "rgb(38, 38, 38)",
+    );
+  });
+
+  it("keeps the isPrime seed first when the settled row has no arweave face yet", async () => {
+    await renderSeedsPanel();
+    settleMasterSeed(undefined);
+
+    expect(masterRowSeedId()).toBe("legacy");
+  });
+
+  it("keeps the isPrime seed first on a codex that has no codexMasterSeed row at all", async () => {
+    await renderSeedsPanel();
+
+    expect(panelStore!.getState().codexMasterSeed).toBeUndefined();
+    expect(masterRowSeedId()).toBe("legacy");
+  });
+});
+
+/**
+ * ArweavePanel resolves the FORMER-master ids — seal-gated — for the Seeds
+ * area (`former-master-record` T2/T3).
+ *
+ * Same division of labour as `masterArweaveSeedId` above: the store lives
+ * here, `ArweaveSeedsArea` is handed plain ids. The gate is codex-core's
+ * `isFormerMasterArweaveSeed(seedId, row, progress)`, whose `progress`
+ * argument is REQUIRED precisely so no surface can forget it.
+ *
+ * Each case guards a distinct regression:
+ *   (sealed) without this wiring the designation is fixed only in tests — on a
+ *       real codex the displaced seed would read as an unrelated seed.
+ *   (unsealed) design: *"the designation follows the SEAL, not the
+ *       finalize"*. `codexMasterSeed` is written at finalize and is re-writable
+ *       while unsealed, so a finalized-but-unapplied codex that already moved
+ *       its designations would be showing a role change Apply never made.
+ */
+describe("ArweavePanel — resolves the seal-gated former-master ids for the Seeds area", () => {
+  const DISPLACED_SEED: ArweaveSeedRecord = {
+    id: "legacy",
+    label: "My cold storage seed",
+    bits: PRIME_BITS,
+    isPrime: true,
+  };
+  const NEW_MASTER_SEED: ArweaveSeedRecord = {
+    id: "new-master",
+    label: "",
+    bits: PRIME_BITS,
+  };
+
+  let panelStore: ReturnType<typeof useCodexStore> | null = null;
+  function StoreGrabber(): null {
+    // Same `StoreGrabber` convention as the describe above.
+    panelStore = useCodexStore();
+    return null;
+  }
+
+  async function renderSeedsPanel(): Promise<void> {
+    const deps = {
+      arweaveSeeds: [DISPLACED_SEED, NEW_MASTER_SEED],
+    } as unknown as ArweavePanelDeps;
+    render(
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+        <StoreGrabber />
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(panelStore!.getState().ready).toBe(true));
+    fireEvent.click(screen.getByTestId("arweave-subtab-seeds"));
+  }
+
+  /** The codex AFTER a takeover: `new-master` holds the role, `legacy` is on
+   *  record as a former holder. `sealed` is what Apply stamps. */
+  function settleTakeover(sealed: boolean): void {
+    act(() => {
+      panelStore!.setState({
+        codexMasterSeed: {
+          ouroAccountId: "ouro-1",
+          chainwebSeedId: "chainweb-1",
+          arweaveSeedId: "new-master",
+          formerArweaveSeedIds: ["legacy"],
+          establishedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies CodexMasterSeed,
+        migrationProgress: {
+          stage: "committing",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          ...(sealed ? { appliedAt: "2026-01-02T00:00:00.000Z" } : {}),
+        } satisfies MigrationProgress,
+      });
+    });
+  }
+
+  afterEach(() => {
+    panelStore = null;
+  });
+
+  it("renders the former designation on the displaced seed once the codex is SEALED", async () => {
+    await renderSeedsPanel();
+    settleTakeover(true);
+
+    const row = screen.getByTestId("arweave-seed-row-legacy");
+    expect(within(row).getByTestId("arweave-seed-designation-legacy").textContent).toBe(
+      FORMER_MASTER_ARWEAVE_SEED,
+    );
+    expect(within(row).getByTestId("arweave-seed-own-name-legacy").textContent).toBe(
+      "My cold storage seed",
+    );
+  });
+
+  it("renders NO former designation on a finalized-but-unapplied codex", async () => {
+    await renderSeedsPanel();
+    settleTakeover(false);
+
+    const row = screen.getByTestId("arweave-seed-row-legacy");
+    expect(within(row).queryByTestId("arweave-seed-designation-legacy")).toBeNull();
+    expect(screen.queryByText(FORMER_MASTER_ARWEAVE_SEED)).toBeNull();
+    // It reads as the ordinary seed it is, under its own name.
+    expect(within(row).getByText("My cold storage seed")).toBeInTheDocument();
   });
 });

@@ -59,6 +59,7 @@ import { serializeGovernorToInput, type NonKeyGuardValue } from "../cfm/governor
 import { AuthPathZone, type AuthPathSelection } from "../cfm/AuthPathZone.js";
 import { useSignTransaction } from "../../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../hooks/useEnsureCodexUnlocked.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -139,7 +140,7 @@ export default function RotateGovernorModal({
 
   const displayAccountName = (acc: IOuroAccount | null | undefined): string => {
     if (!acc) return "—";
-    return accounts.indexOf(acc) === 0 ? "CodexPrime" : acc.name || acc.address?.slice(0, 20) + "…";
+    return accounts.indexOf(acc) === 0 ? OURONET_CODEX_MASTER : acc.name || acc.address?.slice(0, 20) + "…";
   };
 
   // ── Patron IGNIS balance ──
@@ -337,6 +338,7 @@ export default function RotateGovernorModal({
   return (
     <ZbomModalFrame onClose={onClose} width={720}>
       <ZbomLayout
+      kind="page"
         header={
           <>
             <div className="flex items-center gap-2">

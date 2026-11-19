@@ -55,6 +55,13 @@ function Grab() { store = useCodexStore(); return null; }
 const pick = (tid: string) =>
   fireEvent.click(within(screen.getByTestId(tid)).getByRole("button"));
 
+// `docs/work/wizard-keyset-scale-and-sidebar/design.md`'s "E": every group
+// inside the custom guard editor starts collapsed unless it already holds a
+// selected key, so a row inside a given group is only queryable/clickable
+// once that group's own disclosure header has been opened.
+const expandGroup = (editor: HTMLElement, n: number) =>
+  fireEvent.click(within(editor).getByTestId(`legacy-prime-migration-guard-custom-group-${n}`));
+
 async function reachReview(
   guard:
     | "recommended" | "custom" | "keep"
@@ -107,6 +114,7 @@ async function reachReview(
     // custom"), so picking the header is enough to reach the editor.
     pick("legacy-prime-migration-guard-option-custom");
     const editor = await screen.findByTestId("legacy-prime-migration-guard-custom-editor");
+    expandGroup(editor, 0);
     fireEvent.click(within(editor).getByLabelText("Master Chainweb Seed - Key #1"));
   } else if (guard === "use-existing-keyset") {
     pick("legacy-prime-migration-guard-option-custom");
@@ -137,7 +145,7 @@ describe("the review step shows every choice", () => {
   it("names which account becomes the master", async () => {
     await reachReview();
     expect(screen.getByTestId("legacy-prime-migration-review-account").textContent)
-      .toMatch(/Ouronet Codex Master/);
+      .toMatch(/Codex Ouronet Master/);
   });
 
   it("shows the payment key FROM -> TO with the real derived value", async () => {

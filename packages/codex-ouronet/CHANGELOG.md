@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0 — 2026-10-28
+
+**MINOR — the Papyrus Engine designation.** `@ouronet/papyrus@^0.1.1` is now a
+dependency, and every Papyrus instance Codex draws says so on screen.
+
+`ZbomLayout` takes a new **required** `kind: PapyrusKind` and renders the
+designation at the TOP of the sheet, before the form: the member upper-LEFT
+with its blurb as a tooltip, `v{PAPYRUS_VERSION}` upper-RIGHT, opposite ends
+of one `justify-between` row. Required rather than optional deliberately
+(`PAPYRUS_ENGINE_SPEC.md` §2.4) — a default would be silently wrong for
+whichever member it is not, and a badge naming the wrong form is worse than
+none. The type immediately proved its worth: it surfaced **12** call sites,
+not the 8 the integration brief expected.
+
+All 12 modals pass `kind="page"`, verified against §2.2 rather than assumed —
+each renders a `ZbomModalFrame` popup with zones and an execute button, so
+none is an inline Roll or a read-discovery Leaf.
+
+The version shown is the PACKAGE's, never `APP_VERSION` and never a local
+copy: Codex and OuronetUI now report the same engine version and different app
+versions, which is the pair a bug report needs. Only `kind.ts`'s vocabulary is
+imported — `batch.ts` is not used, Codex having no batch/gas-splitting code.
+
 ## 1.1.3 — 2026-10-14
 
 **PATCH — `@ouronet/talos-registry` bumped `^2.1.0`/`^2.2.0` → `^2.3.0`

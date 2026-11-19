@@ -2,7 +2,7 @@
  * SeedWordsTab specs — updated for the v0.5.x 1:1 "My Codex SeedWordsList" clone.
  *
  * The tab now: shows a "Create New Seed" button; renders each seed as an
- * expandable row; displays the first/prime seed as "Prime Codex Seed"; and puts
+ * expandable row; displays the first/prime seed as "Master Chainweb Seed"; and puts
  * View Seed Words / Rename / Delete behind a per-row actions menu (the prime
  * seed's menu omits Rename/Delete). Mnemonic reveal stays gated through
  * `useCodexAuth` (decrypts `seed.secret` with the cached codex password).
@@ -12,6 +12,10 @@ import * as React from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, cleanup, act } from "@testing-library/react";
 import { smartEncrypt } from "@stoachain/stoa-core/crypto";
+// Namespace import so `vi.spyOn(stoaCrypto, "smartDecrypt")` below can
+// control exactly what a reveal/decrypt call resolves/rejects with — same
+// pattern `e3-library-flow.test.ts` already uses for an external package.
+import * as stoaCrypto from "@stoachain/stoa-core/crypto";
 
 import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
@@ -129,9 +133,9 @@ describe("<SeedWordsTab>", () => {
     expect(screen.getByRole("button", { name: /create new seed/i })).toBeTruthy();
   });
 
-  it("displays the first seed as the locked Prime Codex Seed regardless of its name", async () => {
+  it("displays the first seed as the locked Master Chainweb Seed regardless of its name", async () => {
     await renderTab([seedFx({ id: "p", name: "Some Name" })]);
-    expect(screen.getByText("Prime Codex Seed")).toBeTruthy();
+    expect(screen.getByText("Master Chainweb Seed")).toBeTruthy();
     expect(screen.queryByText("Some Name")).toBeNull();
   });
 
@@ -213,7 +217,7 @@ describe("<SeedWordsTab>", () => {
 
   it("omits Rename/Delete from the Prime seed's actions menu", async () => {
     await renderTab([seedFx({ id: "s-prime", name: "Prime Seed", isPrime: true })]);
-    const card = (await screen.findByText("Prime Codex Seed")).closest("[data-seed-id]") as HTMLElement;
+    const card = (await screen.findByText("Master Chainweb Seed")).closest("[data-seed-id]") as HTMLElement;
     openMenu(card);
     // View Seed Words is present; Rename + Delete are not (prime protection).
     // Portaled to `document.body` (round 22) — see the rename test's comment above.
@@ -236,10 +240,10 @@ describe("<SeedWordsTab>", () => {
     const order = Array.from(document.querySelectorAll("[data-seed-id]")).map(
       (el) => (el.querySelector("span")?.textContent || "").trim(),
     );
-    // Prime is pinned first (displayed as "Prime Codex Seed"); the remaining four
+    // Prime is pinned first (displayed as "Master Chainweb Seed"); the remaining four
     // follow alphabetically — "apex seed" before "Seed 2" before "Seed 10"
     // (numeric-aware) before "Zephyr Seed", independent of insertion order.
-    expect(order[0]).toBe("Prime Codex Seed");
+    expect(order[0]).toBe("Master Chainweb Seed");
     expect(order.slice(1)).toEqual(["apex seed", "Seed 2", "Seed 10", "Zephyr Seed"]);
   });
 
@@ -358,6 +362,34 @@ describe("<SeedWordsTab>", () => {
     expect(await screen.findByText(phrase)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /bitmap/i })).toBeNull();
   });
+
+  // Debug session 2026-10-18, bug 2b (docs/work/debug/two-real-codex-bugs.md):
+  // `handleView`'s catch used to show "Unlock the codex to view this seed
+  // phrase." for ANY decrypt failure, even though `ensureUnlocked()` (a few
+  // lines above this try block) had ALREADY resolved `true` — misleading the
+  // user into re-entering a password that was never the problem. This proves
+  // the real decrypt error now surfaces instead, once the codex is
+  // confirmed unlocked.
+  it("handleView's catch surfaces the REAL decrypt error once the codex is already unlocked — not the lock message", async () => {
+    const password = "hunter2";
+    // The fixture's default `secret` ("enc-secret") isn't real ciphertext,
+    // so `smartDecrypt` genuinely throws here — a hermetic way to reach
+    // this catch without needing corrupted-but-valid-looking ciphertext.
+    await renderTab(
+      [
+        seedFx({ id: "p", name: "Prime" }),
+        seedFx({ id: "s1", name: "Corrupt Seed" }),
+      ],
+      password,
+    );
+
+    const card = (await screen.findByText("Corrupt Seed")).closest("[data-seed-id]") as HTMLElement;
+    openMenu(card);
+    fireEvent.click(screen.getByRole("button", { name: /view seed words/i })); // portaled — see the rename test's comment above
+
+    expect(await screen.findByText("Could not decrypt this seed phrase: Failed to parse V1 envelope")).toBeTruthy();
+    expect(screen.queryByText(/unlock the codex to view this seed phrase/i)).toBeNull();
+  });
 });
 
 describe("<SeedWordsTab> — mobile: full-screen expansion + pagination (design.md §8, the 'optimize each blockchain and tab' round)", () => {
@@ -410,7 +442,7 @@ describe("<SeedWordsTab> — mobile: full-screen expansion + pagination (design.
 
   it("closing the full-screen popup returns to the list, nothing left expanded", async () => {
     await renderTabMobile([seedFx({ id: "p", name: "Prime" })]);
-    const card = (await screen.findByText("Prime Codex Seed")).closest("[data-seed-id]") as HTMLElement;
+    const card = (await screen.findByText("Master Chainweb Seed")).closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     await screen.findByRole("dialog");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -502,7 +534,7 @@ describe("<SeedWordsTab> — mobile: full-screen expansion + pagination (design.
     it("reports null once everything fits on one page", async () => {
       const handleRef: { current: PaginationHandle } = { current: null };
       await renderReporting([seedFx({ id: "p", name: "Prime" })], handleRef);
-      await waitFor(() => expect(screen.getByText("Prime Codex Seed")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("Master Chainweb Seed")).toBeTruthy());
       expect(handleRef.current).toBeNull();
     });
   });
@@ -528,7 +560,7 @@ describe("<SeedWordsTab> — mobile: full-screen expansion + pagination (design.
   it("desktop (no CodexUiRoot ancestor) is unaffected — header shown, inline expansion, no pagination", async () => {
     await renderTab([seedFx({ id: "p", name: "Prime" })]);
     expect(screen.getByRole("button", { name: /create new seed/i })).toBeTruthy();
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -645,7 +677,7 @@ describe("<SeedWordsTab> — mobile: fullScreenPortalTarget (design.md §8, the 
     document.body.appendChild(target);
 
     const { container } = await renderTabMobileWithTarget([seedFx({ id: "p", name: "Prime" })], target);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
 
     const dialog = await screen.findByRole("dialog");
@@ -658,7 +690,7 @@ describe("<SeedWordsTab> — mobile: fullScreenPortalTarget (design.md §8, the 
 
   it("without a target, falls back to the bounded inline mount (unchanged default)", async () => {
     const { container } = await renderTabMobileWithTarget([seedFx({ id: "p", name: "Prime" })], null);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
 
     const dialog = await screen.findByRole("dialog");
@@ -733,7 +765,7 @@ describe("<SeedWordsTab> — mobile: ONE key row + switcher (design.md §8, the 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: PUBKEY, derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
 
@@ -747,7 +779,7 @@ describe("<SeedWordsTab> — mobile: ONE key row + switcher (design.md §8, the 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: PUBKEY, derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
     const switcher = within(dialog).getByTitle("Switch to private key");
@@ -772,7 +804,7 @@ describe("<SeedWordsTab> — mobile: ONE key row + switcher (design.md §8, the 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: PUBKEY, derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
 
@@ -780,12 +812,88 @@ describe("<SeedWordsTab> — mobile: ONE key row + switcher (design.md §8, the 
     expect(writeText).toHaveBeenLastCalledWith(PUBKEY);
   });
 
+  // Debug session 2026-10-18, bug 2b (docs/work/debug/two-real-codex-bugs.md):
+  // `copyCurrentKey`'s catch used to show "Unlock the codex to copy the
+  // private key." for ANY reveal failure, even ones that have nothing to do
+  // with the codex being locked. Reaching THIS specific catch (as opposed to
+  // `toggleKeySwitch`'s own, separate one) requires `showPrivateKey === true`
+  // while the CURRENTLY selected key's `privCache` entry is still empty —
+  // reached here by deleting the key that WAS revealed: the shared
+  // switcher's `showPrivateKey` flag has no reason to reset on a deletion,
+  // but the newly-selected fallback key was never cached, so `copyCurrentKey`
+  // falls through to a fresh (here, mocked) reveal call.
+  async function openDualKeySwitcherWithStaleShowPrivateKey(password: string) {
+    await renderTabMobile(
+      [
+        seedFx({ id: "p", name: "Prime" }),
+        seedFx({
+          id: "s1",
+          name: "Dual Key",
+          seedType: "stoic",
+          secret: "placeholder-ciphertext", // the decrypt behind it is mocked below — content is irrelevant.
+          accounts: [
+            { index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" },
+            { index: 1, publicKey: "b".repeat(64), derivationPath: "m/1" },
+          ],
+        }),
+      ],
+      password,
+    );
+    const card = screen.getByText("Dual Key").closest("[data-seed-id]") as HTMLElement;
+    fireEvent.click(card.firstElementChild as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+
+    // Switch to private for key #0 — backed by the FIRST mocked (successful) decrypt.
+    fireEvent.click(within(dialog).getByTitle("Switch to private key"));
+    await waitFor(() => expect(within(dialog).getByTitle("Switch to public key")).toBeTruthy());
+
+    // Delete key #0 while private is showing: selection falls back to key #1
+    // (never revealed/cached), but `showPrivateKey` stays stuck `true`.
+    fireEvent.click(within(dialog).getByTitle("Delete"));
+    await waitFor(() => expect(within(dialog).queryByText("#0")).toBeNull());
+
+    return dialog;
+  }
+
+  it("copyCurrentKey's catch keeps the ORIGINAL locked message when the reveal call behind it rejects with Error('locked') (existing behavior, unchanged)", async () => {
+    const password = "hunter2";
+    const bitstring = "0".repeat(1600);
+    const decryptSpy = vi.spyOn(stoaCrypto, "smartDecrypt");
+    decryptSpy.mockResolvedValueOnce(bitstring); // backs key #0's successful reveal.
+    decryptSpy.mockRejectedValueOnce(new Error("locked")); // backs key #1's reveal, triggered by the copy click below.
+
+    const dialog = await openDualKeySwitcherWithStaleShowPrivateKey(password);
+    fireEvent.click(within(dialog).getByTitle("Copy private key"));
+
+    expect(await within(dialog).findByText("Unlock the codex to copy the private key.")).toBeTruthy();
+    decryptSpy.mockRestore();
+  });
+
+  it("copyCurrentKey's catch shows the REAL error message when the reveal call behind it rejects with something OTHER than 'locked'", async () => {
+    const password = "hunter2";
+    const bitstring = "0".repeat(1600);
+    const decryptSpy = vi.spyOn(stoaCrypto, "smartDecrypt");
+    decryptSpy.mockResolvedValueOnce(bitstring); // backs key #0's successful reveal.
+    decryptSpy.mockRejectedValueOnce(new Error("seed bitstring must be exactly 1024 or 1600 characters")); // backs key #1's reveal.
+
+    const dialog = await openDualKeySwitcherWithStaleShowPrivateKey(password);
+    fireEvent.click(within(dialog).getByTitle("Copy private key"));
+
+    expect(
+      await within(dialog).findByText(
+        "Could not copy the private key: seed bitstring must be exactly 1024 or 1600 characters",
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/unlock the codex to copy the private key/i)).toBeNull();
+    decryptSpy.mockRestore();
+  });
+
   it("desktop keeps the side-by-side row layout, byte-identical", async () => {
     const PUBKEY = "b".repeat(64);
     await renderTab([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: PUBKEY, derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement); // desktop: inline expand, not a dialog
     const publicRow = screen.getByText(PUBKEY).closest("div") as HTMLElement;
     const privateRow = screen.getByTitle("Show private key").closest("div") as HTMLElement;
@@ -805,13 +913,13 @@ describe("<SeedWordsTab> — mobile: seed row header + key-detail footer polish 
     await renderTabMobile([
       seedFx({ id: "p", name: "A Very Long Seed Name That Would Otherwise Truncate", seedType: "koala", accounts: [] }),
     ]);
-    const card = (await screen.findByText("Prime Codex Seed")).closest("[data-seed-id]") as HTMLElement;
+    const card = (await screen.findByText("Master Chainweb Seed")).closest("[data-seed-id]") as HTMLElement;
     // No wide text badge ("Koala") anywhere anymore — just a dot carrying
     // the label via title/aria-label instead.
     expect(within(card).queryByText("Koala")).toBeNull();
     const dot = within(card).getByTitle("Koala");
     expect(dot.style.borderRadius).toBe("50%");
-    const nameEl = within(card).getByText("Prime Codex Seed");
+    const nameEl = within(card).getByText("Master Chainweb Seed");
     expect(nameEl.style.flex).toBe("1 1 0%");
     // Single row: the dot and the name share the SAME header row.
     expect(dot.closest('div[style*="align-items: center"]')).toBe(nameEl.closest('div[style*="align-items: center"]'));
@@ -821,7 +929,7 @@ describe("<SeedWordsTab> — mobile: seed row header + key-detail footer polish 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }, { index: 1, publicKey: "b".repeat(64), derivationPath: "m/1" }] }),
     ]);
-    await screen.findByText("Prime Codex Seed");
+    await screen.findByText("Master Chainweb Seed");
     expect(screen.queryByText(/^\d+ keys?$/)).toBeNull();
     expect(screen.getByText("2")).toBeTruthy();
   });
@@ -837,7 +945,7 @@ describe("<SeedWordsTab> — mobile: seed row header + key-detail footer polish 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
 
@@ -852,7 +960,7 @@ describe("<SeedWordsTab> — mobile: seed row header + key-detail footer polish 
     await renderTabMobile([
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 0, publicKey: "a".repeat(64), derivationPath: "m/0" }] }),
     ]);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
 
@@ -881,14 +989,14 @@ describe("<SeedWordsTab> — mobile: shared key-selection row + position medalli
 
   async function openDialog() {
     await renderTabMobile(threeKeys);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     return screen.findByRole("dialog");
   }
 
   it("the title shows the seed's key count", async () => {
     const dialog = await openDialog();
-    expect(within(dialog).getByText(/^Prime Codex Seed \(3\)$/)).toBeTruthy();
+    expect(within(dialog).getByText(/^Master Chainweb Seed \(3\)$/)).toBeTruthy();
   });
 
   it("shows a #N medallion per position instead of 'Key #N' text", async () => {
@@ -904,7 +1012,7 @@ describe("<SeedWordsTab> — mobile: shared key-selection row + position medalli
       seedFx({ id: "p", name: "Prime", accounts: [{ index: 7723, publicKey: "a".repeat(64), derivationPath: "m/0" }] }),
     ];
     await renderTabMobile(seeds);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
     const dialog = await screen.findByRole("dialog");
 
@@ -963,7 +1071,7 @@ describe("<SeedWordsTab> — mobile: shared key-selection row + position medalli
 
   it("the seed's own card (in the outer list) opts into scroll-snap too", async () => {
     await renderTabMobile(threeKeys);
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     expect(card.style.scrollSnapAlign).toBe("start");
   });
 });
@@ -978,14 +1086,19 @@ describe("<SeedWordsTab> — mobile: 'View Seed Words' failure feedback on a COL
     // The fixture's default `secret` ("enc-secret") isn't real ciphertext,
     // so `smartDecrypt` throws once authenticated — a hermetic way to reach
     // `handleView`'s catch block (sets `rowError`) without needing to drive
-    // a real password-prompt modal to completion.
+    // a real password-prompt modal to completion. The codex IS genuinely
+    // unlocked here (password "pw" was authenticated), so — per bug 2b's
+    // fix (docs/work/debug/two-real-codex-bugs.md) — the message is now the
+    // REAL decrypt error, not the old mislabeled "Unlock the codex..." text;
+    // this test's own concern (does the error surface at all on a collapsed
+    // row) is independent of exactly which message that is.
     await renderTabMobile([seedFx({ id: "p", name: "Prime" })], "pw");
-    const card = screen.getByText("Prime Codex Seed").closest("[data-seed-id]") as HTMLElement;
+    const card = screen.getByText("Master Chainweb Seed").closest("[data-seed-id]") as HTMLElement;
     // Row is COLLAPSED — never tapped to expand.
     openMenu(card);
     fireEvent.click(screen.getByRole("button", { name: /view seed words/i })); // portaled — see the rename test's comment above
 
-    expect(await screen.findByText(/unlock the codex to view this seed phrase/i)).toBeTruthy();
+    expect(await screen.findByText("Could not decrypt this seed phrase: Failed to parse V1 envelope")).toBeTruthy();
   });
 });
 
@@ -1008,7 +1121,7 @@ describe("<SeedWordsTab> — mobile: the drag-following swipe carousel (round 21
   it("a left swipe advances to the next page, a right swipe goes back", async () => {
     await renderTabMobile(manySeeds(13)); // 4 pages, per the pagination test above
     const surface = screen.getByTestId("stoa-seeds-page-surface");
-    expect(screen.getByText("Prime Codex Seed")).toBeTruthy();
+    expect(screen.getByText("Master Chainweb Seed")).toBeTruthy();
 
     const swipe = (fromX: number, toX: number) => {
       fireEvent.touchStart(surface, { touches: [{ clientX: fromX, clientY: 0 }] });
@@ -1017,10 +1130,10 @@ describe("<SeedWordsTab> — mobile: the drag-following swipe carousel (round 21
     };
 
     swipe(300, 200);
-    await waitFor(() => expect(screen.queryByText("Prime Codex Seed")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Master Chainweb Seed")).toBeNull());
 
     swipe(200, 300);
-    await waitFor(() => expect(screen.getByText("Prime Codex Seed")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Master Chainweb Seed")).toBeTruthy());
   });
 
   it("visually follows the finger while dragging, resists past the first page, and ignores a vertical gesture", async () => {

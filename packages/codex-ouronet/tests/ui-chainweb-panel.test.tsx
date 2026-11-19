@@ -362,7 +362,7 @@ describe("<ChainwebPanel> — mobile: forwards fullScreenPortalTarget to BOTH Se
     await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
 
     fireEvent.click(screen.getByRole("button", { name: "Seeds" }));
-    const card = (await screen.findByText("Prime Codex Seed")).closest("[data-seed-id]") as HTMLElement;
+    const card = (await screen.findByText("Master Chainweb Seed")).closest("[data-seed-id]") as HTMLElement;
     fireEvent.click(card.firstElementChild as HTMLElement);
 
     const dialog = await screen.findByRole("dialog");

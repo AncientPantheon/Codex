@@ -97,11 +97,23 @@ const EXPECTED_ADDRESS_BOOK_CHAIN_EXPORTS = [
   "UnknownChainError",
 ] as const;
 
+// `useNeedsStructuralUpgrade` (upgrade-prompt-ui T2) — a genuinely new,
+// codex-ouronet-LOCAL hook (not one of the 16 re-exported from codex-ui),
+// added alongside the pre-existing "exported LOCALLY below" address-book-chain
+// precedent this same barrel already documents. It needs
+// `STRUCTURAL_SHAPE_TARGET_VERSION` (a codex-ouronet-owned constant), so it
+// cannot live in codex-ui without inverting the established core <- ui <-
+// ouronet dependency direction. Allow-listed here the same way the
+// address-book-chain set is: a deliberate, additive widening, not a leak.
+const EXPECTED_STRUCTURAL_UPGRADE_EXPORTS = ["useNeedsStructuralUpgrade"] as const;
+
 // The full allow-list of RUNTIME (value) exports the widened `/hooks` barrel is
-// contracted to expose: the 16 hook functions PLUS the address-book-chain set.
+// contracted to expose: the 16 hook functions PLUS the address-book-chain set
+// PLUS the structural-upgrade hook.
 const EXPECTED_RUNTIME_EXPORTS = [
   ...EXPECTED_HOOK_FUNCTIONS,
   ...EXPECTED_ADDRESS_BOOK_CHAIN_EXPORTS,
+  ...EXPECTED_STRUCTURAL_UPGRADE_EXPORTS,
 ] as const;
 
 describe("hooks barrel — forward lock (every named hook function present)", () => {
@@ -127,7 +139,7 @@ describe("hooks barrel — forward lock (every named hook function present)", ()
 });
 
 describe("hooks barrel — negative lock (runtime surface does not widen)", () => {
-  it("exposes EXACTLY the allow-listed function exports — no extras (16 hooks + address-book-chain fns)", () => {
+  it("exposes EXACTLY the allow-listed function exports — no extras (16 hooks + address-book-chain fns + useNeedsStructuralUpgrade)", () => {
     // Compute the own runtime FUNCTION exports of the barrel namespace and assert
     // the set equals the allow-list. An `export *` regression, a leaked helper, or
     // a new hook added without updating the contract adds a name here and FAILS,
@@ -146,7 +158,7 @@ describe("hooks barrel — negative lock (runtime surface does not widen)", () =
     expect(runtimeFunctionExports).toEqual([...expectedFunctions].sort());
   });
 
-  it("exposes NO runtime VALUE exports outside the allow-list (16 hooks + address-book-chain set)", () => {
+  it("exposes NO runtime VALUE exports outside the allow-list (16 hooks + address-book-chain set + useNeedsStructuralUpgrade)", () => {
     // Broader than the function-set check: any own enumerable runtime export (const,
     // object, class, re-exported value helper) that is NOT in the allow-list is a
     // surface widening. The allow-list is {16 hooks} ∪ {the D-10 address-book-chain

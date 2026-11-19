@@ -36,7 +36,9 @@
  */
 
 import type { ReactNode } from "react";
+import { PAPYRUS_COPY, PAPYRUS_VERSION, type PapyrusKind } from "@ouronet/papyrus";
 import { useUiSetting } from "./seam.js";
+import { InfoTooltip } from "../ui/InfoTooltip.js";
 import { CfmScrollArea } from "../ui/CfmScrollArea.js";
 import { ZbomDebouncer } from "../debouncer/ZbomDebouncer.js";
 import type { PactQueryTier } from "../debouncer/pactQueryTiers.js";
@@ -56,6 +58,20 @@ export interface ZbomExecuteButtonProps {
 }
 
 interface ZbomLayoutProps {
+  /**
+   * WHICH MEMBER of the Papyrus family this instance is.
+   *
+   * REQUIRED, deliberately, per `PAPYRUS_ENGINE_SPEC.md` §2.4: a default
+   * would be silently wrong for whichever member it is not, and a badge
+   * naming the wrong form is worse than no badge at all.
+   *
+   * Everything this layout draws today is a `"page"` — a discrete sheet
+   * presented for signing, inside a `ZbomModalFrame`. The prop is still
+   * taken rather than hardcoded because the caller is what knows: the
+   * moment Codex grows an inline (Roll) or read-discovery (Leaf) instrument,
+   * the type forces the question instead of letting it default to a lie.
+   */
+  kind: PapyrusKind;
   /** Header content (title, subtitle, tooltip — NO wrapper div needed) */
   header: ReactNode;
   /** Execute button configuration */
@@ -66,6 +82,58 @@ interface ZbomLayoutProps {
   headerExtra?: ReactNode;
   /** Active debounce tiers for this ZBOM (defaults to T2+T3 if not specified) */
   activeTiers?: PactQueryTier[];
+}
+
+
+/**
+ * THE PAPYRUS DESIGNATION — member upper-LEFT, engine version upper-RIGHT.
+ *
+ * Owner, 2026-10-28: *"Upper left corner the papyrus type, upper right corner
+ * papyrus package version."* Mirrors OuronetUI's own
+ * `src/lib/papyrus/PapyrusBadge.tsx`, so the same instrument designates
+ * itself identically in both apps.
+ *
+ * AT THE TOP, NOT THE FOOT. The badge answers *"which instrument am I looking
+ * at?"*, and a reader asks that on arrival — so it belongs where the eye
+ * lands, not below the execute button where it would be read, if at all,
+ * after the decision is already made.
+ *
+ * OPPOSITE CORNERS, NOT CLUSTERED. The two facts answer different questions
+ * and change on different clocks: the MEMBER is a property of this screen and
+ * never changes; the VERSION belongs to the engine drawing it and changes on
+ * release. Splitting them stops the pair reading as one compound label.
+ *
+ * The version is the PACKAGE's — `@ouronet/papyrus`, imported, never
+ * `APP_VERSION` and never a local copy. Once Codex consumes Papyrus, Codex and
+ * OuronetUI show the SAME engine version and DIFFERENT app versions, and that
+ * pair is exactly what a bug report needs. `tests/papyrus-designation.test.ts`
+ * holds that rule over comment-stripped source.
+ */
+function PapyrusBadge({ kind }: { kind: PapyrusKind }) {
+  const { label, blurb } = PAPYRUS_COPY[kind];
+  return (
+    <div
+      data-testid="papyrus-badge"
+      className="flex items-center justify-between gap-2 pb-1.5 flex-shrink-0 text-[9px] select-none"
+      style={{ color: "#4a4a4a" }}
+    >
+      {/* ── Upper LEFT: which member this is. */}
+      <span className="flex items-center gap-1 min-w-0">
+        <span
+          data-testid="papyrus-badge-member"
+          className="uppercase tracking-[0.08em] truncate"
+          style={{ color: "#6a6a6a" }}
+        >
+          {label}
+        </span>
+        <InfoTooltip content={`${label} — ${blurb}`} />
+      </span>
+      {/* ── Upper RIGHT: which engine drew it. */}
+      <span data-testid="papyrus-badge-version" className="font-mono flex-shrink-0">
+        v{PAPYRUS_VERSION}
+      </span>
+    </div>
+  );
 }
 
 /** Edge-to-edge separator line */
@@ -113,11 +181,14 @@ function ExecuteZone({ btn }: { btn: ZbomExecuteButtonProps }) {
 
 const DEFAULT_ZBOM_TIERS: PactQueryTier[] = ['T1', 'T2', 'T3'];
 
-export function ZbomLayout({ header, executeButton, children, headerExtra, activeTiers }: ZbomLayoutProps) {
+export function ZbomLayout({ kind, header, executeButton, children, headerExtra, activeTiers }: ZbomLayoutProps) {
   const zbomExecutePosition = useUiSetting<string>("zbomExecutePosition", "top");
 
   return (
     <div className="flex flex-col" style={{ maxHeight: "82vh", marginBottom: "-18px" }}>
+
+      {/* ══ Papyrus designation — FIRST, before the form ══ */}
+      <PapyrusBadge kind={kind} />
 
       {/* ══ ZBOM Debouncer ══ */}
       <div className="flex justify-center pb-2 flex-shrink-0">

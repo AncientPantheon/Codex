@@ -11,9 +11,10 @@
  * wait for the Class IA tab bar) — the same real dashboard shell, not a fake.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 
-import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
+import { STRUCTURAL_SHAPE_TARGET_VERSION } from "@ancientpantheon/codex-ouronet/structural-migration";
 
 import { Dashboard } from "../src/App";
 import { hydrateFromPlaintextSnapshot } from "../src/loadCodex";
@@ -22,6 +23,26 @@ import { populatedStoaChainSnapshot } from "../fixtures";
 afterEach(() => {
   cleanup();
 });
+
+// Exposes the per-mount store so a test can set Codex_Shape_Version
+// directly, same convention as codex-ouronet's own
+// tests/hooks-needs-structural-upgrade.test.tsx.
+let capturedStore: ReturnType<typeof useCodexStore> | null = null;
+function StoreGrabber() {
+  capturedStore = useCodexStore();
+  return null;
+}
+
+async function mountDashboardWithStore() {
+  const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
+  render(
+    <CodexProvider adapter={adapter} deviceVariant="dev">
+      <StoreGrabber />
+      <Dashboard />
+    </CodexProvider>,
+  );
+  await screen.findByRole("tab", { name: /blockchain accounts/i });
+}
 
 async function mountDashboard() {
   const adapter = await hydrateFromPlaintextSnapshot(populatedStoaChainSnapshot);
@@ -80,5 +101,27 @@ describe("Desktop '.cxpg-viewtabs' row — the new 'Codex ID' tab", () => {
 
     expect(screen.getByRole("tab", { name: /blockchain accounts/i })).toBeInTheDocument();
     expect(screen.queryByTestId("arweave-codex-id-page")).toBeNull();
+  });
+});
+
+// The flashing structural-upgrade badge on the "Codex ID" tab (docs/work/
+// upgrade-prompt-ui, T3) — driven by useNeedsStructuralUpgrade(), the same
+// hook/boolean the mobile OuronetShellMock menu item and CodexIdPage's own
+// gating use, so all three can never disagree.
+describe("Desktop '.cxpg-viewtab' \"Codex ID\" tab — the structural-upgrade badge", () => {
+  it("shows the badge when the live codex needs a structural upgrade (fresh/unversioned Codex_Shape_Version)", async () => {
+    await mountDashboardWithStore();
+    // populatedStoaChainSnapshot never stamps Codex_Shape_Version, leaving
+    // it at its default `undefined` — the exact "Unversioned" case the
+    // hook exists to flag.
+    expect(screen.getByTestId("codex-id-upgrade-badge")).toBeInTheDocument();
+  });
+
+  it("hides the badge once Codex_Shape_Version is stamped at the current structural target", async () => {
+    await mountDashboardWithStore();
+    act(() => {
+      capturedStore!.setState({ Codex_Shape_Version: STRUCTURAL_SHAPE_TARGET_VERSION });
+    });
+    expect(screen.queryByTestId("codex-id-upgrade-badge")).toBeNull();
   });
 });

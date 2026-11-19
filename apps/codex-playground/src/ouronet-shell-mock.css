@@ -166,6 +166,7 @@
 }
 
 .cxpg-osm-codex-menu-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -183,6 +184,32 @@
 .cxpg-osm-codex-menu-item--active {
   color: #ceac5f;
   background: rgba(206, 172, 95, 0.12);
+}
+
+/* Flashing structural-upgrade indicator (docs/work/upgrade-prompt-ui, T3) —
+   mirrors app.css's `.cxpg-viewtab-upgrade-badge` (the desktop counterpart),
+   rendered only while useNeedsStructuralUpgrade() is true. */
+.cxpg-osm-codex-menu-item-upgrade-badge {
+  position: absolute;
+  top: 2px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  animation: cxpg-osm-upgrade-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cxpg-osm-upgrade-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    background-color: #ff4d4f;
+  }
+  50% {
+    opacity: 0.3;
+    background-color: #ffb3b3;
+  }
 }
 
 .cxpg-osm-tabbar {

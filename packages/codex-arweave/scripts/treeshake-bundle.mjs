@@ -87,6 +87,22 @@ export async function emitBundle(entryAbsPath) {
     format: "esm",
     platform: "node",
     logLevel: "silent",
+    // A stylesheet is not a JS module, so it can never BE heavy-dep leakage —
+    // and this gate measures exactly one thing: which JS modules survive into
+    // the retained output. Without a `.css` loader, esbuild refuses outright
+    // ("Cannot import … .css into a JavaScript file without an output path
+    // configured") the moment any component in the graph does `import
+    // "./x.css"` — which `codex-ouronet`'s `CodexModalShell.tsx` now does for
+    // its themed scrollbar, taking the whole gate red for a reason that has
+    // nothing to do with tree-shaking.
+    //
+    // `empty` (not an `outdir`) is the right answer: giving the build an
+    // output path would make esbuild EMIT a CSS chunk, and the gate unions
+    // retained inputs across `metafile.outputs` — so a stylesheet output
+    // would start contributing inputs to a measurement about JS. The empty
+    // loader makes the import a no-op instead, leaving the measurement
+    // exactly as it was before any CSS existed in the graph.
+    loader: { ".css": "empty" },
     plugins: [resilientExternals],
   });
 

@@ -36,11 +36,16 @@ import { winstonToAr } from "@ancientpantheon/arweave-core";
 import { registerChainAddressValidator } from "@ancientpantheon/codex-ouronet/hooks";
 import type { WatchListEntry } from "@ancientpantheon/codex-ouronet/types";
 
+import type { CodexMasterSeed, MigrationProgress } from "@ancientpantheon/codex-core";
+
 import { ArweaveAccountsArea, type ArweaveAccountsAreaProps } from "../src/panel/ArweaveAccountsArea";
+import { ArweavePanel } from "../src/panel/ArweavePanel";
+import { ArweavePanelProvider, type ArweavePanelDeps } from "../src/panel/context";
+import { SEED_BIT_LENGTH } from "../src/seeds/index";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import { arweaveValidator } from "../src/address-book/arweaveValidator";
 import { CodexUiRoot } from "@ancientpantheon/codex-ui/ui";
-import { CodexProvider } from "@ancientpantheon/codex-ouronet/provider";
+import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/provider";
 import { MemoryCodexAdapter } from "@ancientpantheon/codex-ouronet/adapters";
 
 const CIPHERTEXT = "ENCRYPTED-KEYFILE-CIPHERTEXT-MUST-NEVER-RENDER";
@@ -94,7 +99,7 @@ describe("ArweaveAccountsArea", () => {
       makeEntry({ id: "a", seedId: "seed-1", index: 0, address: "ADDR-ZERO" }),
     ];
 
-    render(<ArweaveAccountsArea entries={entries} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={entries} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     const group = screen.getByTestId("arweave-accounts-group-seed-1");
     const rows = within(group).getAllByTestId("arweave-account-row");
@@ -111,7 +116,7 @@ describe("ArweaveAccountsArea", () => {
       <ArweaveAccountsArea
         entries={entries}
         seeds={[
-          { id: "seed-1", label: "Prime Arweave Seed" },
+          { id: "seed-1", label: "Master ArWeave Seed" },
           { id: "seed-2", label: "Second Seed" },
         ]}
       />,
@@ -133,7 +138,7 @@ describe("ArweaveAccountsArea", () => {
       makeEntry({ id: "legacy", address: "ADDR-LEGACY", label: "Imported key" }),
     ];
 
-    render(<ArweaveAccountsArea entries={entries} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={entries} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     const unassigned = screen.getByTestId("arweave-accounts-group-unassigned");
     expect(within(unassigned).getByText(addressText("ADDR-ORPHAN"))).toBeInTheDocument();
@@ -157,7 +162,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" })]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -168,7 +173,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 7, address: "ADDR-SEVEN" })]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -179,7 +184,7 @@ describe("ArweaveAccountsArea", () => {
 
   it("renders a visible empty state for an empty entries array", () => {
     expect(() =>
-      render(<ArweaveAccountsArea entries={[]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />),
+      render(<ArweaveAccountsArea entries={[]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />),
     ).not.toThrow();
 
     const empty = screen.getByTestId("arweave-accounts-empty");
@@ -195,7 +200,7 @@ describe("ArweaveAccountsArea", () => {
           makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" }),
           makeEntry({ address: "ADDR-LEGACY" }),
         ]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -207,7 +212,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" })]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -226,7 +231,7 @@ describe("ArweaveAccountsArea", () => {
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" })]}
         seeds={[
-          { id: "seed-1", label: "Prime Arweave Seed" },
+          { id: "seed-1", label: "Master ArWeave Seed" },
           { id: "seed-2", label: "Unused Seed" },
         ]}
       />,
@@ -250,7 +255,7 @@ describe("ArweaveAccountsArea", () => {
           makeEntry({ seedId: "seed-1", index: 1, address: "ADDR-A1" }),
           makeEntry({ seedId: "seed-gone", index: 0, address: "ADDR-ORPHAN" }),
         ]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -266,7 +271,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" })]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -285,7 +290,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" })]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
       />,
     );
 
@@ -311,7 +316,7 @@ describe("ArweaveAccountsArea", () => {
     );
 
     const group = screen.getByTestId("arweave-accounts-group-seed-1");
-    expect(within(group).getByText("Prime Arweave Seed")).toBeInTheDocument();
+    expect(within(group).getByText("Master ArWeave Seed")).toBeInTheDocument();
     expect(within(group).queryByText("some stale label")).toBeNull();
   });
 
@@ -322,13 +327,178 @@ describe("ArweaveAccountsArea", () => {
       <ArweaveAccountsArea
         entries={[makeEntry({ seedId: "seed-2", index: 0, address: "ADDR-ZERO" })]}
         seeds={[
-          { id: "seed-1", label: "Prime Arweave Seed", isPrime: true },
+          { id: "seed-1", label: "Master ArWeave Seed", isPrime: true },
           { id: "seed-2", label: "" },
         ]}
       />,
     );
 
     expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText("Seed #2")).toBeInTheDocument();
+  });
+
+  /**
+   * WHICH seed's group wears the "Master ArWeave Seed" title.
+   *
+   * This heading was the FOURTH independent "which Arweave seed is the master?"
+   * rule in the codebase (`seed.isPrime === true || i === 0`), and it had the
+   * same defect the Seeds area already had fixed: `isPrime` is CREATION-TIME
+   * PROVENANCE ("the first seed ever added") and is deliberately never moved
+   * when the eligibility wizard settles a NEW Master ArWeave Seed. So after a
+   * settlement this surface titled the WRONG seed's address group.
+   *
+   * The user-visible failure each case guards: the Accounts page is where a
+   * user picks an address to send AR from. A group titled "Master ArWeave Seed"
+   * above addresses derived from a seed the codex no longer calls its master
+   * sends funds from the wrong seed — and two groups both wearing the title
+   * means the page cannot be trusted at all.
+   *
+   * The verdict now comes from `resolveMasterArweaveSeed` against the injected
+   * `masterArweaveSeedId` — the SAME resolver the Seeds area uses, not a fifth
+   * local rule.
+   */
+  describe("group heading — the master designation", () => {
+    it("titles the SETTLED master's group, not the isPrime seed's, after a settlement", () => {
+      // The defect. `seed-prime` carries the creation-time flag; the codex has
+      // since settled on `seed-new`, which is the one that must read as master.
+      render(
+        <ArweaveAccountsArea
+          entries={[
+            makeEntry({ seedId: "seed-prime", index: 0, address: "ADDR-OLD" }),
+            makeEntry({ seedId: "seed-new", index: 0, address: "ADDR-NEW" }),
+          ]}
+          seeds={[
+            { id: "seed-prime", label: "Arweave Seed 1", isPrime: true },
+            { id: "seed-new", label: "My New Seed" },
+          ]}
+          masterArweaveSeedId="seed-new"
+        />,
+      );
+
+      const settled = screen.getByTestId("arweave-accounts-group-seed-new");
+      const displaced = screen.getByTestId("arweave-accounts-group-seed-prime");
+      expect(within(settled).getByText("Master ArWeave Seed")).toBeInTheDocument();
+      expect(within(displaced).queryByText("Master ArWeave Seed")).toBeNull();
+      // The displaced seed falls back to its OWN stored name, which is all the
+      // heading ever claimed about a non-master seed.
+      expect(within(displaced).getByText("Arweave Seed 1")).toBeInTheDocument();
+      // Exactly one group may wear the title.
+      expect(screen.getAllByText("Master ArWeave Seed")).toHaveLength(1);
+    });
+
+    it("reads a displaced seed's group as the FORMER master instead of its stale stored title", () => {
+      // Every codex that ran the pre-fix code has a seed stored as "Master
+      // ArWeave Seed" on disk (names used to be overwritten), and
+      // `ForeignChainsWiring.tsx`'s own label fallback can re-assert it. A
+      // stale stored title must not let the displaced seed keep reading as the
+      // master — the codex's own former-holder record names it instead.
+      render(
+        <ArweaveAccountsArea
+          entries={[
+            makeEntry({ seedId: "seed-old", index: 0, address: "ADDR-OLD" }),
+            makeEntry({ seedId: "seed-new", index: 0, address: "ADDR-NEW" }),
+          ]}
+          seeds={[
+            { id: "seed-old", label: "Master ArWeave Seed", isPrime: true },
+            { id: "seed-new", label: "Fresh Seed" },
+          ]}
+          masterArweaveSeedId="seed-new"
+          formerMasterArweaveSeedIds={["seed-old"]}
+        />,
+      );
+
+      const displaced = screen.getByTestId("arweave-accounts-group-seed-old");
+      expect(within(displaced).getByText("Former Master Arweave Seed")).toBeInTheDocument();
+      expect(within(displaced).queryByText("Master ArWeave Seed")).toBeNull();
+      expect(
+        within(screen.getByTestId("arweave-accounts-group-seed-new")).getByText("Master ArWeave Seed"),
+      ).toBeInTheDocument();
+      expect(screen.getAllByText("Master ArWeave Seed")).toHaveLength(1);
+    });
+
+    it("suppresses a stale stored master title on a non-master group even with no former-holder record", () => {
+      // Same stale-name hazard as above on a codex that has settled a master
+      // but holds no former-holder record for the displaced seed (it never
+      // sealed, so the seal-gated former ids resolve to none). The codex has
+      // named its master, so ANY other group wearing the title is provably
+      // stale: the group falls back to its position instead.
+      render(
+        <ArweaveAccountsArea
+          entries={[makeEntry({ seedId: "seed-new", index: 0, address: "ADDR-NEW" })]}
+          seeds={[
+            { id: "seed-old", label: "Master ArWeave Seed", isPrime: true },
+            { id: "seed-new", label: "Fresh Seed" },
+          ]}
+          masterArweaveSeedId="seed-new"
+        />,
+      );
+
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-old")).getByText("Seed #1")).toBeInTheDocument();
+      expect(screen.getAllByText("Master ArWeave Seed")).toHaveLength(1);
+    });
+
+    it("falls back rather than leaving every group untitled when the settled id is dangling", () => {
+      // A master since deleted, or a half-restored codex. Matching the settled
+      // id alone would leave NO group titled at all — the resolver falls
+      // through to the isPrime seed instead (note: NOT position 0).
+      render(
+        <ArweaveAccountsArea
+          entries={[makeEntry({ seedId: "seed-2", index: 0, address: "ADDR-TWO" })]}
+          seeds={[
+            { id: "seed-1", label: "Plain Seed" },
+            { id: "seed-2", label: "Stored Name", isPrime: true },
+          ]}
+          masterArweaveSeedId="seed-gone"
+        />,
+      );
+
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText("Master ArWeave Seed")).toBeInTheDocument();
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).getByText("Plain Seed")).toBeInTheDocument();
+      expect(screen.getAllByText("Master ArWeave Seed")).toHaveLength(1);
+    });
+
+    it("with no settled id, titles the isPrime seed and leaves position 0 its own stored name", () => {
+      // Backwards compatibility, precedence half: every codex that has not
+      // re-run the eligibility wizard passes no settled id at all and must
+      // resolve `isPrime` first, exactly as it always has. The title is also
+      // SINGULAR — the old `isPrime === true || i === 0` disjunction handed it
+      // to position 0 as well whenever the two disagreed.
+      render(
+        <ArweaveAccountsArea
+          entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ONE" })]}
+          seeds={[
+            { id: "seed-1", label: "First Added" },
+            { id: "seed-2", label: "Flagged Seed", isPrime: true },
+          ]}
+        />,
+      );
+
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText("Master ArWeave Seed")).toBeInTheDocument();
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).getByText("First Added")).toBeInTheDocument();
+      expect(screen.getAllByText("Master ArWeave Seed")).toHaveLength(1);
+    });
+
+    it("with no settled id and no isPrime flag anywhere, titles position 0 and keeps every other fallback", () => {
+      // Backwards compatibility, fallback half: position 0 still wins when
+      // nothing else names a master, a non-master group still shows its own
+      // stored label, and a blank-named one still reads `Seed #N`. A stale
+      // stored master title is NOT suppressed here — with no settled id this
+      // surface has no authority to call it stale.
+      render(
+        <ArweaveAccountsArea
+          entries={[makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ONE" })]}
+          seeds={[
+            { id: "seed-1", label: "some stale label" },
+            { id: "seed-2", label: "Second Seed" },
+            { id: "seed-3", label: "" },
+          ]}
+        />,
+      );
+
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).getByText("Master ArWeave Seed")).toBeInTheDocument();
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-1")).queryByText("some stale label")).toBeNull();
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-2")).getByText("Second Seed")).toBeInTheDocument();
+      expect(within(screen.getByTestId("arweave-accounts-group-seed-3")).getByText("Seed #3")).toBeInTheDocument();
+    });
   });
 
   it("badges each group with its own entry count, not the total", () => {
@@ -343,7 +513,7 @@ describe("ArweaveAccountsArea", () => {
           makeEntry({ seedId: "seed-2", index: 0, address: "ADDR-B0" }),
         ]}
         seeds={[
-          { id: "seed-1", label: "Prime Arweave Seed", isPrime: true },
+          { id: "seed-1", label: "Master ArWeave Seed", isPrime: true },
           { id: "seed-2", label: "Second Seed" },
         ]}
       />,
@@ -397,7 +567,7 @@ describe("ArweaveAccountsArea", () => {
     // throwing on a missing function call.
     const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
     expect(() =>
-      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />),
+      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />),
     ).not.toThrow();
 
     const value = screen.getByTestId(`arweave-account-value-${entry.id}`);
@@ -418,7 +588,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entryA, entryB]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         getBalance={getBalance}
       />,
     );
@@ -438,7 +608,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entry]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         getBalance={getBalance}
       />,
     );
@@ -461,7 +631,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           getBalance={getBalance}
         />,
       ),
@@ -482,7 +652,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entryA, entryB]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         getBalance={getBalance}
       />,
     );
@@ -510,7 +680,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           getBalance={getBalance}
         />,
       );
@@ -551,7 +721,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entryA, entryB]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           getBalance={getBalance}
         />,
       );
@@ -587,7 +757,7 @@ describe("ArweaveAccountsArea", () => {
     });
 
     const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO-FULL" });
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     fireEvent.click(screen.getByTestId(`arweave-account-copy-${entry.id}`));
     expect(writeText).toHaveBeenCalledWith("ADDR-ZERO-FULL");
@@ -601,7 +771,7 @@ describe("ArweaveAccountsArea", () => {
     });
 
     const entry = makeEntry({ seedId: "seed-1", index: 0 });
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     fireEvent.click(screen.getByTestId(`arweave-account-copy-${entry.id}`));
     expect(writeText).toHaveBeenCalledWith(entry.id);
@@ -618,7 +788,7 @@ describe("ArweaveAccountsArea", () => {
     vi.useFakeTimers();
     try {
       const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
-      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+      render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
       const copyBtn = screen.getByTestId(`arweave-account-copy-${entry.id}`);
       expect(copyBtn.querySelector('[data-glyph="check"]')).toBeNull();
@@ -642,7 +812,7 @@ describe("ArweaveAccountsArea", () => {
     // reach back into this one (`window.opener`) — noopener/noreferrer is a
     // security property, not a style choice.
     const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-EXPLORE" });
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     const link = screen.getByTestId(`arweave-account-explorer-${entry.id}`);
     expect(link.tagName).toBe("A");
@@ -656,7 +826,7 @@ describe("ArweaveAccountsArea", () => {
     // renders anyway with no callback wired would either throw on click or
     // silently do nothing, both worse than not offering it at all.
     const entry = makeEntry({ seedId: "seed-1", index: 0, address: "ADDR-ZERO" });
-    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} />);
+    render(<ArweaveAccountsArea entries={[entry]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} />);
 
     expect(screen.queryByTestId(`arweave-account-delete-${entry.id}`)).toBeNull();
     // The copy and explorer controls are unaffected by the omission.
@@ -673,7 +843,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entry]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         onDeleteKey={onDeleteKey}
       />,
     );
@@ -692,7 +862,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entryA, entryB]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         onDeleteKey={onDeleteKey}
       />,
     );
@@ -713,7 +883,7 @@ describe("ArweaveAccountsArea", () => {
     render(
       <ArweaveAccountsArea
         entries={[entry]}
-        seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+        seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         onDeleteKey={onDeleteKey}
       />,
     );
@@ -736,7 +906,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           onDeleteKey={onDeleteKey}
         />,
       );
@@ -756,7 +926,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           getBalance={getBalance}
           onDeleteKey={vi.fn()}
         />,
@@ -783,7 +953,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           getBalance={getBalance}
           onDeleteKey={vi.fn()}
         />,
@@ -803,7 +973,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           getBalance={getBalance}
           onDeleteKey={onDeleteKey}
         />,
@@ -827,7 +997,7 @@ describe("ArweaveAccountsArea", () => {
         <ArweaveAccountsArea
           entries={[entry]}
           // No `hasWords` at all — an older caller predating this feature.
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           getBalance={getBalance}
           onDeleteKey={vi.fn()}
         />,
@@ -846,7 +1016,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[entry]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: false }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: false }]}
           getBalance={getBalance}
           onDeleteKey={onDeleteKey}
         />,
@@ -870,7 +1040,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[orphan]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           getBalance={getBalance}
           onDeleteKey={vi.fn()}
         />,
@@ -887,7 +1057,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[seedless]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed", hasWords: true }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed", hasWords: true }]}
           getBalance={getBalance}
           onDeleteKey={vi.fn()}
         />,
@@ -921,7 +1091,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
         />,
       );
       openWatchTab();
@@ -935,7 +1105,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           onAddWatched={onAddWatched}
         />,
       );
@@ -953,7 +1123,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           onAddWatched={onAddWatched}
         />,
       );
@@ -973,7 +1143,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[makeEntry({ seedId: "seed-1", index: 0, address: ARWEAVE_ADDRESS })]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           onAddWatched={onAddWatched}
         />,
       );
@@ -992,7 +1162,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           watchedEntries={[watched]}
           onAddWatched={onAddWatched}
         />,
@@ -1014,7 +1184,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           watchedEntries={[watched]}
           getBalance={getBalance}
         />,
@@ -1035,7 +1205,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           watchedEntries={[watched]}
           onRemoveWatched={onRemoveWatched}
         />,
@@ -1058,7 +1228,7 @@ describe("ArweaveAccountsArea", () => {
         render(
           <ArweaveAccountsArea
             entries={[]}
-            seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+            seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
             watchedEntries={[watched]}
           />,
         );
@@ -1089,7 +1259,7 @@ describe("ArweaveAccountsArea", () => {
       render(
         <ArweaveAccountsArea
           entries={[]}
-          seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+          seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
           watchedEntries={[watched]}
           deps={fakeDeps}
         />,
@@ -1141,7 +1311,7 @@ describe("ArweaveAccountsArea", () => {
         <CodexUiRoot>
           <ArweaveAccountsArea
             entries={[]}
-            seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]}
+            seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]}
             watchedEntries={watchedEntries}
             onPaginationHandleChange={(h) => { handleRef.current = h; }}
           />
@@ -1220,9 +1390,9 @@ describe("ArweaveAccountsArea", () => {
       // thin pill, once per row, which is the whole point of round 12.
       expect(screen.getByText(addressText("ADDR-A0"))).toBeTruthy();
       expect(screen.getByText(addressText("ADDR-B0"))).toBeTruthy();
-      expect(screen.getByText("Prime Arweave Seed")).toBeTruthy();
+      expect(screen.getByText("Master ArWeave Seed")).toBeTruthy();
       expect(screen.getByText("Seed B")).toBeTruthy();
-      expect(screen.getByLabelText("From Prime Arweave Seed")).toBeTruthy();
+      expect(screen.getByLabelText("From Master ArWeave Seed")).toBeTruthy();
       expect(screen.getByLabelText("From Seed B")).toBeTruthy();
     });
 
@@ -1377,7 +1547,7 @@ describe("ArweaveAccountsArea", () => {
       return render(
         <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
           <CodexUiRoot>
-            <ArweaveAccountsArea entries={[]} seeds={[{ id: "seed-1", label: "Prime Arweave Seed" }]} {...props} />
+            <ArweaveAccountsArea entries={[]} seeds={[{ id: "seed-1", label: "Master ArWeave Seed" }]} {...props} />
           </CodexUiRoot>
         </CodexProvider>,
       );
@@ -1459,5 +1629,129 @@ describe("ArweaveAccountsArea", () => {
 
       document.body.removeChild(railTarget);
     });
+  });
+});
+
+/**
+ * ArweavePanel WIRES the codex's master-seed identity into the Accounts area.
+ *
+ * The area itself takes `masterArweaveSeedId` / `formerMasterArweaveSeedIds` as
+ * injected props (it reaches into no store — see its module doc), so without
+ * this wiring the mistitled group is fixed only in tests. These cases drive the
+ * REAL data path: the `codexMasterSeed` row the eligibility wizard's finalize
+ * step writes, plus the `migrationProgress` Apply stamps.
+ *
+ * Exactly the division of labour `ArweaveSeedsArea`'s own wiring cases
+ * (`e5-seeds-area.test.tsx`) already pin, against the SAME two panel-level
+ * values — the point of this task is that the two surfaces can no longer
+ * disagree about which seed is the master.
+ *
+ * Each case guards a distinct regression:
+ *   (wired) threading nothing leaves the Accounts page titling the demoted
+ *       seed's address group "Master ArWeave Seed" on every real settled codex.
+ *   (reactive) the id is SUBSCRIBED, not read once through `getState()`:
+ *       finalize writes the row while this panel is already mounted.
+ *   (former, seal-gated) the displaced group's designation comes from the
+ *       panel's seal-gated former-id resolution, so a finalized-but-unapplied
+ *       codex shows no "Former …" heading at all.
+ */
+describe("ArweavePanel — wires the master-seed identity into the Accounts area", () => {
+  const BITS = "1".repeat(SEED_BIT_LENGTH);
+  const DISPLACED_SEED = { id: "legacy", label: "My cold storage seed", bits: BITS, isPrime: true };
+  const NEW_MASTER_SEED = { id: "new-master", label: "Fresh Seed", bits: BITS };
+
+  let panelStore: ReturnType<typeof useCodexStore> | null = null;
+  function StoreGrabber(): null {
+    // Same `StoreGrabber` convention as `e5-seeds-area.test.tsx`'s own.
+    panelStore = useCodexStore();
+    return null;
+  }
+
+  /** Mounts the panel on its DEFAULT category (Accounts) with both seeds and
+   *  one key under each, so every group has a row and the list renders rather
+   *  than the empty state. */
+  async function renderAccountsPanel(): Promise<void> {
+    const deps = {
+      arweaveSeeds: [DISPLACED_SEED, NEW_MASTER_SEED],
+      foreignKeys: [
+        makeEntry({ id: "k-legacy", seedId: "legacy", index: 0, address: "ADDR-LEGACY" }),
+        makeEntry({ id: "k-new", seedId: "new-master", index: 0, address: "ADDR-NEW" }),
+      ],
+    } as unknown as ArweavePanelDeps;
+    render(
+      <CodexProvider adapter={new MemoryCodexAdapter("dev")}>
+        <StoreGrabber />
+        <ArweavePanelProvider deps={deps}>
+          <ArweavePanel id={ARWEAVE_CHAIN_ID} />
+        </ArweavePanelProvider>
+      </CodexProvider>,
+    );
+    await waitFor(() => expect(panelStore!.getState().ready).toBe(true));
+  }
+
+  /** The group heading's OWN text — the label span alone, not the whole toggle
+   *  row (which also carries the count badge). */
+  function headingOf(seedId: string): string {
+    return screen.getByTestId(`arweave-accounts-label-${seedId}`).textContent!;
+  }
+
+  /** The codex AFTER a takeover: `new-master` holds the role, `legacy` is on
+   *  record as a former holder. `sealed` is what Apply stamps. */
+  function settleTakeover(sealed: boolean): void {
+    act(() => {
+      panelStore!.setState({
+        codexMasterSeed: {
+          ouroAccountId: "ouro-1",
+          chainwebSeedId: "chainweb-1",
+          arweaveSeedId: "new-master",
+          formerArweaveSeedIds: ["legacy"],
+          establishedAt: "2026-01-01T00:00:00.000Z",
+        } satisfies CodexMasterSeed,
+        migrationProgress: {
+          stage: "committing",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          ...(sealed ? { appliedAt: "2026-01-02T00:00:00.000Z" } : {}),
+        } satisfies MigrationProgress,
+      });
+    });
+  }
+
+  afterEach(() => {
+    panelStore = null;
+  });
+
+  it("re-titles the groups the moment the codex row names an arweave seed", async () => {
+    await renderAccountsPanel();
+    // Before finalize: the stale `isPrime` stamp still decides, exactly as it
+    // always has on a codex that never ran the wizard.
+    expect(headingOf("legacy")).toBe("Master ArWeave Seed");
+    expect(headingOf("new-master")).toBe("Fresh Seed");
+
+    settleTakeover(true);
+
+    expect(headingOf("new-master")).toBe("Master ArWeave Seed");
+    expect(headingOf("legacy")).toBe("Former Master Arweave Seed");
+  });
+
+  it("gates only the FORMER designation on the seal — a finalized-but-unapplied codex still moves the master title", async () => {
+    await renderAccountsPanel();
+    settleTakeover(false);
+
+    // The master title follows the settled id at finalize, matching the Seeds
+    // area's own (un-gated) `masterArweaveSeedId` ordering/colouring.
+    expect(headingOf("new-master")).toBe("Master ArWeave Seed");
+    // The seal-gated "Former …" designation does NOT appear — the displaced
+    // seed reads as the ordinary seed it still is, under its own stored name.
+    expect(headingOf("legacy")).toBe("My cold storage seed");
+    expect(screen.queryByText("Former Master Arweave Seed")).toBeNull();
+  });
+
+  it("keeps the isPrime seed titled on a codex that has no codexMasterSeed row at all", async () => {
+    await renderAccountsPanel();
+
+    expect(panelStore!.getState().codexMasterSeed).toBeUndefined();
+    expect(headingOf("legacy")).toBe("Master ArWeave Seed");
+    expect(headingOf("new-master")).toBe("Fresh Seed");
   });
 });

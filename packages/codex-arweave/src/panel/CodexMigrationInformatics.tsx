@@ -30,8 +30,8 @@
  * single set of seed words (ideally arbitrary — which is why new codices
  * now onboard through the Stoic Dalos Derivation instead of Koala, since
  * arbitrary words need it to produce Chainweb keys at all) that generates
- * all three of the Ouronet Account, the Chainweb keys, and the Prime
- * Arweave Seed can always regenerate those three from scratch — but
+ * all three of the Codex Ouronet Master, the Master Chainweb Seed, and the
+ * Master ArWeave Seed can always regenerate those three from scratch — but
  * cannot regenerate anything ELSE a codex has additionally accumulated.
  * Recovering that extra context depends entirely on Arweave: a Master
  * Seed is what lets a seed-words-only restore actually LOCATE and decrypt
@@ -47,6 +47,7 @@
  */
 
 import * as React from "react";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 import {
   INFORMATICS_BODY_LAST_STYLE,
   INFORMATICS_BODY_STYLE,
@@ -75,24 +76,89 @@ export function CodexMigrationInformatics(): React.ReactElement {
           three — not anything about where the words originally came from.
         </p>
         <p style={INFORMATICS_BODY_LAST_STYLE}>
-          The goal of migration is to settle on one single set of seed words — ideally
-          arbitrary, not dictionary-gated — that together generates all three: your Ouronet
-          Account string, your Chainweb keys (arbitrary words need our Stoic Dalos Derivation
-          for this, which is why every new codex now onboards through it instead of Koala), and
-          your Prime Arweave Seed. That one shared word set is what is called your Master Seed.
+          The goal of migration is to settle on one single set of seed words &mdash; ideally
+          arbitrary, not dictionary-gated &mdash; that together generates all three: your
+          Ouronet Account string, your Chainweb keys (arbitrary words need our Stoic Dalos
+          Derivation for this, which is why every new codex now onboards through it instead of
+          Koala), and your Master ArWeave Seed. That one shared word set is what is called your
+          Master Seed.
         </p>
       </section>
 
       <section style={INFORMATICS_SECTION_STYLE}>
         <p style={INFORMATICS_BODY_LAST_STYLE}>
           A Master Seed is what makes full seed-words-only restore actually possible. Your seed
-          words alone can always regenerate your Ouronet Account, your Chainweb keys, and your
-          Prime Arweave Seed from scratch — but they cannot regenerate anything else your codex
-          has additionally accumulated along the way (other accounts, extra keys, your watch
-          list, settings, and so on). Recovering that depends entirely on Arweave: a Master
-          Seed is what lets you find and download an actual backup already made of everything
-          else. Without that alignment, there is no way to even locate that backup using your
-          seed words alone.
+          words alone can always regenerate your {OURONET_CODEX_MASTER}, your Chainweb keys, and
+          your Master ArWeave Seed from scratch &mdash; but they cannot regenerate anything else
+          your codex has additionally accumulated along the way (other accounts, extra keys,
+          your watch list, settings, and so on). Recovering that depends entirely on ArWeave: a
+          Master Seed is what lets you find and download an actual backup already made of
+          everything else. Without that alignment, there is no way to even locate that backup
+          using your seed words alone.
+        </p>
+      </section>
+
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
+          Because it is one seed doing three jobs, it appears under three names, and after
+          migration your codex uses those names everywhere:
+        </p>
+        <ul style={INFORMATICS_LIST_STYLE}>
+          <li data-testid="master-name-ouronet" style={INFORMATICS_LIST_ITEM_STYLE}>
+            <strong>{OURONET_CODEX_MASTER}</strong> &mdash; the single Ouronet account the seed
+            produces. This is the account the whole eligibility flow is about.
+          </li>
+          <li data-testid="master-name-chainweb" style={INFORMATICS_LIST_ITEM_STYLE}>
+            <strong>Master Chainweb Seed</strong> &mdash; the same words as a Chainweb seed.
+            Its numbered positions supply the keys your master account actually uses: position
+            0 pays, position 1 guards.
+          </li>
+          <li data-testid="master-name-arweave" style={INFORMATICS_LIST_ITEM_STYLE}>
+            <strong>Master ArWeave Seed</strong> &mdash; the same words again, deriving your
+            permanent-storage accounts.
+          </li>
+        </ul>
+        <p style={INFORMATICS_BODY_LAST_STYLE}>
+          Taken together these are your <strong>Codex Master Seed</strong>. Whenever support for
+          a new chain is added, its addresses come from this same seed &mdash; so the list above
+          grows, but the words never change.
+        </p>
+      </section>
+
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p data-testid="master-key-lock-note" style={INFORMATICS_BODY_STYLE}>
+          Once a key is actually in use by your {OURONET_CODEX_MASTER}, your codex protects it:
+          the seed holding it, and that exact key position, become non-removable. If you later
+          change the keys your master account relies on, run <strong>Secure Master Account</strong>
+          and the codex re-scans, protecting whatever is now in use and releasing whatever no
+          longer is.
+        </p>
+        <p data-testid="codex-stoic-identity-note" style={INFORMATICS_BODY_LAST_STYLE}>
+          Separately from the seed, your codex can also hold a <strong>Codex Stoic Identity</strong>
+          &mdash; its identity on StoaChain, built from two Apollo halves. The Codex Master Seed
+          itself can never be put on chain; its Stoic Identity can.
+        </p>
+      </section>
+
+      <section style={INFORMATICS_SECTION_STYLE}>
+        <p style={INFORMATICS_BODY_STYLE}>
+          That matters for backups, because a backup can be unlocked two ways:
+        </p>
+        <ul style={INFORMATICS_LIST_STYLE}>
+          <li data-testid="restore-path-master-seed" style={INFORMATICS_LIST_ITEM_STYLE}>
+            <strong>With your Codex Master Seed.</strong> Always available, and the path every
+            backup carries.
+          </li>
+          <li data-testid="restore-path-stoic-identity" style={INFORMATICS_LIST_ITEM_STYLE}>
+            <strong>With your Codex Stoic Identity.</strong> Optional, and only on backups made
+            once an identity existed &mdash; adding one later does not change an older backup.
+          </li>
+        </ul>
+        <p data-testid="restore-honesty-note" style={INFORMATICS_BODY_LAST_STYLE}>
+          To be plain about what is built today: backups really are written with both locks, but
+          there is <strong>no restore screen yet</strong>, and finding a backup still relies on
+          your Master Seed. The Stoic Identity can currently unlock a backup you already have,
+          not locate one for you.
         </p>
       </section>
 

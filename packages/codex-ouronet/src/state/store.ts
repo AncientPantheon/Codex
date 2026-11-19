@@ -11,15 +11,20 @@ import type {
   DeviceVariant,
   IConsumerSettings,
   ICodexIdentity,
+  SeedType,
 } from "../types/entities.js";
 import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
 import type { CodexAdapter, CodexSnapshot } from "../adapters/types.js";
-import type { ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { MasterKeyLock, CodexMasterSeed, MigrationProgress, MigrationSelection, MigrationCommitRecord, MigrationPendingPlan, ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import { isMigrationSealed, recordFormerMasterIds } from "@ancientpantheon/codex-core";
+import { computeMasterKeyLockDelta } from "./masterKeyLockDelta.js";
+import type { MasterKeyLockDelta } from "./masterKeyLockDelta.js";
 import {
   CodexError,
   CodexLockedError,
   CodexPrimeProtectedError,
   CodexArweaveEncryptionProtectedError,
+  CodexMasterKeyLockedError,
   CodexPrimeSeedProtectedError,
   CodexKickstartError,
   CodexIdentityError,
@@ -46,7 +51,13 @@ import type {
 import type { IKeyset } from "../types/entities.js";
 import { encryptStringV2 } from "@stoachain/stoa-core/crypto";
 import { rekeyCodex, type RekeySkip } from "../rekey/index.js";
+import {
+  runStructuralMigration,
+  type StructuralMigrationNeedsInput,
+  type StructuralMigrationResult,
+} from "../structural-migration/index.js";
 import { KadenaWalletBuilder as StoaChainWalletBuilder } from "@stoachain/stoa-core/wallet";
+import { deriveStoaDalosKeypairAtIndex } from "../wallet/stoaDalosKeygen.js";
 import { Apollo, DalosGenesis } from "@ouronet/dalos-crypto/registry";
 import type { FullKey } from "@ouronet/dalos-crypto/registry";
 import { ed25519 } from "@noble/curves/ed25519";
@@ -246,6 +257,16 @@ export interface KickstartResult {
   primeOuro: IOuroAccount;
 }
 
+/**
+ * The per-codex eligibility-shape marker (legacy-prime-migration/design.md's
+ * "Marking a codex's alignment shape" section). `"legacy"` for any codex that
+ * predates this field or hasn't yet completed the migration wizard;
+ * `"aligned"` once its Prime Ouronet Account, Prime Chainweb Seed, and Prime
+ * Arweave Seed are locked together as the same root. Mirrors
+ * `schemaVersion`'s own top-level-state field pattern.
+ */
+export type PrimeAlignment = "legacy" | "aligned";
+
 export interface CodexStoreState {
   // Hydration
   ready: boolean;
@@ -292,6 +313,30 @@ export interface CodexStoreState {
   activeOuroAccountId: string | null;
   dirty: boolean;
   schemaVersion: number;
+  /** Per-codex-instance semver shape stamp (docs/work/codex-shape-version-stamp/
+   *  design.md) — "what shape is THIS specific codex's data in," DISTINCT from
+   *  `schemaVersion` (device-local, does not travel in the export) and from
+   *  `CODEX_PACKAGE_VERSION_OUTPUT` (a single global build constant).
+   *  `undefined` for a codex that predates this field or hasn't yet been
+   *  verified/migrated to the current shape — same value-type-slot resting
+   *  state as `codexIdentity` above; `kickstartCodex` stamps `"1.0.0"` on a
+   *  fresh codex only, never on an imported one. */
+  Codex_Shape_Version: string | undefined;
+  /** Master-key locks — which derived key positions the Codex Ouronet
+   *  Master depends on and therefore may not be removed. A LIST, not a
+   *  flag: a custom guard keyset may lock positions across several seeds,
+   *  and each entry records WHY so a re-scan can release precisely the
+   *  reasons that lapsed. Always an array (never undefined) in live state;
+   *  `[]` is the resting value. See codex-core's `masterKeyLocks.ts`. */
+  masterKeyLocks: MasterKeyLock[];
+  /** The Codex Master Seed row - which three entities are the three faces of
+   *  this codex's one seed. `undefined` until migration settles it; a VALUE
+   *  slot (like codexIdentity), not a container, so absence is meaningful. */
+  codexMasterSeed: CodexMasterSeed | undefined;
+  /** An eligibility migration started and not finished, so the wizard can
+   *  resume and show the user what he chose. Never carries seed words. */
+  migrationProgress: MigrationProgress | undefined;
+  primeAlignment: PrimeAlignment;
   lastUpdatedAt: string | null;
   lastUpdatedDevice: DeviceVariant;
 
@@ -330,6 +375,113 @@ export interface CodexStoreActions {
    *  pre-flight) on a bad old password BEFORE anything is persisted. Returns any
    *  fields that could not be re-keyed (skip-not-dropped, kept verbatim). */
   changeCodexPassword(oldPassword: string, newPassword: string): Promise<{ skipped: RekeySkip[] }>;
+  /** Run the Structural Migration Engine (`runStructuralMigration`) against
+   *  the live, already-unlocked codex and persist the result. Gets the
+   *  current password via `getPassword()` — throws `CodexLockedError`
+   *  untouched if the codex is actually locked; this action NEVER prompts
+   *  for a password itself. Assembles the live snapshot via
+   *  `buildForeignKeySnapshot`, persists the fixed snapshot via the
+   *  full-snapshot `saveAll` (adapter-guarded + touch), then mirrors the
+   *  changed slices (`kadenaSeeds`, `arweaveSeeds`, `Codex_Shape_Version`)
+   *  into live state — the same persist-then-mirror-into-state sequence
+   *  `changeCodexPassword` already follows. */
+  /** Add master-key locks. Idempotent per `(seedId, position, reason)` —
+   *  re-adding an identical entry is a no-op, so a re-scan can hand over the
+   *  full computed set without growing the registry. */
+  addMasterKeyLocks(entries: readonly MasterKeyLock[]): Promise<void>;
+  /** Release every lock matching `predicate`. Reason-aware by construction:
+   *  a position locked under two reasons survives the release of one of
+   *  them, which is what makes a re-scan safe. */
+  releaseMasterKeyLocks(predicate: (lock: MasterKeyLock) => boolean): Promise<void>;
+  /** The live registry. */
+  getMasterKeyLocks(): MasterKeyLock[];
+
+  /**
+   * Write the Codex Master Seed row — which three entities are the three
+   * faces of this codex's one seed. Pure linkage, no secret material.
+   *
+   * MERGES, so establishing the ArWeave face later does not require
+   * restating the other two (they are settled at different moments: the
+   * ArWeave derivation is RSA-4096 and happens separately).
+   *
+   * Whenever a face id actually CHANGES, the displaced id is appended to the
+   * matching former-holder list on the row (codex-core's
+   * `recordFormerMasterIds`), which is what makes "Former Codex Ouronet
+   * Master" / "Former Master Arweave Seed" derivable at all. Callers never
+   * pass those lists; this action maintains them.
+   */
+  setCodexMasterSeed(row: Partial<CodexMasterSeed> & { establishedAt?: string }): Promise<void>;
+
+  // ----- unfinished-migration row (docs/work/migration-three-stages) -----
+  /**
+   * Record stage 1's selection. Called only once the selection is COMPLETE,
+   * so abandoning a partial stage 1 writes nothing to the codex.
+   *
+   * EQUALITY-GATED: re-recording an identical selection is a no-op and does
+   * not touch the adapter, so re-rendering or re-picking the same option
+   * cannot churn the codex (or bump `lastUpdatedAt` and mark it dirty).
+   */
+  recordMigrationSelection(selection: MigrationSelection): Promise<void>;
+  /** Move the recorded run from stage 1 into stage 2. */
+  beginMigrationCommit(): Promise<void>;
+  /**
+   * Merge one stage-2 write into `committed`, so a resumed commit skips what
+   * already landed. MERGES, never replaces: each call records one fact.
+   */
+  recordMigrationCommit(patch: Partial<MigrationCommitRecord>): Promise<void>;
+  /**
+   * Record what a completed FINALIZE decided — the pending state Apply will
+   * seal (docs/work/migration-pending-apply/design.md).
+   *
+   * REPLACES any previous plan wholesale: a new finalize is a new plan,
+   * exactly as re-partitioning replaces the previous layout. Never merges —
+   * a merge would leave the previous run's keys on a plan the new run did
+   * not derive. `selection`/`committed`/`execution` are preserved (they
+   * power resume), and the row is created if absent.
+   *
+   * REFUSES (`CodexError`) once the migration is sealed: Apply makes
+   * further modification impossible.
+   */
+  recordMigrationPending(plan: MigrationPendingPlan): Promise<void>;
+  /**
+   * APPLY — seal the pending state forever. Stamps `appliedAt` and
+   * `stage: "done"`, and performs the alignment seal that used to happen at
+   * finalize by going through {@link CodexActions.stampPrimeAlignmentAligned}
+   * (one writer of `primeAlignment`, not two).
+   *
+   * Idempotent: a second call on an already-sealed migration returns
+   * without writing. REFUSES (`CodexError`) when there is no `pending`
+   * plan — you cannot seal nothing, and the alignment stamp is permanent.
+   */
+  sealMigration(): Promise<void>;
+  /** Finished. CLEARS the row — a completed codex must never offer to
+   *  resume a migration that already happened. */
+  completeMigration(): Promise<void>;
+  /** Abandoned by the user. Clears the row the same way. */
+  abandonMigration(): Promise<void>;
+  /**
+   * Secure Master Account - the user-triggered rescan. Reconciles the lock
+   * registry against what the Codex Ouronet Master actually uses right now,
+   * applying additions and releases in ONE persisted write, and returning
+   * the delta as the report ("never silently").
+   *
+   * The caller supplies the key material because determining it needs chain
+   * reads (see `guards/resolveGuardKeys.ts` for the guard-unfolding half);
+   * the store stays network-free. `null` for either input means "could not
+   * determine", which SUPPRESSES releases for that reason rather than
+   * treating it as "nothing in use" - see `masterKeyLockDelta.ts`.
+   */
+  secureMasterAccount(input: {
+    paymentPublicKey: string | null;
+    guardPublicKeys: readonly string[] | null;
+  }): Promise<MasterKeyLockDelta>;
+
+  runStructuralUpgrade(options?: {
+    requestMissingData?: (
+      need: StructuralMigrationNeedsInput
+    ) => Promise<string | undefined>;
+    onProgress?: (step: string) => void;
+  }): Promise<StructuralMigrationResult>;
 
   // ----- password prompt -----
   /** Request the user enters their password. Returns a Promise that
@@ -494,6 +646,61 @@ export interface CodexStoreActions {
     seedId: string,
     accountId: string
   ): Promise<void>;
+  /** Page 7 ("Finalize") of `legacy-prime-migration-wizard` — ensures the
+   *  Step-2-chosen account has a PAIRED Chainweb seed (creating + linking
+   *  one via `addStoaChainSeed`/`updateOuroAccount` when none exists yet,
+   *  reusing an already-valid `parentSeedId` otherwise), determines
+   *  whether a fund-moving sweep is needed, and promotes the pair to
+   *  Prime via the EXISTING `promoteSeedAndAccountToPrime` ONLY when it
+   *  isn't. Never performs any fund-moving sweep itself.
+   *
+   *  `derivation.bitString` is the 1600-bit DALOS bitstring backing
+   *  whichever words the chosen account's keys derive from (never
+   *  re-prompted here — see `legacy-prime-migration-wizard/design.md`'s
+   *  "Page 3" section); `derivation.words`, when known, are persisted
+   *  alongside it as a NEW seed's `wordsSecret` (mirrors
+   *  `CreateStoaChainSeedModal.tsx`'s `finalizeStoicSeed` convention).
+   *  `derivation.method` picks the derivation family: `"stoic-dalos"`
+   *  (`deriveStoaDalosKeypairAtIndex` at positions 0/1 — payment + guard)
+   *  or `"advanced-native"` (the mnemonic-based `chainweaver`/`koala`
+   *  pipeline, chosen by the target account's own `originSeedTab`).
+   *
+   *  Algorithm (design.md "Page 7 — Finalize", plan.md T7):
+   *   1. Refuses with the SAME lock-in `CodexError` as
+   *      `promoteSeedAndAccountToPrime` when `primeAlignment ===
+   *      "aligned"` — checked FIRST, zero mutation.
+   *   2. Throws `CodexError` if `accountId` doesn't reference a real
+   *      `IOuroAccount`.
+   *   3. Reuses `accountId`'s own `parentSeedId` as the seed if it
+   *      already points at a real `IStoaChainSeed`; otherwise creates one
+   *      from `derivation` and links it via `updateOuroAccount`.
+   *   4. Derives the payment (#0) + guard (#1) public keys `derivation`
+   *      would produce.
+   *   5. `guardRotationNeeded` is `false` only when the account's CURRENT
+   *      `guard` is a non-null `keys-all` keyset whose `keys` (as a set)
+   *      exactly equal those two derived public keys (as a set) — `true`
+   *      otherwise. It describes the CHAIN, not this codex.
+   *   6. ALWAYS calls `promoteSeedAndAccountToPrime(seedId, accountId)`.
+   *      Promotion is structural and codex-local; it does not wait on an
+   *      on-chain rotation. (It used to, and that made eligibility
+   *      unreachable for every codex that actually needed migrating — see
+   *      the implementation's own note.)
+   *   7. Returns `{ guardRotationNeeded, seedId }` — the flag is
+   *      INFORMATION for the caller, never a gate.
+   *
+   *  `derivation`'s shape mirrors whatever
+   *  `LegacyPrimeMigrationKeysChoice` (`LegacyPrimeMigrationWizard.tsx`,
+   *  T6 — a parallel task in the same wave) resolves to; this action's
+   *  own file scope doesn't depend on that type, only on this literal
+   *  shape. */
+  ensurePrimeSeedAccountPairingAndPromote(
+    accountId: string,
+    derivation: {
+      bitString: string;
+      words?: readonly string[];
+      method: "stoic-dalos" | "advanced-native";
+    }
+  ): Promise<{ guardRotationNeeded: boolean; seedId: string }>;
   /** Non-removable-account invariant (docs/work/arweave-non-removable-
    *  account/design.md). Sets `hasEncryptedArweaveUpload: true` on the
    *  matching account and persists it. The host app wires this to
@@ -561,6 +768,44 @@ export interface CodexStoreActions {
    *  slices + schemaVersion to state and best-effort persists via
    *  `adapter.saveAll`. No-op when already current. */
   migrateToCurrent(): Promise<void>;
+  /** Stamp this codex's `primeAlignment` as `"aligned"`
+   *  (legacy-prime-migration/design.md's "Marking a codex's alignment
+   *  shape" section). Persists via the full-snapshot `saveAll`, same as
+   *  every other `buildForeignKeySnapshot`-backed write. Idempotent:
+   *  a no-op (resolves without error, zero state/persistence change)
+   *  when already `"aligned"`. */
+  stampPrimeAlignmentAligned(): Promise<void>;
+}
+
+/**
+ * `CodexSnapshot`, widened with the `primeAlignment` field.
+ *
+ * `primeAlignment` is NOT YET a declared field on the shared `CodexSnapshot`
+ * type (`../adapters/types.ts`) — adding it there is out of this task's file
+ * scope. This local intersection lets the snapshot builders below carry the
+ * field on the object they return/persist (adapters round-trip it verbatim —
+ * `structuredClone`/JSON persistence doesn't care about the static type) while
+ * every call site that only knows about plain `CodexSnapshot` (e.g.
+ * `adapter.saveAll`) stays assignable, since extra properties are fine for
+ * structural subtyping outside a literal context.
+ */
+type CodexSnapshotWithPrimeAlignment = CodexSnapshot & {
+  primeAlignment: PrimeAlignment;
+};
+
+/**
+ * Read `primeAlignment` off a `CodexSnapshot` loaded from an adapter. The
+ * field is absent on the static type (see {@link CodexSnapshotWithPrimeAlignment}
+ * for why) but may be present at runtime on a snapshot a previous
+ * `saveAll` wrote it onto. Coalesces a missing value — any codex that
+ * predates this field — to `"legacy"`, the same safe-default discipline
+ * `consumerSettings`/`foreignKeys`/`arweaveSeeds` already follow on read.
+ */
+function readPrimeAlignment(snapshot: CodexSnapshot): PrimeAlignment {
+  return (
+    (snapshot as Partial<CodexSnapshotWithPrimeAlignment>).primeAlignment ??
+    "legacy"
+  );
 }
 
 /**
@@ -574,10 +819,23 @@ export interface CodexStoreActions {
  * `codexIdentity`, or the `consumerSettings`. Every field on `CodexSnapshot`
  * MUST be included (cascade rule — mirrors `migrateToCurrent`'s inline builder).
  */
+/**
+ * A complete `CodexSnapshot` from live state with NO slice overridden —
+ * what a whole-snapshot write (e.g. a master-key-lock change) must persist.
+ *
+ * Deliberately delegates to {@link buildForeignKeySnapshot} rather than
+ * enumerating the fields again: that builder carries the cascade rule
+ * ("every field on CodexSnapshot MUST be included"), and a second inline
+ * builder is exactly how a slice gets silently dropped on write.
+ */
+function buildFullSnapshot(state: CodexStoreState): CodexSnapshotWithPrimeAlignment {
+  return buildForeignKeySnapshot(state, state.foreignKeys ?? []);
+}
+
 function buildForeignKeySnapshot(
   state: CodexStoreState,
   foreignKeys: ForeignKeyEntry[]
-): CodexSnapshot {
+): CodexSnapshotWithPrimeAlignment {
   return {
     kadenaSeeds: state.kadenaSeeds,
     ouroAccounts: state.ouroAccounts,
@@ -595,6 +853,21 @@ function buildForeignKeySnapshot(
     arweaveSeeds: state.arweaveSeeds,
     foreignKeys,
     schemaVersion: state.schemaVersion,
+    // Per-codex-instance shape stamp, threaded from live state so a
+    // foreign-key write never overwrites the on-disk Codex_Shape_Version with
+    // a stale/undefined value — same cascade rule as codexIdentity above.
+    Codex_Shape_Version: state.Codex_Shape_Version,
+    // Master-key locks, threaded from live state for the same reason as the
+    // shape stamp above: a per-slice write must never blank the on-disk
+    // locks with a stale value and silently unlock the master's payment key.
+    masterKeyLocks: state.masterKeyLocks,
+    // Threaded from live state for the same reason as the locks above.
+    codexMasterSeed: state.codexMasterSeed,
+    migrationProgress: state.migrationProgress,
+    // Per-codex eligibility-shape marker — same cascade rule as every other
+    // field above (see CodexSnapshotWithPrimeAlignment for why this is
+    // widened rather than a declared CodexSnapshot field).
+    primeAlignment: state.primeAlignment,
     lastUpdatedAt: state.lastUpdatedAt,
     lastUpdatedDevice: state.lastUpdatedDevice,
   };
@@ -608,7 +881,7 @@ function buildForeignKeySnapshot(
 function buildArweaveSeedSnapshot(
   state: CodexStoreState,
   arweaveSeeds: IArweaveSeed[]
-): CodexSnapshot {
+): CodexSnapshotWithPrimeAlignment {
   return { ...buildForeignKeySnapshot(state, state.foreignKeys), arweaveSeeds };
 }
 
@@ -658,6 +931,16 @@ const initialState: Omit<CodexStoreState, "actions"> = {
   activeOuroAccountId: null,
   dirty: false,
   schemaVersion: 0,
+  // Explicit undefined, same resting-state discipline as codexIdentity above:
+  // a brand-new store (before kickstart/init runs) has no shape stamp yet.
+  Codex_Shape_Version: undefined,
+  // Empty, not undefined: a lock registry is a container (like
+  // consumerSettings), not a value slot (like codexIdentity) — callers
+  // always iterate it, never test it for presence.
+  masterKeyLocks: [],
+  codexMasterSeed: undefined,
+  migrationProgress: undefined,
+  primeAlignment: "legacy",
   lastUpdatedAt: null,
   lastUpdatedDevice: "dev",
   adapter: null,
@@ -967,6 +1250,14 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         // state that init()'s own gating (`canConsumerWrite`) doesn't already
         // accept.
         schemaVersion: CURRENT_SCHEMA_VERSION,
+        // docs/work/codex-shape-version-stamp/design.md: a freshly-kickstarted
+        // codex IS already in the current data shape -- stamp it immediately,
+        // not deferred to any future migration step. Unlike schemaVersion
+        // above, this is a hardcoded literal (not CURRENT_SCHEMA_VERSION):
+        // Codex_Shape_Version tracks the migration engine's own shape
+        // counter (Topic 2, out of this task's scope), which happens to
+        // start at "1.0.0" too but is a DISTINCT counter.
+        Codex_Shape_Version: "1.0.0",
       });
 
       // 12. Best-effort persistence — saveCodexIdentity LAST (F-001 ordering).
@@ -1096,7 +1387,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // values and run the migration chain to CURRENT_SCHEMA_VERSION. Every
           // field on CodexSnapshot MUST be included here; future phases adding
           // a snapshot field must extend this builder (see migrateToCurrent).
-          const preMigration: CodexSnapshot = {
+          const preMigration: CodexSnapshotWithPrimeAlignment = {
             kadenaSeeds: migratedStoaChainSeeds,
             ouroAccounts: snap.ouroAccounts,
             pureKeypairs: snap.pureKeypairs,
@@ -1120,6 +1411,29 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // keeps a migrating load from persisting a snapshot with no seeds.
             arweaveSeeds: snap.arweaveSeeds ?? [],
             schemaVersion: snap.schemaVersion,
+            // Per-codex-instance shape stamp (docs/work/codex-shape-version-stamp/
+            // design.md). A REAL declared field on CodexSnapshot (unlike
+            // primeAlignment below), so this reads directly off the raw
+            // loaded snapshot -- same value-type-slot discipline as
+            // codexIdentity above: absent on every codex that predates it,
+            // and `undefined` is a valid (not coalesced-away) resting state.
+            Codex_Shape_Version: snap.Codex_Shape_Version,
+            // Coalesced to [] for a codex that predates locks — absent means
+            // "no locks recorded", which is the correct resting state here
+            // (unlike the shape stamp, where absence is itself the datum).
+            masterKeyLocks: snap.masterKeyLocks ?? [],
+            // Value slot: `undefined` is a valid resting state (a codex that
+            // has never been migrated), so it is NOT coalesced away.
+            codexMasterSeed: snap.codexMasterSeed,
+            // `null` on the wire means REMOVED (the sharding adapter's marker,
+            // which a whole-snapshot adapter stores verbatim). Live state is
+            // declared `| undefined`, so normalize rather than leak a null.
+            migrationProgress: snap.migrationProgress ?? undefined,
+            // Per-codex eligibility-shape marker. Not yet a declared field on
+            // CodexSnapshot (see CodexSnapshotWithPrimeAlignment); coalesced
+            // from the raw loaded snapshot the same way foreignKeys/
+            // arweaveSeeds are above — absent on every codex that predates it.
+            primeAlignment: readPrimeAlignment(snap),
             lastUpdatedAt: snap.lastUpdatedAt,
             lastUpdatedDevice: snap.lastUpdatedDevice,
           };
@@ -1158,6 +1472,15 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // state slot stays undefined-typed; the getter does the null
             // coalesce at the public boundary.
             codexIdentity: migrated.codexIdentity,
+            // Hydrate the master-key locks into live state. Without this the
+            // locks ride the adapter correctly but live state stays at its
+            // initial [], so the very next `exportForCloud` emits an empty
+            // registry and the guarantee is lost on the next round trip —
+            // the same class of silent drop this builder's own header warns
+            // about ("Every field on CodexSnapshot MUST be included here").
+            masterKeyLocks: migrated.masterKeyLocks ?? [],
+            codexMasterSeed: migrated.codexMasterSeed,
+            migrationProgress: migrated.migrationProgress ?? undefined,
             // Hydrate the foreign-key keyring into live state so a restored (or
             // adapter-persisted) Arweave key is in memory after init — without
             // this the key rides the backup and the adapter but never reappears
@@ -1168,6 +1491,19 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             // chain-rail switch that unmounts the Arweave panel.
             arweaveSeeds: migrated.arweaveSeeds ?? [],
             schemaVersion: migrated.schemaVersion,
+            // Read from migrated (not loaded), same reason as codexIdentity
+            // above: a future Topic 2 migration may synthesize/transform this
+            // field, and reading `snap` here would silently discard that
+            // output. No current migration touches it, so this is a no-op
+            // pass-through today.
+            Codex_Shape_Version: migrated.Codex_Shape_Version,
+            // Read from the ORIGINALLY loaded `snap`, not `migrated`: no
+            // registered schema migration transforms primeAlignment (it's
+            // independent of the schemaVersion chain), and `applyMigrations`'
+            // declared return type doesn't know about this field at all —
+            // sourcing it from the raw load is what's actually correct here,
+            // not merely convenient.
+            primeAlignment: readPrimeAlignment(snap),
             lastUpdatedAt: migrated.lastUpdatedAt,
             lastUpdatedDevice: migrated.lastUpdatedDevice,
             ready: true,
@@ -1229,6 +1565,22 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         });
         get().actions.authenticate(newPassword);
         return { skipped };
+      },
+
+      async runStructuralUpgrade(options) {
+        // getPassword() throws CodexLockedError untouched if the codex is
+        // actually locked — this action never prompts for a password,
+        // it only ever runs against an already-unlocked codex.
+        const password = get().actions.getPassword();
+        const current = buildForeignKeySnapshot(get(), get().foreignKeys);
+        const result = await runStructuralMigration(current, password, options);
+        await persistAndTouch((a) => a.saveAll(result.snapshot));
+        set({
+          kadenaSeeds: result.snapshot.kadenaSeeds,
+          arweaveSeeds: result.snapshot.arweaveSeeds,
+          Codex_Shape_Version: result.snapshot.Codex_Shape_Version,
+        });
+        return result;
       },
 
       getPassword(): string {
@@ -1389,9 +1741,225 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       },
 
       async updateStoaChainSeed(seed: IStoaChainSeed) {
+        // THE position-removal guard. This action is a whole-object replace
+        // and is the ONLY route by which a derived key position disappears
+        // (there is no deleteDerivedKey action) — so this is the one place
+        // the invariant can actually be enforced. The seeds UI's disabled
+        // delete button is cosmetic; this is the real thing.
+        const keptIndices = new Set((seed.accounts ?? []).map((a) => a.index));
+        const violated = get().masterKeyLocks.find(
+          (l) => l.seedId === seed.id && !keptIndices.has(l.position)
+        );
+        if (violated) {
+          throw new CodexMasterKeyLockedError(
+            violated.seedId,
+            violated.position,
+            violated.reason
+          );
+        }
         const next = get().kadenaSeeds.map((s) => (s.id === seed.id ? seed : s));
         set({ kadenaSeeds: next });
         await persistAndTouch((a) => a.saveStoaChainSeeds(next));
+      },
+
+      async addMasterKeyLocks(entries: readonly MasterKeyLock[]) {
+        const current = get().masterKeyLocks;
+        const key = (l: MasterKeyLock) => `${l.seedId}\u0000${l.position}\u0000${l.reason}`;
+        const seen = new Set(current.map(key));
+        const added = entries.filter((e) => !seen.has(key(e)));
+        if (added.length === 0) return; // idempotent: nothing to write
+        const next = [...current, ...added];
+        set({ masterKeyLocks: next });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async releaseMasterKeyLocks(predicate: (lock: MasterKeyLock) => boolean) {
+        const current = get().masterKeyLocks;
+        const next = current.filter((l) => !predicate(l));
+        if (next.length === current.length) return;
+        set({ masterKeyLocks: next });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      getMasterKeyLocks() {
+        return get().masterKeyLocks;
+      },
+
+      async setCodexMasterSeed(row: Partial<CodexMasterSeed> & { establishedAt?: string }) {
+        const current = get().codexMasterSeed;
+        const merged = {
+          ...(current ?? {}),
+          ...row,
+          establishedAt: current?.establishedAt ?? row.establishedAt ?? new Date().toISOString(),
+        } as CodexMasterSeed;
+        if (!merged.ouroAccountId || !merged.chainwebSeedId) {
+          // Refuse a row that cannot name its two mandatory faces rather than
+          // storing a half-row that the Codex ID page would render as broken.
+          throw new CodexError(
+            "setCodexMasterSeed: a Codex Master Seed row needs both an Ouronet account and a Chainweb seed.",
+          );
+        }
+        // Remember who the master WAS. Append-only, outgoing id only,
+        // de-duplicated — the rule itself is a pure function in codex-core
+        // (`recordFormerMasterIds`), unit-tested there. It records nothing on
+        // a first-ever settlement and nothing when no face id actually
+        // changes, so it cannot disturb the no-change short-circuit below.
+        const withHistory = recordFormerMasterIds(current, merged);
+        if (JSON.stringify(current) === JSON.stringify(withHistory)) return;
+        set({ codexMasterSeed: withHistory });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async recordMigrationSelection(selection: MigrationSelection) {
+        const current = get().migrationProgress;
+        // Equality gate — see the declaration's doc comment.
+        if (
+          current?.stage === "selection" &&
+          JSON.stringify(current.selection) === JSON.stringify(selection)
+        ) {
+          return;
+        }
+        const now = new Date().toISOString();
+        const next: MigrationProgress = {
+          stage: "selection",
+          startedAt: current?.startedAt ?? now,
+          updatedAt: now,
+          selection,
+          ...(current?.committed ? { committed: current.committed } : {}),
+          ...(current?.execution ? { execution: current.execution } : {}),
+        };
+        set({ migrationProgress: next });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async beginMigrationCommit() {
+        const current = get().migrationProgress;
+        if (!current) return;
+        if (current.stage === "committing") return;
+        set({
+          migrationProgress: {
+            ...current,
+            stage: "committing",
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async recordMigrationCommit(patch: Partial<MigrationCommitRecord>) {
+        const current = get().migrationProgress;
+        if (!current) return;
+        set({
+          migrationProgress: {
+            ...current,
+            // MERGE: each call records one fact about what landed.
+            committed: { ...(current.committed ?? {}), ...patch },
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async recordMigrationPending(plan: MigrationPendingPlan) {
+        const current = get().migrationProgress;
+        if (isMigrationSealed(current)) {
+          throw new CodexError(
+            "this migration was already applied — recordMigrationPending refuses once sealed"
+          );
+        }
+        const now = new Date().toISOString();
+        const next: MigrationProgress = {
+          stage: "committing",
+          startedAt: current?.startedAt ?? now,
+          updatedAt: now,
+          ...(current?.selection ? { selection: current.selection } : {}),
+          ...(current?.committed ? { committed: current.committed } : {}),
+          ...(current?.execution ? { execution: current.execution } : {}),
+          // REPLACE, never merge — see the declaration's doc comment.
+          pending: plan,
+        };
+        set({ migrationProgress: next });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async sealMigration() {
+        const current = get().migrationProgress;
+        // Idempotent no-op: already sealed, nothing to set or persist.
+        if (isMigrationSealed(current)) return;
+        if (!current?.pending) {
+          throw new CodexError(
+            "there is no pending migration to apply — sealMigration refuses to seal nothing"
+          );
+        }
+        // The alignment seal, moved here from finalize. Goes through the ONE
+        // writer of `primeAlignment` rather than setting it by hand.
+        //
+        // FIRST, deliberately: if the second write below failed, the row
+        // would still read as pending and Apply would still be offered, so
+        // a retry completes the seal (the stamp itself is idempotent). The
+        // other order would mark the migration applied over a codex that
+        // never got aligned, and the idempotent early return above would
+        // then make that state permanent.
+        await get().actions.stampPrimeAlignmentAligned();
+        const now = new Date().toISOString();
+        set({
+          migrationProgress: {
+            ...current,
+            stage: "done",
+            appliedAt: now,
+            updatedAt: now,
+          },
+        });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async completeMigration() {
+        if (get().migrationProgress === undefined) return;
+        set({ migrationProgress: undefined });
+        // `null` is what tells the sharding adapter to REMOVE the row;
+        // `undefined` would mean "writer did not know about it" and leave it.
+        await persistAndTouch((a) =>
+          a.saveAll({
+            ...buildFullSnapshot(get()),
+            migrationProgress: null,
+          } as unknown as CodexSnapshotWithPrimeAlignment)
+        );
+      },
+
+      async abandonMigration() {
+        await get().actions.completeMigration();
+      },
+
+      async secureMasterAccount(input: {
+        paymentPublicKey: string | null;
+        guardPublicKeys: readonly string[] | null;
+      }) {
+        const current = get().masterKeyLocks;
+        const delta = computeMasterKeyLockDelta({
+          paymentPublicKey: input.paymentPublicKey,
+          guardPublicKeys: input.guardPublicKeys,
+          seeds: get().kadenaSeeds,
+          currentLocks: current,
+        });
+        if (delta.add.length === 0 && delta.release.length === 0) {
+          // Nothing changed - do not touch the adapter at all, so a routine
+          // re-scan does not bump `lastUpdatedAt` and mark the codex dirty.
+          return delta;
+        }
+        // Applied as ONE set + ONE persist rather than add-then-release, so
+        // the registry is never briefly in a half-reconciled state on disk.
+        const releasing = new Set(
+          delta.release.map((l) => l.seedId + " " + String(l.position) + " " + l.reason)
+        );
+        const next = [
+          ...current.filter(
+            (l) => !releasing.has(l.seedId + " " + String(l.position) + " " + l.reason)
+          ),
+          ...delta.add,
+        ];
+        set({ masterKeyLocks: next });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+        return delta;
       },
 
       async deleteStoaChainSeed(id: string) {
@@ -1399,6 +1967,14 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         // v0.2.0 §6.2: prime seed is structurally unremovable.
         if (target?.isPrime) {
           throw new CodexPrimeSeedProtectedError(id);
+        }
+        // A seed holding ANY lock is undeletable — otherwise deleting the
+        // seed would remove the locked position by the back door, and this
+        // action additionally CASCADE-deletes the seed's derived ouro
+        // accounts, so the blast radius is wider than the position itself.
+        const held = get().masterKeyLocks.find((l) => l.seedId === id);
+        if (held) {
+          throw new CodexMasterKeyLockedError(id, null, held.reason);
         }
         const nextSeeds = get().kadenaSeeds.filter((s) => s.id !== id);
 
@@ -1949,6 +2525,16 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
       },
 
       async promoteSeedAndAccountToPrime(seedId: string, accountId: string) {
+        // Lock-in rule (legacy-prime-migration/design.md "The lock-in
+        // rule") — checked FIRST, before any other validation/mutation.
+        // Once a codex is aligned, its Prime Ouronet Account and Prime
+        // Chainweb Seed can never change again; re-derived eligibility is
+        // never recomputed here, only this recorded, stamped fact is read.
+        if (get().primeAlignment === "aligned") {
+          throw new CodexError(
+            "this codex's Prime trio is already locked — promoteSeedAndAccountToPrime refuses once aligned"
+          );
+        }
         // Validate first — zero mutation on any failure (mirrors the
         // existingPrime pre-flight style of addStoaChainSeed/addOuroAccount).
         const targetSeed = get().kadenaSeeds.find((s) => s.id === seedId);
@@ -1994,6 +2580,140 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           await a.saveStoaChainSeeds(nextSeeds);
           await a.saveOuroAccounts(nextAccounts);
         });
+      },
+
+      async ensurePrimeSeedAccountPairingAndPromote(
+        accountId: string,
+        derivation: {
+          bitString: string;
+          words?: readonly string[];
+          method: "stoic-dalos" | "advanced-native";
+        }
+      ) {
+        // Step 1 — the SAME lock-in refusal promoteSeedAndAccountToPrime
+        // itself leads with, checked first, zero mutation.
+        if (get().primeAlignment === "aligned") {
+          throw new CodexError(
+            "this codex's Prime trio is already locked — " +
+              "ensurePrimeSeedAccountPairingAndPromote refuses once aligned"
+          );
+        }
+
+        // Step 2 — resolve the target account.
+        const targetAccount = get().ouroAccounts.find((a) => a.id === accountId);
+        if (!targetAccount) {
+          throw new CodexError(
+            `ensurePrimeSeedAccountPairingAndPromote: no ouro account with id "${accountId}" exists.`
+          );
+        }
+
+        // Step 4 (computed ahead of step 3 — needed either way, whether a
+        // seed ends up getting created or an existing one is reused).
+        // `nativeSeedType` only matters for "advanced-native"; chosen off
+        // the target account's own known word origin (mirrors
+        // `SeedWordsTab.tsx`'s own `createWalletPairFromMnemonic` seedType
+        // selection — "12-words" -> chainweaver, "24-words" -> koala).
+        const nativeSeedType: SeedType =
+          targetAccount.originSeedTab === "24-words" ? "koala" : "chainweaver";
+        let paymentPublicKey: string;
+        let guardPublicKey: string;
+        if (derivation.method === "stoic-dalos") {
+          paymentPublicKey = deriveStoaDalosKeypairAtIndex(derivation.bitString, 0).publicKey;
+          guardPublicKey = deriveStoaDalosKeypairAtIndex(derivation.bitString, 1).publicKey;
+        } else {
+          const mnemonic = (derivation.words ?? []).join(" ");
+          const pos0 = await StoaChainWalletBuilder.createWalletPairFromMnemonic(
+            mnemonic, mnemonic, 0, nativeSeedType
+          );
+          const pos1 = await StoaChainWalletBuilder.createWalletPairFromMnemonic(
+            mnemonic, mnemonic, 1, nativeSeedType
+          );
+          paymentPublicKey = pos0.publicKey;
+          guardPublicKey = pos1.publicKey;
+        }
+
+        // Step 3 — reuse the account's own parentSeedId if it already
+        // points at a real seed; otherwise create + link a new one.
+        const pairedSeed = targetAccount.parentSeedId
+          ? get().kadenaSeeds.find((s) => s.id === targetAccount.parentSeedId)
+          : undefined;
+        let seedId: string;
+        if (pairedSeed) {
+          seedId = pairedSeed.id;
+        } else {
+          const ck = get().actions.getPassword();
+          const seedType: SeedType = derivation.method === "stoic-dalos" ? "stoic" : nativeSeedType;
+          const newSeed: IStoaChainSeed = {
+            id: newId(),
+            version: "1.0",
+            index: 0,
+            // Same persistence shape `CreateStoaChainSeedModal.tsx`'s
+            // `finalizeStoicSeed` already uses: the derived bitstring
+            // itself is `secret` (one-way — there's no deriving back from
+            // it to words), `wordsSecret` is a SEPARATE encrypted pass,
+            // only present when the real words are actually known.
+            secret: await encryptStringV2(derivation.bitString, ck),
+            wordsSecret:
+              derivation.words && derivation.words.length > 0
+                ? await encryptStringV2(derivation.words.join(" "), ck)
+                : undefined,
+            seedType,
+            main: seedType === "stoic" ? paymentPublicKey : `k:${paymentPublicKey}`,
+            createdAt: new Date().toISOString(),
+            accounts: [
+              {
+                index: 0,
+                publicKey: paymentPublicKey,
+                derivationPath:
+                  seedType === "stoic" ? "m'/44'/626'/0'" : "m/44'/626'/0'/0/0",
+              },
+              {
+                index: 1,
+                publicKey: guardPublicKey,
+                derivationPath:
+                  seedType === "stoic" ? "m'/44'/626'/1'" : "m/44'/626'/0'/0/1",
+              },
+            ],
+          };
+          await get().actions.addStoaChainSeed(newSeed);
+          await get().actions.updateOuroAccount({
+            ...targetAccount,
+            parentSeedId: newSeed.id,
+          });
+          seedId = newSeed.id;
+        }
+
+        // Step 5 — sweepNeeded is false only when the account's CURRENT
+        // guard already is exactly this keys-all pair.
+        const derivedKeys = new Set([paymentPublicKey, guardPublicKey]);
+        const guard = targetAccount.guard;
+        const guardMatches =
+          guard !== null &&
+          guard.pred === "keys-all" &&
+          guard.keys.length === derivedKeys.size &&
+          guard.keys.every((k) => derivedKeys.has(k));
+        const guardRotationNeeded = !guardMatches;
+
+        // Step 6 — ALWAYS promote.
+        //
+        // CORRECTED (owner, 2026-10-30). This used to promote only when the
+        // guard already matched, and the consequence was severe: a legacy
+        // codex's on-chain guard does not match until a rotation happens,
+        // which is the very thing migrating is for — so the account was
+        // never promoted, and since eligibility reads the PRIME account's
+        // bitstring and the PRIME ArWeave address, eligibility could never
+        // be reached on exactly the codices that needed it.
+        //
+        // Promotion is STRUCTURAL and codex-local. Rotating the on-chain
+        // guard is a separate, optional act (stage 3A), and asset movement
+        // is another (stage 3B). Neither determines eligibility:
+        // `checkArweaveRestoreEligibility` compares a derived ArWeave
+        // address against the stored prime one and reads nothing from chain.
+        await get().actions.promoteSeedAndAccountToPrime(seedId, accountId);
+
+        // Step 7. `guardRotationNeeded` is now INFORMATION for the caller —
+        // "your chosen keys are not yet the ones on chain" — not a gate.
+        return { guardRotationNeeded, seedId };
       },
 
       // ----- address book -----
@@ -2163,7 +2883,7 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         // Build a CodexSnapshot from the current in-memory state. Every field
         // on CodexSnapshot MUST be included; future phases adding a snapshot
         // field must extend this builder (cascade rule — see init's builder).
-        const current: CodexSnapshot = {
+        const current: CodexSnapshotWithPrimeAlignment = {
           kadenaSeeds: state.kadenaSeeds,
           ouroAccounts: state.ouroAccounts,
           pureKeypairs: state.pureKeypairs,
@@ -2185,6 +2905,13 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           // `snapshot.foreignKeys ?? []` unconditionally).
           foreignKeys: state.foreignKeys,
           schemaVersion: state.schemaVersion,
+          // Source from live store state, same reason as codexIdentity above:
+          // a future Topic 2 migration that touches Codex_Shape_Version
+          // should see the real live value, not a stale one.
+          Codex_Shape_Version: state.Codex_Shape_Version,
+          // Per-codex eligibility-shape marker — same cascade rule as every
+          // other field above (see CodexSnapshotWithPrimeAlignment).
+          primeAlignment: state.primeAlignment,
           lastUpdatedAt: state.lastUpdatedAt,
           lastUpdatedDevice: state.lastUpdatedDevice,
         };
@@ -2216,6 +2943,9 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
           arweaveSeeds: migrated.arweaveSeeds ?? [],
           foreignKeys: migrated.foreignKeys ?? [],
           schemaVersion: migrated.schemaVersion,
+          // Reflect a migration that synthesizes/transforms it; same
+          // read-from-migrated reasoning as codexIdentity above.
+          Codex_Shape_Version: migrated.Codex_Shape_Version,
           lastUpdatedAt: migrated.lastUpdatedAt,
           lastUpdatedDevice: migrated.lastUpdatedDevice,
         });
@@ -2226,6 +2956,15 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
         } catch {
           // swallow — next successful save picks up the migrated shape.
         }
+      },
+
+      async stampPrimeAlignmentAligned() {
+        // Idempotent no-op: already aligned, nothing to set or persist.
+        if (get().primeAlignment === "aligned") return;
+        set({ primeAlignment: "aligned" });
+        await persistAndTouch((a) =>
+          a.saveAll(buildForeignKeySnapshot(get(), get().foreignKeys))
+        );
       },
     };
 

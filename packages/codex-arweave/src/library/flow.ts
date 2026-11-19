@@ -84,7 +84,7 @@ import * as arweaveCore from "@ancientpantheon/arweave-core";
 // binding would defeat.
 import * as fileEncryption from "../crypto/fileEncryption.js";
 import type { CryptoSeam } from "@ancientpantheon/codex-core";
-import { reencryptBackupSecretFields, CODEX_FORM_VERSION } from "@ancientpantheon/codex-core";
+import { reencryptBackupSecretFields, CODEX_PACKAGE_VERSION_OUTPUT } from "@ancientpantheon/codex-core";
 // `codex-backup-envelope-encryption` T3: the dual-key envelope primitives
 // (T1, `crypto/backupEnvelope.ts`) — generates/wraps the IDEK/EDEK this
 // function's own module doc below describes.
@@ -922,9 +922,9 @@ export interface BackupCodexToLibraryOptions {
  * encryption` T3's version-tag fix): the previous convention —
  * `parsed.lastUpdatedAt`, a timestamp — answered "when was this backup
  * made," not "what shape is it in." `Codex-Form-Version` (this function's
- * own `appMetadata`, carrying the real `CODEX_FORM_VERSION` constant) now
- * answers that correctly; no separate timestamp tag is added (this
- * function's own choice — see its doc comment).
+ * own `appMetadata`, carrying the real `CODEX_PACKAGE_VERSION_OUTPUT`
+ * constant) now answers that correctly; no separate timestamp tag is added
+ * (this function's own choice — see its doc comment).
  */
 function deriveBackupLineage(exportJson: string): { appId?: string } {
   try {
@@ -1356,8 +1356,8 @@ function requireEnvelopeInputs(opts: BackupCodexToLibraryOptions): void {
  * never invoked with a complete `opts` — never silently downgraded to an
  * unwrapped, partially-wrapped, or wrong-but-claimed-successful upload.
  *
- * `Codex-Form-Version` carries the real `CODEX_FORM_VERSION` constant
- * (`@ancientpantheon/codex-core`) — never a timestamp (the previous, wrong
+ * `Codex-Form-Version` carries the real `CODEX_PACKAGE_VERSION_OUTPUT`
+ * constant (`@ancientpantheon/codex-core`) — never a timestamp (the previous, wrong
  * convention this task also fixes). No separate timestamp tag is added
  * alongside it (this function's own choice): the Arweave transaction's own
  * network-recorded block timestamp is already a public, permanent record of
@@ -1460,7 +1460,7 @@ export async function backupCodexToLibrary(
     ...masterSeedTags,
     ...standardApolloTags,
     { name: TAG_CODEX_BACKUP_ENCRYPTION_VERSION, value: CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT },
-    { name: TAG_CODEX_FORM_VERSION, value: CODEX_FORM_VERSION },
+    { name: TAG_CODEX_FORM_VERSION, value: CODEX_PACKAGE_VERSION_OUTPUT },
   ];
 
   const result = await uploadCodexBackup(

@@ -84,6 +84,12 @@ export {
   UPLOAD_PERMANENCE_WARNING,
   uploadAndTrack,
   backupCodexToLibrary,
+  // Restore — reachable from the package entry point as of this topic; see
+  // library/index.ts for why it was unreachable before.
+  restoreCodexFromBackupEnvelope,
+  determineBackupSourceRouting,
+  BackupPinRequiredError,
+  BackupSourceNotUsedError,
   pollStatus,
   openUrl,
   rebuildLibrary,
@@ -91,6 +97,9 @@ export {
   checkAccountEncryptedArweaveUploads,
 } from "./library/index.js";
 export type {
+  RestoreCodexFromBackupEnvelopeOptions,
+  BackupUnlockSource,
+  BackupSourceRouting,
   LibraryStore,
   LibraryEntry,
   LibraryStatus,

@@ -1,19 +1,38 @@
 /**
  * CodexInfoCard — token-styled, Redux-free port of OuronetUI's CodexInfoSection.
  *
- * A read-only status panel: schema version, encryption level (V1/V2 derived
- * from the codex secrets), last-updated timestamp + device, live counts
- * of each codex slice, and (added 2026-09-26) the "Codex Form" product
- * version + a blockchain-support breakdown. All data flows through `useCodex`
- * over a mounted <CodexProvider>; nothing here mutates. Styled exclusively
- * via `--codex-*` tokens so consumers reskin by overriding tokens.
+ * A read-only status panel: schema version, codex shape version, encryption
+ * level (V1/V2 derived from the codex secrets), last-updated timestamp +
+ * device, live counts of each codex slice, and (added 2026-09-26) the
+ * "Codex Package" build version + a blockchain-support breakdown. All data
+ * flows through `useCodex` over a mounted <CodexProvider>; nothing here
+ * mutates. Styled exclusively via `--codex-*` tokens so consumers reskin by
+ * overriding tokens.
  *
- * "Schema Version" (`useCodex().schemaVersion`) vs "Codex Form"
- * (`CODEX_FORM_VERSION`) are DELIBERATELY SEPARATE rows, not one repurposed
- * as the other — see `codexFormVersion.ts`'s own doc comment (codex-core)
- * for the full reasoning: "Schema Version" is the at-rest migration-step
- * counter (an integer state machine other code does arithmetic on); "Codex
- * Form" is a new, purely cosmetic, additive product-shape milestone version.
+ * THREE distinct version-shaped rows, each answering a DIFFERENT question —
+ * never one repurposed as another (docs/work/codex-shape-version-stamp):
+ *
+ *  - "Schema Version" (`useCodex().schemaVersion`) — the at-rest, device-
+ *    local migration-step counter (an integer state machine other code does
+ *    arithmetic on, e.g. the V1→V2 encryption upgrade). Never travels in an
+ *    export.
+ *  - "Codex Shape" (`formatCodexShapeVersionLabel(useCodex().Codex_Shape_Version)`)
+ *    — the REAL per-codex-instance data shape, sourced live from the store
+ *    (`Codex_Shape_Version`). Travels in the export, grows independently
+ *    per codex as the migration engine advances it, and reads "Unversioned"
+ *    for a codex that predates the field — never silently stamped as
+ *    current just because it loaded.
+ *  - "Codex Package" (`CODEX_PACKAGE_VERSION_OUTPUT`) — a global, build-time
+ *    constant: what version of the Codex app/package is running RIGHT NOW,
+ *    identical for every codex opened in this session regardless of that
+ *    codex's own age/shape. See `codexPackageVersionOutput.ts`'s own doc
+ *    comment (codex-core) for the full reasoning.
+ *
+ * Conflating "Codex Shape" and "Codex Package" into one row (as this file
+ * used to, under the single misleading label "Codex Form") is exactly how
+ * every codex ended up visibly showing the same "v1.0.0" regardless of its
+ * real age — the two are independently sourced here specifically so that
+ * divergence is visible again.
  *
  * BLOCKCHAINS_SUPPORTED (owner ruling, 2026-09-26): "the Chainweb that we
  * are supporting now, is basically Stoa-Chainweb, but it isnt named as
@@ -26,7 +45,10 @@
  * refinement." Nothing here implies a working switcher exists yet.
  */
 
-import { CODEX_FORM_VERSION } from "@ancientpantheon/codex-core";
+import {
+  CODEX_PACKAGE_VERSION_OUTPUT,
+  formatCodexShapeVersionLabel,
+} from "@ancientpantheon/codex-core";
 import { useCodex } from "../../hooks/index.js";
 import { collectCodexSecrets, encryptionLevel } from "./encryptionState.js";
 
@@ -94,6 +116,7 @@ function InfoRow({
 export function CodexInfoCard({ className }: CodexInfoCardProps) {
   const {
     schemaVersion,
+    Codex_Shape_Version,
     lastUpdatedAt,
     lastUpdatedDevice,
     kadenaSeeds,
@@ -147,8 +170,13 @@ export function CodexInfoCard({ className }: CodexInfoCardProps) {
       </h3>
       <div>
         <InfoRow
-          label="Codex Form"
-          value={CODEX_FORM_VERSION}
+          label="Codex Shape"
+          value={formatCodexShapeVersionLabel(Codex_Shape_Version)}
+          testId="info-shape-version"
+        />
+        <InfoRow
+          label="Codex Package"
+          value={CODEX_PACKAGE_VERSION_OUTPUT}
           testId="info-form-version"
         />
         <InfoRow

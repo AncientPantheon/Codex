@@ -25,6 +25,7 @@ import type {
   AddressBookEntry,
   WatchListEntry,
 } from "@ancientpantheon/codex-ouronet/types";
+import type { KickstartArgsV3 } from "@ancientpantheon/codex-ouronet/codex-identity";
 
 // --------------------------------------------------------------------
 // Fixtures
@@ -899,6 +900,157 @@ describe("CodexStore", () => {
 
       expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
       expect(store.getState().ouroAccounts).toEqual(accountsBefore);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // primeAlignment + the promoteSeedAndAccountToPrime lock-in guard —
+  // docs/work/legacy-prime-migration/design.md "The lock-in rule" /
+  // "Marking a codex's alignment shape"
+  // ----------------------------------------------------------------
+
+  describe("primeAlignment", () => {
+    it("defaults to 'legacy' on a fresh store, before init() even runs", () => {
+      // A brand-new store (not the beforeEach-wired `store`) — asserts the
+      // field's resting state is correct from createCodexStore() alone, not
+      // merely after init()'s own migration/coalesce logic runs.
+      const freshStore = createCodexStore();
+      expect(freshStore.getState().primeAlignment).toBe("legacy");
+    });
+
+    it("stays 'legacy' after init() against a never-persisted adapter", () => {
+      // `store`/`adapter` from beforeEach already ran init() against a fresh
+      // MemoryCodexAdapter (schemaVersion 0 -> migrated to current) — the
+      // absent-on-disk field must coalesce to "legacy", not be lost/thrown.
+      expect(store.getState().primeAlignment).toBe("legacy");
+    });
+
+    it("stampPrimeAlignmentAligned sets state to 'aligned' and persists it, round-tripping through adapter.loadAll()", async () => {
+      await store.getState().actions.stampPrimeAlignmentAligned();
+
+      expect(store.getState().primeAlignment).toBe("aligned");
+
+      const snap = await adapter.loadAll();
+      // `primeAlignment` is not yet a declared field on the shared
+      // `CodexSnapshot` type (out of this task's file scope — see
+      // store.ts's `readPrimeAlignment` for why) but IS carried on the
+      // runtime object through the full-snapshot `saveAll`/`loadAll`
+      // round trip, same as every other persisted slice.
+      expect((snap as unknown as { primeAlignment?: string }).primeAlignment).toBe(
+        "aligned"
+      );
+    });
+
+    it("calling stampPrimeAlignmentAligned a second time is a no-op — resolves without error, state unchanged", async () => {
+      await store.getState().actions.stampPrimeAlignmentAligned();
+      const stateAfterFirst = store.getState();
+
+      await expect(
+        store.getState().actions.stampPrimeAlignmentAligned()
+      ).resolves.toBeUndefined();
+
+      expect(store.getState().primeAlignment).toBe("aligned");
+      expect(store.getState().primeAlignment).toBe(
+        stateAfterFirst.primeAlignment
+      );
+    });
+
+    it("promoteSeedAndAccountToPrime refuses with CodexError once the codex is aligned, with zero mutation to kadenaSeeds/ouroAccounts", async () => {
+      await store.getState().actions.kickstartCodex({
+        seed: seed("primeSeed"),
+        primeOuroAccount: ouro("primeOuro"),
+      });
+      await store.getState().actions.addStoaChainSeed(seed("otherSeed"));
+      await store
+        .getState()
+        .actions.addOuroAccount(
+          ouro("otherOuro", { parentSeedId: "otherSeed" })
+        );
+      await store.getState().actions.stampPrimeAlignmentAligned();
+
+      const seedsBefore = store.getState().kadenaSeeds;
+      const accountsBefore = store.getState().ouroAccounts;
+
+      await expect(
+        store
+          .getState()
+          .actions.promoteSeedAndAccountToPrime("otherSeed", "otherOuro")
+      ).rejects.toThrow(CodexError);
+
+      expect(store.getState().kadenaSeeds).toEqual(seedsBefore);
+      expect(store.getState().ouroAccounts).toEqual(accountsBefore);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // Codex_Shape_Version — docs/work/codex-shape-version-stamp/design.md.
+  // The per-codex-instance shape stamp: "1.0.0" on a FRESH kickstart (it's
+  // already in the current shape), `undefined` on an IMPORTED/legacy codex
+  // lacking the field (never silently stamped as current).
+  // ----------------------------------------------------------------
+
+  describe("Codex_Shape_Version", () => {
+    // encryptStringV2 (PBKDF2-SHA512/600k) makes a real v0.3 kickstart slow.
+    const V3_TIMEOUT = { timeout: 120_000 };
+    const WORDS_12 =
+      "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+
+    async function kickstartV3(): Promise<void> {
+      store.getState().actions.authenticate("shape-version-test-pw", 60);
+      const args: KickstartArgsV3 = {
+        codexIdSeed: { mode: "words", value: WORDS_12 },
+        codexPrimeSeed: { source: "reuse-codexid-whole" },
+        duoPrime: { mode: "auto-pure-keys" },
+      };
+      await store.getState().actions.kickstartCodex(args);
+    }
+
+    it("kickstartCodex (v0.3, fresh codex) stamps Codex_Shape_Version to '1.0.0'", V3_TIMEOUT, async () => {
+      await kickstartV3();
+      expect(store.getState().Codex_Shape_Version).toBe("1.0.0");
+    });
+
+    it("init() against a snapshot with no Codex_Shape_Version key coalesces to undefined -- an imported codex is never silently stamped as current", async () => {
+      const a2 = new MemoryCodexAdapter();
+      await a2.saveAll({
+        kadenaSeeds: [],
+        ouroAccounts: [],
+        pureKeypairs: [],
+        addressBook: [],
+        watchList: [],
+        uiSettings: store.getState().uiSettings,
+        schemaVersion: 1,
+        lastUpdatedAt: null,
+        lastUpdatedDevice: "dev",
+        // No Codex_Shape_Version key at all -- the legacy/imported-codex case.
+      });
+      const s2 = createCodexStore();
+      await s2.getState().actions.init(a2, "dev");
+
+      expect(s2.getState().Codex_Shape_Version).toBeUndefined();
+    });
+
+    it("round-trips Codex_Shape_Version through adapter.saveAll()/loadAll(), the same full-snapshot mechanism schemaVersion/primeAlignment already use", V3_TIMEOUT, async () => {
+      await kickstartV3();
+      expect(store.getState().Codex_Shape_Version).toBe("1.0.0");
+
+      // kickstartCodex's own persistAndTouch writes specific entity slices
+      // (saveStoaChainSeeds/saveOuroAccounts/saveCodexIdentity/setSchemaVersion)
+      // -- not a full saveAll. addForeignKey is the existing full-snapshot
+      // writer (buildForeignKeySnapshot + saveAll) that actually carries the
+      // live Codex_Shape_Version to disk, same as it carries primeAlignment.
+      await store.getState().actions.addForeignKey({
+        id: "fk-1",
+        chainId: "arweave:mainnet",
+        encryptedKeyfile: "ENC(jwk)",
+      });
+
+      const snap = await adapter.loadAll();
+      expect(snap.Codex_Shape_Version).toBe("1.0.0");
+
+      const remounted = createCodexStore();
+      await remounted.getState().actions.init(adapter, "dev");
+      expect(remounted.getState().Codex_Shape_Version).toBe("1.0.0");
     });
   });
 });

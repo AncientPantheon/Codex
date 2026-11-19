@@ -8,9 +8,15 @@ Internal member package — `"private": true`, **never published to npm on its o
 
 ## Status
 
-Version `1.1.2` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
+Version `1.2.0` — built and in active use; drives the standalone playground and the aggregator's Ouronet surface. Bundled into `@ancientpantheon/codex`.
 
 ## Version history
+
+**v1.2.0** — Integrates the Papyrus Engine: `@ouronet/papyrus@^0.1.1` is a
+dependency, `ZbomLayout` takes a required `kind: PapyrusKind`, and every sheet
+is designated on screen (member upper-left, engine version upper-right). All 12
+ZbomLayout call sites pass `kind="page"`. The version rendered is the package's,
+never the app's.
 
 **v1.1.1** — Bugfix: `kickstartCodex`'s `fresh-dalos` path stored the
 CodexPrime account's private scalar in its `secret` field while labelling

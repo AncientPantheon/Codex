@@ -45,6 +45,7 @@ import { PatronZonePattern2 } from "../cfm/PatronSpend.js";
 import { SigningZone } from "../cfm/SigningZone.js";
 import { StringEntryInput, GuardEntryInput, BoolEntryInput, type GuardChangeValue, type GuardInputMode } from "../cfm/inputs.js";
 import { Zone2Wrapper } from "../cfm/Zone2Wrapper.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 function toNum(v: any): number {
   if (v === null || v === undefined) return 0;
@@ -117,7 +118,7 @@ export default function RotateGuardModal({
 
   const displayAccountName = (acc: IOuroAccount | undefined | null): string => {
     if (!acc) return "—";
-    return accounts.indexOf(acc) === 0 ? "CodexPrime" : acc.name || acc.address?.slice(0, 20) + "…";
+    return accounts.indexOf(acc) === 0 ? OURONET_CODEX_MASTER : acc.name || acc.address?.slice(0, 20) + "…";
   };
 
   // ── Derived info values ──
@@ -297,6 +298,7 @@ export default function RotateGuardModal({
   return (
     <ZbomModalFrame onClose={onClose} width={600}>
       <ZbomLayout
+      kind="page"
         header={<>
           <div className="flex items-center gap-2">
             {ICON}

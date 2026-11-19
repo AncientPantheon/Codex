@@ -49,7 +49,7 @@ import "fake-indexeddb/auto";
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { CryptoSeam } from "@ancientpantheon/codex-core";
-import { CODEX_FORM_VERSION } from "@ancientpantheon/codex-core";
+import { CODEX_PACKAGE_VERSION_OUTPUT } from "@ancientpantheon/codex-core";
 import { bigIntToBase49 } from "@ouronet/dalos-crypto/gen1";
 
 import {
@@ -829,10 +829,10 @@ describe("E3 flow — backupCodexToLibrary dual-key envelope (T3, codex-backup-e
     });
   });
 
-  it("tags Codex-Form-Version with the REAL CODEX_FORM_VERSION constant, never a timestamp, and Codex-Backup-Encryption-Version with the pinned envelope-procedure version", async () => {
+  it("tags Codex-Form-Version with the REAL CODEX_PACKAGE_VERSION_OUTPUT constant, never a timestamp, and Codex-Backup-Encryption-Version with the pinned envelope-procedure version", async () => {
     // Sanity guard against a tautological pass (same discipline the
     // existing CODEX_ENCRYPTION_VERSION_CURRENT guard above uses).
-    expect(CODEX_FORM_VERSION.length).toBeGreaterThan(0);
+    expect(CODEX_PACKAGE_VERSION_OUTPUT.length).toBeGreaterThan(0);
     expect(CODEX_BACKUP_ENCRYPTION_VERSION_CURRENT).toBe("1");
 
     const { apiFactory } = makeRecordingUploadApi();
@@ -843,7 +843,7 @@ describe("E3 flow — backupCodexToLibrary dual-key envelope (T3, codex-backup-e
     );
     const tags = (result as { tags: { name: string; value: string }[] }).tags;
 
-    expect(tags.find((t) => t.name === TAG_CODEX_FORM_VERSION)?.value).toBe(CODEX_FORM_VERSION);
+    expect(tags.find((t) => t.name === TAG_CODEX_FORM_VERSION)?.value).toBe(CODEX_PACKAGE_VERSION_OUTPUT);
     // Never the export's lastUpdatedAt-derived timestamp (the old, wrong
     // convention design.md's Problem #3 names) — no tag carries that value.
     expect(tags.some((t) => t.value === "2026-09-30T00:00:00.000Z")).toBe(false);

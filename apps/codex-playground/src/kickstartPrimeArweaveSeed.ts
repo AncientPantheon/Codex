@@ -50,12 +50,13 @@ import { deriveArweaveSeedAtPositionZero as realDeriveArweaveSeedAtPositionZero 
 import type { KeygenProgress } from "@ancientpantheon/codex-arweave/seeds";
 
 import type { StoredArweaveSeed } from "./ForeignChainsWiring.js";
+import { MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 
 /** The name every Prime Arweave Seed is given — mirrors
  *  `ArweaveSeedsArea.tsx`'s own `PRIME_SEED_LABEL`. Duplicated rather than
  *  imported: that constant lives on the HEAVY `./panel` subpath, and this
  *  module deliberately stays off it (it needs no React runtime). */
-export const PRIME_ARWEAVE_SEED_LABEL = "Prime Arweave Seed";
+export const PRIME_ARWEAVE_SEED_LABEL = MASTER_ARWEAVE_SEED;
 
 /** The injected seams — every heavy/side-effecting dependency this module
  *  touches, so the composition itself (call order + argument wiring) is unit-

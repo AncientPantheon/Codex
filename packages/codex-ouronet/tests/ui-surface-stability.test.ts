@@ -119,6 +119,14 @@ const EXPECTED_UI_VALUE_EXPORTS = [
   "DebouncerInfoModal",
   // STAY-set: the @stoachain-edged settings cards (C4)
   "CodexInfoCard",
+  // ── stage 3A (docs/work/migration-stage-3a): the OPTIONAL key changes a
+  // user chose during migration that are not yet in force on chain. The
+  // SECTION is what the Codex ID page composes; the CARD and the pure
+  // `computeOutstandingKeyChanges` are exported beside it so the page's own
+  // suite can assert over them without mounting the ZBOM graph.
+  "PendingKeyChangesCard",
+  "PendingKeyChangesSection",
+  "computeOutstandingKeyChanges",
   "EncryptionCard",
   // STAY-set: the three zbom settings cards (value zbom edge)
   "ZbomSettingsCard",
@@ -161,17 +169,21 @@ describe("ui barrel — forward lock (every named value export present)", () => 
     },
   );
 
-  it("exports all 35 contracted value names (no silent drop below the floor)", () => {
+  it("exports all 40 contracted value names (no silent drop below the floor)", () => {
     // Guards the it.each roster itself: if the golden list is edited down, this
-    // pins the intended cardinality of the VALUE surface at exactly 35 (28 pre-
-    // carve names + the 3 Apollo-verifier exports + ChainwebPanel + the
-    // arweave-seed-reveal-v1 DalosSecretReveal + CodexModalShell + BitmapKeyInput
-    // exports).
+    // pins the intended cardinality of the VALUE surface at exactly 40 (28
+    // pre-carve names + the 3 Apollo-verifier exports + ChainwebPanel + the
+    // arweave-seed-reveal-v1 DalosSecretReveal + CodexModalShell +
+    // BitmapKeyInput exports + the 3 stage-3A exports).
+    //
+    // The title said 35 while the assertion said 37 before this edit — the
+    // prose had drifted from the number twice already, so both are updated
+    // together here.
     const present = EXPECTED_UI_VALUE_EXPORTS.filter(
       (name) => (ouronetUi as Record<string, unknown>)[name] !== undefined,
     );
     expect(present).toHaveLength(EXPECTED_UI_VALUE_EXPORTS.length);
-    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(37);
+    expect(EXPECTED_UI_VALUE_EXPORTS).toHaveLength(40);
   });
 });
 

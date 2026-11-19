@@ -678,7 +678,7 @@ describe("ArweavePanel — mobile: the relocated Seeds '+' add-seed button (roun
     // narrower `ArweavePanelDeps` type this file's `makeDeps` is typed
     // against — cast through a local so the excess-property check doesn't
     // block a field the component genuinely reads.
-    const overrides = { arweaveSeeds: [{ id: "prime", label: "Prime Arweave Seed", bits: "1".repeat(1600), isPrime: true }] };
+    const overrides = { arweaveSeeds: [{ id: "prime", label: "Master ArWeave Seed", bits: "1".repeat(1600), isPrime: true }] };
     renderPanel(overrides as Partial<ArweavePanelDeps>);
     fireEvent.click(screen.getByRole("tab", { name: /seeds/i }));
     expect(screen.queryByTestId("arweave-mobile-add-seed")).toBeNull();

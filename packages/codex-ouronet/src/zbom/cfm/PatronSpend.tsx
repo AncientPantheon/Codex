@@ -18,6 +18,7 @@ import { getIgnisBalance } from "../debouncer/monitoredReads.js";
 import { analyzeGuard, buildCodexPubSet } from "@stoachain/stoa-core/guard";
 import { useWallet, useUiSetting } from "./seam.js";
 import type { IOuroAccount } from "../../types/entities.js";
+import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 // ── formatIgnisBalance ────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ function PatronSelector({
   const activeAccounts = codexAccounts.filter((a) => a.isActive !== false);
 
   const getDisplayName = (a: IOuroAccount) =>
-    codexAccounts.indexOf(a) === 0 ? "CodexPrime" : a.name || a.address.slice(0, 8) + "…";
+    codexAccounts.indexOf(a) === 0 ? OURONET_CODEX_MASTER : a.name || a.address.slice(0, 8) + "…";
 
   const filtered = activeAccounts.filter(
     (a) =>
@@ -537,7 +538,7 @@ export function PatronZonePattern2({
   const patronAddress = patronAccount?.address ?? null;
   const patronName = patronAccount
     ? (codexAccounts.indexOf(patronAccount) === 0
-        ? "CodexPrime"
+        ? OURONET_CODEX_MASTER
         : patronAccount.name || patronAccount.address.slice(0, 8) + "…")
     : "—";
   const hasEnoughIgnis =

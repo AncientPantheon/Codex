@@ -36,6 +36,7 @@ import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { DalosSecretReveal } from "../internal/DalosSecretReveal.js";
 import { deriveStoaDalosKeypairAtIndex } from "../../wallet/stoaDalosKeygen.js";
 import type { IStoaChainSeed, SeedType, WalletAccount } from "../../types/entities.js";
+import { masterChainwebSeedName } from "@ancientpantheon/codex-core";
 
 /** Portals `children` into `target` when supplied (a DOM node spanning the
  *  host's WHOLE mobile body — see `SeedWordsTabProps.fullScreenPortalTarget`'s
@@ -536,7 +537,7 @@ function SeedRow({
   const ensureUnlocked = useEnsureCodexUnlocked();
   const isMobile = useIsMobile();
   const isPrime = seed.isPrime === true || index === 0;
-  const displayName = isPrime ? "Prime Codex Seed" : seed.name || `Seed #${index + 1}`;
+  const displayName = masterChainwebSeedName(index, isPrime, seed.name);
   const cfg = SEED_COLORS[normalizeSeedType(seed.seedType)];
 
   const [renaming, setRenaming] = useState(false);
@@ -603,7 +604,14 @@ function SeedRow({
         const pk = privCache[selectedAccount.index] ?? (await revealPrivateKey(selectedAccount)());
         if (privCache[selectedAccount.index] === undefined) setPrivCache((prev) => ({ ...prev, [selectedAccount!.index]: pk }));
         void navigator.clipboard.writeText(pk).catch(() => {});
-      } catch { setRowError("Unlock the codex to copy the private key."); return; }
+      } catch (err) {
+        setRowError(
+          err instanceof Error && err.message === "locked"
+            ? "Unlock the codex to copy the private key."
+            : `Could not copy the private key: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
     } else {
       void navigator.clipboard.writeText(selectedAccount.publicKey).catch(() => {});
     }
@@ -646,8 +654,8 @@ function SeedRow({
       } else {
         setStoicWords(null);
       }
-    } catch {
-      setRowError("Unlock the codex to view this seed phrase.");
+    } catch (err) {
+      setRowError(`Could not decrypt this seed phrase: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 

@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { useCodexAuth } from "@ancientpantheon/codex-ouronet/hooks";
+import { formatCodexShapeVersionLabel } from "@ancientpantheon/codex-core";
 
 /**
  * Minimal mode-1 unlock screen for the codex-playground devtool.
@@ -53,7 +54,9 @@ function EyeIcon({ off }: { off: boolean }): ReactElement {
   );
 }
 
-export function UnlockScreen(): ReactElement {
+export function UnlockScreen({
+  shapeVersion,
+}: { shapeVersion?: string } = {}): ReactElement {
   const { authenticate } = useCodexAuth();
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
@@ -74,6 +77,9 @@ export function UnlockScreen(): ReactElement {
           🔒
         </div>
         <h1 className="cxpg-title">Unlock your Codex</h1>
+        <p className="cxpg-shape-version" aria-label="Codex shape version">
+          {formatCodexShapeVersionLabel(shapeVersion)}
+        </p>
         <p className="cxpg-subtitle">
           Enter your password to decrypt this codex on this device.
         </p>

@@ -13,6 +13,9 @@
 
 import { CodexAdapterError } from "../codex/errors.js";
 import type { ForeignKeyEntry } from "../codex/foreignKeys.js";
+import type { MasterKeyLock } from "../codex/masterKeyLocks.js";
+import type { CodexMasterSeed } from "../codex/masterSeed.js";
+import type { MigrationProgress } from "../codex/migrationProgress.js";
 
 /**
  * The device tag stamped onto a snapshot's `lastUpdatedDevice`. It drives
@@ -40,6 +43,35 @@ export interface CodexSnapshotBase {
   lastUpdatedDevice: DeviceVariant;
   /** Seedless foreign-chain keyring; omitted when empty. */
   foreignKeys?: ForeignKeyEntry[];
+  /**
+   * Per-codex-instance semver shape stamp — "what shape is THIS specific
+   * codex's data in," grown by the migration engine as this codex's own
+   * data shape changes over time. OPTIONAL; `undefined` means "Unversioned"
+   * (a codex that predates this field, never silently stamped as current).
+   *
+   * DISTINCT from `schemaVersion` above: `schemaVersion` is the device-local
+   * at-rest encryption counter and explicitly does NOT travel in the export
+   * (see its own doc comment); `Codex_Shape_Version` DOES travel — it is
+   * carried through the live snapshot AND the exported JSON so it is
+   * readable pre-unlock.
+   *
+   * Also DISTINCT from `CODEX_PACKAGE_VERSION_OUTPUT` (the renamed
+   * `CODEX_FORM_VERSION` constant): that is a single GLOBAL, build-time
+   * label — "what version of the Codex package/app produced this output" —
+   * the same for every codex opened in a given build. `Codex_Shape_Version`
+   * is per-codex-instance and has nothing to do with which package version
+   * happens to be running.
+   */
+  Codex_Shape_Version?: string;
+  /** Master-key locks (see `codex/masterKeyLocks.ts`). Lives on the generic
+   *  substrate rather than the Ouronet extension because the ENFORCEMENT it
+   *  drives belongs to the storage seam: a position may not be dropped, and
+   *  a seed may not be deleted, while a lock names it. */
+  masterKeyLocks?: MasterKeyLock[];
+  /** The Codex Master Seed row (see `codex/masterSeed.ts`). */
+  codexMasterSeed?: CodexMasterSeed;
+  /** An unfinished eligibility migration (see `codex/migrationProgress.ts`). */
+  migrationProgress?: MigrationProgress;
 }
 
 /**

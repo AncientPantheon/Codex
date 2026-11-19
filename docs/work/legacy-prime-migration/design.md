@@ -50,9 +50,23 @@ Presented once, as a "this is now possible" opportunity:
    explicitly asked whether to keep it present in the codex (fully swept,
    no longer Prime) or discard it — never assumed either way.
 
-**Universal rule:** the sweep below is mandatory under all three options,
-because all three produce new chainweb accounts under Prime — there is no
-path that skips it.
+**CORRECTED (owner refinement, 2026-10-13): the sweep is NOT universal
+across the three options — it was never really about which of the three
+top-level options was picked.** The real trigger is narrower and more
+precise: the account IDENTITY (which Ouronet account becomes Prime) and
+the account's PAYMENT/GUARD KEYS are two *separate* decisions. A user who
+promotes an existing, already-activated account AND chooses to keep that
+account's existing keys as-is needs no sweep at all — nothing is moving,
+only which account is flagged Prime changes. The sweep is needed
+specifically whenever NEW payment/guard keys get defined (via the Stoic
+Dalos Derivation, from whichever words the chosen/typed account uses) —
+which happens to be unavoidable for option 1 (a brand-new account has no
+existing keys to keep) and the keep-current path (re-deriving via Dalos
+necessarily produces different keys than the account's original
+koala-derived ones), but is genuinely optional for option 2 when the
+promoted account's existing keys are kept. See
+`legacy-prime-migration-wizard/design.md` for the full, corrected
+page-by-page flow this implies.
 
 ### The sweep — grounded against the real contract
 
@@ -103,6 +117,79 @@ keys fully emptied. "The goal is to generate everything that is prime from
 that initial set of words" — ideally not dictionary-restricted, but always
 functional even when it is (option 3).
 
+### The lock-in rule (added 2026-10-13, owner decision)
+
+Once a codex is eligible, its Prime Ouronet Account, Prime Chainweb Seed,
+and Prime Arweave Seed are **locked in place** — none of the three can
+ever be changed again. This is deliberate, not an oversight: the whole
+point of eligibility is "these three are the same root," and allowing any
+one of them to drift afterward would silently re-break that alignment for
+a codex the user (and anyone inspecting a future backup) now believes is
+permanently restorable by seed words alone.
+
+Enforcement point: `promoteSeedAndAccountToPrime` (Topic 1) must refuse —
+throw, zero mutation — if the codex is already aligned. The Prime Arweave
+Seed (re)installation path (`kickstartAndInstallPrimeArweaveSeed` and
+whatever Topic 3's wizard calls at the end of a migration) needs the
+identical guard. Both checks read the SAME stored fact (below), never
+re-derive eligibility live for this purpose — a lock is a recorded
+decision, not a recomputed one.
+
+### Marking a codex's alignment shape (added 2026-10-13, owner question)
+
+**The question:** can we use the codex's own shape/form versioning to mark
+a codex "eligible-shape" vs "ineligible-shape", given a freshly-kickstarted
+codex is now built directly in the eligible shape?
+
+**Answer: not the existing `CODEX_FORM_VERSION` constant itself** — that's
+a single, hardcoded, codebase-release-wide value (`packages/codex-core/src/
+codexFormVersion.ts`, currently `"1.0.0"`, bumped manually per the owner's
+own documented MAJOR/MINOR/PATCH policy for "what shape milestone does
+THIS VERSION OF THE APP produce"). Every codex built by the same app
+build shows the identical value regardless of its own individual
+alignment — repurposing it would conflate "which app version wrote this"
+with "is this particular user's codex aligned," a real category error:
+two users on the identical app build can have different alignment (one
+just migrated, one hasn't).
+
+**What's actually needed: a new, per-codex-instance field**, following the
+SAME naming/provenance discipline `CODEX_FORM_VERSION` already
+established, but tracking a different axis:
+
+- A new persisted field on the codex snapshot — e.g. `primeAlignment:
+  "legacy" | "aligned"` — absent/`"legacy"` for any codex that predates
+  this field (same safe-default discipline every other optional snapshot
+  field already follows: never silently reinterpreted, coalesced on
+  read). A fresh kickstart stamps `"aligned"` immediately at creation
+  (its three Prime values are aligned by construction). A completed
+  migration (Topic 3's wizard) stamps `"aligned"` as its final step, in
+  the SAME atomic update that also applies the lock-in guard's
+  precondition.
+- A new Arweave tag, e.g. `Codex-Prime-Alignment`, carrying the same
+  value, written on every codex-backup upload alongside the existing
+  `Codex-Form-Version` tag. This lets restore tooling know — from tags
+  alone, before any decryption — whether a given backup came from an
+  eligible codex, directly useful for the "pick which past backup to
+  restore" design already noted in `codex-backup-envelope-encryption`'s
+  own informatics (`CodexBackupInformatics.tsx`'s "multiple independent
+  backups" section).
+
+This is additive, mechanical, and small — folds into Topic 1's own build
+(the lock-in guard and the stamp are the same piece of work) rather than
+needing its own sub-topic.
+
+### Future context, not in scope here (noted 2026-10-13)
+
+A planned, later feature: a StoaChain-resident Codex Identity (the
+existing dual-Apollo-half concept) that, once built, will publish a
+registry of every Arweave upload a codex has ever made, on-chain. That
+would eventually give restore tooling a much better source than "poll the
+Arweave address's own transaction history" for "which backups exist" —
+but it doesn't exist yet, isn't a precondition for this migration project,
+and this project's own `Codex-Prime-Alignment` tag works standalone
+either way (an on-chain registry, when it arrives, would just index tags
+that are already there).
+
 ## Acceptance criteria
 
 - [ ] The three-option menu presents option 2 as the default whenever an
@@ -128,6 +215,18 @@ functional even when it is (option 3).
       reportable, never silently-partial, state.
 - [ ] Nothing here claims "a single transaction" anywhere a multi-step or
       cross-chain operation is actually required.
+- [ ] Once a codex resolves aligned (`primeAlignment === "aligned"`),
+      `promoteSeedAndAccountToPrime` and the Prime Arweave Seed
+      (re)installation path both refuse — zero mutation — any further
+      attempt to change the Prime Ouronet Account, Prime Chainweb Seed, or
+      Prime Arweave Seed.
+- [ ] A freshly-kickstarted codex is stamped `primeAlignment: "aligned"`
+      at creation; a codex predating this field reads as `"legacy"`
+      (absent, never silently reinterpreted); a completed migration
+      stamps `"aligned"` as its final atomic step.
+- [ ] Every codex-backup upload carries a `Codex-Prime-Alignment` tag
+      matching the codex's own `primeAlignment` value at the moment of
+      that specific backup.
 
 ## Out of scope
 
@@ -180,7 +279,10 @@ repeatedly on large topics — see `arweave-native-upload`,
   an assumed, specific precheck contract function this codebase cannot
   independently confirm exists with that exact name.
 
-Three sub-topics, sequenced (each depends on the one before it):
+Four sub-topics. Revised sequencing (owner decision, 2026-10-13): 2 is no
+longer a hard precondition for 3 — 3 and 4 can be built and fully verified
+(via mockup mode) before 2 exists at all, lowering the bar for green-
+lighting 2 since the wizard's own correctness is already settled by then.
 
 1. `stoachain-prime-promotion` — the foundational, funds-free gap: one
    new, atomic store action that swaps which seed+account pair is Prime,
@@ -193,10 +295,20 @@ Three sub-topics, sequenced (each depends on the one before it):
    UI yet), built on the existing primitives audited above. **This is the
    highest-stakes sub-topic — real fund movement, confirm the approach
    before building it, even under a general autonomous-build instruction.**
-3. `legacy-prime-migration-wizard` — the user-facing three-option wizard
-   tying 1 and 2 together (new words via the existing
-   `CreateStoaChainSeedModal.tsx` pattern for option 1, promotion for
-   options 2/3, the sweep behind explicit per-step confirmation, ending
-   with re-installing the Prime Arweave seed via the already-built
-   `deriveArweaveSeedAtPositionZero`/kickstart-T4 pattern). Depends on 1
-   and 2 both landing first.
+   No longer blocks 3/4 from starting — see revised sequencing above.
+3. `legacy-prime-migration-wizard` — the user-facing wizard (full
+   page-by-page design in its own `docs/work/legacy-prime-migration-
+   wizard/design.md`): the account-identity choice, the separate
+   payment/guard-key choice, the conditional sweep, and finalize
+   (promotion + Prime Arweave Seed creation via the already-built
+   `deriveArweaveSeedAtPositionZero`/generic keygen-at-index mechanism).
+   Depends on 1. Can run against EITHER the real sweep engine (once 2
+   lands) or sub-topic 4's mockup engine in the meantime — the wizard's
+   own page flow is identical either way.
+4. `legacy-prime-migration-mockup` — a local, no-op stand-in for the one
+   on-chain seam (`getFailoverClient`) every relevant transaction goes
+   through, plus an ephemeral scratch copy of the local state Page 7
+   writes, so the full wizard flow (3) can be exercised end-to-end on a
+   real codex with zero real transactions and zero real state mutation.
+   Mirrors the already-shipped `arweave-upload-dry-run` pattern. Depends
+   on 3 (needs the wizard's pages to inject into) but not on 2.

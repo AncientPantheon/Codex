@@ -25,6 +25,7 @@ import * as React from "react";
 import { useState } from "react";
 import { X, Eye, EyeOff } from "lucide-react";
 import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
+import "../tokens.css";
 
 export interface CodexModalShellProps {
   title: string;
@@ -103,6 +104,59 @@ export interface CodexModalShellProps {
    * it).
    */
   zIndex?: number;
+  /**
+   * Optional content rendered in the title bar's own row, between the
+   * title/subtitle block and the close (×) button (`wizard-seed-dashboard-
+   * refinements`, design.md §1 — "make back and next button part of the
+   * region where the steps are presented"). Omitted (every existing
+   * caller), this renders nothing extra and the title bar is
+   * byte-identical to before this prop existed.
+   */
+  headerExtra?: React.ReactNode;
+  /**
+   * Owner (live testing, `wizard-page2-and-dashboard-fixes` round, issue
+   * 3): "i scroll down... you can see the title with the next prev
+   * buttons, as well as the Settle Dashboard Move. They have to be
+   * fixed, non movable." The fixed-header/scrolling-body split that
+   * `footer`/`topBar`/`fillBody` already enable was, until now, MOBILE
+   * ONLY (`isMobile && (...)`) — on desktop, `CodexModalShell`'s own
+   * title-bar row is a plain flow sibling inside the SAME single
+   * scrolling card as `children`, so it scrolls away exactly like any
+   * other content once the body overflows. This repro was on a desktop-
+   * width window.
+   *
+   * Opt-in, defaults to `false` — every EXISTING caller (none of which
+   * pass this) renders BYTE-IDENTICAL to before this prop existed, on
+   * every screen size. Only meaningful combined with `footer`/`topBar`/
+   * `fillBody` (same as the mobile split); alone, it changes nothing.
+   */
+  splitOnDesktop?: boolean;
+  /**
+   * `wizard-keyset-scale-and-sidebar`, design.md §F: owner's own framing —
+   * the Settling Dashboard needed a permanent home that doesn't push the
+   * step content around. Omitted (every EXISTING caller), this renders
+   * BYTE-IDENTICAL to before this prop existed.
+   *
+   * DESKTOP: the card becomes a two-column flex row below the title bar —
+   * a left column (`sidebarWidth`px, its own `overflowY: auto`, right
+   * border) rendering `sidebar`, and a right column that is exactly
+   * today's single-column structure (`topBar` region + scrolling body +
+   * `footer`), unchanged internally.
+   *
+   * MOBILE: `sidebar` renders stacked, in the same fixed region `topBar`
+   * already occupies, immediately BEFORE `topBar`'s own block — so a
+   * caller passes `sidebar` once and the shell decides where it lands per
+   * viewport, no caller-side `useIsMobile` duplication needed. This
+   * engages the fixed-header/scrolling-body split on its own, even if
+   * `footer`/`topBar`/`fillBody` are all omitted (see `footerSplit` below).
+   */
+  sidebar?: React.ReactNode;
+  /**
+   * DESKTOP ONLY, and only while `sidebar` is also supplied — the left
+   * column's width in px. Defaults to `260`; every EXISTING caller (none
+   * of which pass `sidebar`) is unaffected either way.
+   */
+  sidebarWidth?: number;
 }
 
 export function CodexModalShell({
@@ -119,13 +173,69 @@ export function CodexModalShell({
   topBar,
   fillBody,
   zIndex = 9999,
+  headerExtra,
+  splitOnDesktop,
+  sidebar,
+  sidebarWidth = 260,
 }: CodexModalShellProps) {
   const isMobile = useIsMobile();
-  // Mobile WITH a footer AND/OR a topBar AND/OR `fillBody` gets the
-  // fixed-header/scrolling-body/pinned-edges split — every other
-  // combination (desktop, or none of the three supplied) renders exactly
-  // as before.
-  const footerSplit = isMobile && (footer !== undefined || topBar !== undefined || fillBody === true);
+  // Mobile (or, opt-in, desktop too — see `splitOnDesktop`'s own doc)
+  // WITH a footer AND/OR a topBar AND/OR `fillBody` AND/OR a `sidebar`
+  // gets the fixed-header/scrolling-body/pinned-edges split — every other
+  // combination (desktop without `splitOnDesktop`, or none of the four
+  // supplied) renders exactly as before. On desktop, `sidebar`'s own
+  // two-column layout below is a separate wrapper that doesn't rely on
+  // this flag; it matters here specifically for mobile, where `sidebar`
+  // must engage the fixed region on its own even with no `topBar`/
+  // `footer`/`fillBody` supplied.
+  const footerSplit = (isMobile || splitOnDesktop === true)
+    && (footer !== undefined || topBar !== undefined || fillBody === true || sidebar !== undefined);
+  const bodyRegion = (
+    <>
+      {footerSplit && topBar !== undefined && (
+        <div style={{ flexShrink: 0, padding: "12px 20px", borderBottom: "1px solid #262626", backgroundColor: "#0a0a0a" }}>
+          {topBar}
+        </div>
+      )}
+      <div
+        className="codex-modal-shell-scroll"
+        data-testid={dialogTestId ? `${dialogTestId}-body` : undefined}
+        style={{
+          padding: 20,
+          overflowY: footerSplit ? "auto" : undefined,
+          overflowX: footerSplit ? "hidden" : undefined,
+          scrollSnapType: footerSplit && bodySnap ? "y mandatory" : undefined,
+          flex: footerSplit ? 1 : undefined,
+          minHeight: footerSplit ? 0 : undefined,
+          // Round 23 owner correction: "i want the [field] itself to be
+          // scrollable, not the whole full scren to be scrollable." This
+          // div was never actually `display: flex` — round 22's `fillBody`
+          // gave IT a real bounded height (via `flex: 1` above, which DOES
+          // work here since THIS div's own parent, the card, is the flex
+          // column), but any CHILD's own `flex: 1` (e.g.
+          // `DalosSecretReveal`'s root, meant to fill this exact body and
+          // hand the remainder to its own inner scroll box) is a total
+          // no-op unless ITS immediate parent is ALSO a flex container —
+          // it silently wasn't, so every child rendered at natural content
+          // height instead, and THIS div's own `overflowY: auto` ended up
+          // doing all the scrolling — dragging the header-adjacent content
+          // (chip/warning/tabs) along with it instead of leaving them
+          // fixed and confining scroll to the one field meant to grow.
+          display: footerSplit ? "flex" : undefined,
+          flexDirection: footerSplit ? "column" : undefined,
+        }}
+      >
+        {!footerSplit && topBar}
+        {children}
+        {!footerSplit && footer}
+      </div>
+      {footerSplit && footer !== undefined && (
+        <div style={{ flexShrink: 0, padding: "12px 20px", borderTop: "1px solid #262626", backgroundColor: "#0a0a0a" }}>
+          {footer}
+        </div>
+      )}
+    </>
+  );
   return (
     <div
       role="dialog"
@@ -152,6 +262,7 @@ export function CodexModalShell({
       }}
     >
       <div
+        className="codex-modal-shell-scroll"
         style={{
           width: "100%",
           maxWidth: isMobile ? "none" : maxWidth,
@@ -183,6 +294,7 @@ export function CodexModalShell({
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: accent }}>{title}</h2>
             {subtitle && <div style={{ marginTop: 2, fontSize: 11, color: "#888" }}>{subtitle}</div>}
           </div>
+          {headerExtra}
           <button
             type="button"
             aria-label="Close"
@@ -197,46 +309,55 @@ export function CodexModalShell({
             <X size={16} />
           </button>
         </div>
-        {footerSplit && topBar !== undefined && (
+        {footerSplit && isMobile && sidebar !== undefined && (
           <div style={{ flexShrink: 0, padding: "12px 20px", borderBottom: "1px solid #262626", backgroundColor: "#0a0a0a" }}>
-            {topBar}
+            {sidebar}
           </div>
         )}
-        <div
-          data-testid={dialogTestId ? `${dialogTestId}-body` : undefined}
-          style={{
-            padding: 20,
-            overflowY: footerSplit ? "auto" : undefined,
-            overflowX: footerSplit ? "hidden" : undefined,
-            scrollSnapType: footerSplit && bodySnap ? "y mandatory" : undefined,
-            flex: footerSplit ? 1 : undefined,
-            minHeight: footerSplit ? 0 : undefined,
-            // Round 23 owner correction: "i want the [field] itself to be
-            // scrollable, not the whole full scren to be scrollable." This
-            // div was never actually `display: flex` — round 22's `fillBody`
-            // gave IT a real bounded height (via `flex: 1` above, which DOES
-            // work here since THIS div's own parent, the card, is the flex
-            // column), but any CHILD's own `flex: 1` (e.g.
-            // `DalosSecretReveal`'s root, meant to fill this exact body and
-            // hand the remainder to its own inner scroll box) is a total
-            // no-op unless ITS immediate parent is ALSO a flex container —
-            // it silently wasn't, so every child rendered at natural content
-            // height instead, and THIS div's own `overflowY: auto` ended up
-            // doing all the scrolling — dragging the header-adjacent content
-            // (chip/warning/tabs) along with it instead of leaving them
-            // fixed and confining scroll to the one field meant to grow.
-            display: footerSplit ? "flex" : undefined,
-            flexDirection: footerSplit ? "column" : undefined,
-          }}
-        >
-          {!footerSplit && topBar}
-          {children}
-          {!footerSplit && footer}
-        </div>
-        {footerSplit && footer !== undefined && (
-          <div style={{ flexShrink: 0, padding: "12px 20px", borderTop: "1px solid #262626", backgroundColor: "#0a0a0a" }}>
-            {footer}
+        {sidebar !== undefined && !isMobile ? (
+          <div
+            style={{
+              display: "flex",
+              flex: footerSplit ? 1 : undefined,
+              minHeight: footerSplit ? 0 : undefined,
+              overflow: footerSplit ? "hidden" : undefined,
+            }}
+          >
+            <div
+              style={{
+                width: sidebarWidth,
+                flexShrink: 0,
+                overflowY: "auto",
+                borderRight: "1px solid #262626",
+                // Owner (live testing, this round): "the left settle side
+                // of the popup have the same separators towards the
+                // margin as the right side has... the rectangle is flush
+                // to its area." The scrolling BODY column (`bodyRegion`,
+                // right side) always gets `padding: 20` — this column had
+                // none at all, so `sidebar`'s own content (the Settling
+                // Dashboard) sat flush against both edges instead of
+                // matching that same margin.
+                padding: 20,
+                boxSizing: "border-box",
+              }}
+            >
+              {sidebar}
+            </div>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: footerSplit ? "flex" : undefined,
+                flexDirection: footerSplit ? "column" : undefined,
+                minHeight: footerSplit ? 0 : undefined,
+                overflow: footerSplit ? "hidden" : undefined,
+              }}
+            >
+              {bodyRegion}
+            </div>
           </div>
+        ) : (
+          bodyRegion
         )}
       </div>
     </div>
