@@ -58,7 +58,7 @@
   "peerDependencies": {
     "@ancientpantheon/arweave-core": "^0.5.0",
     "@noble/curves": "1.9.7",
-    "@ouronet/dalos-crypto": ">=4.4.0",
+    "@ouronet/dalos-crypto": ">=4.5.1",
     "@ouronet/ouronet-core": ">=4.6.0",
     "@ouronet/talos-registry": "^2.3.0",
     "@stoachain/kadena-stoic-legacy": ">=4.4.0",
@@ -69,7 +69,6 @@
   },
   "dependencies": {
     "@ancientpantheon/arweave-core": "^0.5.0",
-    "@ardrive/turbo-sdk": "^1.42.0",
     "@codemirror/autocomplete": "^6.18.0",
     "@codemirror/language": "^6.12.1",
     "@codemirror/state": "^6.5.0",
@@ -91,7 +90,7 @@
     "@ancientpantheon/codex-ouronet": "*",
     "@ancientpantheon/codex-ui": "*",
     "@noble/curves": "1.9.7",
-    "@ouronet/dalos-crypto": "^4.4.0",
+    "@ouronet/dalos-crypto": "^4.5.1",
     "@ouronet/ouronet-core": "^4.6.0",
     "@ouronet/talos-registry": "^2.3.0",
     "@stoachain/kadena-stoic-legacy": "^4.4.0",

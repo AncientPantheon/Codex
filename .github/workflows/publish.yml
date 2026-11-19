@@ -152,6 +152,13 @@ jobs:
       # `ox` dependency to a non-registry `pkg.pr.new` preview URL) with
       # `EALLOWREMOTE`. 11.21.0 clears the >= 11.5.1 OIDC floor with none of
       # npm 12's new default lockdown.
+      #
+      # `@ardrive/turbo-sdk` has since been removed from the tree
+      # (browser-safe-release, 2026-11), so that exact `viem`→`ox` chain is
+      # gone — the pin is KEPT on its own merits (`allow-remote: none` is a
+      # default change that can bite any future transitive preview URL) and
+      # the trace above is left as the recorded evidence for why it was
+      # introduced, not as a claim about today's dependency graph.
       - name: Upgrade npm (OIDC trusted publishing support)
         run: |
           npm install -g npm@11.21.0
@@ -236,32 +243,40 @@ jobs:
       # ------------------------------------------------------------------
       # This is invisible to BOTH tsc and vitest (vitest externalizes deps on
       # the dev resolver, so it never resolves a bare specifier the way a
-      # real production bundler does) — confirmed the hard way: a real
-      # consumer (OuronetUI) hit this on 1.5.2 with `tsc --noEmit` clean and
+      # real production bundler does) — confirmed the hard way TWICE. A real
+      # consumer (OuronetUI) hit it on 1.5.2 with `tsc --noEmit` clean and
       # 2151/2151 vitest tests passing, and only their own `vite build`
-      # caught it (see HANDOFF-codex-1.5.2-browser-build.md in that repo for
-      # the full trace; root cause and fix: 2026-10-15, codex-arweave's
-      # dynamic `await import("arbundles")` resolving arbundles' Node ESM
-      # build under this package's bundler instead of its real browser
-      # build, inlining fs/http2/stream-promises into this package's own
-      # published dist). `fs`/`http2`/`stream/promises`/`child_process` have
-      # no real browser polyfill (only an inert "empty" stub in common
-      # polyfill setups) — unlike `crypto`/`stream`/`buffer`/etc., which DO
-      # have functional browser polyfills and are fine to leave as bare
-      # externals for a consumer's own bundler to resolve. This is the exact
-      # check that document asked for in CI, run against EVERY published
-      # entry, not just `./arweave` — a future dependency change pulling the
-      # same shape of bug into a different entry should fail here too.
-      - name: Browser-bundleability gate (zero Node-only builtins in dist/)
+      # caught it (see HANDOFF-codex-1.5.2-browser-build.md in that repo;
+      # root cause 2026-10-15: codex-arweave's dynamic
+      # `await import("arbundles")` resolving arbundles' Node ESM build).
+      # Then the AncientHoldings hub hit the identical class on 1.6.0:
+      # Turbopack, `node:stream/promises` via
+      # `@ardrive/turbo-sdk/lib/esm/node/index.js`.
+      #
+      # IT WAS CAUGHT BY NEITHER, AND THIS STEP IS WHY (2026-11). What used
+      # to live here was:
+      #   grep -rlE "from '(fs|http2|stream/promises|…)'" dist/
+      # with three independent blind spots, each alone fatal: it never
+      # matched `node:`-prefixed specifiers; it matched only single quotes
+      # and only the static `from '…'` form, never `import("…")`; and
+      # fatally it grepped OUR dist/ while the offending module was an
+      # EXTERNAL dependency whose bytes are never emitted there. No grep of
+      # dist/ can observe that class of bug — so the gate was replaced by one
+      # that RESOLVES: a real esbuild bundle at platform:"browser" of every
+      # JS entry in the exports map, walking INTO node_modules, failing on
+      # any Node builtin a browser bundler cannot substitute. (`crypto`,
+      # `stream`, `buffer`, `events`, `util` DO have functional browser
+      # implementations and stay allowed — that allow-list, and the reason
+      # for every name on it, lives in the script.)
+      #
+      # Runs AFTER the build step above: the guard checks the PUBLISHED
+      # dist/, because that is what a consumer resolves. A missing dist/ is a
+      # hard failure there, never a skip. `npm test` also runs the same guard
+      # through `packages/codex/tests/browser-safety-guard.test.ts`; this
+      # step is kept separate so the failure is legible as what it is.
+      - name: Browser-bundleability gate (resolve every published entry for the browser)
         if: github.ref_type == 'tag'
-        run: |
-          cd packages/codex
-          if grep -rlE "from '(fs|http2|stream/promises|child_process|net|tls|dns)'" dist/; then
-            echo "::error::@ancientpantheon/codex's dist/ imports a Node-only builtin with no real browser polyfill."
-            echo "::error::This breaks a browser bundler's production build even though tsc + vitest both pass — see the file(s) listed above."
-            exit 1
-          fi
-          echo "✓ No Node-only builtins (fs/http2/stream-promises/child_process/net/tls/dns) found in any dist/ entry."
+        run: node packages/codex/scripts/browser-safety-guard.mjs
 
       # ------------------------------------------------------------------
       # Per-package publish-queue detection (the smart bit)

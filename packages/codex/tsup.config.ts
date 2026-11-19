@@ -79,6 +79,12 @@ export default defineConfig({
       "https",
       "zlib",
       "url",
+      // NOTE: listing a `node:`-PREFIXED specifier here does NOT work.
+      // Under `platform: "browser"` esbuild normalises `node:x` to `x`
+      // BEFORE consulting this list, so the entry never matches. That is why
+      // `node:sqlite` is held in a const at its call site
+      // (`codex-arweave/src/library/sqliteStore.ts`) rather than fixed here —
+      // a variable specifier is opaque to the rewrite. Measured, not assumed.
     ];
   },
 

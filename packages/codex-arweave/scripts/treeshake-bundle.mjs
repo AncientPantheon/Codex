@@ -4,10 +4,14 @@
  * `emitBundle(entry)` runs a real esbuild bundle+tree-shake over `entry` and
  * returns the module paths that ACTUALLY SURVIVE tree-shaking into the emitted
  * bundle. The E4 gate (`tests/e4-treeshake-bundle.test.ts`) inspects those
- * retained paths to prove the light consumer surface excludes the heavy deps
- * (`@ardrive/turbo-sdk` behind a dynamic `import()`, and the bare `arweave`
- * package tree-shaken from arweave-core's `sideEffects:false` barrel) while the
- * panel/heavy entries still reach them.
+ * retained paths to prove the light consumer surface excludes the heavy dep
+ * (the bare `arweave` package, tree-shaken out of arweave-core's
+ * `sideEffects:false` barrel) while the panel/heavy entries still reach it.
+ *
+ * The gate also pins `@ardrive/turbo-sdk` ABSENT from every entry. That package
+ * was deleted from the graph in browser-safe-release (2026-11) — the gate used
+ * to assert it PRESENT on the panel entry, which is what kept a never-called
+ * dynamic `import()` alive until it broke a consumer's browser build.
  *
  * METRIC — retained OUTPUT, not the crawl (the measurement-bug correction):
  * esbuild's `metafile.inputs` lists every module esbuild PARSES/CRAWLS, NOT the
@@ -18,14 +22,21 @@
  * modules that CONTRIBUTED BYTES to the emitted bundle. That is what "bundled"
  * actually means, and it is what reflects tree-shaking.
  *
- * RESILIENT RESOLUTION — so the bundle emits at all: `@ardrive/turbo-sdk` pulls
- * a large transitive graph of OPTIONAL, uninstalled signer peers (`@cosmjs/*`,
- * `@solana/web3.js`, `@ethersproject/*`, `tweetnacl`, ...). `platform:"node"`
- * externalizes node builtins; the `resilient-externals` plugin externalizes any
- * bare specifier esbuild cannot resolve. An externalized module is BY DEFINITION
- * not bundled — the correct semantics for the gate. `arweave` and
- * `@ardrive/turbo-sdk` themselves ARE installed, so they are NEVER force-externalized:
- * the tree-shaker decides their fate, and that decision IS the measurement.
+ * RESILIENT RESOLUTION — so the bundle emits at all: the heavy fixtures reach
+ * packages with OPTIONAL, uninstalled peers. `platform:"node"` externalizes node
+ * builtins; the `resilient-externals` plugin externalizes any bare specifier
+ * esbuild cannot resolve. An externalized module is BY DEFINITION not bundled —
+ * the correct semantics for THIS gate. `arweave` itself IS installed, so it is
+ * NEVER force-externalized: the tree-shaker decides its fate, and that decision
+ * IS the measurement.
+ *
+ * WHAT THIS HELPER CANNOT SEE — read before reusing it as a safety net.
+ * `platform:"node"` auto-externalizes every Node builtin and the plugin above
+ * externalizes everything it cannot resolve, so `node:*` leakage out of a
+ * dependency is invisible here BY CONSTRUCTION. That is correct for a
+ * tree-shake measurement and useless for browser-safety; the latter is
+ * `packages/codex/scripts/browser-safety-guard.mjs`, which bundles the
+ * PUBLISHED entries at `platform:"browser"` and walks INTO node_modules.
  */
 
 import { build } from "esbuild";

@@ -48,9 +48,14 @@ export type {
 } from "./context.js";
 
 // The HEAVY lazy boundary (E-12 / FIX-2): the `./panel` subpath is the heavy
-// entry, so it re-exports the default heavy Arweave runtime + the Turbo
-// dynamic-import boundary. A LIGHT consumer (the `.` root / `./address-book`)
-// never reaches this, keeping `@ardrive/turbo-sdk` + the static `arweave` edge
-// out of its bundle; the panel entry retains both — the real light/heavy split.
-export { loadTurbo, createDefaultArweaveRuntime } from "./lazyDeps.js";
-export type { TurboSdkModule } from "./lazyDeps.js";
+// entry, so it re-exports the default heavy Arweave runtime. A LIGHT consumer
+// (the `.` root / `./address-book`) never reaches this, keeping the static
+// `arweave` edge out of its bundle; the panel entry retains it — the real
+// light/heavy split.
+//
+// `loadTurbo` / `TurboSdkModule` were removed here (browser-safe-release,
+// 2026-11): nothing called them, and the `@ardrive/turbo-sdk` specifier they
+// carried had to be RESOLVED by a consumer's browser bundler even behind a
+// dynamic `import()`, which broke a Turbopack build on 1.6.0. See
+// `./lazyDeps.ts` for the full history.
+export { createDefaultArweaveRuntime } from "./lazyDeps.js";

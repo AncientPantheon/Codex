@@ -3,12 +3,32 @@
  * E4 RED matrix — the REAL BUNDLE-EMIT tree-shake gate (E-12 / N-08 — FIX-2 /
  * F-002 / F-3 / F-4 — the acceptance-gated packaging gate).
  *
- * TWO distinct heavy deps with TWO distinct exclusion mechanisms:
- *   - `@ardrive/turbo-sdk` = dynamic-import boundary (`await import` at
- *     arweave-core upload.ts:89) — the LOAD-BEARING, strongest-provable claim.
+ * THE TURBO ASSERTIONS WERE INVERTED (browser-safe-release, 2026-11). They are
+ * kept, not deleted, because the specifier's absence is now the contract:
+ *
+ *   - `@ardrive/turbo-sdk` = GONE FROM THE GRAPH, every entry, light AND heavy.
+ *     It used to be asserted PRESENT on the panel entry (old assertion (d)) to
+ *     demonstrate the light/heavy split — a dynamic-import boundary in
+ *     `panel/lazyDeps.ts` (`loadTurbo`) that nothing ever called. That proof
+ *     was the entire cause of the 1.6.0 consumer break: a dynamic `import()`
+ *     defers EXECUTION but does not remove the specifier, so a browser bundler
+ *     still had to resolve `@ardrive/turbo-sdk` and emit a chunk for it
+ *     (Turbopack: `the chunking context does not support external modules
+ *     (request: node:stream/promises)`). The real upload path is arbundles
+ *     ANS-104 via arweave-core, which has zero Turbo references. `loadTurbo`,
+ *     `TurboSdkModule`, the re-export and the dependency were all deleted, so
+ *     these assertions now pin ABSENCE EVERYWHERE — they are the regression
+ *     guard that stops the specifier coming back under any import form.
  *   - `arweave` = a STATIC arweave-core edge (sign.ts:31 / transfer.ts:37),
  *     dropped from a light bundle ONLY by a real bundler tree-shaking
- *     arweave-core's `sideEffects:false` barrel.
+ *     arweave-core's `sideEffects:false` barrel. UNCHANGED — this is now the
+ *     sole mechanism the light/heavy split is demonstrated with, and
+ *     assertion (c)'s negative control is what keeps it non-vacuous.
+ *
+ * SCOPE NOTE: this gate measures TREE-SHAKING at `platform:"node"`, so it can
+ * never see `node:*` leakage from a dependency. Browser-safety is a different
+ * question with a different tool:
+ * `packages/codex/scripts/browser-safety-guard.mjs`.
  *
  * The gate is a REAL esbuild emit (`treeShaking:true` + `metafile:true`), NOT a
  * `src`-lexer walk (which would false-FAIL on the static `arweave` edge). It runs
@@ -43,10 +63,9 @@
  * `// @vitest-environment node` (FIX-9): esbuild emit is node-only.
  *
  * GREEN owner: T14.11 (`scripts/treeshake-bundle.mjs` retained-output helper +
- * `src/panel/lazyDeps.ts` dynamic-import boundary + the light `src/index.ts` root).
- * The panel subpath statically reaches the lazy heavy boundary, so its emitted
- * bundle retains the (inlined dynamic) Turbo + the static arweave edge — that is
- * what makes assertion (d) the real light/heavy split, not a global drop.
+ * the light `src/index.ts` root). The panel subpath statically reaches the heavy
+ * boundary, so its emitted bundle retains the static arweave edge — that is what
+ * makes assertion (d) the real light/heavy split, not a global drop.
  */
 
 import { describe, it, expect } from "vitest";
@@ -64,10 +83,11 @@ const LIGHT_FIXTURE = join(HERE, "fixtures", "treeshake", "light-consumer.fixtur
 const HEAVY_FIXTURE = join(HERE, "fixtures", "treeshake", "heavy-consumer.fixture.ts");
 const PANEL_ENTRY = join(HERE, "..", "src", "panel", "index.ts");
 
-/** Turbo is matched by its package specifier; it is RETAINED in the emitted
- *  bundle only when a reached path (static or an inlined dynamic `import()`)
- *  actually contributes its bytes. `inputKeys` is already POSIX-normalized by
- *  the helper, but we re-normalize defensively. */
+/** Turbo is matched by its package specifier. It must now be absent from EVERY
+ *  bundle: the package was removed from the graph entirely, so no reached path —
+ *  static, or an inlined dynamic `import()` — can contribute its bytes anywhere.
+ *  `inputKeys` is already POSIX-normalized by the helper, but we re-normalize
+ *  defensively. */
 const hasTurbo = (inputKeys: string[]): boolean =>
   inputKeys.some((k) => k.replace(/\\/g, "/").includes("@ardrive/turbo-sdk"));
 
@@ -87,8 +107,9 @@ describe("REAL bundle-emit tree-shake gate (E-12/N-08, FIX-2)", () => {
   it("(a) the LIGHT-only consumer bundle excludes BOTH @ardrive/turbo-sdk AND the bare arweave package", async () => {
     const { inputKeys } = await emitBundle(LIGHT_FIXTURE);
 
-    // The load-bearing assertion: the light consumer's emitted bundle does NOT
-    // RETAIN Turbo (its lazy boundary is never reached from the light surface).
+    // Turbo is absent — now for the stronger reason that the specifier no
+    // longer exists anywhere in the package, not because a lazy boundary went
+    // unreached. See (d) for the inversion and why it was made.
     expect(hasTurbo(inputKeys)).toBe(false);
     // The static arweave edge is tree-shaken OUT of the emitted bundle — the
     // sideEffects:false barrel's unused heavy re-exports contribute zero bytes.
@@ -112,22 +133,42 @@ describe("REAL bundle-emit tree-shake gate (E-12/N-08, FIX-2)", () => {
     expect(hasBareArweave(inputKeys)).toBe(true);
   });
 
-  it("(d) the PANEL entry bundle DOES include the heavy deps — the light/heavy split is real, not a global drop", async () => {
+  it("(d) the PANEL entry retains the static arweave edge (the split is real, not a global drop) and — INVERTED, browser-safe-release — NO LONGER retains @ardrive/turbo-sdk anywhere", async () => {
     const { inputKeys } = await emitBundle(PANEL_ENTRY);
 
-    // The panel subpath is the HEAVY entry — it statically reaches the lazy heavy
-    // boundary (`lazyDeps.ts`), so its emitted bundle RETAINS the heavy runtime:
-    // the inlined dynamic Turbo import AND the static arweave edge the default
-    // runtime composes (send/upload). Both retained here; both absent on the light
-    // entry — the split is real, not a global drop.
+    // UNCHANGED half: the panel subpath is the HEAVY entry — it statically
+    // reaches `lazyDeps.ts`'s default runtime, so its emitted bundle RETAINS the
+    // static arweave edge that runtime composes (send/upload). Retained here,
+    // absent on the light entry — the split is real, not a global drop. This
+    // single mechanism now carries the whole light/heavy claim.
     expect(hasBareArweave(inputKeys)).toBe(true);
-    expect(hasTurbo(inputKeys)).toBe(true);
+
+    // INVERTED half (was `.toBe(true)`), kept rather than deleted so the reason
+    // stays pinned to the assertion: Turbo being RETAINED on the heavy entry was
+    // the demonstration that caused the 1.6.0 break. `loadTurbo()` existed only
+    // to prove "Turbo is reachable exclusively behind a dynamic import()", and
+    // this assertion pinned that proof in place — but a dynamic `import()` is
+    // not an escape hatch. The consumer's bundler still had to RESOLVE
+    // `@ardrive/turbo-sdk` and emit a browser chunk for turbo's Node build
+    // (`node:stream/promises`, `fs`, `node:stream`). Nothing ever called
+    // `loadTurbo`; the real upload path is arbundles ANS-104 via arweave-core.
+    // The whole specifier was deleted, so the heavy entry must now be as free of
+    // it as the light one. If this ever flips back to `true`, the exact bug that
+    // shipped in 1.6.0 (and, for arbundles, in 1.5.2) has returned.
+    expect(hasTurbo(inputKeys)).toBe(false);
   });
 
-  it("(b) the two mechanisms are distinct: the load-bearing claim is @ardrive/turbo-sdk ABSENCE from the light bundle (dynamic-import excluded); arweave absence is the tree-shaken static edge", async () => {
-    const { inputKeys } = await emitBundle(LIGHT_FIXTURE);
-    // Restated as the pinned mechanism split: Turbo (dynamic) MUST be absent; this
-    // is the strongest provable claim and the one the gate rests on.
-    expect(hasTurbo(inputKeys)).toBe(false);
+  it("(b) @ardrive/turbo-sdk is absent from EVERY entry — light, heavy fixture and panel alike — because the specifier was deleted, not merely deferred", async () => {
+    // Was: "the two mechanisms are distinct — Turbo absence from the LIGHT bundle
+    // is the dynamic-import exclusion". There is no second mechanism any more, so
+    // this case was repurposed (not deleted) into the broadest statement of the
+    // new contract: the package name appears in no bundle this package can emit.
+    // Checking all three entries is what makes it a real guard — the old version
+    // checked only the light fixture, where Turbo was absent anyway, which is
+    // precisely why its heavy-entry presence went unquestioned for two releases.
+    for (const entry of [LIGHT_FIXTURE, HEAVY_FIXTURE, PANEL_ENTRY]) {
+      const { inputKeys } = await emitBundle(entry);
+      expect(hasTurbo(inputKeys)).toBe(false);
+    }
   });
 });

@@ -76,6 +76,9 @@ const AVAILABILITY_MESSAGE =
   "SqliteLibraryStore requires Node >=22.5 (node:sqlite); " +
   "use IndexedDBLibraryStore or MemoryLibraryStore on older Node.";
 
+/** Kept in a const so bundlers cannot rewrite the `node:` prefix away. */
+const NODE_SQLITE_SPECIFIER = "node:sqlite";
+
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS entries (
     id TEXT PRIMARY KEY,
@@ -119,7 +122,16 @@ export class SqliteLibraryStore implements LibraryStore {
     // Linux runner). This is a lazy, availability-gated runtime import that Node
     // must resolve itself; the directive tells vite to leave it untouched (esbuild
     // / the codex tsup bundle already externalize node: builtins, so no effect there).
-    const probe = opts.importSqlite ?? (() => import(/* @vite-ignore */ "node:sqlite"));
+    // The specifier is held in a CONST, not written inline. Under
+    // `platform: "browser"` esbuild normalises a literal `node:sqlite` to
+    // `sqlite` before it consults the externals list, so the umbrella
+    // package's dist was shipping `import("sqlite")` — a specifier that
+    // resolves nowhere, making this probe reject and `open()` throw its
+    // "requires Node >=22.5" message even on a Node 24 host. A variable
+    // specifier is opaque to that rewrite, so the prefix survives the
+    // bundle. Caught by `packages/codex/scripts/browser-safety-guard.mjs`,
+    // which reported it as UNRESOLVED "sqlite".
+    const probe = opts.importSqlite ?? (() => import(/* @vite-ignore */ NODE_SQLITE_SPECIFIER));
 
     let mod: NodeSqliteModuleLike;
     try {

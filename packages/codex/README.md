@@ -219,7 +219,7 @@ release).
 | --- | --- |
 | `@ancientpantheon/codex-core` | `0.6.1` |
 | `@ancientpantheon/codex-ui` | `0.11.0` |
-| `@ancientpantheon/codex-ouronet` | `1.1.3` |
+| `@ancientpantheon/codex-ouronet` | `1.2.0` |
 | `@ancientpantheon/codex-arweave` | `0.9.2` |
 | `@ancientpantheon/arweave-core` | `0.5.0` |
 <!-- END member-versions -->

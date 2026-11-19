@@ -67,17 +67,23 @@
  * module's own test via `WeakRef` + a forced GC.
  *
  * `arbundles` is reached through a DYNAMIC `import()` inside
- * {@link assembleBundleToFile} below, never a top-level static import —
- * mirroring this package's own established heavy-third-party-dependency
- * convention (`panel/lazyDeps.ts`'s `loadTurbo()`, dynamically loading
- * `@ardrive/turbo-sdk` for the same reason: keep a heavy external signing/
- * protocol library out of a module's STATIC import graph). A static,
- * top-level import of that package here would also trip
+ * {@link assembleBundleToFile} below, never a top-level static import, to keep
+ * a heavy external signing/protocol library out of this module's STATIC import
+ * graph. A static, top-level import of that package here would also trip
  * `e2-stoachain-isolation.test.ts`'s allow-listed-bare-specifier scan across
  * the whole `src/library` tree (an unrelated, pre-existing StoaChain-
- * isolation gate, out of this task's file scope to edit) — the SAME outcome
- * the dynamic-import convention already produces for Turbo, for the same
- * underlying reason.
+ * isolation gate, out of this task's file scope to edit).
+ *
+ * This comment used to cite `panel/lazyDeps.ts`'s `loadTurbo()` as the
+ * established precedent for the convention. That function is gone
+ * (browser-safe-release, 2026-11), and the reason it is gone is a caveat this
+ * module inherits: a dynamic `import()` DEFERS execution, it does not remove
+ * the specifier from the graph — a browser bundler must still resolve it and
+ * emit a chunk. `arbundles` survives that because it publishes a real browser
+ * export condition; Turbo did not. The deferral is a memory/startup property,
+ * never a browser-safety one, and
+ * `packages/codex/scripts/browser-safety-guard.mjs` is what actually checks
+ * the latter.
  */
 
 import {

@@ -1,0 +1,140 @@
+/**
+ * Build-artifact guard: every selector the shipped `dist/ui.css` declares must
+ * be scoped to the `.codex-ui` boundary (or be the `:root` token fallback).
+ *
+ * WHY THIS READS `dist/` AND NOT THE SOURCES: the ~200 utility rules do not
+ * exist in any source file — `tw-utilities.css` is three lines plus
+ * `@tailwind utilities`, and the scoping decision lives in
+ * `tailwind.config.cjs`. Only the compiled sheet shows what we actually
+ * publish, so only the compiled sheet can catch the defect.
+ *
+ * THE REGRESSION IT CATCHES: with no `prefix` and no `important` in the
+ * Tailwind config, `@tailwind utilities` emits at GLOBAL scope — bare
+ * `.flex`, `.hidden`, `.block`, `.border`, `.rounded`, `.w-full`, `.text-sm`,
+ * `.truncate`, plus media-query variants. A consumer that uses Tailwind
+ * itself then has its own identically-named classes overridden by whichever
+ * stylesheet happens to load last, anywhere on its page — which is exactly
+ * why a downstream Next 16 / Turbopack consumer maintains a hand-cut patch
+ * file against this artifact. The reset was scoped from day one; the
+ * utilities never were.
+ */
+
+import { describe, it, expect } from "vitest";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+const distUiCss = resolve(__dirname, "../dist/ui.css");
+
+/** Strips `/* ... *\/` comments so prose never parses as a selector. */
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/**
+ * Every style-rule selector in the sheet, flattened — descending through
+ * conditional at-rules (`@media`, `@supports`, `@layer`) and skipping
+ * `@keyframes` bodies, whose `from`/`to`/`50%` keys are not selectors.
+ */
+function selectorsOf(css: string): string[] {
+  const out: string[] = [];
+  const walk = (text: string): void => {
+    let i = 0;
+    let start = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === "{") {
+        const prelude = text.slice(start, i).trim();
+        // Find the matching close brace.
+        let depth = 1;
+        let j = i + 1;
+        while (j < text.length && depth > 0) {
+          if (text[j] === "{") depth += 1;
+          else if (text[j] === "}") depth -= 1;
+          j += 1;
+        }
+        const body = text.slice(i + 1, j - 1);
+        if (/^@(media|supports|layer|container)\b/.test(prelude)) walk(body);
+        else if (prelude.startsWith("@")) {
+          /* @keyframes & friends — no selectors inside */
+        } else if (prelude) out.push(prelude);
+        i = j;
+        start = j;
+        continue;
+      }
+      if (ch === ";" && text.slice(start, i).trim().startsWith("@")) {
+        // A statement at-rule such as `@import ...;` / `@charset ...;`.
+        start = i + 1;
+      }
+      i += 1;
+    }
+  };
+  walk(stripComments(css));
+  return out;
+}
+
+/** A selector is scoped when every comma-separated part is anchored. */
+function isScoped(selector: string): boolean {
+  return selector
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .every(
+      (part) =>
+        part === ":root" ||
+        part.startsWith(":root ") ||
+        part.startsWith(".codex-ui"),
+    );
+}
+
+describe("dist/ui.css — Tailwind utility scoping", () => {
+  it("is emitted by the build (run `npm run build` first)", () => {
+    expect(existsSync(distUiCss)).toBe(true);
+  });
+
+  it("declares no bare global utility class a consumer could collide with", () => {
+    const selectors = selectorsOf(readFileSync(distUiCss, "utf8"));
+    // The exact names the downstream report named, plus the rest of the
+    // high-traffic set any Tailwind consumer also defines.
+    const collisionProne = [
+      "flex", "hidden", "block", "inline", "grid", "table", "contents",
+      "absolute", "relative", "fixed", "sticky", "static", "visible",
+      "border", "rounded", "truncate", "transform", "shrink", "grow",
+      "w-full", "h-full", "text-sm", "text-xs", "p-3", "bg-white",
+    ];
+    const bare = selectors.filter((sel) =>
+      sel.split(",").some((part) => collisionProne.includes(part.trim().replace(/^\./, ""))),
+    );
+    expect(bare).toEqual([]);
+  });
+
+  it("scopes EVERY selector it ships to .codex-ui (or the :root token fallback)", () => {
+    const selectors = selectorsOf(readFileSync(distUiCss, "utf8"));
+    expect(selectors.length).toBeGreaterThan(100); // the sheet is not empty
+    const unscoped = selectors.filter((sel) => !isScoped(sel));
+    expect(unscoped).toEqual([]);
+  });
+
+  it("still ships the utilities themselves, scoped — not an empty sheet", () => {
+    const css = readFileSync(distUiCss, "utf8");
+    // Spot-check three the components lean on hardest.
+    expect(css).toMatch(/\.codex-ui\s+\.flex\s*\{[^}]*display:\s*flex/);
+    expect(css).toMatch(/\.codex-ui\s+\.items-center\s*\{[^}]*align-items:\s*center/);
+    expect(css).toMatch(/\.codex-ui\s+\.w-full\s*\{[^}]*width:\s*100%/);
+  });
+
+  it("does not blanket-!important the utilities, so our own overrides still win", () => {
+    // Tailwind's SELECTOR important strategy raises specificity instead of
+    // stamping `!important` on every declaration. That distinction is
+    // load-bearing: the components override utilities with inline
+    // `style={{…}}` everywhere, and a literal `!important` would defeat
+    // that silently. The only `!important` allowed is the one a component
+    // asked for explicitly via Tailwind's `!` modifier (e.g. `!hidden`).
+    const css = readFileSync(distUiCss, "utf8");
+    const rules = stripComments(css).match(/[^{}]+\{[^{}]*\}/g) ?? [];
+    const unexpected = rules
+      .filter((rule) => rule.includes("!important"))
+      .map((rule) => rule.split("{")[0].trim())
+      .filter((sel) => !sel.includes("\\!"));
+    expect(unexpected).toEqual([]);
+  });
+});

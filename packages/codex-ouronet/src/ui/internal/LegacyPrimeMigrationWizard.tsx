@@ -280,7 +280,7 @@ import { isPredAvailable, predGroups } from "../../guards/predicates.js";
 import type { GuardKeyResolution } from "../../guards/resolveGuardKeys.js";
 import { useCodexStoreOptional } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
-import type { IOuroAccount, IStoaChainSeed, IPureKeypair, OuroOriginSeedTab } from "../../types/entities.js";
+import type { IOuroAccount, IStoaChainSeed, IPureKeypair, IArweaveSeed, OuroOriginSeedTab } from "../../types/entities.js";
 import { normalizeSeedType } from "./keySource.js";
 import {
   // `resolveArweaveMatchSeedId` is deliberately NOT imported any more — the
@@ -296,7 +296,7 @@ import {
 import { SeedRevealModal } from "./SeedRevealModal.js";
 import { AccountSeedRevealModal } from "./AccountSeedRevealModal.js";
 import { OURONET_CODEX_MASTER, MASTER_CHAINWEB_SEED, MASTER_ARWEAVE_SEED, masterChainwebSeedName, toPersistableAccountSelection, CODEX_MASTER_SEED } from "@ancientpantheon/codex-core";
-import type { MigrationSelection, MigrationCommitRecord } from "@ancientpantheon/codex-core";
+import type { MigrationSelection, MigrationCommitRecord, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 
 /** The wizard's own page/step union — `"intro"`, `"account"`, `"payment"`,
  *  `"guard"`, and `"finalize"` (T8, Wave 5 — Page 7) all have real content
@@ -6334,13 +6334,13 @@ export function LegacyPrimeMigrationWizard({
    */
   const [seedDashboardArweaveResolving, setSeedDashboardArweaveResolving] = useState(true);
   const seedDashboardRequestIdRef = useRef(0);
-  const arweaveSeedsSnapshotKey = JSON.stringify(arweaveSeeds.map((s) => [s.id, s.isPrime === true, s.secret]));
+  const arweaveSeedsSnapshotKey = JSON.stringify(arweaveSeeds.map((s: IArweaveSeed) => [s.id, s.isPrime === true, s.secret]));
   const candidateSeedsSnapshotKey = JSON.stringify(allSeeds.map((s) => [s.id, s.secret]));
   // Shared with the Arweave STEP's own check below — both now watch the
   // codex's Arweave ACCOUNTS (`(seedId, index)` foreign-key entries), not
   // merely its Arweave seed rows, so both must re-run when those change.
   const foreignKeysSnapshotKey = JSON.stringify(
-    foreignKeys.map((k) => [k.seedId ?? null, k.index ?? null]),
+    foreignKeys.map((k: ForeignKeyEntry) => [k.seedId ?? null, k.index ?? null]),
   );
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
@@ -7057,7 +7057,7 @@ export function LegacyPrimeMigrationWizard({
      */
     const legacyPrimeOuroAccountId = codexStore
       ?.getState()
-      .ouroAccounts.find((a) => a.isPrime)?.id;
+      .ouroAccounts.find((a: IOuroAccount) => a.isPrime)?.id;
 
     let guardRotationNeeded: boolean;
     /**

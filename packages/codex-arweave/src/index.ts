@@ -9,10 +9,13 @@
  * internal helper cannot silently leak into the package's API.
  *
  * LIGHT-SURFACE DISCIPLINE (E-12 / FIX-2): this root carries NO static edge to
- * the heavy `./panel` React runtime and NO top-level `@ardrive/turbo-sdk`/
- * `arweave` import. The panel is reached ONLY via the separate `./panel`
- * subpath (the heavy entry, which wraps Turbo behind `lazyDeps.ts`'s dynamic
- * `import()`). The E1-E3 adapter/keyring/upload re-exports below DO statically
+ * the heavy `./panel` React runtime and NO top-level `arweave` import. The
+ * panel is reached ONLY via the separate `./panel` subpath (the heavy entry,
+ * which composes the heavy runtime in `lazyDeps.ts`). It no longer carries any
+ * `@ardrive/turbo-sdk` edge at all — that specifier was deleted from the graph
+ * in browser-safe-release (2026-11) because a dynamic `import()` still forces a
+ * consumer's browser bundler to resolve it. The E1-E3 adapter/keyring/upload
+ * re-exports below DO statically
  * reach arweave-core's `arweave` edge, but arweave-core is `sideEffects:false`,
  * so a consumer importing ONLY the light address-book surface tree-shakes them
  * away — the bundle-emit gate (`tests/e4-treeshake-bundle.test.ts`) proves it.

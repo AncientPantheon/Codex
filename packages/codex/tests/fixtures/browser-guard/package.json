@@ -1,0 +1,10 @@
+{
+  "name": "browser-guard-fixtures",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "_comment": "Not a workspace (the root globs are packages/* and apps/*). It exists for its `imports` map alone: `#fake-external-dep` is a BARE specifier, so the entry below reaches its offending module the way codex's dist reached @ardrive/turbo-sdk — through a dependency the guard must WALK INTO. Resolve it through node's subpath-imports instead of a real node_modules fixture so nothing has to be installed (and nothing can be .gitignored away) for the gate to bite.",
+  "imports": {
+    "#fake-external-dep": "./transitive-dep.js"
+  }
+}
