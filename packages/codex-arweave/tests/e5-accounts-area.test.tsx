@@ -407,7 +407,7 @@ describe("ArweaveAccountsArea", () => {
       );
 
       const displaced = screen.getByTestId("arweave-accounts-group-seed-old");
-      expect(within(displaced).getByText("Former Master Arweave Seed")).toBeInTheDocument();
+      expect(within(displaced).getByText("Former Master ArWeave Seed")).toBeInTheDocument();
       expect(within(displaced).queryByText("Master ArWeave Seed")).toBeNull();
       expect(
         within(screen.getByTestId("arweave-accounts-group-seed-new")).getByText("Master ArWeave Seed"),
@@ -1731,7 +1731,7 @@ describe("ArweavePanel — wires the master-seed identity into the Accounts area
     settleTakeover(true);
 
     expect(headingOf("new-master")).toBe("Master ArWeave Seed");
-    expect(headingOf("legacy")).toBe("Former Master Arweave Seed");
+    expect(headingOf("legacy")).toBe("Former Master ArWeave Seed");
   });
 
   it("gates only the FORMER designation on the seal — a finalized-but-unapplied codex still moves the master title", async () => {
@@ -1744,7 +1744,7 @@ describe("ArweavePanel — wires the master-seed identity into the Accounts area
     // The seal-gated "Former …" designation does NOT appear — the displaced
     // seed reads as the ordinary seed it still is, under its own stored name.
     expect(headingOf("legacy")).toBe("My cold storage seed");
-    expect(screen.queryByText("Former Master Arweave Seed")).toBeNull();
+    expect(screen.queryByText("Former Master ArWeave Seed")).toBeNull();
   });
 
   it("keeps the isPrime seed titled on a codex that has no codexMasterSeed row at all", async () => {

@@ -407,7 +407,7 @@ export interface CodexStoreActions {
    * Whenever a face id actually CHANGES, the displaced id is appended to the
    * matching former-holder list on the row (codex-core's
    * `recordFormerMasterIds`), which is what makes "Former Codex Ouronet
-   * Master" / "Former Master Arweave Seed" derivable at all. Callers never
+   * Master" / "Former Master ArWeave Seed" derivable at all. Callers never
    * pass those lists; this action maintains them.
    */
   setCodexMasterSeed(row: Partial<CodexMasterSeed> & { establishedAt?: string }): Promise<void>;

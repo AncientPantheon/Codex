@@ -43,7 +43,7 @@ describe("the FORMER master designations", () => {
     // Codex Master before, and would become after apply Former Codex Ouronet
     // Master."
     expect(FORMER_OURONET_CODEX_MASTER).toBe("Former Codex Ouronet Master");
-    expect(FORMER_MASTER_ARWEAVE_SEED).toBe("Former Master Arweave Seed");
+    expect(FORMER_MASTER_ARWEAVE_SEED).toBe("Former Master ArWeave Seed");
   });
 });
 

@@ -83,13 +83,19 @@ export const FORMER_OURONET_CODEX_MASTER = `Former ${OURONET_CODEX_MASTER}` as c
  * Owner: *"the one that isn't anymore would be designated Former Master
  * Arweave Seed."*
  *
- * NOTE: this one is NOT derived from {@link MASTER_ARWEAVE_SEED}, because it
- * deliberately does not carry the intercapital W — the owner's wording for the
- * FORMER designation spells it "Arweave", and that is the string pinned by the
- * design's acceptance criteria. See {@link MASTER_ARWEAVE_SEED}'s note: the
- * intercapital is "only this name".
+ * DERIVED from {@link MASTER_ARWEAVE_SEED}, so the pair cannot drift in
+ * wording — and so this one CARRIES THE INTERCAPITAL W too. It first shipped
+ * spelling it "Arweave", taken literally from the owner's sentence above;
+ * asked directly, the owner's answer was *"Master ArWeave Seed — this is the
+ * correct designation"*, i.e. the intercapital belongs to the designation
+ * itself, not to one constant. A seed does not change how its own name is
+ * spelled by ceasing to be the master.
+ *
+ * The exact resulting string is still pinned literally in
+ * `tests/master-names.test.ts`, so a rename of the master has to break a test
+ * before it can silently re-word this.
  */
-export const FORMER_MASTER_ARWEAVE_SEED = "Former Master Arweave Seed";
+export const FORMER_MASTER_ARWEAVE_SEED = `Former ${MASTER_ARWEAVE_SEED}` as const;
 
 /** The codex's StoaChain identity (two Apollo halves). Formerly displayed
  *  as "Codex ID" / "Codex Identity". */

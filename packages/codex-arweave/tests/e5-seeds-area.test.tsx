@@ -2794,13 +2794,13 @@ describe("ArweaveSeedsArea — the master row shows the designation AND the seed
  *       topic exists to end.
  *   (legacy title) a seed displaced from the role on a codex that ran the
  *       pre-fix code carries `name: "Master ArWeave Seed"` on disk; printing
- *       that under "Former Master Arweave Seed" would claim it still holds the
+ *       that under "Former Master ArWeave Seed" would claim it still holds the
  *       role it just lost.
  *   (master wins) the resolver can name the very seed that is on the former
  *       list as today's master (its settled id points at a deleted seed, so it
  *       falls back to `isPrime`). One row must not wear both treatments.
  */
-describe("ArweaveSeedsArea — the displaced seed reads 'Former Master Arweave Seed'", () => {
+describe("ArweaveSeedsArea — the displaced seed reads 'Former Master ArWeave Seed'", () => {
   const GOLD_TEXT = "rgb(206, 172, 95)";
   /** The former designation's own muted-silver treatment — deliberately NOT
    *  the gold the master wears, and not the plain `#d2d3d4` either. */

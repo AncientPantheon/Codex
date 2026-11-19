@@ -358,7 +358,7 @@ function seedDisplayName(label: string, designation: string | null): string {
  *     that ran the pre-fix code has a row stored as "Master ArWeave Seed" on
  *     disk (and `ForeignChainsWiring.tsx`'s own stored-seed label fallback can
  *     re-assert it). On the master row that would print the title twice; on a
- *     displaced row it would claim, underneath "Former Master Arweave Seed",
+ *     displaced row it would claim, underneath "Former Master ArWeave Seed",
  *     that the seed still holds the role it just lost.
  */
 function seedOwnNameLine(label: string, designation: string | null): string | null {

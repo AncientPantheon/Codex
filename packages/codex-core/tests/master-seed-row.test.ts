@@ -81,7 +81,7 @@ describe("the row carries linkage ONLY", () => {
 // --------------------------------------------------------------------
 // The former-master history. Nothing in the codex used to record WHO the
 // master was before it moved: `setCodexMasterSeed` overwrote the id in place,
-// so "Former Codex Ouronet Master" / "Former Master Arweave Seed" could not be
+// so "Former Codex Ouronet Master" / "Former Master ArWeave Seed" could not be
 // derived from anything that existed. These ids are that record, following
 // `IPureKeypair.wasCodexGuard`'s "stored forever" discipline.
 // --------------------------------------------------------------------
@@ -121,7 +121,7 @@ describe("recordFormerMasterIds", () => {
     // The Ouronet account and the ArWeave seed move at different moments
     // (the ArWeave derivation is a separate RSA-4096 step). An account
     // handover that touched the seed history would make a seed that never
-    // moved read as "Former Master Arweave Seed".
+    // moved read as "Former Master ArWeave Seed".
     const accountMoved = recordFormerMasterIds(settled, { ...settled, ouroAccountId: "ouro-2" });
     expect(accountMoved.formerArweaveSeedIds).toBeUndefined();
     const seedMoved = recordFormerMasterIds(settled, { ...settled, arweaveSeedId: "arw-2" });

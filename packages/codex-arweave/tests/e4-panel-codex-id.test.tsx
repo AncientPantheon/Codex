@@ -1721,7 +1721,7 @@ describe("`legacy-prime-migration-wizard` T9 — ensurePrimeArweaveSeed, wired f
    * `codexMasterSeed.arweaveSeedId`, and `setCodexMasterSeed` (T3) appends the
    * outgoing id to `formerArweaveSeedIds` by itself. So the displaced seed is
    * identified by the id it actually held, nothing is written TO it, and the
-   * "Former Master Arweave Seed" designation becomes derivable.
+   * "Former Master ArWeave Seed" designation becomes derivable.
    *
    * Asserted against the STORE, never a spy: "the former master is recorded"
    * has to mean the codex really carries it.
