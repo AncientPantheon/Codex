@@ -128,6 +128,20 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
+    // This package's UI specs drive the REAL crypto path — 600k-iteration
+    // PBKDF2 decrypts, several per test, through a full multi-step wizard
+    // render. They do not fit vitest's 5s default, and under full-suite
+    // parallelism they are slower still.
+    //
+    // This lives in the CONFIG, not in a `--testTimeout=40000` flag on the
+    // `test` script or in whatever each developer habitually types. It was a
+    // flag, and the result was that every local run passed while CI — which
+    // invokes a plain `vitest run` — failed on timeouts that had nothing to
+    // do with the code. That is what broke the v1.7.0 publish run. A timing
+    // requirement is a property of these tests, not of how someone chose to
+    // invoke them.
+    testTimeout: 40000,
+    hookTimeout: 40000,
     // zustand, lucide-react and the @radix-ui/* primitives are all hoisted to the
     // repo root and ship as pre-built modules that vitest externalizes by default.
     // Externalized, their bare `import ... from "react"` resolves through Node

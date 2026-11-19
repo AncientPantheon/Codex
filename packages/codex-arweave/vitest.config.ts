@@ -52,6 +52,19 @@ export default defineConfig({
   optimizeDeps: { exclude: ["lucide-react"] },
   test: {
     globals: true,
+    // Two specs here do genuinely slow REAL work and do not fit vitest's 5s
+    // default: `e4-treeshake-bundle` runs ~13s of actual esbuild bundling,
+    // and `e1-foreign-keys-slice` generates and encrypts a real RSA key.
+    // Under full-suite parallelism both are slower still.
+    //
+    // This belongs in the CONFIG rather than a `--testTimeout` flag someone
+    // remembers to type: with it as a flag, every local run passed while CI —
+    // which invokes a plain `vitest run` — failed on timeouts unrelated to the
+    // code. That is what broke the v1.7.0 publish run (in the sibling package
+    // first, then here). A timing requirement is a property of the tests, not
+    // of how they are invoked.
+    testTimeout: 60000,
+    hookTimeout: 60000,
     // The Arweave panel `.tsx` tests need a DOM; jsdom is the default. Node-logic
     // seam tests (SqliteLibraryStore, KeygenRunner, the validator, the tree-shake
     // gate) opt back to node per-file via a `// @vitest-environment node` header.
