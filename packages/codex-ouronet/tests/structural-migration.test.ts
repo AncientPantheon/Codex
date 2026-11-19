@@ -64,13 +64,37 @@ function readRealStoicSeed(absolutePath: string): Record<string, unknown> {
   return entry;
 }
 
-const REAL_PASSWORD = "<redacted-rotated-credential>";
-const REAL_FILES = [
-  "/home/ancientbox/ClaudeWS/Miscellaneous/_Codices/Foreign/Ionut_OuronetCodex_2026-10-11_13-22-23.json",
-  "/home/ancientbox/ClaudeWS/Miscellaneous/_Codices/Foreign/Iounut-Latests_OuronetCodex_2026-10-11_13-22-23.json",
-];
+/**
+ * These two cases decrypt REAL codex exports that live on one developer's
+ * disk, outside the repo. Both the files and the password are therefore
+ * SUPPLIED BY THE ENVIRONMENT, never written down here:
+ *
+ *   CODEX_FOREIGN_FIXTURE_DIR       — directory holding the two exports
+ *   CODEX_FOREIGN_FIXTURE_PASSWORD  — their password
+ *
+ * The password used to be a string literal in this file. That is why it is
+ * not any more: this repo is PUBLIC, and committing the file published a
+ * real credential. It has since been rotated and purged from history. Do not
+ * reintroduce a literal here, and do not vendor the codices in — a public
+ * repo is the wrong home for somebody's exported codex.
+ *
+ * When either variable is unset, or the files are absent, the block SKIPS
+ * rather than failing. It previously hard-failed with ENOENT anywhere but
+ * that one machine, which is what broke the v1.7.0 publish run: green
+ * locally, red in CI, for reasons unrelated to the code under test.
+ */
+const REAL_PASSWORD = process.env.CODEX_FOREIGN_FIXTURE_PASSWORD ?? "";
+const FOREIGN_FIXTURE_DIR = process.env.CODEX_FOREIGN_FIXTURE_DIR ?? "";
+const REAL_FILES = FOREIGN_FIXTURE_DIR
+  ? [
+      `${FOREIGN_FIXTURE_DIR}/Ionut_OuronetCodex_2026-10-11_13-22-23.json`,
+      `${FOREIGN_FIXTURE_DIR}/Iounut-Latests_OuronetCodex_2026-10-11_13-22-23.json`,
+    ]
+  : [];
+const REAL_FIXTURES_AVAILABLE =
+  REAL_PASSWORD !== "" && REAL_FILES.length > 0 && REAL_FILES.every((f) => fs.existsSync(f));
 
-describe("runStructuralMigration — real legacy codex files (bug 2a)", () => {
+describe.skipIf(!REAL_FIXTURES_AVAILABLE)("runStructuralMigration — real legacy codex files (bug 2a)", () => {
   for (const file of REAL_FILES) {
     it(`fixes the real stoic seed's secret and preserves the original words in ${file}`, async () => {
       const entry = readRealStoicSeed(file);

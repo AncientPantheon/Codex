@@ -14,10 +14,20 @@
  * `fs.readFileSync` — NOT resolved relative to the repo) and asserted to
  * detect as `undefined` ("Unversioned") — they predate this field and are
  * the exact real-world case this function exists to recognize correctly.
+ *
+ * Those two are MACHINE-DEPENDENT and therefore SKIPPED when the files are
+ * absent. They live outside the repo on one developer's disk and are real
+ * user codices, so they are deliberately NOT vendored in — a public repo is
+ * the wrong home for somebody's exported codex, even an unencrypted-shape
+ * one. Without the skip they fail with ENOENT anywhere else, which is
+ * exactly how they broke the v1.7.0 publish run: green on the machine that
+ * has the files, red in CI, for a reason that has nothing to do with the
+ * code under test. Every other case here is self-contained and always runs,
+ * so the function's real contract stays covered everywhere.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import {
   detectCodexShapeVersion,
   formatCodexShapeVersionLabel,
@@ -52,12 +62,12 @@ describe("detectCodexShapeVersion", () => {
     expect(detectCodexShapeVersion(raw)).toBeUndefined();
   });
 
-  it("returns undefined for the REAL legacy file Ionut_OuronetCodex_2026-10-11_13-22-23.json (lacks the field)", () => {
+  it.skipIf(!existsSync(IONUT_CODEX_PATH))("returns undefined for the REAL legacy file Ionut_OuronetCodex_2026-10-11_13-22-23.json (lacks the field)", () => {
     const raw = readFileSync(IONUT_CODEX_PATH, "utf-8");
     expect(detectCodexShapeVersion(raw)).toBeUndefined();
   });
 
-  it("returns undefined for the REAL legacy file Iounut-Latests_OuronetCodex_2026-10-11_13-22-23.json (lacks the field)", () => {
+  it.skipIf(!existsSync(IOUNUT_LATEST_CODEX_PATH))("returns undefined for the REAL legacy file Iounut-Latests_OuronetCodex_2026-10-11_13-22-23.json (lacks the field)", () => {
     const raw = readFileSync(IOUNUT_LATEST_CODEX_PATH, "utf-8");
     expect(detectCodexShapeVersion(raw)).toBeUndefined();
   });
