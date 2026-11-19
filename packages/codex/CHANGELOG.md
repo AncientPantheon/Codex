@@ -2,6 +2,92 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.7.0 — 2026-11-19
+
+**MINOR — unbreaks browser consumers. `@ardrive/turbo-sdk` is removed
+entirely, and the guard that should have caught it now RESOLVES instead of
+grepping.** A Next 16 / Turbopack consumer could not build against 1.6.0:
+`the chunking context does not support external modules (request:
+node:stream/promises)`.
+
+### The cause was dead code
+
+`@ardrive/turbo-sdk` was referenced exactly once in the monorepo —
+`loadTurbo()` in `codex-arweave`'s `panel/lazyDeps.ts` — and **nothing called
+it**. Its own doc said it existed to "prove Turbo is reachable exclusively
+behind a dynamic `import()`", and `e4-treeshake-bundle`'s assertion (d) held
+it in place by asserting Turbo *is* present. A function that existed to
+demonstrate a property, plus a test pinning it there, broke every browser
+consumer. The real upload path is `arbundles` ANS-104 via `arweave-core`,
+which has zero turbo references.
+
+The reported fix was to import `@ardrive/turbo-sdk/web`. **Measured, that does
+not work**: turbo's own `lib/esm/common/{http,events}.js` import `node:stream`
+and `stream`, and `@dha-team/arbundles`' web build imports `stream`/`crypto`.
+The web subpath shares the Node-dependent common layer, so that one-liner
+would have reproduced the same failure on a different specifier. The
+dependency is deleted instead.
+
+A dynamic `import()` is not an escape hatch — the bundler must still RESOLVE
+the specifier and emit a browser chunk for it.
+
+### BREAKING IN THEORY
+
+`loadTurbo` and the `TurboSdkModule` type no longer exist on
+`@ancientpantheon/codex/arweave`. Shipped as a MINOR deliberately: the export
+had no callers, loaded an SDK nothing in the package used, and merely having
+it in the graph broke any browser consumer's build — so it cannot have been
+used successfully. If you import it, delete the import.
+
+### The guard is the point
+
+This bug class has now shipped twice (1.5.3 fixed the identical thing for
+`arbundles`). Both existing guards were structurally incapable of catching it:
+the CI check greps our own `dist/`, but turbo-sdk is EXTERNAL and its bytes
+are never emitted there; the treeshake test runs at `platform: "node"`,
+externalizes builtins by construction, and measures tree-shakeability, which
+is orthogonal to resolvability.
+
+`scripts/browser-safety-guard.mjs` now bundles **every entry of the published
+exports map** at `platform: "browser"` and fails on any unshimmable Node
+builtin. It was proven RED against the pre-fix tree, and mutation-tested —
+re-introducing blanket externalization turns its own spec red. It replaces the
+grep in CI, and is allow-list shaped so the next unanticipated Node-ism fails
+by default rather than having to be predicted.
+
+### Three more consumer-facing bugs the guard found
+
+- **`@ouronet/dalos-crypto` peer floor raised `>=4.4.0` → `>=4.5.1`.** `dist`
+  imports the `/chainweb` subpath, which only exists from 4.5.1 — a consumer
+  on 4.4.0 had an unresolvable import.
+- **`node:sqlite` shipped as `import("sqlite")`.** tsup normalises `node:x` to
+  `x` under `platform: "browser"` *before* consulting externals, so
+  `SqliteLibraryStore.open()` threw its "requires Node >=22.5" message even on
+  a Node 24 host. The specifier now lives in a const, opaque to that rewrite.
+- **`codex-ouronet` never copied `src/ui/tokens.css` to `dist/ui/tokens.css`**,
+  which `CodexModalShell` imports — any clean rebuild broke the package.
+
+### `ui.css`
+
+The bundler concatenated two member sheets that each open with the same
+Google-Fonts `@import`, leaving the second copy **after ~95 lines of rules** —
+invalid per spec, dropped by browsers, a warning or hard error in Turbopack
+and Lightning CSS. `@import`s are now hoisted and de-duplicated.
+
+**Still unfixed, and you may still need a patch:** ~200 Tailwind utilities
+(`.flex`, `.hidden`, `.border`, …) ship unscoped and can override your own
+identically-named classes by load order. Both obvious fixes were disproven by
+measurement — `important: '.codex-ui'` emits DESCENDANT selectors but 34
+`createPortal` sites render our UI outside the root, and `:where()`/`@layer`
+would place us below your *preflight* too, killing every border in our UI on
+exactly the Tailwind consumers it targets. Only `prefix` works (~527 call
+sites); it is tracked as its own task.
+
+### Not a Codex requirement
+
+`engines.node` is `>=20` in every package here, including shipped 1.6.0.
+Nothing in this repo or its dependency tree asks for Node `>=22.12`.
+
 ## 1.6.0 — 2026-10-15
 
 **MINOR — `ChangePasswordCard` gets live progress reporting + per-field
