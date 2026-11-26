@@ -35,6 +35,36 @@ describe("when changes are pending", () => {
     expect(note).toMatch(/keep working/i);
   });
 
+  /**
+   * `migration-execute` T10. This card and
+   * `codex-arweave/src/panel/CodexMigrationInformatics.tsx` shipped
+   * contradicting each other: this one said applying was OPTIONAL and
+   * "nothing is lost by never pressing these buttons", that one said moving
+   * funds was "a genuinely necessary part of becoming eligible".
+   *
+   * Both were half right, which is why both could ship. Eligibility is
+   * structural and reads nothing from chain, so this card is right that none
+   * of this is required. The OTHER surface was right about the funds: once the
+   * chosen payment key is in force, money still sitting on the old one is
+   * money the account no longer names.
+   *
+   * The single reconciled statement, on the owner's ruling, is therefore
+   * "applying is optional; applying PARTIALLY is not". Both halves are
+   * asserted here precisely because dropping either half is how the
+   * contradiction started: a card that only says "optional" invites a
+   * half-applied rotation that strands funds, and a card that only says
+   * "finish it" pushes users into transactions they do not need.
+   */
+  it("says applying is OPTIONAL and, in the same breath, that it must not be left half-applied", () => {
+    render(<PendingKeyChangesCard changes={[paymentChange]} />);
+    const note = screen.getByTestId("pending-key-changes-optional").textContent ?? "";
+    // Half one — unchanged, and asserted again above.
+    expect(note).toMatch(/optional/i);
+    // Half two — the part the old copy was missing.
+    expect(note).toMatch(/half-applied|half applied|part of the way|half-way/i);
+    expect(note).toMatch(/without stopping to ask/i);
+  });
+
   it("shows a guard change as FROM -> TO with its predicate", () => {
     render(<PendingKeyChangesCard changes={[guardChange]} />);
     const row = screen.getByTestId("pending-key-change-guard");

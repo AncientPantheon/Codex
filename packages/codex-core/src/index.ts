@@ -120,6 +120,39 @@ export type {
   MigrationExecutionStep,
   LiveAccountChoice,
 } from "./codex/migrationProgress.js";
+// ----- the MIGRATION CHAIN's brain: design §2's step order, §4's predicates
+// over chain state (which is what makes the chain idempotent and re-pressing
+// the recovery path), §5's once-only preconditions and round 2's keyset
+// -definition step. Pure — it imports nothing, so no chain read, no React and no
+// `@stoachain` can arrive through it; the engine in codex-ouronet is a loop
+// over `planMigrationChain`'s output. `paymentKeyAccountString` is the
+// bare-key -> account-string conversion `store.ts:2680` encodes and nothing
+// else performs. See codex/migrationChain.ts.
+export {
+  planMigrationChain,
+  checkMigrationPreconditions,
+  sumIgnisNeed,
+  paymentKeyAccountString,
+  bareKeyOf,
+  STOA_CONSOLIDATION_TARGET_CHAIN,
+  CONSOLIDATION_SOURCE_CHAINS,
+  KEYSET_UPDATE_NO_REF_REASON,
+  KEYSET_UPDATE_FORFEITED_REASON,
+  KEYSET_UPDATE_NO_DEFINITION_REASON,
+} from "./codex/migrationChain.js";
+export type {
+  ChainStateSnapshot,
+  MigrationGuardTarget,
+  MigrationChainIntent,
+  MigrationChainStep,
+  MigrationChainStepKind,
+  MigrationChainPlan,
+  MigrationIgnisCosts,
+  MigrationPreconditionInputs,
+  MigrationPreconditionVerdict,
+  MigrationPreconditionFailure,
+  MigrationPreconditionCode,
+} from "./codex/migrationChain.js";
 // ----- canonical display names for the Codex Master Seed and its three
 // derivations; see codex/masterNames.ts for why the positional rule lives
 // there too rather than being re-inlined at every call site.

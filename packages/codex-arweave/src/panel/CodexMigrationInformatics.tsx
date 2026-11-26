@@ -39,11 +39,26 @@
  * whole Master Seed/eligibility mechanism exists, not just an arbitrary
  * gate.
  *
- * The "three choices" / fund-migration sections below are STILL UNCHANGED
- * from the original shipped content, pending a further owner
- * clarification on one specific mechanic (whether choosing brand-new
- * custom words can ALSO trigger a fund-sweep from the old CodexPrime
- * account's keys) — do not assume an answer here; revise once confirmed.
+ * The "three choices" section below is STILL UNCHANGED from the original
+ * shipped content, pending a further owner clarification on one specific
+ * mechanic (whether choosing brand-new custom words can ALSO trigger a
+ * fund-sweep from the old CodexPrime account's keys) — do not assume an
+ * answer here; revise once confirmed.
+ *
+ * CORRECTED (owner ruling, `migration-execute` T10): the fund-migration
+ * section used to say moving funds was "a genuinely necessary part of
+ * becoming eligible" and that, "once the wizard is built, every step that
+ * moves funds will require your explicit confirmation". Both were wrong,
+ * and they contradicted two other shipped surfaces
+ * (`PendingKeyChangesCard`'s "this is OPTIONAL", and the Apply popup).
+ * Eligibility is structural and reads nothing from chain, so funds were
+ * never a condition of it; and the engine runs as ONE uninterrupted chain
+ * with no per-step prompts (`migration-execute/design.md` §3). The owner's
+ * ruling, verbatim: "You don't have to do this. But if you start it, it
+ * runs all the way through without stopping to ask you anything." That is
+ * the single statement all three surfaces now make — starting is optional,
+ * stopping half-way is not — and the sentence itself is pinned once as
+ * MIGRATION_RUNS_UNINTERRUPTED_MESSAGE below rather than copied.
  */
 
 import * as React from "react";
@@ -58,6 +73,31 @@ import {
   INFORMATICS_LIST_STYLE,
   INFORMATICS_SECTION_STYLE,
 } from "./informaticsStyles.js";
+
+/**
+ * The owner's ruling on what applying a migration IS, stated verbatim and
+ * pinned ONCE:
+ *
+ *   "You don't have to do this. But if you start it, it runs all the way
+ *    through without stopping to ask you anything."
+ *
+ * Three shipped surfaces used to answer that question differently (see the
+ * header note above), which is exactly what a constant prevents. Exported for
+ * the same reason `ARWEAVE_RESTORE_ELIGIBLE_MESSAGE` is: this file's own tests
+ * and the OTHER surface that states it — the Apply popup in `CodexIdPage.tsx`
+ * — assert and render the exact wording without restating it.
+ *
+ * The third surface, `codex-ouronet`'s `PendingKeyChangesCard`, cannot import
+ * this: codex-arweave depends on codex-ouronet, not the reverse, and that
+ * package's `src/ui/index.ts` is negatively locked by
+ * `tests/ui-surface-stability.test.ts`. It therefore keeps the same two claims
+ * in its own copy, with its own test asserting each half separately. One
+ * string for all three would have to live in `codex-core`, which is outside
+ * this change's scope.
+ */
+export const MIGRATION_RUNS_UNINTERRUPTED_MESSAGE =
+  "You do not have to do this. But if you start it, it runs all the way through: " +
+  "one press, every remaining transaction in order, without stopping to ask you anything.";
 
 export function CodexMigrationInformatics(): React.ReactElement {
   return (
@@ -187,10 +227,15 @@ export function CodexMigrationInformatics(): React.ReactElement {
       <section style={INFORMATICS_LAST_SECTION_STYLE}>
         <p style={INFORMATICS_BODY_LAST_STYLE}>
           Whichever choice you make, migration moves your real on-chain money — native STOA and
-          your staked and unstaked urSTOA — from your old keys to new ones. This is a genuinely
-          necessary part of becoming eligible. It is not instant and not a single click:
-          migration is a multi-step process, and once the wizard is built, every step that
-          moves funds will require your explicit confirmation before it happens.
+          your staked and unstaked urSTOA — from your old keys to new ones. Moving it is not
+          required to be eligible: your codex is eligible either way, and your old keys keep
+          working. What you must not do is move it part of the way — once the new payment key
+          is in force, money still sitting on the old key is money your account no longer
+          names. So this is one decision, not a list of them.{" "}
+          {MIGRATION_RUNS_UNINTERRUPTED_MESSAGE} It is not instant, and it is safe to
+          re-run: every step first reads the chain and skips whatever already landed, so
+          pressing it again after a failure or a closed tab carries on from where it stopped
+          instead of repeating anything.
         </p>
       </section>
     </div>

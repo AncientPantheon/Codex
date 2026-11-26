@@ -1471,20 +1471,29 @@ export function OuronetAccountsTab({ className, paginationRiserTarget, swipeIndi
     return () => { aborted = true; };
   }, [apolloAddrs, txNonce]);
 
-  // Codex at-rest + live chain overlay. Preserves codex order so index 0 stays
-  // CodexPrime regardless of the display sort below.
+  // Codex at-rest + live chain overlay. Preserves codex order, which is what
+  // keeps index 0 FINDABLE for the `indexOf(account)` lookups that feed each
+  // row's `index` — not what makes it display first (see the sort below).
   const hydratedAccounts = useMemo(
     () => accounts.map((a) => hydrate(a, byAddress[a.address])),
     [accounts, byAddress],
   );
 
   const { standardAccounts, smartAccounts } = useMemo(() => {
-    const sorted = [...hydratedAccounts].sort((a, b) => {
-      const aI = hydratedAccounts.indexOf(a), bI = hydratedAccounts.indexOf(b);
-      if (aI === 0) return -1;
-      if (bI === 0) return 1;
-      return (a.name || a.address).localeCompare(b.name || b.address);
-    });
+    // Name alone, never position (migration-execute-keyset/design.md §4). This
+    // comparator used to force-pin `hydratedAccounts[0]` ahead of the alphabet,
+    // which was both wrong and redundant: the pinned prime zone is computed
+    // SEPARATELY below (`primeRows`/`primeIds`, and `restList` excludes them),
+    // so on a SEALED codex — where index 0 is the DISPLACED legacy prime, not
+    // the master — the pin could only lift a retired account over every
+    // ordinary one. That is the owner's screenshot ("Initial Seed" above
+    // AncientPleb / AOZ / CTO / CustodiansVault), and the last survivor of the
+    // positional assumption `prime-identity-display` removed from the gold, the
+    // pinning and the badge. Dropping it also drops an `indexOf` per
+    // comparison — O(n^2) over every account in the codex, by object identity.
+    const sorted = [...hydratedAccounts].sort((a, b) =>
+      (a.name || a.address).localeCompare(b.name || b.address),
+    );
     return {
       standardAccounts: sorted.filter((a) => !a.isSmart),
       smartAccounts: sorted.filter((a) => a.isSmart),

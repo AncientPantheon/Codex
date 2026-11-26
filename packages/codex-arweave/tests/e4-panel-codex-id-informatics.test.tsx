@@ -25,9 +25,11 @@
  *   `legacy-prime-migration/design.md`'s EXACT conditional-default framing
  *   (option 2 recommended when an existing custom-worded account exists,
  *   option 1 recommended otherwise, option 3 always available but always
- *   marked not-recommended); the explicit "moves real on-chain STOA/urSTOA,
- *   never instant, never one click, every fund-moving step needs
- *   confirmation" statement.
+ *   marked not-recommended); the explicit "moves real on-chain STOA/urSTOA"
+ *   statement — which, since `migration-execute` T10, says the owner's
+ *   ruling instead of the old per-step-confirmation promise: starting it is
+ *   optional, leaving it half-applied is not, and once started it runs
+ *   through from one press without stopping to ask anything.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -36,7 +38,10 @@ import { OURONET_CODEX_MASTER } from "@ancientpantheon/codex-core";
 
 import { CodexBackupInformatics } from "../src/panel/CodexBackupInformatics";
 import { CodexEncryptionInformatics } from "../src/panel/CodexEncryptionInformatics";
-import { CodexMigrationInformatics } from "../src/panel/CodexMigrationInformatics";
+import {
+  CodexMigrationInformatics,
+  MIGRATION_RUNS_UNINTERRUPTED_MESSAGE,
+} from "../src/panel/CodexMigrationInformatics";
 
 afterEach(() => {
   cleanup();
@@ -287,14 +292,60 @@ describe("CodexMigrationInformatics — the three-option menu, exact conditional
 });
 
 describe("CodexMigrationInformatics — migration moves real on-chain funds", () => {
-  it("states migration moves native STOA and urSTOA, is never instant/one-click, and needs confirmation at every fund-moving step", () => {
+  /**
+   * REWRITTEN, deliberately, by `migration-execute` T10 — and this comment is
+   * here so the next reader knows it was a DECISION, not a casualty.
+   *
+   * The three assertions removed below ("not a single click", "needs
+   * confirmation at every fund-moving step", and the paragraph's claim that
+   * moving funds is "a genuinely necessary part of becoming eligible") were
+   * accurate when nothing executed these transactions. They are now false,
+   * on the owner's own ruling, quoted verbatim:
+   *
+   *   "You don't have to do this. But if you start it, it runs all the way
+   *    through without stopping to ask you anything."
+   *
+   * `migration-execute/design.md` §3 is the same instruction — "the UI should
+   * be in a loop to send them all. There should be no interrupting it" — so a
+   * promise of per-step confirmation is a promise the engine will not keep,
+   * and "not a single click" is wrong about a surface whose whole point is
+   * ONE press. Eligibility, separately, was settled in stage 2 and reads
+   * nothing from chain (`store.ts:2717-2721`), so funds were never a
+   * condition of it.
+   *
+   * What is NOT optional is doing this half-way, which is what the paragraph
+   * must now say instead: once the new payment key is in force, funds left on
+   * the old key are funds the account no longer names.
+   *
+   * The two NEGATIVE assertions are the load-bearing ones. The positive copy
+   * can be reworded freely; re-introducing either retired promise is the
+   * regression this test exists to catch.
+   */
+  it("says moving funds is optional, that leaving it HALF-DONE is not, and never promises a per-step confirmation", () => {
     render(<CodexMigrationInformatics />);
     const el = screen.getByText(/native STOA/i, { selector: "p" });
     expect(el.textContent).toMatch(/urSTOA/);
     expect(el.textContent).toMatch(/not instant/i);
-    expect(el.textContent).toMatch(/not .*single click|never.*single click/i);
-    expect(el.textContent).toMatch(/multi-step|multiple steps|several steps/i);
-    expect(el.textContent).toMatch(/confirmation/i);
+
+    // The retired promises. Design §3: one uninterrupted loop, no prompts.
+    expect(el.textContent).not.toMatch(/confirmation/i);
+    // ...and funds are not a condition of eligibility (stage 2 settled it).
+    expect(el.textContent).not.toMatch(/necessary part of becoming eligible/i);
+    // ...nor is the wizard still unbuilt.
+    expect(el.textContent).not.toMatch(/once the wizard is built/i);
+
+    // What replaces them: one press, uninterrupted, and half-done is the
+    // real hazard. The ruling itself is asserted against the EXPORTED
+    // constant, not a copy of its text, so this panel and the Apply popup in
+    // `CodexIdPage.tsx` cannot drift back apart — the same discipline the
+    // master-name assertion below already uses.
+    expect(el.textContent).toContain(MIGRATION_RUNS_UNINTERRUPTED_MESSAGE);
+    // ...and the constant itself cannot be quietly softened.
+    expect(el.textContent).toMatch(/one press|single press/i);
+    expect(el.textContent).toMatch(/without stopping to ask/i);
+    expect(el.textContent).toMatch(/half-way|half way|half-done|part of the way/i);
+    // Safe to re-press, because every step re-reads the chain (design §4).
+    expect(el.textContent).toMatch(/re-run|run it again|press it again/i);
   });
 
   it("names all THREE derivations of the one Master Seed, so the threefold model is stated, not implied", () => {

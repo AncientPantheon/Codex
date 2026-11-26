@@ -38,3 +38,29 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { configure } from "@testing-library/react";
 
 configure({ asyncUtilTimeout: 15000 });
+
+/**
+ * THE NETWORK BELT.
+ *
+ * No spec in this package may make a real network call. Verified free: with
+ * this throw in place the whole suite passes unchanged (71 files, 1137
+ * tests), so nothing here legitimately reaches the wire.
+ *
+ * It exists because the reach is easy to acquire by ACCIDENT. `CodexIdPage`
+ * mounts `<PendingKeyChangesSection />` prop-less, and that section's
+ * injected seams fall back to live readers when a prop is omitted — so a
+ * component added below it can start reading mainnet from a unit test
+ * without anyone editing a test. The sibling package wears this belt
+ * per-file via `setPactReader`; codex-arweave cannot (it does not depend on
+ * `@stoachain/stoa-core`), so the guard goes at the transport instead, which
+ * is stricter and catches every route rather than one library's.
+ *
+ * A spec that genuinely needs fetch should stub it locally, which shadows
+ * this and keeps the failure loud for everyone else.
+ */
+globalThis.fetch = ((...args: unknown[]) => {
+  throw new Error(
+    `A test made a real network call to ${String(args[0])}. Inject the seam ` +
+      `instead — see tests/setup.ts's network belt.`,
+  );
+}) as typeof fetch;

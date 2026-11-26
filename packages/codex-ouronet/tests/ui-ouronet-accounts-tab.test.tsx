@@ -666,3 +666,111 @@ describe("<OuronetAccountsTab> — the settled master is renameable, but still N
     expect(within(initial).queryByRole("button", { name: /^delete$/i })).toBeNull();
   });
 });
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * migration-execute-keyset/design.md §4, acceptance criterion 9 — the list
+ * sorts alphabetically, with NO index-0 pin.
+ *
+ * The owner's second screenshot of the same SEALED codex: under "Other
+ * standard accounts", "Initial Seed" sat above AncientPleb / AOZ / CTO /
+ * CustodiansVault — which were themselves correctly alphabetical. The cause
+ * was a positional special case inside the display comparator
+ * (`if (aI === 0) return -1`), which force-pinned `hydratedAccounts[0]` ahead
+ * of `localeCompare`. On a settled codex index 0 is the DISPLACED legacy
+ * prime, so the pin lifted a retired account above every ordinary one — the
+ * same positional assumption `prime-identity-display` removed from the gold,
+ * the pinning and the badge, surviving inside the sort.
+ *
+ * Only this fixture SHAPE can observe the pin at all, which is why the defect
+ * lived so long: the prime zone (`primeIds`) is built separately and
+ * `restList` already excludes it, so a pin on a row that IS the prime is
+ * invisible, and every earlier order spec here uses a two-account fixture
+ * with one of them pinned. It takes a SEALED codex (so index 0 is displaced
+ * into the rest list) plus more than one other ordinary row for the force-pin
+ * to show.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/** The screenshot's codex: the settled master, the DISPLACED index-0 legacy
+ *  prime whose name sorts mid-alphabet, and four ordinary accounts whose
+ *  stored names sort in a different order from their codex positions. */
+const screenshotRestAccounts = (): IOuroAccount[] => [
+  ouroFx({ id: "initial", name: "Initial Seed", address: "Ѻ.initial-acct" }),
+  ouroFx({ id: "hodler", name: "AncientHodler", address: "Ѻ.hodler-acct" }),
+  ouroFx({ id: "vault", name: "CustodiansVault", address: "Ѻ.vault-acct" }),
+  ouroFx({ id: "pleb", name: "AncientPleb", address: "Ѻ.pleb-acct" }),
+  ouroFx({ id: "cto", name: "CTO", address: "Ѻ.cto-acct" }),
+  ouroFx({ id: "aoz", name: "AOZ", address: "Ѻ.aoz-acct" }),
+];
+
+describe("<OuronetAccountsTab> — the rest list is sorted by name alone, with no positional pin", () => {
+  it("orders every non-prime row by `localeCompare`, so the displaced index-0 account sits where its NAME falls", async () => {
+    // The photograph, as an assertion: the pinned master first, then
+    // AncientPleb / AOZ / CTO / CustodiansVault / Initial Seed. Codex order
+    // (initial, vault, pleb, cto, aoz) is deliberately nothing like it, so a
+    // comparator that leaked ANY positional information cannot pass.
+    await renderTab(screenshotRestAccounts(), {}, SETTLED_ON_HODLER, SEALED);
+
+    expect(rowOrder()).toEqual(["hodler", "pleb", "aoz", "cto", "vault", "initial"]);
+  });
+
+  it("never lifts the row at `hydratedAccounts[0]` above the others when its name does not sort first", async () => {
+    // The regression this task closes, stated independently of the exact
+    // alphabet so it survives a fixture tweak: "Initial Seed" is codex index
+    // 0, and every one of the four ordinary names sorts before it, so it must
+    // come LAST — under the force-pin it came first.
+    await renderTab(screenshotRestAccounts(), {}, SETTLED_ON_HODLER, SEALED);
+
+    const rest = rowOrder().slice(1); // drop the pinned prime zone
+    expect(rest[0]).not.toBe("initial");
+    expect(rest[rest.length - 1]).toBe("initial");
+  });
+
+  it("leaves the pinned prime zone exactly as it was: the settled master still leads, still the only gold row, still badged", async () => {
+    // The sort and the prime zone are different mechanisms — `primeRows` /
+    // `primeIds` resolve through `useMasterOuronetIdentity(hydratedAccounts)`,
+    // not through the sorted copy. Removing the pin must not move the master,
+    // which on a bigger fixture than the two-row ones above is worth pinning
+    // explicitly: the master's name ("AncientHodler") sorts FIRST here, so a
+    // regression that dropped the prime zone and relied on the alphabet would
+    // still produce a master-first row order — but not a gold, badged,
+    // separated one.
+    await renderTab(screenshotRestAccounts(), {}, SETTLED_ON_HODLER, SEALED);
+
+    expect(rowOrder()[0]).toBe("hodler");
+    expect(goldRowIds()).toEqual(["hodler"]);
+    const hodler = rowOf("hodler");
+    expect(within(hodler).getByTestId("account-designation-hodler").textContent).toBe(
+      "Codex Ouronet Master",
+    );
+    expect(within(hodler).getByText(/🔒\s*Prime/)).toBeTruthy();
+    // ...and the displaced row keeps its retired designation wherever the
+    // sort put it.
+    expect(within(rowOf("initial")).getByTestId("account-designation-initial").textContent).toBe(
+      "Former Codex Prime",
+    );
+  });
+
+  it("falls back to the ADDRESS for an account with no stored name — the branch that now carries the whole decision", async () => {
+    // `a.name || a.address` is the entire comparator after this change, so
+    // its fallback arm is load-bearing. Both unnamed rows TITLE themselves
+    // "Account #n" (`masterOuronetAccountName`'s own fallback), which is not
+    // the sort key: sorting by the title would order them by codex position
+    // (zebra, then alpha), and sorting by the empty name would put them
+    // FIRST. Only the address fallback yields alpha before zebra, after
+    // "Initial Seed" — every `Ѻ.`-prefixed address collates after the Latin
+    // names.
+    await renderTab(
+      [
+        ouroFx({ id: "initial", name: "Initial Seed", address: "Ѻ.initial-acct" }),
+        ouroFx({ id: "hodler", name: "AncientHodler", address: "Ѻ.hodler-acct" }),
+        ouroFx({ id: "zebra", name: "", address: "Ѻ.zebra-acct" }),
+        ouroFx({ id: "alpha", name: "", address: "Ѻ.alpha-acct" }),
+      ],
+      {},
+      SETTLED_ON_HODLER,
+      SEALED,
+    );
+
+    expect(rowOrder()).toEqual(["hodler", "initial", "alpha", "zebra"]);
+  });
+});

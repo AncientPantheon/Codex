@@ -38,6 +38,7 @@ import { rotateGuard } from "@ouronet/ouronet-core/interactions/guardFunctions";
 import { getRotateGuardInfoLive as getRotateGuardInfo } from "../ouroSelectorReads.js";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
+import { collectGuardSigners } from "../execute/rotateOps.js";
 import { Shield, Loader2 } from "lucide-react";
 import { ZbomLayout } from "../cfm/ZbomLayout.js";
 import { FunctionInfoZone } from "../cfm/FunctionInfoZone.js";
@@ -252,16 +253,14 @@ export default function RotateGuardModal({
       // Prompt for the codex password if locked; abort on cancel.
       if (!(await ensureCodexUnlocked())) { _tx.fail("Authentication required"); return; }
 
-      const collectKeys = async (analysis: ReturnType<typeof analyzeGuard>) => {
-        const keys: { publicKey: string; privateKey: string }[] = [];
-        const candidates = [...analysis.codexKeys, ...analysis.resolvedForeignKeys];
-        for (const pub of candidates) {
-          if (keys.length >= analysis.threshold) break;
-          if (resolvedManualKeys[pub]) keys.push({ publicKey: pub, privateKey: resolvedManualKeys[pub] });
-          else { const kp = await getStoaChainKeyPairsByPublicKey(pub); if (kp) keys.push(kp); }
-        }
-        return keys;
-      };
+      // The signer walk itself lives in `zbom/execute/rotateOps.ts` — it was
+      // byte-identical here and in the sibling rotate modal, and the threshold
+      // stop (never sign with more keys than the guard requires) is too
+      // load-bearing to keep in two independently-editable copies. This
+      // closure is only the binding of this modal's own resolver + manual
+      // keys, so the two call sites below are unchanged.
+      const collectKeys = (analysis: ReturnType<typeof analyzeGuard>) =>
+        collectGuardSigners(analysis, getStoaChainKeyPairsByPublicKey, resolvedManualKeys);
 
       const patronSignKeys   = await collectKeys(patronAnalysis);
       const accountSignKeys  = await collectKeys(accountAnalysis);

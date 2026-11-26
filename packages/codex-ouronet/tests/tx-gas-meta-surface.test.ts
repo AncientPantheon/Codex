@@ -23,7 +23,7 @@
  *
  * WHAT IS LOCKED (source-text scan, so it holds for sites a unit test can't easily
  * reach — these closures live inside heavy React modals):
- *   (a) inventory — exactly the 15 known `.setMeta(` sites exist. A NEW transaction
+ *   (a) inventory — exactly the 20 known `.setMeta(` sites exist. A NEW transaction
  *       site fails here until it is added below AND satisfies (b)-(d), so the gas
  *       contract can't be forgotten by a future modal.
  *   (b) every `.setMeta({...})` passes `gasPrice`.
@@ -83,7 +83,7 @@ import { join, relative, resolve } from "node:path";
 // package's vitest transform does not hand these specs a file: URL.
 const SRC = resolve(__dirname, "../src");
 
-/** The 17 confirmed transaction-building sites. Three operations
+/** The 20 confirmed transaction-building sites. Three operations
  *  (RotateSovereign, RotateGuard, RotatePaymentKey) exist as TWO independent copies
  *  across `components/` and `zbom/modals/` — they share no code, so both copies are
  *  listed and both must satisfy the gas contract. The 15th,
@@ -92,7 +92,15 @@ const SRC = resolve(__dirname, "../src");
  *  16th, `kadena/kadenaReads.ts`, is a dirty-read-only site — see
  *  `READ_ONLY_TX_SITES` below. The 17th, `ui/internal/SendKadenaModal.tsx`
  *  (added 2026-09-28), is a FIXED gas-price site — see
- *  `FIXED_GAS_PRICE_TX_SITES` below. */
+ *  `FIXED_GAS_PRICE_TX_SITES` below. The 18th,
+ *  `zbom/execute/nativeStoaTransfer.ts` (added 2026-11-25), is the migration
+ *  engine's native-STOA drain — also self-contained, for the reason recorded
+ *  in that category's comment below. The 19th and 20th,
+ *  `zbom/execute/collectUnstakeUrStoa.ts` and
+ *  `zbom/execute/defineKeysetOps.ts` (added 2026-11-26,
+ *  docs/work/migration-execute-keyset/), are the migration engine's two new
+ *  builders — the merged Collect+Unstake and the keyset-ref update — and are
+ *  self-contained for the same recorded reason. */
 const EXPECTED_TX_SITES = [
   "components/RotateGuardModal.tsx",
   "components/RotatePaymentKeyModal.tsx",
@@ -110,14 +118,60 @@ const EXPECTED_TX_SITES = [
   "ui/internal/SendStoaModal.tsx",
   "ui/internal/SendKadenaModal.tsx",
   "zbom/rotatePaymentKeyLive.ts",
+  "zbom/execute/nativeStoaTransfer.ts",
+  "zbom/execute/collectUnstakeUrStoa.ts",
+  "zbom/execute/defineKeysetOps.ts",
   "kadena/kadenaReads.ts",
 ].sort();
 
 /** Self-contained delegate implementations (mirror an external package's OWN
  *  dirtyRead→sign→submit pipeline, predating `execute()`'s ctx-injection
  *  contract) — inventoried and checked for (b)/(c), but exempt from (d)/(e)'s
- *  ctx-shape assertions. See the module doc comment above. */
-const SELF_CONTAINED_TX_SITES = new Set(["zbom/rotatePaymentKeyLive.ts"]);
+ *  ctx-shape assertions. See the module doc comment above.
+ *
+ *  `zbom/execute/nativeStoaTransfer.ts` joined this category by DESIGN
+ *  DECISION, not convenience (docs/work/migration-execute/plan.md decision 3).
+ *  The migration engine is a thing the user RE-PRESSES, and
+ *  `CodexSigningStrategy.execute()`'s own doc comment
+ *  (`@stoachain/stoa-core/dist/signing/codexStrategy.js:39-56`) rules it out
+ *  for that in so many words: it "deliberately runs without failover (REQ-04)
+ *  and therefore has NO built-in dedup safety on retry … Better: use
+ *  `getFailoverClient` directly for non-codex submit flows so the dedup
+ *  contract handles this for you." A `TIMEOUT` on submit may already have
+ *  reached chainweb; a re-press rebuilds with a fresh `creationTime`, so the
+ *  two copies hash differently and BOTH land — for a transfer, that is paying
+ *  twice. So the drain submits through `getFailoverClient`, which means it has
+ *  no injected `execute()` ctx to take `creationTime` from and must satisfy
+ *  the `...stoaGasMeta(safeCreationTime())` shape instead of (d)/(e)'s
+ *  ctx-destructuring ones — exactly like `rotatePaymentKeyLive.ts`.
+ *
+ *  The MODAL that shares its Pact-code builders (`ui/internal/SendStoaModal.tsx`)
+ *  stays in the default ctx-injected category: a human watching one send is
+ *  the case `execute()` is for, and `buildGasStationTransaction` deliberately
+ *  did not move.
+ *
+ *  `zbom/execute/collectUnstakeUrStoa.ts` (added 2026-11-26) is step C merged
+ *  into ONE transaction — `(coin.C_URV|Collect …)` then `(coin.C_URV|Unstake …)`
+ *  — and is self-contained for exactly the decision above: it is a row of the
+ *  same re-pressable chain, and a duplicate landing would unstake twice.
+ *  `codexStrategy.js:39-56` rules `execute()` out for a flow the user
+ *  re-presses, because it has no dedup on retry.
+ *
+ *  `zbom/execute/defineKeysetOps.ts` (added 2026-11-26) is the keyset-ref
+ *  update, self-contained for the same re-press reason — and it is also the
+ *  one site in this package whose gas is SELF-PAID rather than
+ *  gas-station-sponsored, because `DALOS.GAS_PAYER`
+ *  (`1_SOVEREIGN/STAGE_01/2_Core/01_DALOS.pact:456-526`) accepts no shape a
+ *  `(define-keyset …)` can take. That changes who pays, not how the command
+ *  is built: it still derives StoaChain's own rising floor through
+ *  `stoaGasMeta(safeCreationTime())`, so this category fits it and
+ *  `FIXED_GAS_PRICE_TX_SITES` does not. */
+const SELF_CONTAINED_TX_SITES = new Set([
+  "zbom/rotatePaymentKeyLive.ts",
+  "zbom/execute/nativeStoaTransfer.ts",
+  "zbom/execute/collectUnstakeUrStoa.ts",
+  "zbom/execute/defineKeysetOps.ts",
+]);
 
 /** Dirty-read-only sites — never signed, never submitted, so the gasPrice/
  *  creationTime contract this whole file exists to enforce genuinely does

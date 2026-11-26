@@ -21,6 +21,10 @@ import { MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 
 import { ArweavePanel } from "../src/panel/ArweavePanel";
+// The owner's ruling on uninterrupted execution, asserted against the one
+// exported constant the two arweave surfaces render rather than a copy of
+// its text (`migration-execute` T10).
+import { MIGRATION_RUNS_UNINTERRUPTED_MESSAGE } from "../src/panel/CodexMigrationInformatics";
 import { ArweavePanelProvider, type ArweavePanelDeps } from "../src/panel/context";
 import { ARWEAVE_CHAIN_ID } from "../src/address-book/chainId";
 import type { LibraryEntry, LibraryStore } from "../src/library/types";
@@ -2101,12 +2105,84 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     expect(within(modal).getByTitle(CHOSEN_GUARD_KEY)).toBeInTheDocument();
     expect(within(modal).getByTestId("codex-apply-migration-needs-transactions")).toBeInTheDocument();
 
-    // THE load-bearing rule: execution is not wired yet, so sealing here would
-    // lock the codex forever with the chosen keys never put in force.
+    // THE load-bearing rule, and it does NOT depend on execution being
+    // unwired (`migration-execute` T10 wired it): Seal is permanent, so it is
+    // refused while anything is outstanding, or the codex locks forever with
+    // the chosen keys never put in force. This popup lists and points; the
+    // card below executes. `applyHasOutstandingWork` exists to keep those two
+    // apart, and keeping them apart survives the executor.
     expect(within(modal).queryByTestId("codex-apply-migration-seal")).toBeNull();
     expect(within(modal).queryByTestId("codex-apply-migration-nothing-to-send")).toBeNull();
     expect(capturedStore!.getState().migrationProgress?.appliedAt).toBeUndefined();
     expect(capturedStore!.getState().primeAlignment).not.toBe("aligned");
+  });
+
+  /**
+   * `migration-execute` T10. The paragraph used to say execution "is not
+   * wired up yet — until it is, use the 'Key changes you chose, not yet on
+   * chain' card further down this page to send them one at a time."
+   *
+   * Both halves of that go false the moment the chain engine lands: there IS
+   * a way to execute from this app, and it is explicitly NOT one at a time —
+   * design §3 runs every remaining step in one uninterrupted pass from a
+   * single press. A popup that keeps telling the user to send them
+   * individually is instructions for stranding funds half-way through a
+   * rotation, which is the exact hazard the one-chain ordering exists to
+   * prevent.
+   *
+   * Asserted on the paragraph's own text (scoped by its `data-testid`, which
+   * T10 keeps) rather than on the modal as a whole, because the SEAL caveat
+   * and the `define-keyset` note are separate paragraphs with their own
+   * wording and their own tests.
+   *
+   * `migration-execute-keyset` T7 — THE COMMENT, DELIBERATELY CORRECTED. It
+   * used to justify the scoping by calling the sibling paragraphs' "not wired
+   * up" wording "still-true". That was true of the `define-keyset` note only,
+   * and T7 made the keyset update a real step and removed the last "not wired
+   * up" from this popup. The ASSERTION below is unaffected and stays — the
+   * negative now holds modal-wide, and it is still asserted here because this
+   * is the paragraph where the retired claim would reappear — but an
+   * explanation that points at copy which no longer exists is a false
+   * explanation of a true test, so it is rewritten rather than left.
+   */
+  it("the needs-transactions paragraph names the executor on the card below, not 'one at a time', and still offers NO Seal", async () => {
+    await renderCodexIdPage(() => {
+      capturedStore!.setState({
+        migrationProgress: progressWith({
+          selection: {
+            account: { kind: "keep-current" },
+            payment: { kind: "keep" },
+            guard: { kind: "custom", keys: [CHOSEN_GUARD_KEY], pred: "keys-all" },
+          },
+        }),
+        ouroAccounts: [MASTER_ACCOUNT],
+      });
+    });
+
+    fireEvent.click(screen.getByTestId("arweave-codex-id-apply-migration"));
+    const modal = screen.getByTestId("codex-apply-migration-modal");
+    const note =
+      within(modal).getByTestId("codex-apply-migration-needs-transactions").textContent ?? "";
+
+    // It still says transactions are needed before sealing...
+    expect(note).toMatch(/needs transactions/i);
+    // ...and now names WHERE they are sent from: T11's single control on the
+    // stage-3A card, by the label the user actually sees.
+    expect(note).toMatch(/Execute all remaining transactions/i);
+    expect(note).toMatch(/Key changes you chose, not yet on chain/i);
+
+    // The two retired claims.
+    expect(note).not.toMatch(/one at a time/i);
+    expect(note).not.toMatch(/not wired up/i);
+
+    // The owner's ruling, stated here too — all three surfaces say one thing,
+    // and these two say it from the SAME constant.
+    expect(note).toContain(MIGRATION_RUNS_UNINTERRUPTED_MESSAGE);
+    expect(note).toMatch(/without stopping to ask/i);
+
+    // Unchanged: this popup is the SEAL surface and offers no Seal while
+    // anything is outstanding.
+    expect(within(modal).queryByTestId("codex-apply-migration-seal")).toBeNull();
   });
 
   it("state (4) — sealed: the locked '✓ Permaweb Eligible' status, with NO Retry and NO Apply, even though the sealed row still KEEPS its plan", async () => {
@@ -2127,14 +2203,16 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     expect(capturedStore!.getState().migrationProgress?.pending).toBeTruthy();
   });
 
-  it("a guard choice of `update-keyset-custom` is OUTSTANDING WORK: the popup needs transactions, names the `define-keyset` that would do it, and offers NO Seal", async () => {
+  it("a guard choice of `update-keyset-custom` is OUTSTANDING WORK: the popup needs transactions, names the `define-keyset` that WILL do it, and offers NO Seal", async () => {
     // Owner's correction to T3: updating a namespace keyset's definition IS a
-    // real on-chain transaction (`define-keyset` against that keyset) — this
-    // app just does not wire it up yet. `computeOutstandingKeyChanges` still
-    // skips both kinds (outstandingKeyChanges.ts:58-71) because it answers the
-    // narrower "which key ROTATIONS are outstanding"; the popup must combine
-    // that with the keyset choice, or it offers Seal — permanent — over work
-    // that was never executed.
+    // real on-chain transaction (`define-keyset` against that keyset), and
+    // `migration-execute-keyset` T3/T4/T5 made it an EXECUTABLE step of the
+    // chain rather than a recorded intention — see the rewritten assertions
+    // below. `computeOutstandingKeyChanges` still skips both kinds
+    // (outstandingKeyChanges.ts:83-95) because it answers the narrower "which
+    // key ROTATIONS are outstanding"; the popup must combine that with the
+    // keyset choice, or it offers Seal — permanent — over work that was never
+    // executed.
     await renderCodexIdPage(() => {
       capturedStore!.setState({
         migrationProgress: progressWith({
@@ -2159,11 +2237,51 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     expect(within(modal).queryByTestId("codex-apply-migration-seal")).toBeNull();
 
     const note = within(modal).getByTestId("codex-apply-migration-keyset-note");
-    // Naming the transaction is the point of the correction: the old copy told
-    // the owner no such transaction exists, which is false.
+    // Naming the transaction is the point of the original correction: the copy
+    // before it told the owner no such transaction exists, which was false.
     expect(note).toHaveTextContent(/define-keyset/i);
-    expect(note).toHaveTextContent(/not wired up/i);
     expect(note.textContent ?? "").not.toMatch(/nothing executable/i);
+
+    /**
+     * `migration-execute-keyset` T7 — THE DELIBERATE REWRITE. This assertion
+     * used to be `expect(note).toHaveTextContent(/not wired up/i)`, pinning
+     * the copy's claim that a `define-keyset` "is not wired up in this app
+     * yet, so it cannot be sent from here".
+     *
+     * The DESIGN overruled that, not a convenience: design §2 makes the
+     * keyset update a real step ("`define-keyset` — the keyset-ref update, as
+     * a real step"), and this round built it — the planner emits it in G's
+     * slot (`codex-core/src/codex/migrationChain.ts:629-650`), there is a
+     * builder for it (`codex-ouronet/src/zbom/execute/defineKeysetOps.ts`),
+     * the engine submits it, and the pre-press gate resolves its signers
+     * (`codex-ouronet/src/ui/settings/KeysetUpdateGate.tsx`). A test that
+     * kept pinning the old sentence would be pinning a falsehood onto a
+     * shipped surface, so it is replaced by assertions on what is now true.
+     *
+     * Deliberately NOT asserted as a whole-string match: the point is the
+     * four FACTS, each of which a future copy edit could silently drop.
+     */
+    expect(note.textContent ?? "").not.toMatch(/not wired up|cannot be sent/i);
+    // (1) Criterion 3 — it goes out on the SAME press as everything else.
+    expect(note).toHaveTextContent(/same single press/i);
+    // (2) Criterion 5 — the refusal before anything is sent, and BOTH of
+    //     design §3's two resolutions. The forfeit is the half a reader is
+    //     most likely to lose, and losing it leaves an owner who cannot
+    //     satisfy the keyset believing the whole migration is blocked.
+    expect(note).toHaveTextContent(/current keys/i);
+    expect(note).toHaveTextContent(/refuses before it starts anything/i);
+    expect(note).toHaveTextContent(/supply the missing private keys/i);
+    expect(note).toHaveTextContent(/forfeit/i);
+    // (3) The gas asymmetry ("Before you start" (3) / `01_DALOS.pact:456-526`):
+    //     this is the one step the gas station cannot sponsor, so the owner
+    //     needs STOA on the payment key or the step reports a failure it
+    //     could have been warned about.
+    expect(note).toHaveTextContent(/gas station cannot pay/i);
+    // (4) Criterion 8 / "Before you start" (3b) — a protocol-held namespace
+    //     may refuse the redefinition on chain, and that is REPORTED, never a
+    //     halt. "It will work" would be as wrong as "it is not wired up".
+    expect(note).toHaveTextContent(/ouronet-ns/i);
+    expect(note).toHaveTextContent(/reported/i);
 
     // Still genuinely absent from the executable list — the note is the only
     // place it is accounted for.

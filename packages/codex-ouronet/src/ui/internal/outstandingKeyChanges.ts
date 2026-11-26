@@ -45,6 +45,29 @@ function sameKeys(a: readonly string[], b: readonly string[]): boolean {
   return b.every((k) => set.has(k));
 }
 
+/**
+ * The bare public key behind a StoaChain payment-key ADDRESS.
+ *
+ * Mirror of `state/store.ts:2680`, which is this repo's own encoding of the
+ * two address forms a payment key is stored in:
+ * `seedType === "stoic" ? paymentPublicKey : \`k:${paymentPublicKey}\`` — a
+ * stoic seed's address IS the bare key, every other seed's carries the `k:`
+ * sigil. `committed.paymentPublicKey` is always bare, so both forms have to
+ * reduce to bare before they can be compared at all (the same
+ * strip-then-compare convention `internal/seedDashboard.ts:97` and
+ * `internal/keySource.ts:77` already use).
+ *
+ * Defensive on the input type, deliberately: `IOuroAccount` types
+ * `stoaChainLedger` as `string | null`, but real persisted legacy accounts
+ * carry it absent entirely — the hazard `seedDashboard.ts:146-155` documents
+ * from live testing. Anything that is not a usable string is "none on
+ * record", never a crash at render time.
+ */
+function bareKeyFromAddress(keyOrAddr: unknown): string | null {
+  if (typeof keyOrAddr !== "string" || keyOrAddr.length === 0) return null;
+  return keyOrAddr.startsWith("k:") ? keyOrAddr.slice(2) : keyOrAddr;
+}
+
 export function computeOutstandingKeyChanges(
   progress: MigrationProgress | undefined | null,
   account: IOuroAccount | null | undefined
@@ -93,9 +116,22 @@ export function computeOutstandingKeyChanges(
   if (selection.payment && selection.payment.kind !== "keep") {
     const chosen = committed?.paymentPublicKey;
     if (chosen) {
-      // The account's live payment key, when the selector has reported one.
-      const live =
-        typeof account.chainPublicKey === "string" ? [account.chainPublicKey] : null;
+      // The account's live PAYMENT key is `stoaChainLedger` — the selector
+      // fills it from the chain's `payment-key`
+      // (`ui/tabs/OuronetAccountsTab.tsx:115`). It is NOT `chainPublicKey`,
+      // which `:117` fills from `public-key`: the account's own identity key,
+      // whose mismatch with `publicKey` means "admin-level rotation or codex
+      // corruption" (`types/entities.ts:272-275`) and has nothing to say about
+      // which payment key is in force. Reading that field compared the chosen
+      // payment key against the account key, so every account whose two keys
+      // differ — all of them — reported a payment rotation as permanently
+      // pending (`docs/work/migration-execute/design.md` §7 defect 2).
+      //
+      // The ledger is an ADDRESS and `chosen` is bare hex, so compare (and
+      // report) NORMALISED. `null` stays `null`: "none on record" is a state
+      // the card already renders (`settings/PendingKeyChangesCard.tsx:73`).
+      const liveKey = bareKeyFromAddress(account.stoaChainLedger);
+      const live = liveKey !== null ? [liveKey] : null;
       const alreadyInForce = live !== null && sameKeys(live, [chosen]);
       if (!alreadyInForce) {
         changes.push({ kind: "payment", from: live, to: [chosen] });

@@ -104,20 +104,90 @@ describe("a pending guard change", () => {
   });
 });
 
+/**
+ * The account's live PAYMENT key is `stoaChainLedger` — NOT `chainPublicKey`.
+ *
+ * Three cases in this block (the "differs from the chosen one" case, the
+ * "once the chosen key is live" case, and "both pending" below) originally
+ * asserted against `chainPublicKey`. The design overruled that field —
+ * `docs/work/migration-execute/design.md` §7 defect 2, executed as plan T2 —
+ * so they are DELIBERATELY rewritten here, not casualties of the fix. The
+ * evidence is the selector mapping itself: `ui/tabs/OuronetAccountsTab.tsx:115`
+ * fills `stoaChainLedger` from the chain's `payment-key`, while `:117` fills
+ * `chainPublicKey` from `public-key` — the account's OWN identity key, whose
+ * doc comment (`types/entities.ts:272-275`) says a mismatch with `publicKey`
+ * "indicates an admin-level rotation or codex corruption". Comparing the
+ * chosen PAYMENT key against the account key made every account whose two
+ * keys differ — i.e. all of them — report a permanently pending rotation.
+ *
+ * The comparison also has to NORMALISE, which is why this was not a field
+ * swap: `stoaChainLedger` is an ADDRESS (`types/entities.ts:260`) and
+ * `committed.paymentPublicKey` is bare 64-hex. The repo's own encoding of the
+ * two address forms is `state/store.ts:2680`
+ * (`seedType === "stoic" ? paymentPublicKey : `k:${paymentPublicKey}``), so
+ * BOTH a bare (stoic-form) ledger and a `k:`-prefixed one must compare equal
+ * to the bare chosen key.
+ */
 describe("a pending payment-key change", () => {
-  it("reports it when the live chain key differs from the chosen one", () => {
-    const r = computeOutstandingKeyChanges(run(), acct({ chainPublicKey: OLD }));
+  it("reports it when the live payment key on chain differs from the chosen one", () => {
+    const r = computeOutstandingKeyChanges(run(), acct({ stoaChainLedger: `k:${OLD}` }));
+    const pay = r.changes.find((c) => c.kind === "payment")!;
+    // Reported BARE although the ledger carried `k:` — the card renders
+    // `from` through `MeasuredHexHighlight` (`PendingKeyChangesCard.tsx:75`),
+    // so the normalisation has to reach the OUTPUT, not just the equality
+    // test, for the card to keep rendering what it renders today.
+    expect(pay.from).toEqual([OLD]);
+    expect(pay.to).toEqual([K0]);
+  });
+
+  it("reports pending when a BARE (stoic-form) ledger carries a different key", () => {
+    const r = computeOutstandingKeyChanges(run(), acct({ stoaChainLedger: OLD }));
     const pay = r.changes.find((c) => c.kind === "payment")!;
     expect(pay.from).toEqual([OLD]);
     expect(pay.to).toEqual([K0]);
   });
 
-  it("reports NONE for payment once the chosen key is live", () => {
+  it("reports NONE for payment once the chosen key is live — `k:` address form", () => {
     const r = computeOutstandingKeyChanges(
       run({ selection: { account: { kind: "keep-current" }, payment: { kind: "stoic-dalos-position-0" }, guard: { kind: "keep" } } }),
-      acct({ chainPublicKey: K0 }),
+      acct({ stoaChainLedger: `k:${K0}` }),
     );
     expect(r.none).toBe(true);
+  });
+
+  it("reports NONE for payment once the chosen key is live — BARE stoic form", () => {
+    // `store.ts:2680`'s stoic branch stores the bare key as the address.
+    const r = computeOutstandingKeyChanges(
+      run({ selection: { account: { kind: "keep-current" }, payment: { kind: "stoic-dalos-position-0" }, guard: { kind: "keep" } } }),
+      acct({ stoaChainLedger: K0 }),
+    );
+    expect(r.none).toBe(true);
+  });
+
+  it("reports pending with from: null when no payment key is on record", () => {
+    // "none on record" is already a rendered state
+    // (`PendingKeyChangesCard.tsx:73`), so a null ledger must stay null
+    // rather than becoming an empty list or a fabricated key.
+    const r = computeOutstandingKeyChanges(
+      run({ selection: { account: { kind: "keep-current" }, payment: { kind: "stoic-dalos-position-0" }, guard: { kind: "keep" } } }),
+      acct({ stoaChainLedger: null }),
+    );
+    const pay = r.changes.find((c) => c.kind === "payment")!;
+    expect(pay.from).toBeNull();
+    expect(pay.to).toEqual([K0]);
+  });
+
+  it("reports NONE when chainPublicKey differs from the chosen key but the LEDGER matches it", () => {
+    // THE REGRESSION THAT PINS THE DEFECT SHUT. This is the ordinary shape of
+    // a real account — identity key and payment key are different keys — and
+    // the old `chainPublicKey` read reported a pending payment rotation for
+    // it forever, offering a button for a rotation that had already happened.
+    const r = computeOutstandingKeyChanges(
+      run({ selection: { account: { kind: "keep-current" }, payment: { kind: "stoic-dalos-position-0" }, guard: { kind: "keep" } } }),
+      acct({ chainPublicKey: OLD, stoaChainLedger: `k:${K0}` }),
+    );
+    expect(r.none).toBe(true);
+    expect(r.changes).toEqual([]);
   });
 
   it("does not invent a payment change when stage 2 recorded no derived key", () => {
@@ -131,9 +201,11 @@ describe("a pending payment-key change", () => {
 
 describe("both pending", () => {
   it("reports the guard and the payment key together", () => {
+    // `chainPublicKey: OLD` → `stoaChainLedger` for the reason documented
+    // above this block (design §7 defect 2 / plan T2).
     const r = computeOutstandingKeyChanges(
       run(),
-      acct({ guard: { pred: "keys-any", keys: [OLD] }, chainPublicKey: OLD }),
+      acct({ guard: { pred: "keys-any", keys: [OLD] }, stoaChainLedger: `k:${OLD}` }),
     );
     expect(r.none).toBe(false);
     expect(r.changes.map((c) => c.kind).sort()).toEqual(["guard", "payment"]);

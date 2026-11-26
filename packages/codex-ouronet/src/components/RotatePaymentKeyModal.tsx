@@ -2,8 +2,10 @@
  * <RotatePaymentKeyModal> — headless modal for StoaChain Ledger payment-key
  * rotation on an Ouronet account.
  *
- * Builds the C_RotateStoaChain Pact tx via buildRotateStoaChainPactCode +
- * dispatches through useSignTransaction's CodexSigningStrategy.execute().
+ * Builds the `DALOS|C_RotateStoa` Pact tx LOCALLY (see
+ * ROTATE_STOA_PACT_MEMBER below — do NOT route this through
+ * `@ouronet/ouronet-core/pact` again) + dispatches through
+ * useSignTransaction's CodexSigningStrategy.execute().
  *
  * The patron's guard + (when patron ≠ account) the account's guard need
  * to be attached as `ks` and `ks-account` data slots on the transaction
@@ -26,14 +28,33 @@ import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
-import { buildRotateKadenaPactCode as buildRotateStoaChainPactCode } from "@ouronet/ouronet-core/pact";
-
 import { useSignTransaction } from "../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../zbom/hooks/useEnsureCodexUnlocked.js";
 import { useActiveWallet } from "../hooks/index.js";
 import type { IOuroAccount } from "../types/entities.js";
 
 const HEX_64_RX = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * The LIVE on-chain member for StoaChain-Ledger payment-key rotation.
+ *
+ * Emitted LOCALLY on purpose. `@ouronet/ouronet-core/pact`'s
+ * `buildRotateKadenaPactCode` — which this file used to import under the alias
+ * `buildRotateStoaChainPactCode`, making a wrong name read as a right one for
+ * months — still emits the RENAMED-AWAY `DALOS|C_RotateKadena`. Confirmed on
+ * mainnet: `"Module ouronet-ns.TS01-C1 has no such member:
+ * DALOS|C_RotateKadena"`, so every submit from here failed as a RESOLUTION
+ * error at the dirtyRead step, before signing. Full `describe-module`
+ * evidence + the rename's history: see `src/zbom/rotatePaymentKeyLive.ts`'s
+ * header (and its `:83`, the same one-line emit shape used below).
+ *
+ * **Do not re-introduce an import from `@ouronet/ouronet-core/pact` here** —
+ * `tests/components-rotate-payment-key-modal.test.tsx` locks that edge shut.
+ *
+ * Arg count/order was UNCHANGED by the rename: `(patron executor stoa)`, per
+ * `src/constants/pactSignatures.generated.ts`'s `"TS01-C1.DALOS|C_RotateStoa"`.
+ */
+const ROTATE_STOA_PACT_MEMBER = "TS01-C1.DALOS|C_RotateStoa";
 
 export interface RotatePaymentKeyRenderArgs {
   account: IOuroAccount;
@@ -115,11 +136,8 @@ export function RotatePaymentKeyModal({
       // Prompt for the codex password if locked; abort on cancel.
       if (!(await ensureCodexUnlocked())) { setLastError("Authentication required"); return; }
 
-      const pactCode = buildRotateStoaChainPactCode({
-        patron: patron.address,
-        account: account.address,
-        newPaymentKey: newPaymentKey.trim(),
-      });
+      const pactCode =
+        `(${STOACHAIN_NAMESPACE}.${ROTATE_STOA_PACT_MEMBER} "${patron.address}" "${account.address}" "${newPaymentKey.trim()}")`;
 
       const guards = [];
       if (patron.guard) guards.push(patron.guard);

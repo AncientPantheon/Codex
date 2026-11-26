@@ -15,7 +15,7 @@ import type {
 } from "../types/entities.js";
 import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
 import type { CodexAdapter, CodexSnapshot } from "../adapters/types.js";
-import type { MasterKeyLock, CodexMasterSeed, MigrationProgress, MigrationSelection, MigrationCommitRecord, MigrationPendingPlan, ForeignKeyEntry } from "@ancientpantheon/codex-core";
+import type { MasterKeyLock, CodexMasterSeed, MigrationProgress, MigrationSelection, MigrationCommitRecord, MigrationExecutionStep, MigrationPendingPlan, ForeignKeyEntry } from "@ancientpantheon/codex-core";
 import { arweaveSeedLock, isMigrationSealed, recordFormerMasterIds } from "@ancientpantheon/codex-core";
 import { computeMasterKeyLockDelta } from "./masterKeyLockDelta.js";
 import type { MasterKeyLockDelta } from "./masterKeyLockDelta.js";
@@ -430,6 +430,37 @@ export interface CodexStoreActions {
    * already landed. MERGES, never replaces: each call records one fact.
    */
   recordMigrationCommit(patch: Partial<MigrationCommitRecord>): Promise<void>;
+  /**
+   * Record one stage-3 execution step — what the chain engine DID.
+   *
+   * MERGES BY `step.id`: the entry with that id is replaced IN PLACE, a new
+   * id is appended, and order is never disturbed. Same per-fact discipline as
+   * {@link CodexActions.recordMigrationCommit} — one call records one fact
+   * about one step, and a step is recorded repeatedly as it progresses
+   * (`running` -> `running` with a `txHash` -> `confirmed`).
+   *
+   * **AUTHORITATIVE FOR NOTHING.** `docs/work/migration-execute/design.md`
+   * §4: stage 3 resumes by RE-READING ON-CHAIN STATE, because every step is a
+   * predicate over chain state rather than a position in a script. A recorded
+   * `txHash` is "a HINT, never authority". This list exists for display and
+   * support; nothing may read it to decide what to run next. The next reader
+   * will assume a persisted step list is a resume cursor — it is not, and the
+   * design explicitly rejected a durable cursor because it "fails in
+   * precisely the case that matters: a transaction lands and the tab dies
+   * before the write", after which replay re-sends money that already moved.
+   * That is why this action returns `void` and the store exposes no reader
+   * for the list beyond the rendered row: there is deliberately nothing here
+   * to build a cursor out of.
+   *
+   * A no-op when no migration row exists (as `recordMigrationCommit` is): a
+   * record of a run nobody started must not conjure a half-row.
+   *
+   * Does NOT refuse once sealed — deliberately unlike
+   * {@link CodexActions.recordMigrationPending}. The seal forbids changing
+   * the PLAN; this records what HAPPENED, and the engine may legitimately
+   * confirm its last steps after the seal. Do not add the guard by symmetry.
+   */
+  recordMigrationExecutionStep(step: MigrationExecutionStep): Promise<void>;
   /**
    * Record what a completed FINALIZE decided — the pending state Apply will
    * seal (docs/work/migration-pending-apply/design.md).
@@ -1855,6 +1886,31 @@ export function createCodexStore(): UseBoundStore<StoreApi<CodexStoreState>> {
             ...current,
             // MERGE: each call records one fact about what landed.
             committed: { ...(current.committed ?? {}), ...patch },
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        await persistAndTouch((a) => a.saveAll(buildFullSnapshot(get())));
+      },
+
+      async recordMigrationExecutionStep(step: MigrationExecutionStep) {
+        const current = get().migrationProgress;
+        // No row, nothing to record onto - see the declaration's doc comment.
+        if (!current) return;
+        const previous = current.execution?.steps ?? [];
+        const at = previous.findIndex((s) => s.id === step.id);
+        // MERGE BY ID: replace in place when the id is known, append when it
+        // is new. `map` rather than filter-then-append precisely so a late
+        // update cannot move its step to the end of the list - the order IS
+        // the only thing this record is good for.
+        const steps =
+          at === -1
+            ? [...previous, step]
+            : previous.map((s, i) => (i === at ? step : s));
+        // NOTE: no seal check here, on purpose. See the declaration.
+        set({
+          migrationProgress: {
+            ...current,
+            execution: { steps },
             updatedAt: new Date().toISOString(),
           },
         });

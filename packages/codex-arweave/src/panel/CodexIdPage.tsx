@@ -101,7 +101,10 @@ import type { ArweavePanelDeps } from "./context.js";
 import { CodexBackupArea } from "./CodexBackupArea.js";
 import { CodexBackupInformatics } from "./CodexBackupInformatics.js";
 import { CodexEncryptionInformatics } from "./CodexEncryptionInformatics.js";
-import { CodexMigrationInformatics } from "./CodexMigrationInformatics.js";
+import {
+  CodexMigrationInformatics,
+  MIGRATION_RUNS_UNINTERRUPTED_MESSAGE,
+} from "./CodexMigrationInformatics.js";
 import { CodexMasterSeedSection } from "./CodexMasterSeedSection.js";
 import { INFORMATICS_ACCENT } from "./informaticsStyles.js";
 import { runSeededBatch, type BatchProgressEvent } from "../keygen/KeygenRunner.js";
@@ -1134,8 +1137,13 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
    * answers the narrower question "which key ROTATIONS are outstanding", and
    * updating a keyset's own definition is not a rotation of an account's
    * guard. But it IS a transaction: a `define-keyset` against the referenced
-   * keyset (owner, this session). This app does not wire that up yet, so the
-   * choice is outstanding WORK, and the popup must say so.
+   * keyset (owner, this session) — and since `migration-execute-keyset` it is
+   * an EXECUTABLE step of the chain, emitted in G's slot by
+   * `codex-core/src/codex/migrationChain.ts:629-650`. Recorded-but-not-yet-sent
+   * is still outstanding WORK, so this derivation is unchanged and the popup
+   * must still say so; only the REASON moved, from "this app cannot send it"
+   * to "this app has not sent it yet". `outstandingKeyChanges.ts:83-95`'s skip
+   * remains right for the narrower question it answers.
    */
   const guardKind = migrationProgress?.selection?.guard?.kind;
   const keysetDefinitionChosen =
@@ -1150,12 +1158,62 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
    */
   const applyHasOutstandingWork = !outstanding.none || keysetDefinitionChosen;
 
+  /**
+   * `migration-execute-keyset` T7. This paragraph used to end "…which is not
+   * wired up in this app yet, so it cannot be sent from here." That is now
+   * false: design §2 made the keyset update a real step, the planner emits it
+   * (`migrationChain.ts:629-650`), `zbom/execute/defineKeysetOps.ts` builds
+   * it, the engine submits it and `KeysetUpdateGate` resolves its signers
+   * before the press.
+   *
+   * It is NOT replaced with "it will work", which would be the same mistake
+   * pointing the other way. The honest shape is four facts, and all four are
+   * stated because each one changes what the owner does next:
+   *
+   *  1. it IS sent from here, by the same press as the rest, and it goes last
+   *     (G's slot — `migrationChain.ts:629-650`; G itself is suppressed for
+   *     these two selections, so this is the final transaction of the run);
+   *  2. it can only be satisfied by the keyset's CURRENT keys, so an
+   *     unreachable predicate makes the chain refuse BEFORE anything is sent,
+   *     with design §3's two resolutions — supply, or forfeit. A forfeit is
+   *     legitimate: everything else still runs;
+   *  3. it is the one step the Ouronet gas station cannot sponsor
+   *     (`01_DALOS.pact:456-526` accepts only `coin.C_`/TALOS/DSP shapes), so
+   *     it spends STOA on gas from the account's payment key;
+   *  4. a keyset in a protocol-guarded namespace
+   *     (`stoa-genesis-1.pact:110-113`) may still be refused on chain, which
+   *     is REPORTED and never a halt.
+   *
+   * On (3), note the deliberate asymmetry with
+   * `KEYSET_UPDATE_NO_REF_REASON`'s instruction not to mention gas in the
+   * user-facing REASON strings: those are read AFTER the chain ran, when gas
+   * is not what is standing in the owner's way. This is read BEFORE the
+   * press, where "fund the payment key with STOA" is an action they can still
+   * take — so here it belongs.
+   *
+   * Everything structural stays: the testid, the <code>define-keyset</code>
+   * literal, and the fact that this is still the SEAL surface. The pointer to
+   * the executor ("Execute all remaining transactions" on the stage-3A card)
+   * is stated ONCE, in the needs-transactions paragraph that renders directly
+   * above this one — deliberately not restated here, so the control's label
+   * is transcribed in exactly one place in this file.
+   */
   const applyKeysetNote = keysetDefinitionChosen ? (
     <p data-testid="codex-apply-migration-keyset-note" style={APPLY_NOTE_STYLE}>
       Your guard choice was to update the referenced keyset&apos;s own definition.
       That needs its own transaction — a <code>define-keyset</code> against that
-      keyset — which is not wired up in this app yet, so it cannot be sent from
-      here. The choice stays recorded in your pending plan.
+      keyset — and it is sent from here, by the same single press as everything
+      else, going last so that keyset is still signed by the keys it holds today.
+      It can only be signed by that keyset&apos;s current keys: if this codex
+      cannot reach the keyset&apos;s predicate, the chain refuses before it starts
+      anything and offers you two ways on — supply the missing private keys
+      before you press, or forfeit the update and let the rest of the migration
+      run with the keyset left exactly as it is. Unlike every other step, the
+      Ouronet gas station cannot pay for this one, so it spends STOA on gas from
+      your account&apos;s payment key. And a keyset inside a protocol-guarded
+      namespace (ouronet-ns, stoa-ns) may still be refused on chain; if that
+      happens it is reported rather than fatal, and every other step still runs.
+      Until it is sent, the choice stays recorded in your pending plan.
     </p>
   ) : null;
 
@@ -1417,9 +1475,10 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
               <>
                 <p data-testid="codex-apply-migration-needs-transactions" style={APPLY_NOTE_STYLE}>
                   This pending state needs transactions to be executed before it can be
-                  sealed. Executing them from here is not wired up yet — until it is, use
+                  sealed. Send them with &ldquo;Execute all remaining transactions&rdquo;, on
                   the &ldquo;Key changes you chose, not yet on chain&rdquo; card further
-                  down this page to send them one at a time.
+                  down this page.{" "}
+                  {MIGRATION_RUNS_UNINTERRUPTED_MESSAGE}
                 </p>
                 {/* The SAME FROM → TO rows the stage-3A card renders — reused,
                     not re-invented, so the two can never describe the same

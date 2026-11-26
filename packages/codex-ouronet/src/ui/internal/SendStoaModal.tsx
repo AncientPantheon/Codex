@@ -55,12 +55,27 @@
  *     bypassing `execute()` entirely (that pipeline always injects a
  *     gas-station capsKeyPub — there is no "no gas signer" mode in it).
  *
- * Either crosschain path then auto-polls (`pollTransactionStatus`) for the
- * initiate step's confirmation, auto-polls (`pollSpvProof`) for the SPV
- * proof, and auto-submits the continuation (`buildContinuationTransaction` +
+ * Either crosschain path then awaits the initiate step's confirmation
+ * (`awaitTxVerdict`), polls (`pollSpvProof`) for the SPV proof, and
+ * auto-submits the continuation (`buildContinuationTransaction` +
  * `submitContinuation` — UNSIGNED, "can be executed by anyone" per that
  * function's own doc comment) — the user never manually completes a second
  * step, matching OuronetUI's own UX exactly.
+ *
+ * THAT THREE-STEP CHAIN NO LONGER LIVES IN THIS FILE. It was lifted whole
+ * into `../../zbom/execute/crossChainStoaTransfer.ts`
+ * (`runCrossChainStoaTransfer`) because the migration engine
+ * (docs/work/migration-execute/design.md §2 step A) runs it up to NINE times
+ * per press to consolidate chains 1-9 onto chain 0, and a second copy of a
+ * ~110-line flow whose "pending" wording is deliberately chosen to prevent
+ * duplicate resubmits is the "two independently-editable copies that can
+ * silently disagree" trap this package already refused once for this exact
+ * flow (`../../zbom/toast/toastManager.ts:287-295`). This modal is now one of
+ * its two callers: it supplies the chain-0 `execute()` initiate below (which
+ * is why `buildGasStationTransaction` stays here), its toast controller's
+ * `updateStep` as the step reporter, and `pollStoaChainConfirmation` as the
+ * continuation tracker. The same-chain path's two Pact strings moved with it,
+ * to `../../zbom/execute/nativeStoaTransfer.ts`, and are imported back.
  *
  * In-flight/success/error state machine mirrors StakeUrStoaModal /
  * RotatePaymentKeyModal for the same-chain path: a `submitting` flag, a
@@ -88,32 +103,45 @@ import { checkCoinAccountExists } from "@ouronet/ouronet-core/interactions/ouroP
 import {
   buildCTransferAcross,
   submitCrossChainTransfer,
-  pollTransactionStatus,
   pollSpvProof,
   buildContinuationTransaction,
   submitContinuation,
-  type TransferStatus,
 } from "@ouronet/ouronet-core/interactions/crossChainFunctions";
 import type { IKeyset } from "@stoachain/stoa-core/guard";
 import { useSignTransaction, useGetKeypair } from "../../hooks/index.js";
 import { CodexLockedError } from "../../errors/index.js";
+import { awaitTxVerdict, awaitTxVerdictLiveDeps } from "../../zbom/execute/awaitConfirmation.js";
+import {
+  runCrossChainStoaTransfer,
+  createSignedCrossChainInitiate,
+  CROSSCHAIN_TOAST_STEPS,
+  type CrossChainInitiate,
+  type CrossChainStepReporter,
+} from "../../zbom/execute/crossChainStoaTransfer.js";
+import {
+  buildNativeStoaTransferPactCode,
+  deriveKAccountKeyset,
+  K_ACCOUNT_RX,
+  RECEIVER_NOT_AUTOCREATABLE_MESSAGE,
+  SAFE_ACCOUNT_RX,
+  UNSAFE_RECEIVER_MESSAGE,
+} from "../../zbom/execute/nativeStoaTransfer.js";
 import { txPending, createMultiStepToast, pollStoaChainConfirmation, type ToastController } from "../../zbom/toast/toastManager.js";
 import { useEnsureCodexUnlocked } from "../../zbom/hooks/useEnsureCodexUnlocked.js";
 import { CodexModalShell, ModalExecuteRow, ModalFeedback, modalLabel, modalInput } from "./CodexModalShell.js";
 import { ChainSelector } from "./ChainSelector.js";
 
 const AMOUNT_RX = /^\d+(\.\d+)?$/;
-const K_ACCOUNT_RX = /^k:[0-9a-fA-F]{64}$/;
-/** Every real Pact/Chainweb account name is drawn from this charset (see
- *  `coin-live.pact`'s own `validate-account` regex, `^[a-zA-Z0-9_:-]{3,}$`,
- *  slightly widened here to also allow `.` for namespaced `c:`/`w:`-style
- *  accounts). `receiverAddr` is free-text user input that gets spliced
- *  directly into a Pact code STRING LITERAL below — a receiver containing a
- *  `"` could otherwise break out of that literal and append arbitrary Pact
- *  expressions, authorized by this same modal's own unscoped guard signer.
- *  Gating on this BEFORE any pact-code interpolation (and before the
- *  existence check, which also interpolates it) closes that off entirely. */
-const SAFE_ACCOUNT_RX = /^[A-Za-z0-9_:.-]+$/;
+// `K_ACCOUNT_RX` (the only receiver shape that can be auto-created) and
+// `SAFE_ACCOUNT_RX` (the Pact-string-literal injection guard — `receiverAddr`
+// is free-text user input spliced directly into a code STRING LITERAL, and a
+// receiver containing a `"` could break out of that literal and append
+// arbitrary Pact expressions authorized by this modal's own signer) both now
+// live beside the pact-code builders they protect, in
+// `../../zbom/execute/nativeStoaTransfer.ts`, so the headless engine enforces
+// the SAME two rules rather than a second transcription of them. Gating on
+// `SAFE_ACCOUNT_RX` BEFORE any pact-code interpolation (and before the
+// existence check, which also interpolates the receiver) is unchanged.
 
 function validateAmount(raw: string): string | null {
   const trimmed = raw.trim();
@@ -161,30 +189,6 @@ const fmt12 = (n: number): string => n.toFixed(12);
  *  convention (see `SeedWordsTab.tsx`). */
 function MobilePortal({ target, children }: { target?: Element | null; children: React.ReactNode }) {
   return target ? createPortal(children, target) : <>{children}</>;
-}
-
-/** Repeatedly checks the initiate step's own confirmation status — a single
- *  `pollTransactionStatus` call is a snapshot, not a wait; this bounds the
- *  retry the same way every other multi-step chain flow in this package
- *  waits for confirmation before moving on. 20 attempts / 5s = ~100s budget
- *  — same order of magnitude as `pollSpvProof`'s own default (30 × 5s), since
- *  an initiate step is a real on-chain confirmation with the same variance,
- *  not a fixed-latency call. Exhausting the budget returns `"pending"` —
- *  distinct from `"failure"` — so the caller never reports a merely-slow
- *  confirmation as a hard failure (which would invite a duplicate resubmit
- *  of a transfer that may still land). */
-async function waitForInitiateConfirmation(
-  requestKey: string,
-  chainId: string,
-  maxAttempts = 20,
-  delayMs = 5000,
-): Promise<TransferStatus> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const status = await pollTransactionStatus(requestKey, chainId);
-    if (status.status === "success" || status.status === "failure") return status;
-    if (attempt < maxAttempts - 1) await new Promise((r) => setTimeout(r, delayMs));
-  }
-  return { status: "pending" };
 }
 
 /**
@@ -295,12 +299,11 @@ const CROSSCHAIN_STATUS_LABEL: Record<CrossChainStatus, string | null> = {
  * renders a numbered "Step i" row per entry once `steps.length > 1`; this
  * is simply the first crosschain flow in this package to actually supply
  * more than one.
+ *
+ * The three labels themselves moved to `crossChainStoaTransfer.ts` with the
+ * flow that drives them — the migration engine's own toast names these same
+ * three stages, and they are the flow's vocabulary, not this modal's.
  */
-const CROSSCHAIN_TOAST_STEPS = [
-  { label: "Confirming on source chain" },
-  { label: "Waiting for cross-chain proof" },
-  { label: "Completing on target chain" },
-] as const;
 
 export function SendStoaModal({
   isOpen,
@@ -385,7 +388,7 @@ export function SendStoaModal({
     try {
       const receiverAddr = receiver.trim();
       if (!SAFE_ACCOUNT_RX.test(receiverAddr)) {
-        const message = "Receiver address contains characters that aren't allowed in an account name.";
+        const message = UNSAFE_RECEIVER_MESSAGE;
         setLastError(message);
         if (isCrossChain) setCrossChainStatus("error");
         reportFailure(message);
@@ -395,118 +398,116 @@ export function SendStoaModal({
       const decimalStr = formatDecimalForPact(amount.trim());
 
       if (isCrossChain) {
-        // Every crosschain call needs a receiver keyset regardless of
-        // whether the receiver exists elsewhere — the account may not exist
-        // on THIS target chain yet (chain accounts are independent).
-        if (!isKAccount) {
-          const message = "Cross-chain transfers currently support k: receivers only.";
-          setLastError(message);
+        // The whole 3-step chain — initiate, confirm, SPV proof, continuation
+        // — now lives in `runCrossChainStoaTransfer`; see this file's module
+        // doc comment for why it was lifted. What stays HERE is the half that
+        // is genuinely this modal's: the chain-0 `execute()` initiate, the
+        // toast controller, and the user-facing status machine.
+        //
+        // `submitInitiate` is the seam between the two signing paths that
+        // `buildCTransferAcross` itself distinguishes. Source chain "0" pays
+        // gas through the Ouronet Gas Station and is built INLINE via the SAME
+        // `execute()` pipeline the same-chain path uses (auto-calibrated gas,
+        // auto-resolved `capsKeyPub`). Any other source chain pays through
+        // `stoa-xchain-gas` (no gas signer at all) and signs+submits directly
+        // — which is also the ONLY path the migration engine ever takes, so it
+        // is the module's own ready-made factory rather than a local closure.
+        const submitInitiate: CrossChainInitiate =
+          sourceChain === "0"
+            ? async ({ sender, receiver: receiverAccount, receiverGuard, amount: decimalAmount, targetChain: target }) => {
+                const result = await execute({
+                  build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }) =>
+                    buildGasStationTransaction(
+                      { gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime },
+                      {
+                        pactCode: `(coin.C_TransferAcross "${sender}" "${receiverAccount}" (read-keyset "ks") "${target}" ${decimalAmount})`,
+                        chainId: sourceChain,
+                        keysetData: receiverGuard,
+                        // (coin.TRANSFER_XCHAIN sender receiver amount target-chain)
+                        // — confirmed live, coin-live.pact's own `defcap
+                        // TRANSFER_XCHAIN`; note the arg ORDER (amount BEFORE
+                        // target-chain) differs from C_TransferAcross's own
+                        // function signature (target-chain before amount) —
+                        // this mirrors SendKadenaModal.tsx's own identical
+                        // `coin.TRANSFER_XCHAIN` capability call exactly (same
+                        // arg order, same {decimal} wrapping), the two chains'
+                        // crosschain protocols sharing the same capability
+                        // shape.
+                        guardCapabilities: (w: any) => [
+                          w("coin.TRANSFER_XCHAIN", sender, receiverAccount, { decimal: decimalAmount }, target),
+                        ],
+                      },
+                    ),
+                  guards: [{ keys: [publicKey], pred: "keys-all" }],
+                  paymentKey: null,
+                });
+                return { requestKey: result.requestKey };
+              }
+            : createSignedCrossChainInitiate({
+                senderPublicKey: publicKey,
+                getKeypair,
+                sign,
+                buildCTransferAcross,
+                submitCrossChainTransfer,
+              });
+
+        // The flow reports its own step transitions; this adapter is where
+        // they become BOTH a toast row and the on-screen status text, and
+        // where `activeCrossChainStep` keeps tracking which stage is in
+        // flight so the shared catch block below still marks the right step
+        // red (a THROWN error — a refused submit, a locked codex — is not a
+        // flow outcome and still arrives there).
+        const onStep: CrossChainStepReporter = (stepIdx, status, data) => {
+          if (status === "done") activeCrossChainStep = stepIdx + 1;
+          if (stepIdx === 0 && status === "active") setCrossChainStatus("confirming");
+          if (stepIdx === 0 && status === "done") setCrossChainStatus("waiting-spv");
+          if (stepIdx === 1 && status === "done") setCrossChainStatus("completing");
+          // Third argument omitted when there is none — `updateStep(1, "done")`
+          // and `updateStep(1, "done", undefined)` are the same call at
+          // runtime but not to a caller comparing argument lists.
+          if (data === undefined) (_tx as ToastController).updateStep(stepIdx, status);
+          else (_tx as ToastController).updateStep(stepIdx, status, data);
+        };
+
+        const outcome = await runCrossChainStoaTransfer(
+          { sender: address, receiver: receiverAddr, amount: decimalStr, sourceChain, targetChain },
+          {
+            submitInitiate,
+            awaitInitiateVerdict: (requestKey, chainId) =>
+              awaitTxVerdict(requestKey, chainId, awaitTxVerdictLiveDeps),
+            pollSpvProof,
+            buildContinuationTransaction,
+            submitContinuation,
+            onStep,
+            // The continuation is what ACTUALLY lands the funds on the target
+            // chain — `submitContinuation` only confirms mempool acceptance
+            // (see its own doc comment), so step 2 is deliberately NOT marked
+            // done by the flow. Its real on-chain confirmation keeps polling
+            // in the background after this modal closes, using the SAME
+            // shared poller `.submitted()` itself calls for a single-step
+            // toast (`pollStoaChainConfirmation`, `toastManager.ts` — no
+            // second, independently-editable copy of this fetch/retry/timeout
+            // logic). Fire-and-forget, matching `.submitted()`'s own original
+            // behavior.
+            onContinuationSubmitted: (stepIdx, continuationRequestKey, chainId) => {
+              void pollStoaChainConfirmation(_tx as ToastController, stepIdx, continuationRequestKey, chainId);
+            },
+          },
+        );
+
+        if (!outcome.ok) {
+          // The flow has already marked the failing step red with this same
+          // message — `reportFailure` here would be a second, duplicate
+          // report. All four `kind`s are user-visible text, including the
+          // deliberately non-alarming "still confirming" wording for an
+          // initiate that may yet land.
+          setLastError(outcome.message);
           setCrossChainStatus("error");
-          reportFailure(message);
           return;
         }
-        const receiverGuard: IKeyset = { keys: [receiverAddr.slice(2)], pred: "keys-all" };
-
-        let requestKey: string;
-        if (sourceChain === "0") {
-          const result = await execute({
-            build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }) =>
-              buildGasStationTransaction(
-                { gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime },
-                {
-                  pactCode: `(coin.C_TransferAcross "${address}" "${receiverAddr}" (read-keyset "ks") "${targetChain}" ${decimalStr})`,
-                  chainId: sourceChain,
-                  keysetData: receiverGuard,
-                  // (coin.TRANSFER_XCHAIN sender receiver amount target-chain)
-                  // — confirmed live, coin-live.pact's own `defcap
-                  // TRANSFER_XCHAIN`; note the arg ORDER (amount BEFORE
-                  // target-chain) differs from C_TransferAcross's own
-                  // function signature (target-chain before amount) — this
-                  // mirrors SendKadenaModal.tsx's own identical
-                  // `coin.TRANSFER_XCHAIN` capability call exactly (same
-                  // arg order, same {decimal} wrapping), the two chains'
-                  // crosschain protocols sharing the same capability shape.
-                  guardCapabilities: (w: any) => [
-                    w("coin.TRANSFER_XCHAIN", address, receiverAddr, { decimal: decimalStr }, targetChain),
-                  ],
-                },
-              ),
-            guards: [{ keys: [publicKey], pred: "keys-all" }],
-            paymentKey: null,
-          });
-          requestKey = result.requestKey;
-        } else {
-          const unsignedTx = buildCTransferAcross({
-            sender: address,
-            receiver: receiverAddr,
-            receiverGuard,
-            amount: decimalStr,
-            sourceChain,
-            targetChain,
-            senderPublicKey: publicKey,
-          });
-          const keypair = await getKeypair(publicKey);
-          const signedTx = await sign({ tx: unsignedTx, capsKey: keypair, guardKeypairs: [] });
-          const descriptor = await submitCrossChainTransfer(signedTx, sourceChain);
-          requestKey = descriptor.requestKey;
-        }
-        // Step 0 was already showing (created "active" by default) — this
-        // just attaches the real requestKey to it now that one exists, so a
-        // user who opens the toast mid-flow can already see/copy it instead
-        // of waiting for the whole flow to finish.
-        (_tx as ToastController).updateStep(0, "active", { requestKey });
-
-        setCrossChainStatus("confirming");
-        const initiateStatus = await waitForInitiateConfirmation(requestKey, sourceChain);
-        if (initiateStatus.status !== "success") {
-          // "pending" (budget exhausted, no failure reported) is NOT the
-          // same as "failure" — a slow-but-still-landing initiate step must
-          // never be worded so a user thinks it's safe to resubmit. Only a
-          // real reported `"failure"` gets the harder framing.
-          const message =
-            initiateStatus.status === "pending"
-              ? `The transfer is still confirming on chain ${sourceChain} (request key ${requestKey}). It may still complete — check its status before resubmitting.`
-              : (initiateStatus.error ?? "The cross-chain transfer's initiate step did not confirm.");
-          setLastError(message);
-          setCrossChainStatus("error");
-          reportFailure(message);
-          return;
-        }
-        // Step 0 done — `updateStep`'s own auto-activate-next-pending logic
-        // (toastManager.ts) flips step 1 to "active" for free.
-        (_tx as ToastController).updateStep(0, "done", { requestKey });
-        activeCrossChainStep = 1;
-
-        setCrossChainStatus("waiting-spv");
-        const { proof, error: spvError } = await pollSpvProof(requestKey, sourceChain, targetChain);
-        if (!proof) {
-          const message = spvError ?? "Timed out waiting for the SPV proof.";
-          setLastError(message);
-          setCrossChainStatus("error");
-          reportFailure(message);
-          return;
-        }
-        (_tx as ToastController).updateStep(1, "done");
-        activeCrossChainStep = 2;
-
-        setCrossChainStatus("completing");
-        const contTx = buildContinuationTransaction(requestKey, proof, targetChain);
-        const contDescriptor = await submitContinuation(contTx, targetChain);
 
         setCrossChainStatus("done");
-        // The continuation is what ACTUALLY lands the funds on the target
-        // chain — `submitContinuation` only confirms mempool acceptance
-        // (see its own doc comment), so marking step 2 "done" here would be
-        // exactly as premature as the OLD single-step toast's own
-        // `.submitted()` call was for the whole flow. Deliberately NOT
-        // awaited (fire-and-forget, matching `.submitted()`'s own original
-        // behavior) — the continuation's own on-chain confirmation keeps
-        // polling in the background after this modal closes, using the SAME
-        // shared poller `.submitted()` itself calls for a single-step toast
-        // (`pollStoaChainConfirmation`, `toastManager.ts` — no second,
-        // independently-editable copy of this fetch/retry/timeout logic).
-        void pollStoaChainConfirmation(_tx as ToastController, 2, contDescriptor.requestKey, targetChain);
-        onSuccess?.(requestKey);
+        onSuccess?.(outcome.requestKey);
         onClose();
         return;
       }
@@ -522,23 +523,27 @@ export function SendStoaModal({
         return;
       }
       if (!exists && !isKAccount) {
-        const message = "Receiver account not found — only k: accounts can be auto-created.";
+        const message = RECEIVER_NOT_AUTOCREATABLE_MESSAGE;
         setLastError(message);
         reportFailure(message);
         return;
       }
 
       const isNew = !exists;
-      const pactCode = isNew
-        ? `(coin.C_TransferAnew "${address}" "${receiverAddr}" (read-keyset "ks") ${decimalStr})`
-        : `(coin.C_Transfer "${address}" "${receiverAddr}" ${decimalStr})`;
+      // The two Pact strings now live with the headless drain that shares
+      // them (`../../zbom/execute/nativeStoaTransfer.ts`) — ONE copy, so the
+      // engine cannot emit a subtly different transfer than this modal does.
+      const pactCode = buildNativeStoaTransferPactCode({
+        sender: address,
+        receiver: receiverAddr,
+        amount: decimalStr,
+        receiverExists: exists,
+      });
 
       const guard: IKeyset = { keys: [publicKey], pred: "keys-all" };
       // Receiver's keyset is derived from its own k: address pubkey —
       // required for the on-chain (read-keyset "ks") in C_TransferAnew.
-      const keysetData: IKeyset | undefined = isNew
-        ? { keys: [receiverAddr.slice(2)], pred: "keys-all" }
-        : undefined;
+      const keysetData: IKeyset | undefined = isNew ? deriveKAccountKeyset(receiverAddr) : undefined;
 
       const { requestKey } = await execute({
         build: ({ gasLimit, capsKeyPub, guardPubs, gasPrice, creationTime }) =>

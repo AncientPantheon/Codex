@@ -7,7 +7,7 @@
  *
  * ## Why this is not in the wizard
  *
- * Applying these is OPTIONAL and can happen days later — the owner's point
+ * STARTING this is OPTIONAL and can happen days later — the owner's point
  * that *"migration is basically a tool for those that want to give up old
  * accounts and use new ones"*. Eligibility was settled in stage 2 and does
  * not wait on any of this. Keeping it out of the wizard is also what lets
@@ -16,8 +16,35 @@
  * ## Why it says the old keys still work
  *
  * Because they do, and a card that merely says "ACTION REQUIRED" would push
- * users into transactions they do not need. Nothing is lost by never
- * pressing these buttons; the codex keeps the old keys either way.
+ * users into transactions they do not need. Never starting this loses
+ * nothing; the codex keeps the old keys either way.
+ *
+ * ## ...but stopping HALF-WAY does lose something (`migration-execute` T10)
+ *
+ * This card's old copy said only the first half, and
+ * `codex-arweave`'s `CodexMigrationInformatics.tsx` said only the second —
+ * that moving funds was "a genuinely necessary part of becoming eligible".
+ * Both shipped, contradicting each other, because they were answering
+ * different questions. The reconciliation, now stated on all three surfaces
+ * that touch this: **applying is optional; applying PARTIALLY is not.** Once
+ * the chosen payment key is in force, STOA and urSTOA still sitting on the
+ * old key are funds the account no longer names — which is why
+ * `migration-execute/design.md` §2 orders the drain BEFORE the rotation and
+ * §3 runs the whole thing as one uninterrupted chain from one press, with no
+ * per-step prompts. The owner's ruling, verbatim: *"You don't have to do
+ * this. But if you start it, it runs all the way through without stopping to
+ * ask you anything."* Keep BOTH halves in the rendered paragraph below;
+ * `tests/ui-pending-key-changes-card.test.tsx` asserts each one separately
+ * because dropping either is how the contradiction started.
+ *
+ * That last sentence is WORD-FOR-WORD `codex-arweave`'s exported
+ * `MIGRATION_RUNS_UNINTERRUPTED_MESSAGE`
+ * (`src/panel/CodexMigrationInformatics.tsx`), which both of that package's
+ * surfaces render from the constant itself. This copy cannot import it — the
+ * dependency runs codex-arweave -> codex-ouronet, and this package's
+ * `src/ui/index.ts` is negatively locked by `tests/ui-surface-stability.test.ts`
+ * — so it is kept identical deliberately: grep finds both, and promoting the
+ * sentence to `codex-core` later is a pure substitution rather than a rewrite.
  *
  * Presentational: it computes nothing and reads no store. The page hands it
  * the changes and the launchers.
@@ -120,7 +147,11 @@ export function PendingKeyChangesCard({
         >
           This is optional. Your codex is already eligible, and your existing keys keep
           working &mdash; this codex still holds them. Applying these only matters if you
-          want the keys you chose to be the ones in force on chain.
+          want the keys you chose to be the ones in force on chain. What is not optional is
+          leaving it half-applied: once the payment key you chose is in force, money still
+          sitting on the old key is money your account no longer names. You do not have to do
+          this. But if you start it, it runs all the way through: one press, every remaining
+          transaction in order, without stopping to ask you anything.
         </p>
       </div>
       {changes.map((c) => (

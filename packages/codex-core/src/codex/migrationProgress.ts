@@ -115,11 +115,32 @@ export interface MigrationCommitRecord {
   readonly alignmentStamped?: boolean;
 }
 
+/**
+ * One step of the stage-3 chain, as a RECORD OF WHAT HAPPENED.
+ *
+ * AUTHORITATIVE FOR NOTHING. `docs/work/migration-execute/design.md` §4
+ * decided stage 3 resumes by RE-READING ON-CHAIN STATE: every step is a
+ * predicate over chain state, not a position in a script. So this list is
+ * for display and support only, and **no code may read it to decide what to
+ * do next** — the engine asks the chain.
+ *
+ * A durable step cursor was considered and rejected there, for the reason
+ * that matters: a transaction lands and the tab dies before the write, and
+ * replaying from the cursor re-sends a transfer that already happened. Chain
+ * state cannot lie that way.
+ *
+ * Written only by `recordMigrationExecutionStep` (codex-ouronet's store),
+ * which merges by `id`.
+ */
 export interface MigrationExecutionStep {
   readonly id: string;
   readonly state: "pending" | "running" | "confirmed" | "failed";
-  /** Whether this is AUTHORITATIVE or merely a hint depends on the
-   *  stage-3 resumability decision, which is still open. */
+  /**
+   * A HINT, never authority — design §4 settled the question this comment
+   * used to leave open. Show it, link to it, quote it in a support report;
+   * never branch on its presence. "This step has a txHash" does not mean the
+   * transaction landed, and its absence does not mean it did not.
+   */
   readonly txHash?: string;
   readonly error?: string;
 }
@@ -160,6 +181,12 @@ export interface MigrationProgress {
   readonly updatedAt: string;
   readonly selection?: MigrationSelection;
   readonly committed?: MigrationCommitRecord;
+  /**
+   * What the stage-3 engine DID — see {@link MigrationExecutionStep}. A
+   * record for display and support, authoritative for nothing: resume
+   * re-reads the chain (design §4). Produced by the store's
+   * `recordMigrationExecutionStep`, consumed by renderers only.
+   */
   readonly execution?: { readonly steps: readonly MigrationExecutionStep[] };
   /** What Apply would execute and seal. See {@link MigrationPendingPlan}. */
   readonly pending?: MigrationPendingPlan;
