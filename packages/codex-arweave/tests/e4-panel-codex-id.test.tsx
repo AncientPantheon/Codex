@@ -21,6 +21,13 @@ import { MASTER_ARWEAVE_SEED } from "@ancientpantheon/codex-core";
 import type { ArweaveJwk, GatewayPool } from "@ancientpantheon/arweave-core";
 
 import { ArweavePanel } from "../src/panel/ArweavePanel";
+// The navigation seam the Apply popup's one control is built on, plus the DOM
+// id it targets — imported from the page's own module rather than re-declared
+// here, so the pinned literal below is genuinely the one that ships.
+import {
+  MIGRATION_EXECUTOR_ANCHOR_ID,
+  revealMigrationExecutor,
+} from "../src/panel/CodexIdPage";
 // The owner's ruling on uninterrupted execution, asserted against the one
 // exported constant the two arweave surfaces render rather than a copy of
 // its text (`migration-execute` T10).
@@ -2080,7 +2087,29 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     expect(screen.queryByTestId("arweave-codex-id-apply-migration")).toBeNull();
   });
 
-  it("state (3) WITH outstanding changes: the popup lists each one FROM → TO, says transactions are still needed, and offers NO Seal button", async () => {
+  /**
+   * REWRITTEN (owner, live testing: *"i thought apply button would bring me
+   * to the execution page"*). This test used to require the popup to render
+   * `PendingKeyChangesCard` — the FULL FROM → TO card — inside itself,
+   * justified as "a summary would not tell the owner what is about to be
+   * signed".
+   *
+   * That requirement is what produced the dead end. The popup rendered a card
+   * titled, word for word, "Key changes you chose, not yet on chain" — while
+   * its own prose told the owner to go and find a card by that exact title
+   * "further down this page" and press a button on it. Two visually identical
+   * cards, one of them missing the only button that does anything, is why the
+   * owner concluded the transaction engine had never been wired.
+   *
+   * The old justification does not survive the move either: this popup CANNOT
+   * sign anything (`applyHasOutstandingWork` keeps Seal off it by design), so
+   * the detail of "what is about to be signed" belongs with the press that
+   * signs it — and the executor renders that same card immediately above its
+   * own button. The detail is therefore not reduced, it is DE-DUPLICATED: one
+   * card, one button, and this popup keeps a short summary plus the control
+   * that gets the owner there (the two tests below this one).
+   */
+  it("state (3) WITH outstanding changes: the popup SUMMARISES them instead of duplicating the executor's card, and offers NO Seal button", async () => {
     await renderCodexIdPage(() => {
       capturedStore!.setState({
         migrationProgress: progressWith({
@@ -2097,12 +2126,26 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     fireEvent.click(screen.getByTestId("arweave-codex-id-apply-migration"));
     const modal = screen.getByTestId("codex-apply-migration-modal");
 
-    expect(within(modal).getByTestId("pending-key-change-guard")).toBeInTheDocument();
-    // The REAL keys, both ends — a summary would not tell the owner what is
-    // about to be signed. (`MeasuredHexHighlight` always carries the full
-    // value in its `title`, whatever it truncated the display to.)
-    expect(within(modal).getByTitle(OLD_GUARD_KEY)).toBeInTheDocument();
-    expect(within(modal).getByTitle(CHOSEN_GUARD_KEY)).toBeInTheDocument();
+    // THE de-duplication: no second copy of the card, and no second copy of
+    // its rows, inside this popup.
+    expect(within(modal).queryByTestId("pending-key-changes-card")).toBeNull();
+    expect(within(modal).queryByTestId("pending-key-change-guard")).toBeNull();
+    // What IS outstanding is still named here, by kind — this popup must say
+    // what is blocking the seal, not merely that something is.
+    expect(
+      within(modal).getByTestId("codex-apply-migration-outstanding-summary").textContent ?? "",
+    ).toMatch(/guard/i);
+
+    // ...and the FROM → TO detail did not vanish with the duplicate: it is on
+    // the one card that can actually send it, with the real keys at both ends.
+    // (`MeasuredHexHighlight` always carries the full value in its `title`,
+    // whatever it truncated the display to.)
+    const stage3a = screen.getByTestId("codex-id-stage3a");
+    expect(within(stage3a).getByTestId("pending-key-change-guard")).toBeInTheDocument();
+    expect(within(stage3a).getByTitle(OLD_GUARD_KEY)).toBeInTheDocument();
+    expect(within(stage3a).getByTitle(CHOSEN_GUARD_KEY)).toBeInTheDocument();
+    expect(within(modal).queryByTitle(CHOSEN_GUARD_KEY)).toBeNull();
+
     expect(within(modal).getByTestId("codex-apply-migration-needs-transactions")).toBeInTheDocument();
 
     // THE load-bearing rule, and it does NOT depend on execution being
@@ -2337,7 +2380,11 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     fireEvent.click(screen.getByTestId("arweave-codex-id-apply-migration"));
     const modal = screen.getByTestId("codex-apply-migration-modal");
 
-    expect(within(modal).getByTestId("pending-key-change-guard")).toBeInTheDocument();
+    // The outstanding GUARD rotation is summarised (it is a real rotation of
+    // the account's guard, which the summary names) and carries no keyset note.
+    expect(
+      within(modal).getByTestId("codex-apply-migration-outstanding-summary").textContent ?? "",
+    ).toMatch(/guard/i);
     expect(within(modal).queryByTestId("codex-apply-migration-keyset-note")).toBeNull();
   });
 
@@ -2366,5 +2413,190 @@ describe("`migration-pending-apply` T3 — the four-state step-2 card and the Ap
     expect(error.textContent).toMatch(/seal/i);
     expect(screen.getByTestId("codex-apply-migration-modal")).toBeInTheDocument();
     expect(capturedStore!.getState().primeAlignment).not.toBe("aligned");
+  });
+
+  /**
+   * THE owner's live-testing complaint, as a test: *"i thought apply button
+   * would bring me to the execution page. so wire that in so i can apply the
+   * modifications"*.
+   *
+   * The popup told him to go and find a control further down the page and
+   * press it, while showing him a card that looked exactly like the one he
+   * was being sent to, minus its button. Nothing on this surface led
+   * anywhere. The regression this catches is the dead end itself: the popup's
+   * prose naming a destination with no way to reach it.
+   *
+   * This runs against the REAL `PendingKeyChangesSection` from
+   * `@ancientpantheon/codex-ouronet/ui` — the page already mounts it — so it
+   * is the only test in the repo that holds BOTH halves of the cross-package
+   * DOM contract at once: the page's transcribed id, and the element the
+   * other package actually renders it on. There is no mock of the section, by
+   * design: a mocked destination would pass while the real one moved.
+   */
+  it("the popup's one control LANDS the user on the real executor card: popup closed, card focused and highlighted, nothing executed", async () => {
+    await renderCodexIdPage(() => {
+      capturedStore!.setState({
+        migrationProgress: progressWith({
+          selection: {
+            account: { kind: "keep-current" },
+            payment: { kind: "keep" },
+            guard: { kind: "custom", keys: [CHOSEN_GUARD_KEY], pred: "keys-all" },
+          },
+        }),
+        ouroAccounts: [MASTER_ACCOUNT],
+      });
+    });
+
+    fireEvent.click(screen.getByTestId("arweave-codex-id-apply-migration"));
+    const modal = screen.getByTestId("codex-apply-migration-modal");
+    const goTo = within(modal).getByTestId("codex-apply-migration-goto-executor");
+    // It must not read as a SECOND execute button. Requirement 1: this popup
+    // is the seal surface and gains no execute control — it navigates.
+    expect(goTo.textContent ?? "").not.toMatch(/execute all remaining transactions/i);
+
+    fireEvent.click(goTo);
+
+    // Closed, because the destination is behind it.
+    expect(screen.queryByTestId("codex-apply-migration-modal")).toBeNull();
+    // Landed on the real thing: the id the page transcribes resolves to the
+    // box the other package renders, and that box holds the one press.
+    const executor = document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID);
+    expect(executor).toBe(screen.getByTestId("pending-key-changes-executor"));
+    expect(executor!.contains(screen.getByTestId("pending-key-changes-execute-all"))).toBe(true);
+    // FINDABLE, not merely scrolled to: focus moved (which is also what moves
+    // a screen reader's cursor) and the card is lit.
+    expect(document.activeElement).toBe(executor);
+    expect(executor!.style.boxShadow).not.toBe("");
+
+    // ...and NOT auto-clicked. Requirement 3: ~33 transactions stay a
+    // deliberate press. The engine renders an outcome and records steps; a
+    // run would leave both behind.
+    expect(screen.queryByTestId("pending-key-changes-execute-result")).toBeNull();
+    expect(capturedStore!.getState().migrationProgress?.execution).toBeUndefined();
+    // Nothing sealed either — navigating is not applying.
+    expect(capturedStore!.getState().migrationProgress?.appliedAt).toBeUndefined();
+    expect(capturedStore!.getState().primeAlignment).not.toBe("aligned");
+  });
+
+  it("when the executor card is NOT on the page, the control REPORTS it and keeps the popup open", async () => {
+    // Requirement 4. The Apply button is offered off `migrationProgress`
+    // alone, but the executor additionally needs the master account
+    // (`accounts[0]`) — so a codex whose accounts have not resolved can open
+    // this popup with no destination rendered anywhere. A control that
+    // scrolled nowhere and closed the popup would look exactly like a working
+    // one, which is the failure mode this whole round exists to delete.
+    await renderCodexIdPage(() => {
+      capturedStore!.setState({
+        migrationProgress: progressWith({
+          selection: {
+            account: { kind: "keep-current" },
+            payment: { kind: "keep" },
+            guard: { kind: "update-keyset-custom", keys: [CHOSEN_GUARD_KEY], pred: "keys-all" },
+          },
+        }),
+        ouroAccounts: [],
+      });
+    });
+
+    fireEvent.click(screen.getByTestId("arweave-codex-id-apply-migration"));
+    const modal = screen.getByTestId("codex-apply-migration-modal");
+    // The premise: there genuinely is no destination in the document.
+    expect(document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID)).toBeNull();
+    expect(within(modal).queryByTestId("codex-apply-migration-executor-missing")).toBeNull();
+
+    fireEvent.click(within(modal).getByTestId("codex-apply-migration-goto-executor"));
+
+    const missing = within(modal).getByTestId("codex-apply-migration-executor-missing");
+    expect(missing).toHaveAttribute("role", "alert");
+    expect(missing.textContent ?? "").toMatch(/not on this page/i);
+    // Kept open: the user stays on the surface that just explained itself.
+    expect(screen.getByTestId("codex-apply-migration-modal")).toBeInTheDocument();
+    // And a failed navigation is never a back door to sealing.
+    expect(within(modal).queryByTestId("codex-apply-migration-seal")).toBeNull();
+    expect(capturedStore!.getState().primeAlignment).not.toBe("aligned");
+  });
+});
+
+/**
+ * `revealMigrationExecutor` — the Apply popup's navigation seam, as a pure
+ * function over an injected DOM lookup.
+ *
+ * It is a separately exported value, taking its one seam as an argument, for
+ * the same reason the chain engine's deps are: the behaviours that matter
+ * here are "what happens when the host cannot do this" — no document at all,
+ * no `scrollIntoView` (jsdom), a `scrollIntoView` that throws — and none of
+ * them can be driven through a mounted page. No `vi.mock` anywhere: the
+ * document is passed in.
+ */
+describe("revealMigrationExecutor — the navigation seam, and its hostile hosts", () => {
+  it("targets the id the ouronet executor card renders — the transcribed half of the cross-package contract", () => {
+    // Pinned on BOTH sides (`packages/codex-ouronet/tests/
+    // ui-pending-key-changes-section.test.tsx` pins the same literal on the
+    // rendering side), because no import can cross this package boundary.
+    expect(MIGRATION_EXECUTOR_ANCHOR_ID).toBe("codex-migration-executor");
+  });
+
+  it("reports failure instead of throwing when there is no document at all (a non-browser host)", () => {
+    // The module is imported by anything that imports the page, including
+    // non-DOM hosts; `document` is read lazily and its absence is a `false`,
+    // never a `ReferenceError` at import or at press.
+    expect(revealMigrationExecutor(null)).toBe(false);
+  });
+
+  it("reports failure when the executor card is not rendered — the signal the popup turns into its refusal", () => {
+    const getElementById = vi.fn(() => null);
+    expect(revealMigrationExecutor({ getElementById })).toBe(false);
+    expect(getElementById).toHaveBeenCalledWith(MIGRATION_EXECUTOR_ANCHOR_ID);
+  });
+
+  it("works where scrollIntoView DOES NOT EXIST (jsdom): focuses the real element and reports success", () => {
+    const el = document.createElement("div");
+    el.id = MIGRATION_EXECUTOR_ANCHOR_ID;
+    el.tabIndex = -1;
+    document.body.appendChild(el);
+    try {
+      // The premise, asserted rather than assumed: jsdom implements no
+      // `Element.prototype.scrollIntoView`, so an unguarded call is a
+      // TypeError on every press in every test that mounts this page.
+      expect((el as unknown as { scrollIntoView?: unknown }).scrollIntoView).toBeUndefined();
+
+      expect(revealMigrationExecutor()).toBe(true);
+      expect(document.activeElement).toBe(el);
+    } finally {
+      el.remove();
+    }
+  });
+
+  it("asks a real host for a CENTERED, smooth scroll, and lets that scroll own the motion", () => {
+    const scrollIntoView = vi.fn();
+    const focus = vi.fn();
+    const el = { scrollIntoView, focus } as unknown as HTMLElement;
+
+    expect(revealMigrationExecutor({ getElementById: () => el })).toBe(true);
+
+    // `block: "center"` is the difference between the card landing in the
+    // middle of the viewport and it landing one pixel inside the bottom edge,
+    // which is what a bare `scrollIntoView()` does on a long page like this.
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    // `preventScroll` only when something else is already scrolling: focus()
+    // jumps instantly, which would fight the smooth scroll it was paired with.
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it("still focuses, and still reports success, when a host's scrollIntoView THROWS", () => {
+    // jsdom's own `window.scrollTo` throws "Not implemented" rather than being
+    // absent, so a host whose `scrollIntoView` behaves the same way is not
+    // hypothetical. Losing the scroll is survivable; losing the focus means
+    // the control silently did nothing, which is the failure being deleted.
+    const focus = vi.fn();
+    const el = {
+      scrollIntoView: () => {
+        throw new Error("Not implemented: Element.prototype.scrollIntoView");
+      },
+      focus,
+    } as unknown as HTMLElement;
+
+    expect(revealMigrationExecutor({ getElementById: () => el })).toBe(true);
+    expect(focus).toHaveBeenCalled();
   });
 });

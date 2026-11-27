@@ -74,7 +74,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 import {
   CodexModalShell,
-  PendingKeyChangesCard,
   PendingKeyChangesSection,
   computeOutstandingKeyChanges,
 } from "@ancientpantheon/codex-ouronet/ui";
@@ -425,6 +424,97 @@ const APPLY_MIGRATION_BUTTON_STYLE: React.CSSProperties = {
   marginTop: 8,
 };
 
+/**
+ * The DOM id `PendingKeyChangesSection`'s EXECUTOR box renders
+ * (`packages/codex-ouronet/src/ui/settings/PendingKeyChangesSection.tsx` —
+ * `MIGRATION_EXECUTOR_ANCHOR_ID` there), transcribed here because no import
+ * can cross this boundary: that package's `./ui` barrel is a NEGATIVE export
+ * lock (`packages/codex-ouronet/tests/ui-surface-stability.test.ts`) so the
+ * name cannot be published through it, and this package's path mapping
+ * resolves `@ancientpantheon/codex-ouronet/<x>` to that package's
+ * `src/<x>/index.ts`, never to a module that deep.
+ *
+ * So the contract is held by tests on BOTH sides instead of by the compiler:
+ * the literal is pinned in `tests/e4-panel-codex-id.test.tsx` and in that
+ * package's `tests/ui-pending-key-changes-section.test.tsx`, and this
+ * package's own suite additionally renders the REAL section and asserts the id
+ * resolves to the box holding "Execute all remaining transactions" — so a
+ * rename on either side fails here, loudly, rather than turning this popup's
+ * control back into a dead end. Same discipline the execute button's LABEL
+ * (quoted in the needs-transactions paragraph below) is already held to.
+ */
+export const MIGRATION_EXECUTOR_ANCHOR_ID = "codex-migration-executor";
+
+/** The one DOM capability {@link revealMigrationExecutor} needs — injected,
+ *  so its hostile-host behaviour is testable without a mounted page. The real
+ *  `Document` satisfies it structurally. */
+export interface MigrationExecutorLookup {
+  getElementById(id: string): HTMLElement | null;
+}
+
+/** Best effort, by design: a host that cannot scroll or cannot focus must not
+ *  turn navigation into an exception. */
+function attempt(action: () => void): void {
+  try {
+    action();
+  } catch {
+    /* A host that refuses to move the viewport is not a reason to fail. */
+  }
+}
+
+/**
+ * Take the owner to the migration executor — the destination the Apply popup
+ * points at (owner, live testing: *"i thought apply button would bring me to
+ * the execution page"*).
+ *
+ * Returns whether the executor was actually FOUND, which is the whole reason
+ * this returns anything: the section gates its executor on
+ * `hasMigrationPending` AND on a resolved master account, so "there is nowhere
+ * to go" is a real state, and the popup turns a `false` into a visible refusal
+ * rather than a control that appears to work. It deliberately does NOT press
+ * anything — the chain is ~33 transactions and stays a deliberate press.
+ *
+ * Every host capability is treated as optional, because they genuinely are:
+ *
+ *  - `document` may not exist at all (this module is imported by anything that
+ *    imports the page). Read lazily, inside the call, never at module scope.
+ *  - `Element.prototype.scrollIntoView` does not exist in jsdom, so every
+ *    test that mounts this page would throw on the press if it were called
+ *    unguarded. Guarded by `typeof`, and wrapped in {@link attempt} as well
+ *    because jsdom's `window.scrollTo` throws "Not implemented" rather than
+ *    being absent, so a host that does the same for `scrollIntoView` is not
+ *    hypothetical.
+ *  - `focus` is what actually makes the card findable: it moves a screen
+ *    reader's cursor, and the section lights the card while it holds focus
+ *    (its `MIGRATION_EXECUTOR_ANCHOR_ID` doc comment is the other half of
+ *    this contract). `preventScroll` is passed ONLY when the smooth scroll
+ *    above actually ran, so focus does not jerk the page out from under it —
+ *    and is omitted otherwise, so on a host with no `scrollIntoView` the
+ *    focus is what brings the card into view.
+ */
+export function revealMigrationExecutor(
+  lookup: MigrationExecutorLookup | null = typeof document === "undefined" ? null : document,
+): boolean {
+  if (lookup === null || lookup === undefined) return false;
+  const target = lookup.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID);
+  if (target === null) return false;
+
+  let scrolled = false;
+  if (typeof target.scrollIntoView === "function") {
+    attempt(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrolled = true;
+    });
+  }
+  if (typeof target.focus === "function") {
+    attempt(() => {
+      if (scrolled) target.focus({ preventScroll: true });
+      else target.focus();
+    });
+  }
+  return true;
+}
+
 /** Body copy inside the Apply popup. */
 const APPLY_NOTE_STYLE: React.CSSProperties = {
   margin: 0,
@@ -439,6 +529,25 @@ const APPLY_CAVEAT_STYLE: React.CSSProperties = {
   fontSize: 12,
   lineHeight: 1.5,
   color: "#888",
+};
+
+/**
+ * The popup's one control: it NAVIGATES, so it is deliberately NOT the gold
+ * fill `APPLY_MIGRATION_BUTTON_STYLE` / the executor's own Execute button use.
+ * An outlined accent button cannot be mistaken for the press that sends ~33
+ * transactions — which is the confusion this whole round is removing, not one
+ * to re-introduce one level down.
+ */
+const APPLY_NAV_BUTTON_STYLE: React.CSSProperties = {
+  alignSelf: "flex-start",
+  padding: "8px 14px",
+  borderRadius: 8,
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+  border: `1px solid ${INFORMATICS_ACCENT}`,
+  backgroundColor: "transparent",
+  color: INFORMATICS_ACCENT,
 };
 
 /** A failed seal. Same `role="alert"` + `#f87171` convention every other
@@ -621,6 +730,14 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
   // closing the popup on a failure would read as "sealed" when nothing was.
   const [applyMigrationOpen, setApplyMigrationOpen] = useState(false);
   const [sealError, setSealError] = useState<string | null>(null);
+  /**
+   * Set when the popup's navigation control found no executor to go to. Only
+   * ever written by the press itself: this is the OUTCOME of an attempt, not a
+   * prediction, so the popup never pre-emptively claims the card is missing
+   * (the section can appear between opening the popup and pressing — the
+   * accounts list resolving is exactly that).
+   */
+  const [executorMissing, setExecutorMissing] = useState(false);
   const [informaticsTab, setInformaticsTab] = useState<InformaticsTab>("backup");
 
   // `upgrade-prompt-ui` T5: single source of truth for "does this codex need
@@ -1065,6 +1182,33 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
   }, [ensureCodexUnlocked]);
 
   /**
+   * The Apply popup's one control (owner, live testing: *"i thought apply
+   * button would bring me to the execution page. so wire that in so i can
+   * apply the modifications"*).
+   *
+   * It NAVIGATES and nothing else. The popup gains no execute button: it is
+   * the SEAL surface, `applyHasOutstandingWork` refuses sealing while
+   * anything is outstanding, and that separation is the only thing stopping a
+   * permanent seal over keys that were never put in force. So the fix for
+   * "Apply leads nowhere" is a route to the executor, not a second executor.
+   *
+   * Closing the popup is part of the navigation, not a side effect: the
+   * destination sits BEHIND this overlay, so a popup left open would scroll
+   * the page under a card the owner cannot see or press. It closes only when
+   * the destination was actually found — {@link revealMigrationExecutor}
+   * reports that — because a control that closed the popup and scrolled
+   * nowhere is indistinguishable from one that worked.
+   */
+  const goToMigrationExecutor = useCallback(() => {
+    if (revealMigrationExecutor()) {
+      setExecutorMissing(false);
+      setApplyMigrationOpen(false);
+      return;
+    }
+    setExecutorMissing(true);
+  }, []);
+
+  /**
    * `migration-pending-apply` T3 — the Apply popup's Seal action. Calls T1's
    * real `sealMigration()` (which stamps `primeAlignment: "aligned"` through
    * the single writer and marks the row applied), then closes.
@@ -1157,6 +1301,41 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
    * the mistake worth a derived name.
    */
   const applyHasOutstandingWork = !outstanding.none || keysetDefinitionChosen;
+
+  /**
+   * What is outstanding, named by KIND — the popup's replacement for the copy
+   * of `PendingKeyChangesCard` it used to render inside itself.
+   *
+   * Why the card is gone (owner, live testing: *"i thought apply button would
+   * bring me to the execution page"*): this popup rendered a card titled, word
+   * for word, "Key changes you chose, not yet on chain", directly beneath prose
+   * telling the owner to find a card by that exact title "further down this
+   * page" and press a button on it. The popup's copy had no button, because
+   * this is the seal surface — so the owner reasonably read two identical
+   * cards, one of them broken, and concluded the engine had never been wired.
+   *
+   * The FROM → TO detail is not reduced, it is DE-DUPLICATED: the executor
+   * renders that same card immediately above the press that signs it, which is
+   * where the detail belongs, and the control below gets the owner there in one
+   * press. What stays here is what this surface is FOR — naming what blocks the
+   * seal. Exactly one card now carries exactly one button.
+   *
+   * Driven off the same `outstanding.changes` the card is, so the two cannot
+   * disagree about what is outstanding.
+   */
+  const outstandingSummary =
+    outstanding.changes.length > 0 ? (
+      <p data-testid="codex-apply-migration-outstanding-summary" style={APPLY_NOTE_STYLE}>
+        Still to put in force:{" "}
+        {outstanding.changes
+          .map((change) =>
+            change.kind === "guard" ? "the account's guard" : "the payment key",
+          )
+          .join(" and ")}
+        . The full FROM → TO detail for each is on that one card, immediately
+        above the button that sends them.
+      </p>
+    ) : null;
 
   /**
    * `migration-execute-keyset` T7. This paragraph used to end "…which is not
@@ -1309,6 +1488,7 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
                 title="Apply — shows exactly what this pending state would execute on chain, and seals it"
                 onClick={() => {
                   setSealError(null);
+                  setExecutorMissing(false);
                   setApplyMigrationOpen(true);
                 }}
                 style={APPLY_MIGRATION_BUTTON_STYLE}
@@ -1477,15 +1657,37 @@ export function CodexIdPage({ deps }: CodexIdPageProps): React.ReactElement {
                   This pending state needs transactions to be executed before it can be
                   sealed. Send them with &ldquo;Execute all remaining transactions&rdquo;, on
                   the &ldquo;Key changes you chose, not yet on chain&rdquo; card further
-                  down this page.{" "}
+                  down this page &mdash; the button below takes you straight to it.{" "}
                   {MIGRATION_RUNS_UNINTERRUPTED_MESSAGE}
                 </p>
-                {/* The SAME FROM → TO rows the stage-3A card renders — reused,
-                    not re-invented, so the two can never describe the same
-                    change differently. No launchers here: this popup lists,
-                    the card below executes. */}
-                <PendingKeyChangesCard changes={outstanding.changes} />
+                {outstandingSummary}
                 {applyKeysetNote}
+                {/* The route to the executor. NOT an execute button — see
+                    `goToMigrationExecutor`: this popup stays the seal surface,
+                    and the single press that sends ~33 transactions stays on
+                    the one card that shows them in full. */}
+                <button
+                  type="button"
+                  data-testid="codex-apply-migration-goto-executor"
+                  title="Take me to the transactions — closes this popup and highlights the card that sends them. Nothing is sent until you press the button on that card."
+                  onClick={goToMigrationExecutor}
+                  style={APPLY_NAV_BUTTON_STYLE}
+                >
+                  Take me to the transactions
+                </button>
+                {executorMissing ? (
+                  <p
+                    data-testid="codex-apply-migration-executor-missing"
+                    role="alert"
+                    style={APPLY_ERROR_STYLE}
+                  >
+                    The transactions card is not on this page right now, so there is
+                    nowhere to take you. It appears once this codex&apos;s accounts have
+                    loaded and a finalized plan is waiting &mdash; close this popup,
+                    check that the codex is unlocked, then try again. Nothing has been
+                    sent and nothing has been sealed.
+                  </p>
+                ) : null}
                 <p style={APPLY_CAVEAT_STYLE}>
                   Sealing is deliberately not offered while anything is outstanding:
                   it is permanent, and it would lock this codex with the keys you

@@ -392,7 +392,13 @@ describe("Settling Dashboard — synchronous tickers", () => {
         { index: 1, publicKey: KEY1, derivationPath: "m/1" },
       ],
     };
-    await renderWizard([seed], account({ id: "current", publicKey: ACCOUNT_PUB }));
+    // KEY0 is this seed's own recorded position 0 AND (now stated, not
+    // assumed) the chosen account's own registered payment key — see the
+    // `stoaChainLedger` note on the fixtures below.
+    await renderWizard(
+      [seed],
+      account({ id: "current", publicKey: ACCOUNT_PUB, stoaChainLedger: `k:${KEY0}` }),
+    );
     await toAccountStep();
     fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
     const keepPayment = await screen.findByTestId("legacy-prime-migration-payment-option-keep");
@@ -495,10 +501,20 @@ describe("Settling Dashboard — synchronous tickers", () => {
       secret: "ct", main: "", createdAt: "2026-01-01T00:00:00.000Z",
       accounts: [{ index: 0, publicKey: UNRELATED_1, derivationPath: "m/0" }],
     };
-    // `seed2` listed FIRST — `currentPaymentKeyOf` reads `allSeeds[0]`'s
-    // own index-0 key, so "keep payment" resolves to seed2's own key,
-    // never seed1's.
-    await renderWizard([seed2, seed1], account({ id: "current", publicKey: ACCOUNT_PUB }), { currentPrimeSeed: seed1 });
+    // The chosen account's own registered payment key is seed2's, not
+    // seed1's, so "keep payment" resolves to seed2 and seed1 — which backs
+    // only the ACCOUNT — must show payment unlit. REWRITTEN (owner-reported
+    // bug): this used to rely on listing `seed2` FIRST, because
+    // `currentPaymentKeyOf` read `allSeeds[0]`'s own index-0 key
+    // positionally instead of consulting the account at all. The ORDER is
+    // kept exactly as it was, deliberately: with the identity now read
+    // from the account, seed1-vs-seed2 ordering no longer decides the
+    // answer, and leaving the old order in place proves it.
+    await renderWizard(
+      [seed2, seed1],
+      account({ id: "current", publicKey: ACCOUNT_PUB, stoaChainLedger: `k:${UNRELATED_1}` }),
+      { currentPrimeSeed: seed1 },
+    );
     await toAccountStep();
     fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
     const keepPayment = await screen.findByTestId("legacy-prime-migration-payment-option-keep");
@@ -1419,6 +1435,16 @@ describe("Settling Dashboard — unmatched-account fallback card (wizard-page2-a
     ARWEAVE_DECRYPT_MAP["hodler-fallback-secret-3"] = existingWords;
     const existingAccount = account({
       id: "hodler3", name: "AncientHodler", publicKey: existingAccountPub, secret: "hodler-fallback-secret-3",
+      // CORRECTED (owner-reported bug, found on a real codex): a KEPT
+      // payment key is the chosen ACCOUNT's own registered key
+      // (`stoaChainLedger`). These fixtures used to leave it unset and
+      // still passed, because `currentPaymentKeyOf` read position 0 of
+      // `allSeeds[0]` POSITIONALLY — which on the owner's real codex is a
+      // DIFFERENT key than the account actually uses (its payment key
+      // lives in a non-prime koala seed, while `seeds[0]` is a prime
+      // stoic seed), making the old pass an accident of fixture ordering.
+      // See `ui-migration-payment-key-identity.test.tsx`.
+      stoaChainLedger: `k:${UNRELATED_1}`,
     });
     const current = account({ id: "current", publicKey: ACCOUNT_PUB });
     const paymentSeed: IStoaChainSeed = {
@@ -1488,6 +1514,16 @@ describe("Settling Dashboard — unmatched-account fallback card (wizard-page2-a
     ARWEAVE_DECRYPT_MAP["hodler-fallback-secret-4"] = existingWords;
     const existingAccount = account({
       id: "hodler4", name: "AncientHodler", publicKey: existingAccountPub, secret: "hodler-fallback-secret-4",
+      // CORRECTED (owner-reported bug, found on a real codex): a KEPT
+      // payment key is the chosen ACCOUNT's own registered key
+      // (`stoaChainLedger`). These fixtures used to leave it unset and
+      // still passed, because `currentPaymentKeyOf` read position 0 of
+      // `allSeeds[0]` POSITIONALLY — which on the owner's real codex is a
+      // DIFFERENT key than the account actually uses (its payment key
+      // lives in a non-prime koala seed, while `seeds[0]` is a prime
+      // stoic seed), making the old pass an accident of fixture ordering.
+      // See `ui-migration-payment-key-identity.test.tsx`.
+      stoaChainLedger: `k:${UNRELATED_1}`,
     });
     const current = account({ id: "current", publicKey: ACCOUNT_PUB });
     // The legacy literal name real codices can still carry, per
@@ -2205,9 +2241,13 @@ describe("Settling Dashboard — Pure Keys card", () => {
       secret: "ct", main: "", createdAt: "2026-01-01T00:00:00.000Z",
       accounts: [{ index: 0, publicKey: PURE_PAYMENT_KEY, derivationPath: "m/0" }],
     };
-    await renderWizard([seed], account({ id: "current", publicKey: ACCOUNT_PUB }), {
-      pureKeypairs: [pureKeypairFx("pk-1", PURE_PAYMENT_KEY)],
-    });
+    await renderWizard(
+      [seed],
+      // The account's OWN registered payment key IS the pure keypair's — see
+      // the `stoaChainLedger` note on the fixtures above.
+      account({ id: "current", publicKey: ACCOUNT_PUB, stoaChainLedger: `k:${PURE_PAYMENT_KEY}` }),
+      { pureKeypairs: [pureKeypairFx("pk-1", PURE_PAYMENT_KEY)] },
+    );
     await toAccountStep();
     fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
     const keepPayment = await screen.findByTestId("legacy-prime-migration-payment-option-keep");
@@ -2393,7 +2433,14 @@ describe("Settling Dashboard — locked codex degrades silently (wizard-unlock-l
       secret: T4_SEED_SECRET, main: "", createdAt: "2026-01-01T00:00:00.000Z",
       accounts: [{ index: 0, publicKey: T4_PAYMENT_KEY, derivationPath: "m/0" }],
     };
-    const current = account({ id: "t4-current", publicKey: ACCOUNT_PUB });
+    // No `k:` sigil, deliberately: `seed-t4` is a STOIC seed, and
+    // `state/store.ts:2680` writes a stoic seed's payment-key address as
+    // the BARE key (`seedType === "stoic" ? paymentPublicKey :
+    // `k:${paymentPublicKey}``). Both forms therefore appear across this
+    // file's fixtures, and both must reduce to the same bare key.
+    const current = account({
+      id: "t4-current", publicKey: ACCOUNT_PUB, stoaChainLedger: T4_PAYMENT_KEY,
+    });
 
     store = null;
     render(

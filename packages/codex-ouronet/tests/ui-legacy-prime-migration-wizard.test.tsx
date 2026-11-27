@@ -3000,6 +3000,21 @@ describe("LegacyPrimeMigrationWizard — Page 7 (\"finalize\")", () => {
       // chain read needed to resolve it, so "keep" has something concrete
       // to lock.
       guard: { pred: "keys-all", keys: [kickstartKey] },
+      // CORRECTED (owner-reported bug, found on a real codex): "keep the
+      // PAYMENT key" locks the account's OWN registered payment key, read
+      // from `stoaChainLedger`. This fixture used to leave that unset and
+      // still passed, because `currentPaymentKeyOf` read position 0 of
+      // `allSeeds[0]` POSITIONALLY — which happens to be `kickstartKey`
+      // here, and is a DIFFERENT key on the owner's real codex (its
+      // account's payment key lives in a non-prime koala seed while
+      // seeds[0] is a prime stoic seed). So the old pass was an accident
+      // of fixture ordering, and the lock it proved was the lock of a key
+      // the account never used. Stated properly now, in the `k:` address
+      // form `state/store.ts:2680` writes for a non-stoic (koala) seed —
+      // which keeps this test's own subject intact: payment and guard
+      // still point at the SAME kickstart key, so one assertion pair
+      // still proves both write paths.
+      stoaChainLedger: `k:${kickstartKey}`,
       secret,
     });
     const store = await renderFinalizeWizard(targetAccount, {
@@ -3048,6 +3063,103 @@ describe("LegacyPrimeMigrationWizard — Page 7 (\"finalize\")", () => {
       expect.objectContaining({
         seedId: "finalize-kickstart-seed", position: 0, reason: "master-guard-key",
       }),
+    );
+  });
+
+  /**
+   * The owner's real codex, at the WRITE.
+   *
+   * Reported this session and verified by decrypting that codex's export:
+   * its Ouronet account's actual on-chain payment key is `k:e20f2672…f231`
+   * — position 0 of a NON-prime KOALA seed — while `allSeeds[0]` is the
+   * prime STOIC "Prime Codex Seed", holding `225eb6d1…` at position 0.
+   * `currentPaymentKeyOf` read that position POSITIONALLY, so a `"keep"`
+   * payment choice sent the STOIC key into `secureMasterAccount` (locking
+   * a key the account has never used, non-removably) and into
+   * `recordMigrationCommit` (where stage 3A then compares it against the
+   * account's `stoaChainLedger` and reports a rotation that was never
+   * chosen). A wrong WRITE, against a real codex — the display half of
+   * the same bug is pinned in
+   * `tests/ui-migration-payment-key-identity.test.tsx`.
+   *
+   * The two seeds are passed as `allSeeds` in the owner's own ORDER (the
+   * prime stoic one FIRST, so a positional read lands on it), and the
+   * koala seed is ALSO added to the store — `secureMasterAccount` resolves
+   * the key it is handed against `kadenaSeeds` to decide which seed and
+   * position to lock, so the codex has to genuinely hold it for there to
+   * be a lock to assert on at all.
+   */
+  it("a KEPT payment key locks and commits the ACCOUNT's own registered key (a non-prime koala seed's #0), never allSeeds[0]'s position 0", async () => {
+    const PRIME_STOIC_KEY0 = "225eb6d1b11f637b7f6014d9dd4ad5630d157540ef0fc4" + "0".repeat(18);
+    const KOALA_KEY0 = "e20f267264634c5bc76e15dd5a9df6703fc3c06726e7674aa6217edeb064f231";
+    const primeStoicSeed: IStoaChainSeed = {
+      id: "owner-prime-codex-seed", name: "Prime Codex Seed", seedType: "stoic",
+      version: "1.0.0", index: 0, secret: "ct-stoic", main: "",
+      createdAt: "2026-11-01T10:00:00.000Z", isPrime: true,
+      accounts: [{ index: 0, publicKey: PRIME_STOIC_KEY0, derivationPath: "m/0" }],
+    };
+    const koalaSeed: IStoaChainSeed = {
+      id: "owner-original-koala", name: "OriginalKoala", seedType: "koala",
+      version: "1.0.0", index: 1, secret: "ct-koala", main: `k:${KOALA_KEY0}`,
+      createdAt: "2026-11-02T10:00:00.000Z", isPrime: false,
+      accounts: [{ index: 0, publicKey: KOALA_KEY0, derivationPath: "m/0" }],
+    };
+    const secret = await encryptStringV2(FINALIZE_WORDS.join(" "), FINALIZE_PASSWORD);
+    const targetAccount = makeAccount({
+      id: "finalize-target-owner-koala-payment",
+      originSeedTab: "write-seed",
+      // The account's REAL payment key, in the `k:` address form
+      // `state/store.ts:2680` writes for every non-stoic seed.
+      stoaChainLedger: `k:${KOALA_KEY0}`,
+      secret,
+    });
+    const store = await renderFinalizeWizard(targetAccount, {
+      allSeeds: [primeStoicSeed, koalaSeed],
+      ensurePrimeArweaveSeed: fakeArweaveDerivation(),
+    });
+    await act(async () => {
+      await store.getState().actions.addStoaChainSeed(koalaSeed);
+    });
+    await installMasterArweaveAccountsFor(FINALIZE_BIT_STRING);
+
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // intro -> account
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-account-option-keep")).getByRole("button", {
+        name: /keep your current account/i,
+      }),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // account -> payment
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-payment-option-keep")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // payment -> guard
+    await screen.findByTestId("legacy-prime-migration-guard-section");
+    fireEvent.click(
+      within(screen.getByTestId("legacy-prime-migration-guard-option-recommended")).getByRole("button"),
+    );
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // guard -> review
+    fireEvent.click(screen.getByTestId("legacy-prime-migration-continue")); // review -> arweave
+    await passArweaveStep();
+    await settleChoices();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("legacy-prime-migration-finalize-committed")).toBeTruthy(),
+    );
+
+    // What stage 3A reads to decide whether a payment rotation is still
+    // outstanding: it compares this against the account's own
+    // `stoaChainLedger` (bare), so recording the stoic key here is what
+    // made a "keep" look like a pending rotation forever.
+    expect(store.getState().migrationProgress?.committed?.paymentPublicKey).toBe(KOALA_KEY0);
+    // ...and the non-removable lock lands on the seed that actually holds
+    // that key, never on the prime stoic seed.
+    expect(store.getState().masterKeyLocks).toContainEqual(
+      expect.objectContaining({
+        seedId: "owner-original-koala", position: 0, reason: "master-payment-key",
+      }),
+    );
+    expect(store.getState().masterKeyLocks).not.toContainEqual(
+      expect.objectContaining({ seedId: "owner-prime-codex-seed" }),
     );
   });
 

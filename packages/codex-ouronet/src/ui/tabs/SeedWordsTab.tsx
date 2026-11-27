@@ -36,6 +36,8 @@ import { MeasuredHexHighlight } from "../internal/StoaAddressHighlight.js";
 import { CreateStoaChainSeedModal } from "../internal/CreateStoaChainSeedModal.js";
 import { CodexModalShell } from "../internal/CodexModalShell.js";
 import { DalosSecretReveal } from "../internal/DalosSecretReveal.js";
+import { classifyDecryptFailure } from "../internal/decryptFailure.js";
+import { encryptionLevel } from "../settings/encryptionState.js";
 import { deriveStoaDalosKeypairAtIndex } from "../../wallet/stoaDalosKeygen.js";
 import type { IStoaChainSeed, SeedType, WalletAccount } from "../../types/entities.js";
 import { masterChainwebSeedName, chainwebSeedLock, chainwebKeyPositionLock } from "@ancientpantheon/codex-core";
@@ -616,6 +618,40 @@ function SeedRow({
   const displayName = masterChainwebSeedName(index, isPrime, seed.name);
   const cfg = SEED_COLORS[normalizeSeedType(seed.seedType)];
 
+  /**
+   * Is this seed's `secret` still in the LEGACY V1 envelope (PBKDF2-SHA256 /
+   * 10k iterations — sub-OWASP), rather than the current V2 one (PBKDF2-SHA512
+   * / 600k)? docs/work/honest-failure-reporting/design.md §5: the owner's codex
+   * logs stoa-core's one-shot V1 advisory and nothing in the UI ever said WHICH
+   * entry caused it.
+   *
+   * Derived through the package's OWN `encryptionLevel` — the same read-only
+   * predicate `EncryptionCard` + `CodexInfoCard` already classify the codex
+   * with, so a per-seed notice can never disagree with the codex-wide badge —
+   * rather than through stoa-core's `smartDecryptWithDetails`. That function's
+   * `wasLegacyV1` is literally `!isEncryptedV2(encrypted)` (stoa-core
+   * crypto/v2.js), i.e. the same bit this predicate reads, except only
+   * obtainable AFTER a successful decrypt and at the cost of a second import.
+   *
+   * NB the honest reading of `"v1"` here is "not a V2 envelope": a blob that is
+   * not an envelope at all also lands here. That is why the notice is only ever
+   * rendered NEXT TO A SUCCESSFUL REVEAL (`phrase` set, below) — at that point
+   * the bytes provably decrypted, so "not V2" provably means "decrypted via
+   * the V1 path".
+   */
+  const isLegacyEnvelope = encryptionLevel(seed.secret ? [seed.secret] : []) === "v1";
+
+  /** The advisory itself, built once and placed into each of the reveal
+   *  surfaces below (mobile full-screen shell, desktop stoic panel, desktop
+   *  mnemonic strip) so the three cannot drift apart. */
+  const legacyEnvelopeNotice = isLegacyEnvelope ? (
+    <p role="note" style={{ fontSize: 11, color: "#ceac5f", margin: "0 0 8px", lineHeight: 1.5 }}>
+      Legacy encryption — this seed is still stored in the V1 envelope
+      (PBKDF2-SHA256, 10k iterations). Use &quot;Upgrade Encryption&quot; in Codex
+      settings to re-encrypt it.
+    </p>
+  ) : null;
+
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(displayName);
   const [phrase, setPhrase] = useState<string | null>(null);
@@ -735,7 +771,17 @@ function SeedRow({
         setStoicWords(null);
       }
     } catch (err) {
-      setRowError(`Could not decrypt this seed phrase: ${err instanceof Error ? err.message : String(err)}`);
+      // docs/work/honest-failure-reporting/design.md §5 (acceptance criterion
+      // 7). This line used to interpolate `err.message` raw, so a wrong
+      // password rendered as the crypto primitive's own internal string —
+      // `AES-GCM auth-tag failure` — and the owner had to decode it himself.
+      // `classifyDecryptFailure` (the LIFTED logic of the typed classifier
+      // `LegacyPrimeMigrationWizard` already carried privately at ~:1367)
+      // returns a complete sentence per failure mode, so it is rendered
+      // VERBATIM: no "Could not decrypt …" prefix, because a codex that
+      // locked mid-flight and a module that failed to load are not
+      // decryption failures at all.
+      setRowError(classifyDecryptFailure(err, "This seed phrase").message);
     }
   };
 
@@ -986,6 +1032,7 @@ function SeedRow({
       {phrase && isMobile && (
         <MobilePortal target={fullScreenPortalTarget}>
           <CodexModalShell title={`${displayName} — Seed Words`} onClose={() => { setPhrase(null); setStoicWords(null); }} fillBody>
+            {legacyEnvelopeNotice}
             {seed.seedType === "stoic" ? (
               stoicWords ? (
                 <DalosSecretReveal key="stoic-words" plaintext={stoicWords} originMode="seedWords" originCurve="dalos" sourceLabelOverride={displayName} hideAddress />
@@ -1016,6 +1063,7 @@ function SeedRow({
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
               <IconHideBtn onClick={() => { setPhrase(null); setStoicWords(null); }} size={28} />
             </div>
+            {legacyEnvelopeNotice}
             {stoicWords ? (
               <DalosSecretReveal key="stoic-words" plaintext={stoicWords} originMode="seedWords" originCurve="dalos" sourceLabelOverride={displayName} hideAddress />
             ) : (
@@ -1023,11 +1071,14 @@ function SeedRow({
             )}
           </div>
         ) : (
-          <div style={{ margin: "0 16px 12px", backgroundColor: "#080808", border: "1px dashed #2a2a2a", borderRadius: 8, padding: "10px 12px", fontFamily: MONO, fontSize: 13, color: "#d2d3d4", wordBreak: "break-word", display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ flex: 1 }}>{phrase}</span>
-            <IconCopyBtn text={phrase} size={28} />
-            <IconHideBtn onClick={() => { setPhrase(null); setStoicWords(null); }} size={28} />
-          </div>
+          <>
+            {legacyEnvelopeNotice && <div style={{ margin: "0 16px" }}>{legacyEnvelopeNotice}</div>}
+            <div style={{ margin: "0 16px 12px", backgroundColor: "#080808", border: "1px dashed #2a2a2a", borderRadius: 8, padding: "10px 12px", fontFamily: MONO, fontSize: 13, color: "#d2d3d4", wordBreak: "break-word", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1 }}>{phrase}</span>
+              <IconCopyBtn text={phrase} size={28} />
+              <IconHideBtn onClick={() => { setPhrase(null); setStoicWords(null); }} size={28} />
+            </div>
+          </>
         )
       )}
 

@@ -45,7 +45,20 @@ const OTHER_KEY = "7".repeat(64);
 function account(o: Partial<IOuroAccount> & { id: string }): IOuroAccount {
   return {
     version: "1.0", isSmart: false, address: `Ѻ.${o.id}-address`, guard: null,
-    stoaChainLedger: null, publicKey: "pub", secret: `ct-${o.id}`,
+    // CORRECTED (owner-reported bug, found on a real codex): every test
+    // in this file that asserts on the "current payment key" was passing
+    // only because `currentPaymentKeyOf` read position 0 of `seeds[0]`
+    // POSITIONALLY and never looked at the account at all. That is a
+    // false statement about a real account — the owner's own Ouronet
+    // account's payment key is position 0 of a NON-prime koala seed,
+    // while `seeds[0]` is a prime stoic seed holding an unrelated key
+    // (see `ui-migration-payment-key-identity.test.tsx` for that exact
+    // codex). The key below IS what this file's single koala seed holds
+    // at position 0, so the fixture now simply SAYS so, in the `k:`
+    // address form `state/store.ts:2680` writes for a non-stoic seed —
+    // making every assertion in this file true for the same reason the
+    // real screen is now true, rather than by accident of ordering.
+    stoaChainLedger: `k:${CURRENT_PAYMENT}`, publicKey: "pub", secret: `ct-${o.id}`,
     backup: "ct", originSeedTab: "write-seed", ...o,
   };
 }

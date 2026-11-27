@@ -558,7 +558,55 @@ export interface LegacyPrimeMigrationWizardProps {
    *  explicitly UNRESOLVED - never as "authorizes no keys", which would be a
    *  different and dangerous claim. */
   describeKeyset?: (qualifiedName: string) => Promise<{ keys: readonly string[]; pred: string }>;
+  /**
+   * Page 2's decrypt-probe seam — defaults to `@stoachain/stoa-core/crypto`'s
+   * own `smartDecrypt`, which is what every production call site gets.
+   * INJECTED (same discipline, and the same reason, as `describeKeyset`
+   * above) rather than reached for through a module mock: this package's
+   * specs drive mainnet-facing code, so a test that needs a decrypt which
+   * hangs or fails on demand must say so through the component's real
+   * surface instead of rewriting the crypto module out from under it.
+   *
+   * Read-only, exactly like the default: the probe never writes what it
+   * decrypts anywhere (see `AccountStep`'s `probeWithPassword`).
+   */
+  probeDecrypt?: (secret: string, password: string) => Promise<string>;
+  /**
+   * How long Page 2's decrypt probe may run before it gives up and says so
+   * (`honest-failure-reporting` §1). Defaults to
+   * {@link PROBE_WATCHDOG_MS_DEFAULT}. Injected so a test can observe the
+   * terminal state in milliseconds rather than waiting out a production
+   * wall clock — the value itself is a UI timing policy, not a secret.
+   */
+  probeWatchdogMs?: number;
 }
+
+/**
+ * Page 2's probe watchdog, in ms (`honest-failure-reporting` §1: "a stalled
+ * probe must reach a terminal state with a visible 'could not read N
+ * accounts' rather than spinning forever").
+ *
+ * Deliberately generous. Each candidate costs a full PBKDF2-600k
+ * `smartDecrypt`, the pool is 4 wide, and the owner's real codex has 14+
+ * Standard accounts — on a slow machine a HEALTHY pass can legitimately
+ * take tens of seconds, and a watchdog that fires over a pass still doing
+ * its job would be its own dishonesty. 90s is far past any healthy pass
+ * observed and still far short of "forever", which is what this replaces.
+ */
+export const PROBE_WATCHDOG_MS_DEFAULT = 90_000;
+
+/**
+ * Per-account reason recorded for a candidate the watchdog gave up on
+ * (`honest-failure-reporting` §1). Deliberately NOT one of
+ * `classifyDecryptError`'s taxonomy entries: nothing was learned about this
+ * account's secret at all — the decrypt never came back either way — so
+ * claiming a wrong password, a corrupt envelope or an unsupported format
+ * would be inventing a diagnosis. Exported so a caller/test asserts the
+ * exact wording rather than re-typing it (same reason as
+ * {@link LOCK_IN_WARNING_TEXT}).
+ */
+export const PROBE_TIMED_OUT_ACCOUNT_TEXT =
+  "Reading this account's secret timed out — it never completed, so nothing is known about it either way.";
 
 const ACCENT = "#ceac5f";
 
@@ -1081,6 +1129,63 @@ const stepParagraphStyle: React.CSSProperties = {
   color: "#888",
 };
 
+/**
+ * Page 2's decrypt-probe diagnostics, rendered INSIDE the progress panel
+ * (`honest-failure-reporting` §1, acceptance criterion 2).
+ *
+ * Everything this step knows about a failure — `probeErrors`, the inline
+ * unlock prompt, `classifyDecryptError`'s whole typed taxonomy — was
+ * rendered BELOW the progress panel's early return, i.e. unreachable for
+ * exactly as long as the panel was the only thing on screen. On the
+ * owner's 14-account codex that means a pass where account 1 fails says
+ * nothing at all until (and unless) account 14 comes back. A failure that
+ * has already happened is a fact the screen can state immediately.
+ *
+ * Renders nothing at all when there is nothing to report — the same
+ * "absent data, no placeholder" convention this file follows elsewhere.
+ */
+function ProbeDiagnostics({
+  lines,
+  fatal,
+  testid,
+}: {
+  lines: readonly { id: string; name: string; reason: string }[];
+  fatal: string | null;
+  testid: string;
+}): React.ReactElement | null {
+  if (lines.length === 0 && fatal === null) return null;
+  return (
+    <div
+      data-testid={testid}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "8px 10px",
+        borderRadius: 8,
+        backgroundColor: "#c0392b12",
+        border: "1px solid #c0392b40",
+      }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 700, color: "#e07b72" }}>
+        {lines.length > 0
+          ? `${lines.length} account${lines.length === 1 ? "" : "s"} could not be read:`
+          : "The account check failed:"}
+      </span>
+      {fatal !== null ? (
+        <span style={{ fontSize: 11, color: "#e07b72" }}>{fatal}</span>
+      ) : null}
+      {lines.map((l) => (
+        <span key={l.id} style={{ fontSize: 11, lineHeight: 1.5, color: "#b9847e" }}>
+          <strong style={{ color: "#d2d3d4" }}>{l.name}</strong>
+          {" — "}
+          {l.reason}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Page 2 — the Prime Ouronet Account identity choice (three radio-style
  *  options; see the module doc). Purely a selection UI: choosing any
  *  option only calls `onChoose`, never performs account activation or any
@@ -1101,6 +1206,8 @@ function AccountStep({
   authenticate,
   passwordEpoch,
   onProbeSettledChange,
+  probeDecrypt = smartDecrypt,
+  probeWatchdogMs = PROBE_WATCHDOG_MS_DEFAULT,
 }: {
   currentPrimeSeed: IStoaChainSeed | null;
   currentPrimeAccount: IOuroAccount | null;
@@ -1151,6 +1258,13 @@ function AccountStep({
    *  `probePhase` changes; optional so every existing non-probe caller
    *  (tests, `getPassword` absent) keeps working unchanged. */
   onProbeSettledChange?: (settled: boolean) => void;
+  /** The decrypt seam, defaulting to the real `smartDecrypt` — see
+   *  {@link LegacyPrimeMigrationWizardProps.probeDecrypt}. */
+  probeDecrypt?: (secret: string, password: string) => Promise<string>;
+  /** The watchdog's wall clock, defaulting to
+   *  {@link PROBE_WATCHDOG_MS_DEFAULT} — see
+   *  {@link LegacyPrimeMigrationWizardProps.probeWatchdogMs}. */
+  probeWatchdogMs?: number;
 }): React.ReactElement {
   const existingCandidates = useMemo(
     () => computeExistingAccountCandidates(allAccounts, currentPrimeAccount?.id ?? null),
@@ -1293,6 +1407,26 @@ function AccountStep({
     done: 0,
     total: 0,
   });
+  /**
+   * Set when the WATCHDOG — not the pass itself — ended the pass
+   * (`honest-failure-reporting` §1). `unread` is how many candidates had
+   * still not come back either way at that moment.
+   *
+   * A settled phase alone cannot carry this fact: a pass that genuinely
+   * finished and a pass that was cut off after 90 seconds both leave the
+   * step rendering its list, and the second one is making claims
+   * ("Recommended", "No known words") about accounts it never actually
+   * read. So the banner below states it, by count, above everything else
+   * on the step, with the re-check path right there.
+   */
+  const [probeStall, setProbeStall] = useState<{ unread: number } | null>(null);
+  /**
+   * Set when the pass's own async body rejected OUTRIGHT — see the
+   * `.catch` on the fire-and-forget below. Previously that rejection had
+   * nowhere to go: an unhandled promise rejection in the console, a
+   * progress panel that never moved, and no UI consequence whatsoever.
+   */
+  const [probeFatalError, setProbeFatalError] = useState<string | null>(null);
 
   // Owner (live testing, this round): the Settling Dashboard's "View
   // seed" button must stay disabled until THIS step's own probe has
@@ -1329,6 +1463,26 @@ function AccountStep({
    *  (candidate set x password era x retry) — including under
    *  StrictMode's deliberate double-invocation of effects. */
   const startedPassRef = useRef<string | null>(null);
+  /**
+   * The last pass that actually FINISHED — a separate fact from
+   * `startedPassRef`, and the missing half of the exactly-once guard.
+   *
+   * `honest-failure-reporting` §1, the defect that cost the owner the most
+   * time. "This pass was already claimed" was being used to answer two
+   * different questions: *is a pass in flight?* (don't start a second one)
+   * and *is the answer already on screen?* (don't re-render the spinner).
+   * It can only answer the first. So when a sibling effect pushed
+   * `probePhase` back to `"pending"` — `resetFailedProbes`, which runs on
+   * every `passwordEpoch`/`probeRunKey` change AND on every StrictMode
+   * remount — the probe effect declined on the stale claim and left the
+   * phase exactly where that sibling had put it: `"pending"`, with the
+   * step's whole body withheld behind the progress panel's early return,
+   * forever.
+   *
+   * With the completion recorded separately, a declined re-run can tell
+   * the two apart and SETTLE instead of hanging (see the effect below).
+   */
+  const completedPassRef = useRef<string | null>(null);
 
   /** Every candidate still lacking CONFIRMED words — what a retry (new
    *  auth epoch, or the explicit "Re-check") must re-attempt, as opposed
@@ -1350,6 +1504,12 @@ function AccountStep({
     });
     setProbeErrors({});
     setProbeNeedsPassword(null);
+    // A new attempt is pending, so last attempt's verdicts about it —
+    // "the watchdog gave up on N accounts", "the pass itself blew up" —
+    // are no longer true of anything. Cleared here rather than at the
+    // banner, so there is exactly one place a retry is defined.
+    setProbeStall(null);
+    setProbeFatalError(null);
     // Round 9: a retry re-enters the progress state rather than flashing
     // the stale (wrong) list while it re-runs.
     if (getPassword) setProbePhase("pending");
@@ -1447,7 +1607,11 @@ function AccountStep({
         let error: string | undefined;
         let isUngated: boolean | undefined;
         try {
-          const plain = await smartDecrypt(account.secret, password);
+          // `probeDecrypt`, not the imported `smartDecrypt` directly —
+          // same function by default (see this component's own
+          // `probeDecrypt` prop), injectable for specs that need a decrypt
+          // which fails or never returns.
+          const plain = await probeDecrypt(account.secret, password);
           ok = plain.length > 0;
           if (!ok) error = "Decrypted successfully but to empty content.";
           else isUngated = await isUngatedPlaintext(plain);
@@ -1494,7 +1658,19 @@ function AccountStep({
     if (!getPassword) return;
 
     const passKey = `${candidateSignature}|${passwordEpoch ?? "none"}|${probeRunKey}`;
-    if (startedPassRef.current === passKey) return;
+    if (startedPassRef.current === passKey) {
+      // Already claimed — but "claimed" alone is not a state the UI can
+      // render. If that pass FINISHED, its answer is already in
+      // `probedHasWords`/`probeErrors`, so the only correct phase is
+      // "settled": re-assert it, because `resetFailedProbes` (a sibling
+      // effect, ordered BEFORE this one) has just pushed it back to
+      // "pending". Without this, a StrictMode remount after a completed
+      // pass left the step withheld behind the progress panel forever —
+      // see `completedPassRef`. Still running: leave it alone, the pass
+      // owns the phase.
+      if (completedPassRef.current === passKey) setProbePhase("settled");
+      return;
+    }
     startedPassRef.current = passKey;
 
     // Snapshot the work ONCE, up front. Deliberately read out of the
@@ -1503,6 +1679,16 @@ function AccountStep({
     // never feed back into this effect's identity again.
     const pending = existingCandidates.filter((c) => probedHasWords[c.account.id] !== true);
     if (pending.length === 0) {
+      // A pass with nothing to decrypt is a pass that COMPLETED — the
+      // ordinary shape of a codex whose only Standard DALOS account is
+      // already its prime (`computeExistingAccountCandidates` excludes the
+      // current prime, every Smart account and every APOLLO account).
+      // Recording the completion is what makes this exit definite rather
+      // than a claim no successor can interpret; the previous version
+      // returned here with the claim held and nothing to say it was done,
+      // which is exactly the stall the owner hit.
+      completedPassRef.current = passKey;
+      setProbeProgress({ done: 0, total: 0 });
       setProbePhase("settled");
       return;
     }
@@ -1511,6 +1697,46 @@ function AccountStep({
     // Round 10b: did this pass reach its own end? Decides whether the
     // cleanup below hands the pass BACK for a successor to run.
     let completed = false;
+    /** Candidates that came back — either way — before the watchdog fired.
+     *  Lets the watchdog name exactly what it is giving up on instead of
+     *  reporting a count of "everything we asked for". */
+    const returned = new Set<string>();
+    /**
+     * THE WATCHDOG (`honest-failure-reporting` §1). Releasing the claim on
+     * every exit fixes the stalls that have an exit; this covers the one
+     * that does not — a decrypt that neither resolves nor rejects, so the
+     * pool never drains, the `finally` never runs, and the panel owns the
+     * screen for the rest of the session with no CPU, no error and no
+     * retry (precisely the owner's report).
+     *
+     * It ends the pass rather than politely waiting: `cancelled` stops the
+     * pool from burning further PBKDF2 work on a run whose answer is no
+     * longer going to be used, each un-returned candidate gets the honest
+     * {@link PROBE_TIMED_OUT_ACCOUNT_TEXT} reason (never one of
+     * `classifyDecryptError`'s verdicts — nothing was learned about these),
+     * and the phase settles so the step's body, its re-check control and
+     * its diagnostics are all reachable again.
+     */
+    const watchdog = setTimeout(() => {
+      if (completed || cancelled) return;
+      const unread = pending.filter((c) => !returned.has(c.account.id));
+      if (unread.length === 0) {
+        // Everything came back; only the pass's own tail is outstanding.
+        // Nothing to report, but the phase still must not hang.
+        setProbePhase("settled");
+        return;
+      }
+      cancelled = true;
+      setProbeErrors((prev) => {
+        const next = { ...prev };
+        for (const c of unread) {
+          if (next[c.account.id] === undefined) next[c.account.id] = PROBE_TIMED_OUT_ACCOUNT_TEXT;
+        }
+        return next;
+      });
+      setProbeStall({ unread: unread.length });
+      setProbePhase("settled");
+    }, Math.max(0, probeWatchdogMs));
     void (async () => {
       try {
         let password: string;
@@ -1534,6 +1760,7 @@ function AccountStep({
           // body stays hidden until the pass settles, so the list still
           // appears once, already correct.
           onResult: (id, r) => {
+            returned.add(id);
             setProbedHasWords((prev) => ({ ...prev, [id]: r.ok }));
             if (r.error !== undefined) setProbeErrors((prev) => ({ ...prev, [id]: r.error! }));
             if (r.ungated !== undefined) setProbedUngated((prev) => ({ ...prev, [id]: r.ungated! }));
@@ -1555,7 +1782,15 @@ function AccountStep({
           }
         }
         completed = true;
+        // Recorded for the NEXT run of this effect (a StrictMode remount,
+        // or any re-render that re-arms the phase): this pass's answer is
+        // already on screen, so a declined re-run must settle rather than
+        // leave the progress panel up. See `completedPassRef`.
+        completedPassRef.current = passKey;
       } finally {
+        // The pass answered (or died trying) — the watchdog must not fire
+        // over it later and claim accounts went unread.
+        clearTimeout(watchdog);
         // Round 10: ALWAYS leave the progress state, whatever happened —
         // locked, wrong password, a throw from anywhere. The step hides
         // its whole body behind this phase now, so a pass that fails to
@@ -1563,9 +1798,25 @@ function AccountStep({
         // failure the owner just hit.
         if (!cancelled) setProbePhase("settled");
       }
-    })();
+    })().catch((e: unknown) => {
+      // `honest-failure-reporting` §1, item 4: this fire-and-forget had no
+      // `.catch`, so anything the inner `try/finally` could not contain
+      // (a throw from `setProbePhase` itself, a rejection added by a later
+      // edit between the two) became an unhandled rejection with ZERO UI
+      // consequence — the single most expensive shape of failure in this
+      // whole file. Defensive by design and expected never to fire; if it
+      // ever does, it says so on screen instead of in a console nobody has
+      // open.
+      clearTimeout(watchdog);
+      if (cancelled) return;
+      setProbeFatalError(
+        e instanceof Error ? e.message : "The account check failed for an unknown reason.",
+      );
+      setProbePhase("settled");
+    });
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
       // Round 10b — THE STALL THE OWNER HIT ("Reading your Ouronet
       // accounts… 0 of 14", forever). `<StrictMode>` (which
       // `apps/codex-playground/src/main.tsx` wraps the app in, and which
@@ -1581,6 +1832,13 @@ function AccountStep({
       // the next mount re-runs it. Only a COMPLETED pass keeps the key.
       if (!completed) startedPassRef.current = null;
     };
+    // `probeDecrypt`/`probeWatchdogMs` are deliberately NOT dependencies.
+    // A pass's identity is WHICH accounts, WHICH password era, and an
+    // explicit retry — nothing else may restart it (that lesson is the
+    // whole of round 10's note above). Both are read from the closure of
+    // whichever render started the pass; an inline arrow prop would
+    // otherwise re-key this effect on every single render, which is the
+    // exact failure mode this dep list exists to prevent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateSignature, getPassword, passwordEpoch, probeRunKey]);
 
@@ -1612,6 +1870,24 @@ function AccountStep({
       setProbeUnlocking(false);
     }
   }
+
+  /** `probeErrors` as renderable, NAMED lines — the raw record is keyed by
+   *  account id, which is not a thing the owner can recognise. Shared by
+   *  the progress panel's own diagnostics (criterion 2: a failure is
+   *  visible while the probe is still running, not only after it) and by
+   *  the terminal stall banner. */
+  const probeErrorLines = useMemo(
+    () =>
+      Object.entries(probeErrors).map(([id, reason]) => {
+        const candidate = existingCandidates.find((c) => c.account.id === id);
+        return {
+          id,
+          name: candidate?.account.name ?? candidate?.account.address ?? id,
+          reason,
+        };
+      }),
+    [probeErrors, existingCandidates],
+  );
 
   // Merge the real decrypt-probe result on top of the metadata-derived
   // candidate list. Round 7: the probe is now AUTHORITATIVE for BOTH
@@ -1830,6 +2106,15 @@ function AccountStep({
             words are recoverable, and whether they are dictionary-gated. The list
             appears when every account has been checked.
           </span>
+          {/* `honest-failure-reporting` §1, criterion 2 — the diagnostics
+              are no longer hidden BEHIND this panel. Whatever has already
+              failed is stated here, by account name, while the rest of the
+              pass continues. */}
+          <ProbeDiagnostics
+            lines={probeErrorLines}
+            fatal={probeFatalError}
+            testid="legacy-prime-migration-account-probe-progress-errors"
+          />
         </div>
       </div>
     );
@@ -1844,6 +2129,57 @@ function AccountStep({
         Choose which Ouronet account becomes your Prime Ouronet Account. This is a
         separate decision from which payment/guard keys it uses — the next step.
       </p>
+
+      {/* The WATCHDOG's terminal statement (`honest-failure-reporting` §1).
+          Above every option on purpose: the list below is about to make
+          claims ("Recommended", "No known words") about accounts this pass
+          never actually read, and the count of those is the first thing
+          that has to be on screen. The alternative — which this replaces —
+          was a progress panel that never came down. */}
+      {probeStall !== null || probeFatalError !== null ? (
+        <div
+          data-testid="legacy-prime-migration-account-probe-stalled"
+          role="alert"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: "10px 12px",
+            borderRadius: 8,
+            backgroundColor: "#c0392b12",
+            border: "1px solid #c0392b40",
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#e07b72" }}>
+            {probeStall !== null
+              ? `Could not read ${probeStall.unread} account${probeStall.unread === 1 ? "" : "s"}.`
+              : "The account check failed."}
+          </span>
+          <span style={stepParagraphStyle}>
+            {probeStall !== null
+              ? "The check ran out of time before their secrets came back, so nothing is known about them either way — they are listed below with no verdict. Nothing in this codex was changed."
+              : probeFatalError}
+          </span>
+          <button
+            type="button"
+            data-testid="legacy-prime-migration-account-probe-stalled-recheck"
+            onClick={() => setProbeRunKey((n) => n + 1)}
+            style={{
+              alignSelf: "flex-start",
+              fontSize: 10,
+              fontWeight: 700,
+              color: "#d2d3d4",
+              background: "none",
+              border: "1px solid #c0392b60",
+              borderRadius: 6,
+              padding: "3px 8px",
+              cursor: "pointer",
+            }}
+          >
+            Try reading them again
+          </button>
+        </div>
+      ) : null}
 
       {/* Option 1 — keep current. Always available. */}
       <div
@@ -2258,7 +2594,13 @@ function AccountStep({
                                 ? "corrupted secret"
                                 : probeErrors[account.id]?.startsWith("This account's secret uses an encryption")
                                   ? "unsupported format"
-                                  : "unreadable"}
+                                  : // `honest-failure-reporting` §1: the watchdog gave
+                                    // up on this one. NOT "unreadable" — that claims
+                                    // the secret was read and rejected, when in fact
+                                    // the decrypt never came back at all.
+                                    probeErrors[account.id] === PROBE_TIMED_OUT_ACCOUNT_TEXT
+                                    ? "timed out"
+                                    : "unreadable"}
                           </span>
                         ) : probeNeedsPassword !== null ? (
                           <span style={{ fontWeight: 600, color: "#8a4b44" }}>{" · not checked"}</span>
@@ -2503,15 +2845,79 @@ function findKeyTies(
 }
 
 /**
- * The codex's CURRENT payment key: position 0 of the first Chainweb seed.
+ * The bare public key behind a StoaChain payment-key ADDRESS.
  *
- * Same value `ActivateStandardAccountModal.tsx` already uses as `primeKey0`
- * when it builds a transaction, and the exact key the owner quoted as their
- * "FROM". Read positionally rather than from `isPrime`, because a real codex
- * can carry a stale flag (the Page-2 lesson).
+ * MIRRORED (not shared) from `internal/outstandingKeyChanges.ts`'s own
+ * `bareKeyFromAddress`, which is module-private there. Exporting it would
+ * mean editing that file, and this fix is deliberately confined to this
+ * one component; duplicating six lines of pure string handling is the
+ * cheaper of the two, and it is already this codebase's own local idiom —
+ * `seedDashboard.ts:97`, `:119`, `:155` and `keySource.ts:77` each inline
+ * the identical strip-then-compare rather than reaching for a shared
+ * helper. If a fourth caller ever appears, promote it out of
+ * `outstandingKeyChanges.ts` and delete this copy.
+ *
+ * The rule itself is `state/store.ts:2680`'s own encoding of the two forms
+ * a payment key is stored in: `seedType === "stoic" ? paymentPublicKey :
+ * \`k:${paymentPublicKey}\`` — a stoic seed's address IS the bare key,
+ * every other seed's carries the `k:` sigil. Every key this file compares
+ * it against (`seeds[].accounts[].publicKey`, `pureKeypairs[].publicKey`,
+ * `deriveStoaDalosKeypairAtIndex`'s output, `committed.paymentPublicKey`)
+ * is bare, so the address has to reduce to bare before it can be matched
+ * or locked at all.
+ *
+ * Defensive on the input TYPE, deliberately: `IOuroAccount` types
+ * `stoaChainLedger` as `string | null`, but real persisted legacy accounts
+ * — the ones this wizard exists to rescue — carry it absent entirely, the
+ * hazard `seedDashboard.ts:146-155` documents from live testing (a missing
+ * field once took the whole wizard down on `.startsWith` of `undefined`).
+ * Anything that is not a usable string is "none on record", never a crash
+ * at render time.
  */
-function currentPaymentKeyOf(seeds: readonly IStoaChainSeed[]): string | null {
-  return seeds[0]?.accounts?.find((a) => a.index === 0)?.publicKey ?? null;
+function bareKeyFromAddress(keyOrAddr: unknown): string | null {
+  if (typeof keyOrAddr !== "string" || keyOrAddr.length === 0) return null;
+  return keyOrAddr.startsWith("k:") ? keyOrAddr.slice(2) : keyOrAddr;
+}
+
+/**
+ * The CURRENT payment key OF THE CHOSEN ACCOUNT — its own registered
+ * `stoaChainLedger`, read bare.
+ *
+ * CORRECTED (owner-reported, found on a real codex and verified by
+ * decrypting that codex's export). This used to return
+ * `seeds[0].accounts[index === 0].publicKey`: the first Chainweb seed's
+ * position 0, POSITIONALLY, never consulting the account whose payment key
+ * it claimed to report. On the owner's codex those are two different keys —
+ * the account's real on-chain payment key is `k:e20f2672…f231`, position 0
+ * of a NON-prime koala seed, while `seeds[0]` is the prime stoic
+ * "Prime Codex Seed" whose position 0 is `225eb6d1…`. So the screen
+ * printed the stoic key as "Current payment key" under the caption "Held
+ * in this codex as Master Chainweb Seed - Key #0", a false statement about
+ * that account; the kept-key SETTLED FOR box and the kept key's own
+ * derivation label ("This key's own derivation: Stoic Dalos", over a
+ * Koala-derived key) inherited the same wrong key; and worst, `runFinalize`
+ * locked it non-removable via `secureMasterAccount` and recorded it with
+ * `recordMigrationCommit` on a `"keep"` choice — a WRITE, of the wrong key,
+ * against a real codex.
+ *
+ * `stoaChainLedger` is the account's live PAYMENT key (the selector fills
+ * it from the chain's `payment-key`, `ui/tabs/OuronetAccountsTab.tsx:115`)
+ * — not `chainPublicKey`, which is the account's own identity key and says
+ * nothing about which payment key is in force. Same correction, same
+ * field, same reason as `internal/outstandingKeyChanges.ts`'s payment
+ * branch (`docs/work/migration-execute/design.md` §7 defect 2).
+ *
+ * `null` when the account has none on record stays `null`: there is then no
+ * honest answer, and the positional guess is exactly what is being removed.
+ * Every consumer already handles it — the payment section renders its own
+ * "no payment key on record" box, the review step omits its FROM line, and
+ * `runFinalize` passes `null` through to `secureMasterAccount`, where it is
+ * the defined "unresolved" value that suppresses releasing existing locks
+ * and adds none (`masterKeyLockDelta.ts`). Locking nothing is recoverable;
+ * locking another seed's key is not.
+ */
+function currentPaymentKeyOf(account: IOuroAccount | null | undefined): string | null {
+  return bareKeyFromAddress(account?.stoaChainLedger);
 }
 
 /** owner (live testing, this session): "when selecting option 2 (keep the
@@ -2733,9 +3139,15 @@ function PaymentKeySection({
               </p>
             </>
           ) : (
+            // The copy used to read "this codex has no Chainweb key at
+            // position 0 yet" — the old, positional question. The honest
+            // one is about the ACCOUNT: a legacy/imported account can
+            // genuinely carry no `stoaChainLedger` at all, and naming
+            // some other seed's key in its place is the bug this box's
+            // own `currentKey` source was just corrected for.
             <p data-testid="legacy-prime-migration-payment-current-none" style={stepParagraphStyle}>
-              This codex has no Chainweb key at position 0 yet, so there is no current payment key
-              to show.
+              This account has no payment key on record, so there is no current payment key to
+              show. Keeping it would keep nothing — derive one instead.
             </p>
           )
         }
@@ -4012,7 +4424,19 @@ function PaymentStep({
   paymentChoice: LegacyPrimeMigrationPaymentChoice | null;
   onChoosePayment: (c: LegacyPrimeMigrationPaymentChoice) => void;
 }): React.ReactElement {
-  const currentPaymentKey = currentPaymentKeyOf(allSeeds);
+  // The account whose payment key this page is ABOUT — the Page-2 choice,
+  // resolved the same way the parent resolves `chosenAccountForPreview`
+  // and the same way this page already resolves `chosenOriginSeedTab`
+  // below (`resolveChosenAccountOriginSeedTab`). `currentPaymentKeyOf`
+  // reads that account's own registered key; reading it off `allSeeds`
+  // positionally is the bug that function's own doc comment describes.
+  const chosenAccount = resolveChosenAccount(accountChoice, currentPrimeAccount, allAccounts);
+  const currentPaymentKey = currentPaymentKeyOf(chosenAccount);
+  // Still a SEEDS question, and still correct as it stands: "which seed
+  // and position hold this key" is answered by searching for the key
+  // itself, so it now reports the seed that genuinely holds the account's
+  // own payment key (the owner's non-prime koala seed) instead of
+  // restating position 0 of `seeds[0]`.
   const paymentTies = currentPaymentKey ? findKeyTies(allSeeds, currentPaymentKey) : null;
   const currentPaymentKeyOrigin = detectPaymentKeyOrigin(currentPaymentKey, allSeeds, pureKeypairs);
   // "Advanced" (native-format) derivation is offered ONLY when the Page-2-
@@ -5955,6 +6379,8 @@ export function LegacyPrimeMigrationWizard({
   onStateChange,
   ensurePrimeArweaveSeed,
   describeKeyset,
+  probeDecrypt,
+  probeWatchdogMs,
 }: LegacyPrimeMigrationWizardProps): React.ReactElement | null {
   const [step, setStep] = useState<LegacyPrimeMigrationWizardStep>("intro");
   // Owner (live testing, this round): the Settling Dashboard's "View
@@ -6266,7 +6692,7 @@ export function LegacyPrimeMigrationWizard({
   // SAME settled values the Payment/Guard/Review steps already render,
   // resolved once here rather than re-derived per step.
   const seedDashboardPaymentPublicKey = settledPaymentKeyOf(
-    paymentChoice, reviewPreview, currentPaymentKeyOf(allSeeds),
+    paymentChoice, reviewPreview, currentPaymentKeyOf(chosenAccountForPreview),
   );
   // Owner (live testing, `wizard-page2-and-dashboard-fixes` round 8):
   // "Keep this guard as is, would have to show the Seed Words that are
@@ -7271,7 +7697,7 @@ export function LegacyPrimeMigrationWizard({
       paymentPublicKey =
         paymentChoice?.kind === "stoic-dalos-position-0"
           ? deriveStoaDalosKeypairAtIndex(resolved.bitString, 0).publicKey
-          : currentPaymentKeyOf(allSeeds);
+          : currentPaymentKeyOf(chosenAccountForPreview);
       await actions.secureMasterAccount({ paymentPublicKey, guardPublicKeys: guardKeys });
       // Record the PUBLIC keys alongside, so stage 3A can report what should
       // be in force without decrypting the seed just to display it.
@@ -8233,6 +8659,8 @@ export function LegacyPrimeMigrationWizard({
             authenticate={actions?.authenticate}
             passwordEpoch={passwordCache?.expiresAt ?? null}
             onProbeSettledChange={setAccountProbeSettled}
+            probeDecrypt={probeDecrypt}
+            probeWatchdogMs={probeWatchdogMs}
           />
         ) : null}
         {step === "payment" ? (
@@ -8292,7 +8720,7 @@ export function LegacyPrimeMigrationWizard({
                   ? allAccounts.find((a) => a.id === accountChoice.accountId)?.name ?? null
                   : "newly typed words"
             }
-            currentPaymentKey={currentPaymentKeyOf(allSeeds)}
+            currentPaymentKey={currentPaymentKeyOf(chosenAccountForPreview)}
             paymentChoice={paymentChoice}
             guardChoice={guardChoice}
             preview={reviewPreview}

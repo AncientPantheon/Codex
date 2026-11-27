@@ -13,7 +13,10 @@
 
 import type { CodexSnapshot } from "../adapters/types.js";
 import { CodexMigrationError } from "../errors/index.js";
-import { DEFAULT_UI_SETTINGS } from "../types/entities.js";
+import {
+  DEFAULT_UI_SETTINGS,
+  normalizeLegacyOuroAccounts,
+} from "../types/entities.js";
 import type {
   IConsumerSettings,
   PatronSelectionMode,
@@ -161,6 +164,84 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
   },
 ];
 
+/**
+ * A VERSION-INDEPENDENT shape correction, applied by {@link applyMigrations}
+ * on entry — before (and regardless of) the integer `schemaVersion` chain.
+ *
+ * WHY this exists alongside {@link SCHEMA_MIGRATIONS} rather than as another
+ * entry in it: the integer chain can only reach a codex whose stored
+ * `schemaVersion` is the `fromVersion` of a registered migration, and the
+ * codices that carry legacy field names do not qualify. Measured, not
+ * assumed:
+ *   - The v1.2/v1.3 export envelope carries NO `schemaVersion` at all (it is
+ *     device-local by design — `@ouronet/ouronet-core/codex`'s
+ *     `CodexExportV1_2`/`V1_3`). An imported snapshot therefore enters the
+ *     runner with `schemaVersion: undefined`, where `undefined === target` is
+ *     false, `undefined > target` is false, and `while (undefined < target)`
+ *     is ALSO false — the chain is skipped silently, with no error.
+ *   - A LocalStorage codex with no `codex_schema_version` key loads as `0`
+ *     (`LocalStorageCodexAdapter.loadSchemaVersion`), and `SCHEMA_MIGRATIONS`
+ *     starts at `fromVersion: 1` — a chain gap the runner `break`s out of.
+ *     `state-migrations.test.ts` pins that v0 skip as deliberate: `0` also
+ *     means "nothing persisted yet" (`emptySnapshot`), so pulling it into the
+ *     chain would run the v1→v2 uiSettings relocation over every fresh codex
+ *     and every legacy one, which is a different change than fixing a field
+ *     name.
+ * A fix keyed to a version would thus never run on a single affected codex.
+ * Keying it to nothing instead is both correct and honest: a field name is a
+ * property of the data's AGE, which `schemaVersion` on these codices simply
+ * does not record.
+ *
+ * Contract: `normalize` MUST be pure, MUST be idempotent, and MUST return the
+ * INPUT SNAPSHOT BY REFERENCE when it changes nothing — `store.init` persists
+ * only when the version moved, and the runner's documented "returns the
+ * snapshot unchanged at target" no-op depends on reference identity surviving
+ * this pass.
+ */
+export interface SnapshotShapeNormalizer {
+  description: string;
+  normalize: (snapshot: CodexSnapshot) => CodexSnapshot;
+}
+
+/**
+ * `IOuroAccount.kadenaLedger` → `stoaChainLedger`, the missing half of
+ * `dd485a5` ("refactor!: rename Kadena → StoaChain across the Codex (v0.2.0,
+ * breaking)"): it renamed the account's REGISTERED PAYMENT KEY field and
+ * shipped no migration, so on every codex written before it the payment key
+ * is stored under a name nothing in the package reads.
+ *
+ * The mapping rule itself (including the both-present tie-break) lives in
+ * `types/entities.ts`'s `resolveOuroAccountLedger` — defined once, shared
+ * with `LocalStorageCodexAdapter`'s read-time fallback. The legacy field is
+ * never cleared.
+ */
+const legacyOuroLedgerNormalizer: SnapshotShapeNormalizer = {
+  description:
+    "IOuroAccount.kadenaLedger -> stoaChainLedger (dd485a5 rename, no schemaVersion required)",
+  normalize: (snap) => {
+    const { accounts, changed } = normalizeLegacyOuroAccounts(
+      snap.ouroAccounts ?? []
+    );
+    return changed ? { ...snap, ouroAccounts: accounts } : snap;
+  },
+};
+
+/** Registry of version-independent shape normalizations. Append-only, same
+ *  as {@link SCHEMA_MIGRATIONS}: a legacy name that is still present in some
+ *  user's data must keep being understood forever. */
+export const SNAPSHOT_SHAPE_NORMALIZERS: SnapshotShapeNormalizer[] = [
+  legacyOuroLedgerNormalizer,
+];
+
+/** Applies every {@link SnapshotShapeNormalizer} in order. Pure; returns
+ *  `snapshot` by reference when no normalizer changed anything. */
+export function normalizeSnapshotShape(
+  snapshot: CodexSnapshot,
+  normalizers: SnapshotShapeNormalizer[] = SNAPSHOT_SHAPE_NORMALIZERS
+): CodexSnapshot {
+  return normalizers.reduce((current, n) => n.normalize(current), snapshot);
+}
+
 /** Returns true if this package version can safely WRITE a codex loaded at the
  *  given schema version. False when the loaded codex is at a NEWER schema —
  *  writing could silently drop fields this package doesn't understand. */
@@ -173,6 +254,11 @@ export function canConsumerWrite(loadedSchemaVersion: number): boolean {
  * the migration chain with a rolling cursor.
  *
  * Semantics:
+ *   - ALWAYS applies {@link normalizeSnapshotShape} first — the
+ *     version-independent shape corrections (legacy field names), which must
+ *     run even for the snapshots that skip the chain below. Reference
+ *     identity is preserved when it corrects nothing, so every no-op case
+ *     listed here still returns the caller's own object.
  *   - If `snapshot.schemaVersion === targetVersion`: returns it unchanged.
  *   - If `snapshot.schemaVersion > targetVersion`: throws
  *     `unknown-schema-version` (this consumer is too old to read the codex).
@@ -192,13 +278,23 @@ export function applyMigrations(
   migrations: SchemaMigration[],
   targetVersion: number
 ): CodexSnapshot {
-  if (snapshot.schemaVersion === targetVersion) {
-    return snapshot;
+  // Version-INDEPENDENT shape normalization runs first, on every path through
+  // this function — including the two paths that skip the chain entirely (a
+  // snapshot already at `targetVersion`, and one whose `schemaVersion` has no
+  // registered `fromVersion`: `undefined` from an import, `0` from a
+  // never-stamped LocalStorage codex). See SnapshotShapeNormalizer for why
+  // these corrections cannot live on the integer axis. Returns `snapshot` by
+  // reference when there is nothing to correct, so the no-op contracts below
+  // are preserved exactly.
+  const normalized = normalizeSnapshotShape(snapshot);
+
+  if (normalized.schemaVersion === targetVersion) {
+    return normalized;
   }
-  if (snapshot.schemaVersion > targetVersion) {
+  if (normalized.schemaVersion > targetVersion) {
     throw new CodexMigrationError(
       "unknown-schema-version",
-      `loaded=${snapshot.schemaVersion}, max=${targetVersion}`
+      `loaded=${normalized.schemaVersion}, max=${targetVersion}`
     );
   }
 
@@ -206,8 +302,8 @@ export function applyMigrations(
 
   const sorted = [...migrations].sort((a, b) => a.fromVersion - b.fromVersion);
 
-  let result = snapshot;
-  let current = snapshot.schemaVersion;
+  let result = normalized;
+  let current = normalized.schemaVersion;
 
   while (current < targetVersion) {
     const next = sorted.find((m) => m.fromVersion === current);

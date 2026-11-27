@@ -24,30 +24,37 @@
  *   - Skip-not-drop: an entry this engine cannot resolve automatically
  *     keeps its ORIGINAL ciphertext and is recorded in `skipped` — never
  *     silently dropped.
- *   - On full completion, stamps `Codex_Shape_Version` to the current
- *     target value, enforced as a postcondition exactly like
- *     `applyMigrations` (`src/state/migrations.ts`) already enforces
- *     `schemaVersion` — a run that doesn't reach the declared target fails
- *     loudly, never silently.
+ *   - Stamps `Codex_Shape_Version` to the current target value ONLY when
+ *     nothing was skipped, and clears an inherited stamp when something
+ *     was — the stamp is the claim `useNeedsStructuralUpgrade` reads, so
+ *     making it over an unresolved seed marks a broken codex current and
+ *     takes away the retry (honest-failure-reporting/design.md §2).
  *
  * Algorithm per checked entry (a kadenaSeeds entry with
  * `seedType === "stoic"`, or any arweaveSeeds entry):
- *   1. Empty/undefined `secret` → skip silently (nothing to migrate).
+ *   1. Empty/undefined `secret` → nothing to migrate; counted in
+ *      `result.emptySecret`.
  *   2. Decrypt `secret` with the codex password. A decrypt failure is
  *      routed through the SAME reconciliation path as step 5 below (it is
  *      just another "unresolvable automatically" case) rather than being
  *      recorded directly — this lets a caller-supplied `requestMissingData`
  *      value rescue even an undecryptable entry.
  *   3. Plaintext already matches the current bitstring shape
- *      (`/^[01]+$/`, length 1024 or 1600) → no-op; not counted anywhere.
- *   4. Plaintext is a valid DALOS word list (`validateSeedWords` does not
- *      throw) → this is the legacy-shape bug: encrypt the original words
- *      into `wordsSecret` (only if not already set — never overwrite real
- *      data), then encrypt `seedWordsToBitString(words)` into `secret`.
- *      Record the id in `fixedSeedIds`.
- *   5. Neither shape, and no caller-supplied value resolves it → record a
- *      `{ slice, id, reason }` entry in `skipped`; the original ciphertext
- *      (and any existing `wordsSecret`) is left completely untouched.
+ *      (`/^[01]+$/`, length 1024 or 1600) → no-op; counted in
+ *      `result.alreadyCurrent`.
+ *   4. Plaintext passes `validateSeedWords` AND the positive
+ *      `seedPhraseShapeReason` test AND its original can be preserved →
+ *      this is the legacy-shape bug: preserve the plaintext VERBATIM in
+ *      `wordsSecret` (never overwriting an existing one), then encrypt
+ *      `seedWordsToBitString(words)` into `secret`. Record the id in
+ *      `fixedSeedIds`.
+ *   5. Anything step 4 refuses, and no caller-supplied value resolves it →
+ *      record a `{ slice, id, reason }` entry in `skipped` carrying the
+ *      refusal; the original ciphertext (and any existing `wordsSecret`) is
+ *      left completely untouched. Nothing is ever converted on a guess:
+ *      `validateSeedWords` alone admits almost any alphanumeric plaintext,
+ *      and writing a bitstring derived from a non-phrase over `secret`
+ *      destroys the only copy of the real key (design.md §3).
  */
 
 import { smartDecrypt, encryptStringV2 } from "@stoachain/stoa-core/crypto";
@@ -101,6 +108,27 @@ export interface StructuralMigrationResult {
   snapshot: CodexSnapshot;
   fixedSeedIds: string[];
   skipped: StructuralMigrationSkip[];
+  /** How many entries this engine was RESPONSIBLE for and actually walked
+   *  (stoic `kadenaSeeds` entries + every `arweaveSeeds` entry). `0` means
+   *  "this run examined nothing", which is a completely different statement
+   *  from "everything was already fine" — before these counters existed both
+   *  reached the UI as the single line `Fixed 0 seeds.`
+   *  (honest-failure-reporting/design.md §2).
+   *
+   *  Accounting invariant, enforced over every walked entry:
+   *  `examined === fixedSeedIds.length + skipped.length + alreadyCurrent +
+   *  emptySecret`. */
+  examined: number;
+  /** Of `examined`, how many already held the current 1024/1600-char
+   *  bitstring (step 3's no-op). */
+  alreadyCurrent: number;
+  /** Of `examined`, how many had an empty/absent `secret` — nothing to
+   *  migrate (step 1's no-op), which is NOT the same as already-current. */
+  emptySecret: number;
+  /** Entries deliberately NOT walked: non-stoic `kadenaSeeds` entries, whose
+   *  `secret` already IS the real mnemonic. Never examined, never fixed,
+   *  never skipped — and, until these counters existed, invisible. */
+  notEligible: number;
 }
 
 /** A locator for one checked seed's `secret`/`wordsSecret` pair — read it,
@@ -158,6 +186,70 @@ function toWords(plaintext: string): string[] {
   return plaintext.trim().split(/\s+/).filter(Boolean);
 }
 
+/** Token-count bounds for the §3 positive phrase-shape test. Calibrated on
+ *  the only two genuine DALOS phrases this project can point at:
+ *  the owner's real exported codex (24 tokens / 154 chars, measured in
+ *  honest-failure-reporting/design.md) and this repo's own long-standing
+ *  24-token test fixture (144 chars). Every phrase-producing surface in the
+ *  codebase emits exactly 12 or 24 tokens
+ *  (`StoaChainWalletBuilder.generateMnemonic(12|24)`,
+ *  `CreateStoaChainSeedModal`'s `option.words`, `ArweaveSeedsArea`'s
+ *  `RestrictedWordCount`), so 12 is a hard floor — below it, an alphanumeric
+ *  plaintext is prose, not a phrase. The ceiling is 2x the largest observed
+ *  count: generous headroom for a hand-written DALOS phrase without
+ *  approaching `validateSeedWords`' own 256-token limit, at which point
+ *  "tokens of runes" and "a paragraph of text" are indistinguishable. */
+export const SEED_PHRASE_MIN_TOKENS = 12;
+export const SEED_PHRASE_MAX_TOKENS = 48;
+
+/** Per-token glyph bounds. The BIP39 English wordlist — the single wordlist
+ *  every phrase-producing surface here draws from — is 2048 words, each 3-8
+ *  characters, all lowercase `a-z`; both measured real phrases above sit
+ *  inside that envelope exactly. `validateSeedWords` instead admits 1-256
+ *  glyphs out of a 256-glyph set that includes all of `[0-9A-Za-z]`, which
+ *  is why it cannot tell a phrase from a sentence or a password. */
+export const SEED_PHRASE_MIN_TOKEN_GLYPHS = 3;
+export const SEED_PHRASE_MAX_TOKEN_GLYPHS = 8;
+
+const SEED_PHRASE_TOKEN_RE = /^[a-z]+$/;
+
+/**
+ * The §3 POSITIVE phrase-shape test: `null` when `words` genuinely looks
+ * like a DALOS seed phrase, a human-readable reason otherwise.
+ *
+ * Deliberately stricter than `validateSeedWords`, and deliberately
+ * asymmetric in its failure cost. A false NEGATIVE (a real but unusually
+ * shaped phrase refused here) costs the user one prompt: the entry is routed
+ * through `requestMissingData`, its original ciphertext kept verbatim, and
+ * the upgrade stays on offer. A false POSITIVE converts a non-phrase
+ * plaintext into a well-formed but WRONG key and writes it over the only
+ * copy of the real one. The second is irreversible, so this test refuses
+ * anything it cannot positively recognise.
+ */
+export function seedPhraseShapeReason(words: readonly string[]): string | null {
+  if (words.length < SEED_PHRASE_MIN_TOKENS || words.length > SEED_PHRASE_MAX_TOKENS) {
+    return (
+      `expected a seed phrase of ${SEED_PHRASE_MIN_TOKENS}-${SEED_PHRASE_MAX_TOKENS} words, ` +
+      `got ${words.length} — this does not look like a seed phrase`
+    );
+  }
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] ?? "";
+    const glyphs = Array.from(word);
+    if (
+      glyphs.length < SEED_PHRASE_MIN_TOKEN_GLYPHS ||
+      glyphs.length > SEED_PHRASE_MAX_TOKEN_GLYPHS ||
+      !SEED_PHRASE_TOKEN_RE.test(word)
+    ) {
+      return (
+        `word ${i + 1} (${JSON.stringify(word)}) is not ${SEED_PHRASE_MIN_TOKEN_GLYPHS}-` +
+        `${SEED_PHRASE_MAX_TOKEN_GLYPHS} lowercase letters — this does not look like a seed phrase`
+      );
+    }
+  }
+  return null;
+}
+
 /** `null` when `words` is a valid DALOS seed-word list, a human-readable
  *  reason string otherwise. Thin wrapper over `validateSeedWords`, which
  *  throws rather than returning a sentinel. */
@@ -170,14 +262,65 @@ function invalidWordsReason(words: readonly string[]): string | null {
   }
 }
 
-/** Step 4's fix: encrypt the original words into `wordsSecret` (unless one
- *  is already set), then encrypt the derived bitstring into `secret`. Same
- *  password both times — this is a shape fix, not a password rotation. */
-async function applyWordsFix(ref: StructuralSeedRef, words: readonly string[], password: string): Promise<void> {
-  if (!ref.readWordsSecret()) {
-    ref.writeWordsSecret(await encryptStringV2(words.join(" "), password));
+/**
+ * The ONE write path: `null` when the fix was applied, a human-readable
+ * refusal reason when it was not (in which case NOTHING was written).
+ *
+ * `plaintext` is the exact string the fix is derived FROM — step 4's
+ * decrypted `secret`, or step 5's caller-supplied words. It is preserved
+ * VERBATIM in `wordsSecret` before `secret` is overwritten, so the original
+ * survives the conversion byte-for-byte rather than as a re-join of its
+ * parsed tokens.
+ *
+ * Three gates, in order, all of them before the first write
+ * (honest-failure-reporting/design.md §3 — "DATA LOSS RISK"):
+ *   1. `validateSeedWords` — the DALOS library contract.
+ *   2. `seedPhraseShapeReason` — the positive phrase-shape test. Without it
+ *      almost any alphanumeric plaintext was converted into a well-formed
+ *      but WRONG key and written over the only copy of the real one.
+ *   3. Preserve-or-refuse. An existing `wordsSecret` is never clobbered, so
+ *      when it holds something OTHER than `plaintext` there is nowhere to
+ *      keep the original and the entry is refused instead of overwritten.
+ *
+ * Same password throughout — this is a shape fix, not a password rotation.
+ */
+async function tryApplyWordsFix(
+  ref: StructuralSeedRef,
+  plaintext: string,
+  password: string,
+): Promise<string | null> {
+  const words = toWords(plaintext);
+
+  const libraryReason = invalidWordsReason(words);
+  if (libraryReason !== null) return libraryReason;
+
+  const shapeReason = seedPhraseShapeReason(words);
+  if (shapeReason !== null) return shapeReason;
+
+  const existingWordsSecret = ref.readWordsSecret();
+  if (existingWordsSecret) {
+    let existingPlaintext: string;
+    try {
+      existingPlaintext = await smartDecrypt(existingWordsSecret, password);
+    } catch (err) {
+      return (
+        "this seed already carries a wordsSecret that cannot be read " +
+        `(${err instanceof Error ? err.message : String(err)}), so the original words ` +
+        "could not be confirmed preserved — secret left untouched"
+      );
+    }
+    if (toWords(existingPlaintext).join(" ") !== words.join(" ")) {
+      return (
+        "this seed already carries a wordsSecret holding DIFFERENT words; overwriting " +
+        "secret would destroy one of the two — secret left untouched"
+      );
+    }
+  } else {
+    ref.writeWordsSecret(await encryptStringV2(plaintext, password));
   }
+
   ref.writeSecret(await encryptStringV2(seedWordsToBitString(words), password));
+  return null;
 }
 
 /**
@@ -195,6 +338,7 @@ async function resolveUnresolvable(
   fixedSeedIds: string[],
   skipped: StructuralMigrationSkip[],
 ): Promise<void> {
+  let refusal: string | null = null;
   if (options?.requestMissingData) {
     let supplied: string | undefined;
     try {
@@ -203,15 +347,21 @@ async function resolveUnresolvable(
       supplied = undefined;
     }
     if (supplied) {
-      const words = toWords(supplied);
-      if (invalidWordsReason(words) === null) {
-        await applyWordsFix(ref, words, password);
+      refusal = await tryApplyWordsFix(ref, supplied, password);
+      if (refusal === null) {
         fixedSeedIds.push(ref.id);
         return;
       }
     }
   }
-  skipped.push({ slice: need.slice, id: need.id, reason: need.reason });
+  // A refused rescue says WHY it was refused rather than repeating only the
+  // original complaint — the user typed something and is entitled to know it
+  // was not used, and what the engine made of it.
+  skipped.push({
+    slice: need.slice,
+    id: need.id,
+    reason: refusal === null ? need.reason : `${need.reason}; the words supplied were not used: ${refusal}`,
+  });
 }
 
 /**
@@ -236,12 +386,21 @@ export async function runStructuralMigration(
   const next = structuredClone(snapshot);
   const fixedSeedIds: string[] = [];
   const skipped: StructuralMigrationSkip[] = [];
+  // Every walked entry increments exactly one of these, so "examined
+  // nothing" and "everything was already fine" are no longer the same
+  // answer (design.md §2).
+  let examined = 0;
+  let alreadyCurrent = 0;
+  let emptySecret = 0;
+  const notEligible = (next.kadenaSeeds ?? []).filter((s) => s.seedType !== "stoic").length;
 
   for (const ref of iterateStructuralSeedRefs(next)) {
+    examined += 1;
     options?.onProgress?.(`Checking ${ref.slice} seed ${ref.id}…`);
 
     const ciphertext = ref.readSecret();
     if (!ciphertext) {
+      emptySecret += 1;
       options?.onProgress?.(`Seed ${ref.id} has nothing to migrate, skipping.`);
       continue; // step 1: nothing to migrate
     }
@@ -266,26 +425,30 @@ export async function runStructuralMigration(
     }
 
     if (isCurrentBitstring(plaintext)) {
+      alreadyCurrent += 1;
       options?.onProgress?.(`Seed ${ref.id} is already the current shape.`);
       continue; // step 3: already current shape
     }
 
-    const words = toWords(plaintext);
-    if (invalidWordsReason(words) === null) {
-      // step 4: legacy-shape bug confirmed — fix it.
-      await applyWordsFix(ref, words, password);
+    // step 4: try the legacy-shape fix. `tryApplyWordsFix` writes NOTHING
+    // unless the plaintext passes the DALOS contract AND the positive
+    // phrase-shape test AND the original can be preserved; anything it
+    // refuses routes through step 5 instead of being converted, so the
+    // original ciphertext is never destroyed on a guess.
+    const refusal = await tryApplyWordsFix(ref, plaintext, password);
+    if (refusal === null) {
       fixedSeedIds.push(ref.id);
       options?.onProgress?.(`Fixed seed ${ref.id}.`);
       continue;
     }
 
-    // step 5: decrypted fine, but neither a bitstring nor valid DALOS words.
+    // step 5: decrypted fine, but not something this engine may convert.
     await resolveUnresolvable(
       ref,
       {
         slice: ref.slice,
         id: ref.id,
-        reason: "decrypted value is neither a valid bitstring nor a valid DALOS word list",
+        reason: `decrypted value was not converted: ${refusal}`,
       },
       password,
       options,
@@ -295,13 +458,32 @@ export async function runStructuralMigration(
     options?.onProgress?.(`Seed ${ref.id} resolved: ${fixedSeedIds.includes(ref.id) ? "fixed" : "skipped"}.`);
   }
 
-  next.Codex_Shape_Version = STRUCTURAL_SHAPE_TARGET_VERSION;
-  if (next.Codex_Shape_Version !== STRUCTURAL_SHAPE_TARGET_VERSION) {
+  // The stamp is a CLAIM, not a formality: it is the single value
+  // `useNeedsStructuralUpgrade` reads to decide whether `CodexIdPage` keeps
+  // offering "Upgrade Codex Now" or settles on "✓ Versioned" forever. It may
+  // therefore only be made when nothing was left unresolved. An INHERITED
+  // stamp is cleared for the same reason — the same discipline
+  // `LocalStorageCodexAdapter`'s `codex_shape_version` shard already states
+  // for itself ("absent -> removeItem … leaving a stale claim over freshly-
+  // written legacy-shaped data would mark unmigrated data as migrated").
+  if (skipped.length === 0) {
+    next.Codex_Shape_Version = STRUCTURAL_SHAPE_TARGET_VERSION;
+  } else {
+    delete next.Codex_Shape_Version;
+  }
+
+  // The real postcondition: the stamp on the output snapshot and the skip
+  // list must agree. Two INDEPENDENTLY derived quantities — unlike the
+  // previous check, which compared the field to the literal assigned on the
+  // line above and so could never fire whatever the engine did.
+  const stamped = next.Codex_Shape_Version === STRUCTURAL_SHAPE_TARGET_VERSION;
+  if (stamped !== (skipped.length === 0)) {
     throw new CodexStructuralMigrationError(
       "post-condition-failed",
-      `Expected Codex_Shape_Version "${STRUCTURAL_SHAPE_TARGET_VERSION}" after a completed run, got "${String(next.Codex_Shape_Version)}".`,
+      `Codex_Shape_Version is "${String(next.Codex_Shape_Version)}" while ${skipped.length} ` +
+        `seed(s) were skipped — a completion stamp may only be made when nothing was skipped.`,
     );
   }
 
-  return { snapshot: next, fixedSeedIds, skipped };
+  return { snapshot: next, fixedSeedIds, skipped, examined, alreadyCurrent, emptySecret, notEligible };
 }

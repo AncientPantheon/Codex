@@ -36,9 +36,20 @@
  *     might need a password — this upgrade flow has exactly one caller).
  *     A text input + "Submit" resolves with the typed value and returns to
  *     "running"; "Skip this seed" resolves with `undefined`, same return.
- *   - "result": once the action's Promise resolves, shows the fixed count
- *     and every `skipped` entry's `slice`/`id`/`reason`. "Close" calls
- *     `onClose`.
+ *   - "result": once the action's Promise resolves, shows WHICH of the
+ *     possible outcomes occurred (`describeStructuralUpgradeOutcome`, below),
+ *     then the fixed ids and every `skipped` entry's `slice`/`id`/`reason`.
+ *     "Close" calls `onClose`.
+ *
+ * The outcome sentence exists because of honest-failure-reporting/design.md
+ * §2: the engine's "examined nothing", "every seed was already fine" and
+ * "nothing had a secret to migrate" are three completely different
+ * statements that this step used to collapse into the single line
+ * `Fixed 0 seeds.` It now reads the engine's `examined`/`alreadyCurrent`/
+ * `emptySecret`/`notEligible` counters and says which one happened — and,
+ * after a partial run, says the codex is still marked as needing an upgrade
+ * so the user knows the retry is real rather than wondering why the Codex ID
+ * page still offers it.
  */
 
 import * as React from "react";
@@ -193,6 +204,114 @@ function NeedsInputStep({
   );
 }
 
+/** Which of the engine's mutually-exclusive outcomes a finished run
+ *  represents. Named after the four the design's acceptance criterion 4
+ *  requires the UI to distinguish, plus the ordinary success. */
+export type StructuralUpgradeOutcomeKind =
+  | "examined-none"
+  | "not-eligible"
+  | "already-current"
+  | "fixed"
+  | "skipped";
+
+export interface StructuralUpgradeOutcome {
+  kind: StructuralUpgradeOutcomeKind;
+  /** The one sentence that says what happened. */
+  headline: string;
+  /** A second sentence for entries the engine never examined, or `null`. */
+  note: string | null;
+  /** True when the codex is NOT structurally current afterwards — i.e. the
+   *  engine declined to stamp `Codex_Shape_Version`, so
+   *  `useNeedsStructuralUpgrade` still returns true and the Codex ID page
+   *  still offers "Upgrade Codex Now". */
+  stillNeedsUpgrade: boolean;
+}
+
+/** `n` with a correctly-pluralised "seed". */
+function seeds(n: number): string {
+  return `${n} seed${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Pure: a finished `StructuralMigrationResult` -> the text the result step
+ * renders. Exported (and unit-tested) separately from the component because
+ * the whole outcome matrix is a statement about the engine's counters, not
+ * about React.
+ */
+export function describeStructuralUpgradeOutcome(
+  result: StructuralMigrationResult,
+): StructuralUpgradeOutcome {
+  const fixed = result.fixedSeedIds.length;
+  const skipped = result.skipped.length;
+  const { examined, alreadyCurrent, emptySecret, notEligible } = result;
+  const note =
+    notEligible > 0
+      ? `${notEligible} other seed${notEligible === 1 ? " in this codex is" : "s in this codex are"} of a ` +
+        `type this upgrade never touches; ${notEligible === 1 ? "it was" : "they were"} not examined.`
+      : null;
+
+  if (skipped > 0) {
+    return {
+      kind: "skipped",
+      headline:
+        `Fixed ${fixed} of the ${seeds(examined)} examined. ${seeds(skipped)} could not be upgraded ` +
+        `and ${skipped === 1 ? "was" : "were"} left exactly as ${skipped === 1 ? "it" : "they"} ` +
+        `${skipped === 1 ? "was" : "were"} — nothing was dropped or overwritten. This codex is ` +
+        `still marked as needing an upgrade, so you can run this again.`,
+      note,
+      stillNeedsUpgrade: true,
+    };
+  }
+
+  if (fixed > 0) {
+    return {
+      kind: "fixed",
+      headline:
+        `Fixed ${fixed} of the ${seeds(examined)} examined. Nothing was skipped, so this codex is ` +
+        `now marked structurally current.`,
+      note,
+      stillNeedsUpgrade: false,
+    };
+  }
+
+  if (examined > 0) {
+    // Nothing fixed, nothing skipped: every examined entry was already fine.
+    // WHICH kind of fine is the part that used to be invisible.
+    // Reported as a breakdown in every case, including the single-bucket
+    // ones: "already the current shape" and "no stored secret at all" are
+    // two of the three silent `continue`s design.md §2 names, and the user
+    // is entitled to know which one their codex hit.
+    const parts: string[] = [];
+    if (alreadyCurrent > 0) parts.push(`${alreadyCurrent} already in the current shape`);
+    if (emptySecret > 0) parts.push(`${emptySecret} with no stored secret to migrate`);
+    const detail = parts.length > 0 ? parts.join(", ") : `${seeds(examined)} needing no change`;
+    return {
+      kind: "already-current",
+      headline: `Examined ${seeds(examined)}: ${detail}. Nothing needed fixing, and nothing was changed.`,
+      note,
+      stillNeedsUpgrade: false,
+    };
+  }
+
+  if (notEligible > 0) {
+    return {
+      kind: "not-eligible",
+      headline:
+        `Examined no seeds: all ${seeds(notEligible)} in this codex are of a type this upgrade never ` +
+        `touches. Nothing was changed.`,
+      note: null,
+      stillNeedsUpgrade: false,
+    };
+  }
+
+  return {
+    kind: "examined-none",
+    headline: "This codex has no seeds this upgrade applies to. Nothing was examined, and nothing was changed.",
+    note: null,
+    stillNeedsUpgrade: false,
+  };
+}
+
 function ResultStep({
   result,
   onClose,
@@ -200,11 +319,17 @@ function ResultStep({
   result: StructuralMigrationResult;
   onClose: () => void;
 }): React.ReactElement {
+  const outcome = describeStructuralUpgradeOutcome(result);
   return (
     <div data-testid="structural-upgrade-result" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <p style={stepParagraphStyle}>
-        Fixed {result.fixedSeedIds.length} seed{result.fixedSeedIds.length === 1 ? "" : "s"}.
+      <p data-testid="structural-upgrade-outcome" style={stepParagraphStyle}>
+        {outcome.headline}
       </p>
+      {outcome.note ? (
+        <p data-testid="structural-upgrade-outcome-note" style={stepParagraphStyle}>
+          {outcome.note}
+        </p>
+      ) : null}
       {result.fixedSeedIds.length > 0 ? (
         <ul data-testid="structural-upgrade-fixed-list" style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#d2d3d4" }}>
           {result.fixedSeedIds.map((id) => (

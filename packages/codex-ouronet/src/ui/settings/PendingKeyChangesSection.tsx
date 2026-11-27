@@ -37,6 +37,34 @@
  * pre-flight (a chain read, not a guess) is what decides there is nothing
  * left to do.
  *
+ * ## What the chain READ writes back
+ *
+ * This component holds the store handle and the resolved master account, so it
+ * binds BOTH of the engine's store-facing seams: `recordStep`, and a wrap
+ * around the engine's `readChainState` that reconciles the account's recorded
+ * keys with what that read reported ({@link reconcileAccountFromChainState}).
+ * The card is pure — `computeOutstandingKeyChanges` compares the STORED
+ * `stoaChainLedger` / `guard` against the recorded plan — and nothing else on
+ * this surface ever refreshed those two fields, so a rotation already in force
+ * on chain stayed listed as outstanding for the rest of the codex's life
+ * (owner, mainnet, 2026-11-27: both keys in force across two runs, both still
+ * listed, under a toast that said everything was done).
+ *
+ * Driving that write off the READ rather than off a confirmed step is what
+ * makes the card structurally unable to disagree with the engine — both decide
+ * from the same observation — and it is the ONLY writer of those two fields
+ * here. There is deliberately no second route.
+ *
+ * That read has TWO call sites and one meaning. The press path wraps the
+ * engine's own `readChainState`, so every observation taken DURING a run —
+ * the re-read after each confirmation, and the closing read after a completed
+ * chain — reconciles. {@link MigrationExecutor}'s load-time effect takes the
+ * SAME read once on mount, because a press is not a way to correct a display:
+ * on a fresh page load nothing read the chain, so the card listed both of the
+ * owner's confirmed rotations and the Apply popup kept pointing here instead
+ * of offering Seal (2026-11-27 — see that effect's own doc). One read
+ * function, one writer, two moments.
+ *
  * ## MAINNET HAZARD — this is the file where the real functions are named
  *
  * {@link createMigrationChainDeps} is the ONLY place in the tree that names
@@ -63,6 +91,18 @@
  * {@link keysetUpdatePreconditionFacts}, each taking its seam as a required
  * argument, precisely so that the spec can assert them without invoking
  * anything that could reach a node.
+ *
+ * {@link buildRotateGuardRequest} is the fourth, and the one with a live
+ * mainnet failure behind it: G's request was assembled inline inside the
+ * closure that names `liveRotateGuardSubmitter`, where no test could reach
+ * it, and it omitted the INCOMING guard's analysis — so the keyset being
+ * adopted was sent with no signature and the chain refused it at simulation
+ * (`Keyset failure ( keys-all ): 22ac9147…`, 2026-11-26, after step 0 had
+ * already confirmed). That refusal is the chain stopping a user from locking
+ * an account behind a keyset they do not hold, so the request is now built by
+ * a value that resolves the chosen guard's keys from the codex and refuses
+ * loudly when it cannot. See that function's own doc for why the threshold
+ * must come from the NEW predicate.
  *
  * ## The keyset update, in three sentences
  *
@@ -93,22 +133,26 @@
  */
 
 import * as React from "react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCodexStoreOptional } from "../../provider/index.js";
 import type { CodexStoreState } from "../../state/store.js";
 import { flattenStoaChainAccounts } from "../../zbom/cfm/seam.js";
 import { computeOutstandingKeyChanges } from "../internal/outstandingKeyChanges.js";
 import { PendingKeyChangesCard } from "./PendingKeyChangesCard.js";
-import type { IOuroAccount, IStoaChainSeed } from "../../types/entities.js";
+import type { IKeyset, IOuroAccount, IStoaChainSeed } from "../../types/entities.js";
 
 import {
   bareKeyOf,
   hasMigrationPending,
+  resolveMasterOuronetAccount,
+  type ChainStateSnapshot,
   type MigrationChainIntent,
   type MigrationExecutionStep,
+  type MigrationGuardTarget,
   type MigrationProgress,
 } from "@ancientpantheon/codex-core";
 import { analyzeGuard, buildCodexPubSet, selectCapsSigningKey } from "@stoachain/stoa-core/guard";
+import type { GuardAnalysis } from "@stoachain/stoa-core/guard";
 import { mayComeWithDeimal } from "@stoachain/stoa-core/pact";
 import type { ICommand } from "@stoachain/kadena-stoic-legacy/client";
 import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
@@ -129,10 +173,11 @@ import {
   type MigrationChainOutcome,
   type MigrationChainRequest,
   type MigrationPreconditionFacts,
+  type RotateGuardStepRequest,
   type UrStoaVaultStepRequest,
 } from "../../zbom/execute/engine.js";
 import { awaitTxVerdict, awaitTxVerdictLiveDeps } from "../../zbom/execute/awaitConfirmation.js";
-import { readChainState } from "../../zbom/execute/chainState.js";
+import { readChainState, type ChainStateQuery } from "../../zbom/execute/chainState.js";
 import {
   createSignedCrossChainInitiate,
   runCrossChainStoaTransfer,
@@ -163,6 +208,7 @@ import {
   liveRotatePaymentKeySubmitter,
   type GuardSignerAnalysis,
   type ResolvedKeysetLike,
+  type RotateGuardRequest,
 } from "../../zbom/execute/rotateOps.js";
 // The leaf operations ouronet-core owns. Named HERE and nowhere else on the
 // engine's path — every module under `zbom/execute` takes them as an injected
@@ -331,6 +377,110 @@ export function buildDefineKeysetRequest(
     // `collectGuardSigners` reach them through `resolvedForeignKeys`.
     currentKeysetAnalysis: analysis,
     manualKeys: keysetUpdate?.manualKeys ?? {},
+  };
+}
+
+// ─── G's request — the INCOMING keyset's own signature ──────────────────────
+
+/**
+ * The guard being ADOPTED cannot be signed from this codex, so the rotation
+ * can never land. Named here, with the keys, because the chain's own words for
+ * it are `Keyset failure ( keys-all ): 22ac9147…` — a key the owner then has
+ * to recognise unaided.
+ */
+function chosenGuardUnsignableMessage(analysis: GuardAnalysis): string {
+  const missing = analysis.foreignKeys.join(", ");
+  return (
+    `The chosen guard cannot be co-signed by this codex: its predicate `
+    + `(${analysis.predLabel}) needs ${analysis.threshold} of its `
+    + `${analysis.keys.length} keys and only ${analysis.signable} can be signed `
+    + `for. This codex does not hold ${missing}. A guard change must be signed by `
+    + `the keyset being adopted — that is what proves you control what the `
+    + `account is being moved to — so nothing was submitted for this step. `
+    + `Nothing else in the migration is undone: press again once the missing key `
+    + `is in this codex, or record a different guard.`
+  );
+}
+
+/** What {@link buildRotateGuardRequest} needs that the engine's step request
+ *  does not carry: the patron, the gas-station keypair, the two guard analyses
+ *  {@link createMigrationChainDeps} resolved once for this press, and the
+ *  codex's own public keys — which is what makes the NEW guard analysable. */
+export interface RotateGuardContext {
+  readonly patronAddress: string;
+  readonly gasStationKey: IStoaChainKeypair;
+  readonly patronAnalysis: GuardSignerAnalysis;
+  readonly accountAnalysis: GuardSignerAnalysis;
+  readonly codexPubs: Set<string>;
+}
+
+/**
+ * G's whole request — including the INCOMING guard's own analysis, which is
+ * the half the 2026-11-26 mainnet run was missing.
+ *
+ * ## Why the new guard must co-sign, and why that is not negotiable
+ *
+ * `C_RotateGuard` is submitted with `safe: true` (forced — `rotateOps.ts`'s
+ * `GuardChangeTarget`), and the chain then requires the keyset in the `ks`
+ * payload to sign its own adoption. That is the check that stops a user
+ * locking an account behind a keyset they do not hold. `executeRotateGuard`
+ * collects `newGuardKeys` ONLY from `newGuardAnalysis`, and this factory used
+ * to pass just the patron's and the account's — so the incoming keyset went
+ * out with no signer and the chain answered
+ * `Keyset failure ( keys-all ): 22ac9147…` at SIMULATION, after step 0 had
+ * already confirmed. The fix is to satisfy the check, never to send
+ * `safe: false`.
+ *
+ * ## The threshold is the NEW predicate's
+ *
+ * `collectGuardSigners` stops at `analysis.threshold`, so the analysis is
+ * built over `req.guard.{keys,pred}` — the keyset being adopted — and
+ * `analyzeGuard` derives the number from THAT predicate and THAT key count
+ * (`keys-all` → N, `keys-any` → 1). Reusing `context.accountAnalysis`, or its
+ * threshold, would collect one key for a two-key `keys-all` guard and fail on
+ * chain in exactly the way this function exists to prevent.
+ *
+ * ## No manual keys — and a THROW rather than a short signer set
+ *
+ * `{}`, for design §3's reason: the chain never stops to ask for a private
+ * key. So a chosen guard this codex cannot satisfy is not something a prompt
+ * can rescue, and the honest answer is to refuse. Thrown, which the engine
+ * turns into a halt that names the step with nothing submitted for it — the
+ * same shape as {@link buildDefineKeysetRequest}'s refusal.
+ *
+ * It is a SUBMIT-TIME refusal rather than a §5 precondition, deliberately.
+ * Two reasons, in order: core's precondition vocabulary has no code for "the
+ * chosen guard is unsignable" (`guard-keys-unresolved` means the keys are not
+ * KNOWN, a different fact resolved at selection time), so reporting it there
+ * would print a reason that is not the real one; and the plan — which decides
+ * whether a `rotate-guard` step is even owed — is computed from fresh chain
+ * reads inside the engine, so a gate at the press would refuse runs whose
+ * guard is already in force, blocking the fund moves with it. G is also LAST
+ * and independent: a halt here leaves every earlier step legitimately done,
+ * and the chain is resumable.
+ */
+export function buildRotateGuardRequest(
+  req: RotateGuardStepRequest,
+  context: RotateGuardContext,
+): RotateGuardRequest {
+  const newGuardAnalysis = analyzeGuard(
+    { keys: [...req.guard.keys], pred: req.guard.pred },
+    context.codexPubs,
+    {},
+  );
+  if (!newGuardAnalysis.satisfied) {
+    throw new Error(chosenGuardUnsignableMessage(newGuardAnalysis));
+  }
+  return {
+    patronAddress: context.patronAddress,
+    accountAddress: req.accountAddress,
+    gasStationKey: context.gasStationKey,
+    patronAnalysis: context.patronAnalysis,
+    accountAnalysis: context.accountAnalysis,
+    newGuardAnalysis,
+    // Always the `"define"` form — see the factory's G closure for why a REF
+    // repoint is not expressible through this seam.
+    target: { mode: "define", newKeys: [...req.guard.keys], newPred: req.guard.pred },
   };
 }
 
@@ -680,17 +830,22 @@ export function createMigrationChainDeps(input: MigrationChainDepsInput): Migrat
     // `RotateGuardModal`'s "existing" mode. The one guard choice that would
     // need a ref (`update-keyset-*`) is planned as the non-executable
     // `define-keyset` step and is reported, never submitted.
+    //
+    // The request — INCLUDING the incoming keyset's own analysis — is built by
+    // {@link buildRotateGuardRequest} rather than inline here. That is not
+    // tidiness: this closure names `liveRotateGuardSubmitter`, so no test may
+    // invoke it, and the request assembled inline was where the 2026-11-26
+    // mainnet failure lived. As a value, it is asserted directly.
     submitRotateGuard: async (req) => {
       const guards = await resolveGuards();
       return executeRotateGuard(
-        {
+        buildRotateGuardRequest(req, {
           patronAddress: input.patronAddress,
-          accountAddress: req.accountAddress,
           gasStationKey: await gasStationKey(),
           patronAnalysis: guards.patronAnalysis,
           accountAnalysis: guards.accountAnalysis,
-          target: { mode: "define", newKeys: [...req.guard.keys], newPred: req.guard.pred },
-        },
+          codexPubs: input.codexPubs,
+        }),
         { getKeypair: input.getKeypair, submitRotateGuard: liveRotateGuardSubmitter },
       );
     },
@@ -841,15 +996,48 @@ function describeOutcome(outcome: MigrationChainOutcome): OutcomeView {
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
-const executorBoxStyle: React.CSSProperties = {
+/**
+ * THE DOM ANCHOR the Apply popup navigates to — a cross-package contract.
+ *
+ * `codex-arweave`'s Apply popup (`panel/CodexIdPage.tsx`) is the SEAL surface:
+ * it refuses to seal while anything is outstanding (`applyHasOutstandingWork`)
+ * and carries NO execute button, by design. Its one control therefore has to
+ * lead HERE, to the single press. That control cannot import this module —
+ * this package's `./ui` barrel is a NEGATIVE export lock
+ * (`tests/ui-surface-stability.test.ts`) so the name cannot be published
+ * through it, and every consumer's vitest/tsc path mapping resolves
+ * `@ancientpantheon/codex-ouronet/<x>` to `src/<x>/index.ts`, never to a file
+ * this deep. So the seam is a DOM one, and it is exactly two facts:
+ *
+ *   1. this `id` sits on the box that holds the execute button — never on an
+ *      ancestor, never on the section wrapper, because a user sent to a card
+ *      with no button has been sent nowhere;
+ *   2. FOCUSING that element highlights it ({@link executorBoxStyle}'s
+ *      `focused` variant), so a caller only has to `getElementById(...)` and
+ *      `.focus()` to put the owner's eye on the right card. The highlight is
+ *      owned here rather than reached into from outside.
+ *
+ * The consumer transcribes this string literally (and pins the literal in its
+ * own spec, as it already does for the execute button's LABEL), so a rename
+ * here is a deliberate two-sided edit. `tests/ui-pending-key-changes-section
+ * .test.tsx`'s "the navigation anchor the Apply popup targets" block holds
+ * both facts on this side of the boundary.
+ */
+export const MIGRATION_EXECUTOR_ANCHOR_ID = "codex-migration-executor";
+
+/** The executor box. `focused` is the navigation highlight — see
+ *  {@link MIGRATION_EXECUTOR_ANCHOR_ID}. Nothing else changes: an arriving
+ *  user must recognise the SAME card, lit up, not a different one. */
+const executorBoxStyle = (focused: boolean): React.CSSProperties => ({
   padding: 12,
   borderRadius: 8,
   backgroundColor: "#18181B",
-  border: "1px solid #262626",
+  border: `1px solid ${focused ? "#ceac5f" : "#262626"}`,
+  ...(focused ? { boxShadow: "0 0 0 3px rgba(206, 172, 95, 0.25)" } : {}),
   display: "flex",
   flexDirection: "column",
   gap: 8,
-};
+});
 
 const buttonStyle = (busy: boolean): React.CSSProperties => ({
   alignSelf: "flex-start",
@@ -871,6 +1059,205 @@ const headingStyle: React.CSSProperties = {
   color: "#d2d3d4",
 };
 
+// ─── The planned payment key, and the reconciliation of the registered one ──
+
+/**
+ * The payment key the recorded plan intends — the BARE key and the seed type
+ * that decides its address form, resolved once, together.
+ *
+ * Deliberately does NOT carry the account-string form. There is exactly one
+ * implementation of design §5's seed-type rule (`paymentKeyAccountString`,
+ * `migrationChain.ts:490`, mirroring `state/store.ts:2680`) and exactly one
+ * caller that needs it: the ENGINE, which performs the conversion itself
+ * because the transaction is what needs the account string. The stored
+ * `stoaChainLedger` is no longer derived from the plan at all — it is
+ * reconciled from what the chain reports
+ * ({@link reconcileAccountFromChainState}), so there is no second
+ * derivation left here to drift from the first.
+ *
+ * `pending` before `committed`, the same precedence the engine's own intent
+ * assembly uses: `pending` is what the last finalize decided Apply would
+ * execute, so it is what is about to be sent.
+ */
+export interface PlannedPaymentKey {
+  /** Bare hex, as `MigrationPendingPlan.paymentPublicKey` stores it. */
+  readonly publicKey: string | null;
+  /** The paired seed's type, which is what decides the address form. */
+  readonly seedType: string | null;
+}
+
+export function plannedPaymentKey(
+  run: MigrationProgress | null | undefined,
+  seeds: readonly IStoaChainSeed[],
+): PlannedPaymentKey {
+  const publicKey = run?.pending?.paymentPublicKey ?? run?.committed?.paymentPublicKey ?? null;
+  const seedId = run?.pending?.seedId ?? run?.committed?.seedId;
+  const seedType = seeds.find((seed) => seed.id === seedId)?.seedType ?? null;
+  return { publicKey, seedType };
+}
+
+/** The non-throwing store handle, structurally — so this writer is callable
+ *  from a spec with a synthetic store and no provider. */
+interface CodexStoreHandle {
+  getState: () => CodexStoreState;
+}
+
+/** Exactly the three fields of a {@link ChainStateSnapshot} this writer reads,
+ *  so a spec can state an observation as a literal and the full snapshot stays
+ *  assignable to it. All three come off the SAME selector row
+ *  (`zbom/execute/chainState.ts`), which is why they travel together. */
+export type ChainObservedAccountKeys = Pick<
+  ChainStateSnapshot,
+  "registeredPaymentKey" | "registeredGuard" | "registeredKeysetRef"
+>;
+
+/** Set equality, so key ORDER never makes an unchanged guard look changed and
+ *  rewrite the account on every press. Mirrors `outstandingKeyChanges.ts:42`'s
+ *  rule — the comparison the CARD makes — rather than a structural compare. */
+function sameKeySet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((key) => set.has(key));
+}
+
+/**
+ * Reconcile the master account's recorded keys with what the chain just said.
+ *
+ * ## Why this is driven by the READ, and not by a confirmed step
+ *
+ * `readChainState` is the engine's one observation of the truth, taken on
+ * every press (and again before every step that follows a confirmation). It
+ * carries `registeredPaymentKey` and `registeredGuard`, read live. Writing
+ * from THAT covers every case at once — a rotation confirmed moments ago, one
+ * already in force before the press, one performed from another surface
+ * entirely, the payment key AND the guard — and it makes the card
+ * structurally unable to disagree with the engine, because
+ * `computeOutstandingKeyChanges` and `planMigrationChain` then compare the
+ * same two values against the same recorded plan.
+ *
+ * The write-back this replaced fired only for a CONFIRMED `rotate-payment-key`
+ * step, and the owner hit both of its blind spots on mainnet (2026-11-27):
+ * run 1 confirmed the payment-key rotation before that write-back existed, so
+ * run 2's engine SKIPPED the step — and a skipped step fires no `recordStep`
+ * at all — while the guard had no write-back on any path. Two mechanisms are
+ * also one too many for one field, so there is now exactly this one.
+ *
+ * ## What it may and may not write
+ *
+ * ONLY what the chain reported. A `null` `registeredPaymentKey` or
+ * `registeredGuard` means NOT OBSERVED — the selector's BAR sentinel, an
+ * unactivated account, a guard shape this code does not model — never
+ * "cleared". Nothing here erases a stored value on the strength of an absent
+ * one, and nothing here invents a value: the ledger is stored in the chain's
+ * OWN account-string form (`k:<pub>`, or bare for a stoic seed — the
+ * `state.ts:2680` rule `paymentKeyAccountString` owns), never re-derived from
+ * the plan, so this surface cannot disagree with what funds are actually
+ * registered to.
+ *
+ * Reads the account FRESH from the store rather than from a render's closure,
+ * because `updateOuroAccount` merges the whole object by id: a stale copy
+ * would revert any other field written since. No-ops when the observation
+ * already matches, so a re-press — which re-reads the same chain state —
+ * touches no storage, flips no `dirty` flag and prompts no sync the owner did
+ * not earn.
+ *
+ * Writes `stoaChainLedger` and never the legacy `kadenaLedger` alias, which is
+ * read-only by this package's own rule (`types/entities.ts:285` — "new code
+ * must write `stoaChainLedger`"); a legacy account's `kadenaLedger` is left
+ * exactly as stored (skip-not-drop) and is outranked by the field written here
+ * in `resolveOuroAccountLedger`'s one reconciliation.
+ *
+ * KNOWN COUPLING, pre-existing and deliberately not widened here: the executor
+ * hands the engine `masterAccount.stoaChainLedger` as the drain's SOURCE
+ * address, so once a rotation is in force that address becomes the new key —
+ * which is correct for "the account's registered payment key" (the field's
+ * documented meaning, and what `OuronetAccountsTab.tsx:115` hydrates it from)
+ * but makes the old key's leftovers invisible to a LATER press. Every press
+ * drains from the address the stored field held when it started, so no run in
+ * progress is affected; a migration that halts mid-drain and is re-pressed
+ * after the key rotated elsewhere is the gap. The fix for that is to record
+ * the drain source explicitly instead of inferring it from the registered key
+ * — a change to what the wizard persists, i.e. its own topic.
+ *
+ * A failed write is SWALLOWED, deliberately, and that property is now MORE
+ * load-bearing than it was: this runs inside the engine's chain read, so a
+ * rejection would surface as "chain state could not be read" and halt a
+ * migration whose transactions are fine. `updateOuroAccount` sets state before
+ * it persists, so the card is already correct in memory either way. Degrading
+ * to the stale card the owner already lives with is survivable; stopping the
+ * chain over a cache write is not.
+ */
+export async function reconcileAccountFromChainState(
+  store: CodexStoreHandle,
+  accountId: string,
+  observed: ChainObservedAccountKeys,
+): Promise<void> {
+  const fresh = store.getState().ouroAccounts.find((account) => account.id === accountId);
+  if (fresh === undefined) return;
+
+  const next: IOuroAccount = { ...fresh };
+  let changed = false;
+
+  // The payment key. `registeredPaymentKey` is ALREADY an account string —
+  // `chainState.ts` passes the selector's `payment-key` through verbatim, the
+  // same field `OuronetAccountsTab.tsx:115` hydrates `stoaChainLedger` from —
+  // so there is nothing to convert, and converting would be how the stored
+  // address and the registered one come apart.
+  if (observed.registeredPaymentKey !== null
+    && observed.registeredPaymentKey !== fresh.stoaChainLedger) {
+    next.stoaChainLedger = observed.registeredPaymentKey;
+    changed = true;
+  }
+
+  // The guard. `registeredGuard` is `{ keys, pred }` — `IKeyset` minus the
+  // `keysetRef` annotation, which rides on `registeredKeysetRef`: BOTH are
+  // read off the one raw `ouronet-account-guard` value, so carrying the
+  // annotation over costs no second observation and keeps the keyset-ref
+  // affordances (`resolveGuardKeys`' `viaRef`, the badge) pointing at the
+  // reference the chain actually reports. The `pred` is stored as the chain
+  // spells it and is never defaulted: the card compares `pred` as well as the
+  // keys, so a substituted one would silently change what it compares. The
+  // cast is load-bearing and deliberate — `IKeyset` declares the three
+  // predicates this app OFFERS while Pact allows any `keys-N`, and coercing an
+  // unlisted one into the union would be inventing a guard; the raw chain
+  // value rides through exactly as `OuronetAccountsTab.tsx:106` passes the
+  // selector's `any`-typed guard through on the display path.
+  const guard = observed.registeredGuard;
+  if (guard !== null && !sameStoredGuard(fresh.guard, guard, observed.registeredKeysetRef)) {
+    next.guard = {
+      pred: guard.pred as IKeyset["pred"],
+      keys: [...guard.keys],
+      ...(observed.registeredKeysetRef !== null
+        ? { keysetRef: observed.registeredKeysetRef }
+        : {}),
+    };
+    changed = true;
+  }
+
+  if (!changed) return;
+  try {
+    await store.getState().actions.updateOuroAccount(next);
+  } catch {
+    // See the doc above: never allowed to halt the chain.
+  }
+}
+
+/** Whether the stored guard already says exactly what the chain reported —
+ *  the no-churn test. Compares the keys as a SET, the predicate, and the
+ *  keyset-ref annotation this writer would carry over. */
+function sameStoredGuard(
+  stored: IKeyset | null | undefined,
+  observed: MigrationGuardTarget,
+  observedRef: string | null,
+): boolean {
+  if (stored === null || stored === undefined) return false;
+  return (
+    stored.pred === observed.pred
+    && sameKeySet(stored.keys, observed.keys)
+    && (stored.keysetRef ?? null) === observedRef
+  );
+}
+
 // ─── The executor ───────────────────────────────────────────────────────────
 
 /** Injected by the spec; the defaults are the production wiring. See this
@@ -886,6 +1273,20 @@ export interface PendingKeyChangesSectionProps {
    *  required prop with no default: this is the ONE place it is named, and the
    *  component's spec injects a synthetic one. */
   readonly readAccountGuard?: (address: string) => Promise<unknown>;
+  /**
+   * The chain observation taken ON MOUNT — see
+   * {@link MigrationExecutor}'s load-time effect. Defaults to the engine's
+   * own `readChainState`, which is the SAME function
+   * {@link createMigrationChainDeps} wires onto `deps.readChainState`: there
+   * is one read of the account's registered key and guard in this package and
+   * both call sites use it.
+   *
+   * MAINNET HAZARD, the same one `readAccountGuard` carries: the default is a
+   * live read and this one fires on RENDER rather than on the press, so every
+   * spec that mounts this section injects a synthetic one (that file's header
+   * rule 4).
+   */
+  readonly readChainState?: (query: ChainStateQuery) => Promise<ChainStateSnapshot>;
 }
 
 interface ExecutorProps extends PendingKeyChangesSectionProps {
@@ -893,6 +1294,14 @@ interface ExecutorProps extends PendingKeyChangesSectionProps {
   readonly masterAccount: IOuroAccount;
   readonly seeds: readonly IStoaChainSeed[];
   readonly recordStep: (step: MigrationExecutionStep) => void | Promise<void>;
+  /**
+   * {@link reconcileAccountFromChainState}, bound to the store and to the
+   * resolved master — the second injected seam, alongside `recordStep`, for
+   * the same reason: this component holds no store handle of its own, and the
+   * engine deliberately owns none either. Must never reject; see the writer's
+   * doc, where swallowing is the documented property.
+   */
+  readonly reconcileChainState: (observed: ChainStateSnapshot) => Promise<void>;
 }
 
 /**
@@ -905,14 +1314,23 @@ function MigrationExecutor({
   masterAccount,
   seeds,
   recordStep,
+  reconcileChainState,
   createDeps = createMigrationChainDeps,
   runChain = runMigrationChain,
   readAccountGuard = getStoaChainAccountGuard,
+  readChainState: readLiveChainState = readChainState,
 }: ExecutorProps): React.ReactElement {
   const ensureCodexUnlocked = useEnsureCodexUnlocked();
   const getKeypair = useGetKeypair();
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<OutcomeView | null>(null);
+  /**
+   * Lit while the box itself holds focus — i.e. while someone was just sent
+   * here. Purely presentational, and deliberately NOT a "was navigated to"
+   * flag: tying it to focus means it clears the moment the owner interacts
+   * with anything, and it cannot get stuck on.
+   */
+  const [arrivedFocus, setArrivedFocus] = useState(false);
   /**
    * The keyset update's resolution, held for ONE press. Design §3's whole
    * point: the keys and the forfeit are settled BEFORE the button, so the
@@ -937,6 +1355,113 @@ function MigrationExecutor({
   // double chain, i.e. every remaining transaction submitted twice.
   const running = useRef(false);
 
+  // ─── The LOAD-TIME observation — the same read, before any press ──────────
+
+  /**
+   * One chain read on MOUNT, reconciled through
+   * {@link reconcileAccountFromChainState}, so the card is right before the
+   * owner touches anything.
+   *
+   * ## Why a press was not enough (owner, mainnet, 2026-11-27)
+   *
+   * Both of his rotations were confirmed on chain and his stored codex still
+   * held the old values (`stoaChainLedger: k:e20f2672…f231`, a `keys-any`
+   * guard over the two superseded keys). The reconciliation existed, but only
+   * inside `onPress`' wrap of the engine's read — so on a fresh load nothing
+   * read the chain, `computeOutstandingKeyChanges` compared the stale stored
+   * account against the recorded plan, the card listed both rotations as
+   * outstanding, and `applyHasOutstandingWork` kept the Apply popup pointing
+   * at this executor instead of offering Seal: *"i cannot apply, because it
+   * takes me to the transactions, and both transactions are already done …
+   * i cannot finalize the migration."* He could unstick it by pressing
+   * Execute — which submits nothing and reconciles — but requiring a press on
+   * a button that looks like it spends money, in order to correct a DISPLAY,
+   * is the defect.
+   *
+   * ## Not a second mechanism
+   *
+   * Same read (`readChainState`, the one this package has), same single
+   * writer, same three observed fields. The press path's wrap is NOT redundant
+   * and stays: it reconciles the observations taken DURING a run — the
+   * engine's re-read after each confirmation, and the closing read after a
+   * completed chain — which a read taken at load cannot know about. Two call
+   * sites of one read and one writer; there is still no second route to
+   * `stoaChainLedger` or `guard`.
+   *
+   * It deliberately does NOT go through {@link createMigrationChainDeps}:
+   * that factory names every live submitter and the two rotations, and its
+   * input is all press-time material (the unlock gate, the keypair resolver,
+   * the keyset gate's one-press resolution). Assembling it on page load to
+   * take a display read would be the wrong coupling, and it is why the read
+   * is its own injected prop.
+   *
+   * ## At most ONE read, and never a loop
+   *
+   * The write updates the store, which re-renders this component. An effect
+   * that re-fired on that change would be an unbounded read loop against
+   * mainnet, opened by merely loading the page. Two things prevent it: the
+   * effect has NO dependencies (so React never re-runs it for this mount),
+   * and `observedOnMount` is a ref — which survives both a re-render and
+   * StrictMode's deliberate mount/unmount/remount — so even a re-setup takes
+   * no second read. The reader and the reconciler are held in refs, updated
+   * in their own effect, exactly as {@link KeysetUpdateGate} holds its
+   * injected read: the parent passes inline arrows, and depending on their
+   * identity is the same loop by another name.
+   *
+   * ## A read failure changes NOTHING
+   *
+   * This runs on load, so it may never break the surface. A read that throws,
+   * times out or reports nothing leaves the card exactly as it was — the
+   * swallow below, plus the writer's own "`null` means NOT OBSERVED, never
+   * cleared" rule. No busy state is published and nothing is gated on this
+   * read, so there is no spinner to get stuck and the section stays fully
+   * usable offline: the one press still works, and it reconciles as before.
+   *
+   * Gated by this component existing at all, which is `hasMigrationPending`
+   * (see the file header) — a codex with no plan pending costs no read.
+   */
+  const loadReadRef = useRef(readLiveChainState);
+  const reconcileRef = useRef(reconcileChainState);
+  useEffect(() => {
+    loadReadRef.current = readLiveChainState;
+    reconcileRef.current = reconcileChainState;
+  }, [readLiveChainState, reconcileChainState]);
+
+  // The query, as of mount. Only `accountAddress` decides anything here: the
+  // three fields the reconciliation reads all come off that account's selector
+  // row, and the snapshot's balance halves are discarded. So the payment
+  // address rides in BOTH slots rather than re-deriving the planned new
+  // address — the engine owns design §5's seed-type conversion, and a second
+  // spelling of it on a path that reads no balance would be pure risk.
+  const ledgerAddress = masterAccount.stoaChainLedger ?? "";
+  const accountAddress = masterAccount.address;
+  const observedOnMount = useRef(false);
+  useEffect(() => {
+    if (observedOnMount.current) return;
+    observedOnMount.current = true;
+    let aborted = false;
+    void (async () => {
+      try {
+        const snapshot = await loadReadRef.current({
+          oldPaymentAddress: ledgerAddress,
+          newPaymentAddress: ledgerAddress,
+          accountAddress,
+        });
+        // Nothing is written after unmount: the surface the observation was
+        // for is gone, and the next mount takes its own read.
+        if (aborted) return;
+        await reconcileRef.current(snapshot);
+      } catch {
+        // Deliberately silent — see the doc above. A failed load-time read
+        // leaves the owner with the stale card he already had, which is
+        // survivable; a page that breaks because a node is unhealthy is not.
+      }
+    })();
+    return () => { aborted = true; };
+    // No dependencies, on purpose: one read per mount. See the doc above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onPress = useCallback(async () => {
     if (running.current) return;
     running.current = true;
@@ -944,10 +1469,13 @@ function MigrationExecutor({
     setOutcome(null);
     try {
       const pending = recordedRun.pending;
-      const committed = recordedRun.committed;
       const guardKeys = pending?.guardPublicKeys ?? [];
+      // The ONE resolution of the planned payment key — see
+      // {@link plannedPaymentKey}. The engine gets the BARE key and the seed
+      // type, and performs the address conversion itself.
+      const planned = plannedPaymentKey(recordedRun, seeds);
       const intent: MigrationChainIntent = {
-        newPaymentPublicKey: pending?.paymentPublicKey ?? committed?.paymentPublicKey ?? null,
+        newPaymentPublicKey: planned.publicKey,
         guard:
           guardKeys.length > 0
             ? { keys: [...guardKeys], pred: pending?.guardPred ?? "keys-all" }
@@ -960,12 +1488,6 @@ function MigrationExecutor({
         // nothing carries no flag at all.
         ...(keysetUpdate?.forfeited === true ? { keysetUpdateForfeited: true } : {}),
       };
-      // The seed the plan was derived from decides `k:<pub>` vs bare `<pub>`
-      // for the new payment key's address (design §5). The engine performs
-      // that conversion; this only has to pair the plan with its seed.
-      const seedId = pending?.seedId ?? committed?.seedId;
-      const seedType = seeds.find((s) => s.id === seedId)?.seedType ?? null;
-
       const deps = createDeps({
         accountAddress: masterAccount.address,
         // Patron and subject are the same account here — see the input type.
@@ -981,15 +1503,55 @@ function MigrationExecutor({
         keysetUpdate,
       });
 
+      // The engine's own observation of the chain, wrapped so that every read
+      // it takes ALSO reconciles the stored account
+      // ({@link reconcileAccountFromChainState}). Wrapping the injected read
+      // rather than writing from a recorded step is what covers the skipped
+      // rotation, the one that was already in force, and the one performed
+      // elsewhere — see that writer's doc. The query is REMEMBERED rather
+      // than rebuilt: the engine composes it (`engine.ts:691`) and a second
+      // spelling here is exactly how the read that reconciles and the read
+      // that plans come apart.
+      let lastQuery: ChainStateQuery | null = null;
+      const observe = async (query: ChainStateQuery): Promise<ChainStateSnapshot> => {
+        lastQuery = query;
+        const snapshot = await deps.readChainState(query);
+        await reconcileChainState(snapshot);
+        return snapshot;
+      };
+
       const result = await runChain(
         {
           intent,
           oldPaymentAddress: masterAccount.stoaChainLedger ?? "",
           accountAddress: masterAccount.address,
-          seedType,
+          // The seed the plan was derived from decides `k:<pub>` vs bare
+          // `<pub>` for the new payment key's address (design §5). The engine
+          // performs that conversion; this only pairs the plan with its seed.
+          seedType: planned.seedType,
         },
-        deps,
+        { ...deps, readChainState: observe },
       );
+
+      // ONE closing observation, and only when the chain actually landed
+      // something. The engine's re-read is LAZY — taken at the top of the row
+      // AFTER a confirmation, so "the last step of a chain costs no extra
+      // read" (`engine.ts:875-877`) — and the guard rotation is LAST in every
+      // plan. Without this, a press whose final step confirmed would leave
+      // the card describing the state the chain was in BEFORE it, which is
+      // precisely the guard the owner saw listed under a toast that said
+      // everything was done. A halt needs none: the step that halted did not
+      // confirm, so the read at the top of its own row already observed
+      // whatever confirmed before it.
+      if (lastQuery !== null && result.status === "completed" && result.confirmed.length > 0) {
+        try {
+          await observe(lastQuery);
+        } catch {
+          // A display refresh, never the run's verdict: the transactions are
+          // in, and a failed extra read may not turn a completed chain into a
+          // reported failure.
+        }
+      }
       setOutcome(describeOutcome(result));
     } catch (error) {
       // Nothing that escapes the engine is a flow outcome — a refused node, a
@@ -1005,12 +1567,23 @@ function MigrationExecutor({
       setBusy(false);
     }
   }, [
-    recordedRun, masterAccount, seeds, recordStep, createDeps, runChain,
+    recordedRun, masterAccount, seeds, recordStep, reconcileChainState, createDeps, runChain,
     ensureCodexUnlocked, getKeypair, guardSelectionKind, codexPubs, keysetUpdate,
   ]);
 
   return (
-    <div data-testid="pending-key-changes-executor" style={executorBoxStyle}>
+    <div
+      data-testid="pending-key-changes-executor"
+      // See `MIGRATION_EXECUTOR_ANCHOR_ID`. `tabIndex={-1}` makes the box
+      // programmatically focusable — which is what a cross-package caller
+      // uses to move the viewport AND the screen reader's cursor here —
+      // WITHOUT adding a keyboard tab stop to a page that did not ask for one.
+      id={MIGRATION_EXECUTOR_ANCHOR_ID}
+      tabIndex={-1}
+      onFocus={() => setArrivedFocus(true)}
+      onBlur={() => setArrivedFocus(false)}
+      style={executorBoxStyle(arrivedFocus)}
+    >
       <p style={headingStyle}>Finish the migration</p>
       <p style={noteStyle}>
         One press sends every transaction still needed, in order, without stopping to
@@ -1122,11 +1695,39 @@ export function PendingKeyChangesSection(
   const accounts = codexStore ? codexStore((s: CodexStoreState) => s.ouroAccounts) : [];
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const seeds = codexStore ? codexStore((s: CodexStoreState) => s.kadenaSeeds) : [];
+  // Read off the STORE, not `useCodex()`: that hook throws without a provider,
+  // which is the one thing this component may not do (see above).
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const codexMasterSeed = codexStore
+    ? codexStore((s: CodexStoreState) => s.codexMasterSeed)
+    : undefined;
 
-  // The master account is resolved POSITIONALLY, the same rule the accounts
-  // tab and the wizard use — a stray `isPrime` stamp can sit on a non-first
-  // account, and this must agree with what the rest of the UI calls master.
-  const masterAccount = accounts[0] ?? null;
+  /**
+   * The master account, by IDENTITY — `codexMasterSeed.ouroAccountId` first,
+   * then `isPrime`, then position (`resolveMasterOuronetAccount`). This read
+   * was `accounts[0] ?? null`, the sixth positional-master assumption in the
+   * tree after the gold/pinning/badge, the account sort,
+   * `outstandingKeyChanges`' field read and the wizard's
+   * `currentPaymentKeyOf`. On a codex that migrated ONTO a different account —
+   * precisely the codex this surface exists for — the card described another
+   * account's keys and the engine was handed another account's address to
+   * rotate.
+   *
+   * ## No seal gate here, on purpose
+   *
+   * `OuronetAccountsTab` gates its golden DESIGNATION on
+   * `isMigrationSealed(migrationProgress)` (`useMasterOuronetIdentity`), and
+   * must: an unapplied finalize may not repaint rows gold. "Which account is
+   * the master" is a different question, and `resolveMasterOuronetAccount`
+   * carries no seal gate for exactly that reason (see its header: the
+   * positional branch exists so an unsealed, never-migrated codex still has a
+   * master row). Stage 3A is by definition BEFORE the seal — `hasMigrationPending`
+   * is false once sealed — so copying the tab's gate here would pin this
+   * surface to `accounts[0]` for the entire window in which it is the only
+   * surface that matters, i.e. would not fix the defect at all.
+   */
+  const masterAccount = resolveMasterOuronetAccount(accounts, codexMasterSeed?.ouroAccountId)
+    ?? null;
   const outstanding = computeOutstandingKeyChanges(recordedRun, masterAccount);
   // The CARD's rule is unchanged: a user with nothing pending in KEY terms is
   // shown no card. The EXECUTOR's is `hasMigrationPending` — see the header.
@@ -1152,7 +1753,25 @@ export function PendingKeyChangesSection(
           recordedRun={recordedRun}
           masterAccount={masterAccount}
           seeds={seeds}
-          recordStep={(step) => codexStore.getState().actions.recordMigrationExecutionStep(step)}
+          // The ONE binding of the engine's write-only step record to the
+          // store. It lives HERE, not in `zbom/execute/*`: the engine
+          // deliberately owns no store access beyond this injected function
+          // (`engine.ts:357-359`), and giving it one would hand the module
+          // that submits mainnet transactions a reason to write the codex.
+          recordStep={async (step) => {
+            await codexStore.getState().actions.recordMigrationExecutionStep(step);
+          }}
+          // The SECOND store binding, and the only writer of the account's
+          // recorded keys: every chain read the engine takes is reconciled
+          // against the master account — see
+          // {@link reconcileAccountFromChainState} for why the observation,
+          // rather than a confirmed step, is what the codex stores. Bound in
+          // the same place and for the same reason as `recordStep`: this
+          // component holds the store handle and the resolved master, and
+          // neither the engine nor the executor holds either.
+          reconcileChainState={async (observed) => {
+            await reconcileAccountFromChainState(codexStore, masterAccount.id, observed);
+          }}
         />
       ) : null}
     </div>

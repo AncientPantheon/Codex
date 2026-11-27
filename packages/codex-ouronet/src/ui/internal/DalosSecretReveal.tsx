@@ -78,7 +78,7 @@ import {
   BITMAP_COLS,
   BITMAP_TOTAL_BITS,
 } from "@stoachain/stoa-core/dalos";
-import { rebuildFullKey } from "../../codex-identity/rebuildFullKey.js";
+import { rebuildFullKeyWithReason } from "../../codex-identity/rebuildFullKey.js";
 import type { OuroOriginMode, OuroOriginSeedTab, OuronetOriginCurve } from "../../types/entities.js";
 import { useIsMobile } from "@ancientpantheon/codex-ui/ui";
 
@@ -268,7 +268,17 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
   // space, only scroll once truly full" flex chain, one level up.
   const isMobile = useIsMobile();
 
-  const full = useMemo(() => (plaintext ? rebuildFullKey(plaintext, originMode, originCurve) : null), [plaintext, originMode, originCurve]);
+  // `rebuildFullKeyWithReason` carries back WHAT the stored plaintext actually
+  // is when it cannot be re-derived (honest-failure-reporting §4): the owner's
+  // real seed held a 24-word phrase in its bitstring slot and every panel
+  // below could only say "Could not derive bitstring." Rendering the typed
+  // reason is the whole fix — this view still NEVER converts or rewrites the
+  // stored secret, it only reports what it found.
+  const outcome = useMemo(() => (plaintext ? rebuildFullKeyWithReason(plaintext, originMode, originCurve) : null), [plaintext, originMode, originCurve]);
+  const full = outcome?.ok ? outcome.key : null;
+  // Falls back to each panel's own generic line only when there is no reason
+  // to show at all (an unmounted/empty plaintext never reaches the helper).
+  const failureMsg = outcome && !outcome.ok ? outcome.failure.message : null;
   const color = originColor(originMode, originSeedTab, originCurve);
   const seedWords = originMode === "seedWords" ? plaintext.trim().split(/\s+/).filter(Boolean) : [];
   // Round 24 — see `fitWordColumns`'s own doc comment.
@@ -453,10 +463,10 @@ export function DalosSecretReveal({ plaintext, originMode = "seedWords", originS
               {rows} × {cols} = {totalBits} bits · row-major
             </p>
           </div>
-        ) : <ErrorPanel msg="Could not derive bitmap." />)}
-        {active === "bitstring" && (full ? <RepPanel value={full.privateKey.bitString} unmasked={unmasked} label={`${totalBits}-bit binary`} color={COLORS.bitstring} icon={<Binary style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg="Could not derive bitstring." />)}
-        {active === "int10" && (full ? <RepPanel value={full.privateKey.int10} unmasked={unmasked} label="Base-10 integer" color={COLORS.int10} icon={<Hash style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg="Could not derive base-10." />)}
-        {active === "int49" && (full ? <RepPanel value={full.privateKey.int49} unmasked={unmasked} label="Base-49 integer (DALOS alphabet)" color={COLORS.int49} icon={<Hash style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg="Could not derive base-49." />)}
+        ) : <ErrorPanel msg={failureMsg ?? "Could not derive bitmap."} />)}
+        {active === "bitstring" && (full ? <RepPanel value={full.privateKey.bitString} unmasked={unmasked} label={`${totalBits}-bit binary`} color={COLORS.bitstring} icon={<Binary style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg={failureMsg ?? "Could not derive bitstring."} />)}
+        {active === "int10" && (full ? <RepPanel value={full.privateKey.int10} unmasked={unmasked} label="Base-10 integer" color={COLORS.int10} icon={<Hash style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg={failureMsg ?? "Could not derive base-10."} />)}
+        {active === "int49" && (full ? <RepPanel value={full.privateKey.int49} unmasked={unmasked} label="Base-49 integer (DALOS alphabet)" color={COLORS.int49} icon={<Hash style={{ width: 13, height: 13 }} />} /> : <ErrorPanel msg={failureMsg ?? "Could not derive base-49."} />)}
       </div>
 
       {/* Derived address — Smart (Σ./Π.) for smart accounts, Standard (Ѻ./₱.) otherwise */}

@@ -3,6 +3,7 @@ import { migrateSeedType } from "@ouronet/ouronet-core/codex";
 import { CodexAdapterError } from "../errors/types.js";
 import {
   DEFAULT_UI_SETTINGS,
+  normalizeLegacyOuroAccounts,
   type IStoaChainSeed,
   type IArweaveSeed,
   type IOuroAccount,
@@ -27,7 +28,11 @@ import { emptySnapshot } from "./types.js";
  *
  * Storage key inventory (kept stable for backwards-compat):
  *   - "wallets"                kadena seeds (JSON array)
- *   - "ouronetWallets"         ouro accounts (JSON array)
+ *   - "ouronetWallets"         ouro accounts (JSON array). Read through
+ *                              `loadOuroAccountsWithLegacyLedger`, which maps
+ *                              the pre-v0.2.0 `kadenaLedger` field onto
+ *                              today's `stoaChainLedger` (and writes the
+ *                              correction back) — see that method.
  *   - "pureKeypairs"           pure keypairs (JSON array)
  *   - "addressBook"            address book (JSON array) — NEW canonical
  *                              key (v0.1.0); legacy data was stored under
@@ -104,7 +109,7 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
     this.assertBrowser("loadAll");
     try {
       const kadenaSeeds = this.loadStoaChainSeedsWithMigration();
-      const ouroAccounts = this.parseArray<IOuroAccount>("ouronetWallets");
+      const ouroAccounts = this.loadOuroAccountsWithLegacyLedger();
       const pureKeypairs = this.parseArray<IPureKeypair>("pureKeypairs");
       const addressBook = this.loadAddressBookWithLegacyFallback();
       const watchList = this.parseArray<WatchListEntry>("stoa-watch-list");
@@ -495,6 +500,49 @@ export class LocalStorageCodexAdapter implements CodexAdapter {
       }
     }
     return seeds;
+  }
+
+  /** Load ouro accounts with the legacy payment-key field name mapped.
+   *
+   *  `dd485a5` ("refactor!: rename Kadena → StoaChain across the Codex
+   *  (v0.2.0, breaking)") renamed `IOuroAccount.kadenaLedger` →
+   *  `stoaChainLedger` and shipped no migration, and this method's previous
+   *  body was a bare `parseArray<IOuroAccount>("ouronetWallets")` — stored
+   *  JSON straight into the typed entity with no field mapping. So on every
+   *  pre-rename codex the account's REGISTERED PAYMENT KEY parsed into a
+   *  field nothing reads, and `stoaChainLedger` came out `undefined`
+   *  (measured on the owner's real codex: `kadenaLedger` = `k:e20f2672…f231`,
+   *  `stoaChainLedger` = `undefined`). It went unnoticed because
+   *  `OuronetAccountsTab` overwrites the field from the LIVE CHAIN read
+   *  (`d["payment-key"] || account.stoaChainLedger`); every surface reading
+   *  STORED state instead — the eligibility wizard — saw nothing.
+   *
+   *  This is the BELT, deliberately redundant with the `applyMigrations`
+   *  normalization pass in `state/migrations.ts`: it makes the codex legible
+   *  at the storage boundary, so nothing downstream depends on a migration
+   *  having already run, and it covers the consumers that read a snapshot
+   *  without going through the store's migration path at all. The rule itself
+   *  is NOT duplicated — both layers call `normalizeLegacyOuroAccounts`.
+   *
+   *  Write-back on change mirrors `loadStoaChainSeedsWithMigration` above
+   *  (same best-effort, same reason): the correction then survives the next
+   *  reload for every other reader of raw localStorage. It is idempotent —
+   *  the second load finds a usable `stoaChainLedger`, reports no change, and
+   *  writes nothing — and non-destructive: `kadenaLedger` is written back
+   *  verbatim alongside, never cleared.
+   */
+  private loadOuroAccountsWithLegacyLedger(): IOuroAccount[] {
+    const { accounts, changed } = normalizeLegacyOuroAccounts(
+      this.parseArray<IOuroAccount>("ouronetWallets")
+    );
+    if (changed) {
+      try {
+        window.localStorage.setItem("ouronetWallets", JSON.stringify(accounts));
+      } catch {
+        // best-effort write-back; failure here doesn't block the load
+      }
+    }
+    return accounts;
   }
 
   /** Load address book with the legacy-redux-persist fallback path.

@@ -266,3 +266,77 @@ describe("DalosSecretReveal — Seed tab word layout", () => {
     expect(document.body.textContent ?? "").not.toContain("…");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The reveal's failure sentence (honest-failure-reporting §4, criterion 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner's real case, reproduced: a `stoic` seed whose `secret` still held
+ * its 24-word phrase while `wordsSecret` was absent (the pre-repair state),
+ * so `SeedRevealModal` fed a word phrase into `originMode="bitString"`. The
+ * reveal printed "Could not derive bitstring." — which says nothing about the
+ * 154-character phrase sitting in the bitstring slot, nothing about the
+ * repair that fixes it, and cost hours.
+ *
+ * The second spec here is the data-loss guard: the fix must NOT quietly
+ * convert the words into a bitstring to make the panel look healthy. A reveal
+ * is read-only; conversion belongs to the repair engine, which preserves the
+ * original. A rendered 1600-bit value on this input would mean the reveal had
+ * decided, on its own, what the user's key is.
+ */
+describe("DalosSecretReveal — a stored secret that is not what the mode expects", () => {
+  // A 24-token phrase of the same shape as the owner's seed [0]; its
+  // character count is read off the constant, never hardcoded.
+  const PHRASE =
+    "bid quartz vortex lumen crag nimbus falcon rivet plume cinder oblique tundra " +
+    "helix marble juniper sable thorn vellum wicket zephyr onyx garnet flint dusk";
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function renderPhraseAsBitstring() {
+    // The helper logs the caught crypto error for forensics — not this spec's
+    // subject. A spy, not a module mock.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <DalosSecretReveal plaintext={PHRASE} originMode="bitString" originCurve="dalos" />,
+    );
+  }
+
+  it("says the stored secret is 24 seed words of N characters, not a bitstring, and names the repair", () => {
+    renderPhraseAsBitstring();
+
+    const panel = screen.getByText(/24 seed words/);
+    expect(panel.textContent).toContain(`${PHRASE.length} characters`);
+    expect(panel.textContent).toContain("1600-bit bitstring");
+    expect(panel.textContent).toContain("Upgrade Codex Now");
+    // The sentence it replaces must be gone, not sitting beside it.
+    expect(document.body.textContent ?? "").not.toContain("Could not derive bitstring.");
+  });
+
+  it("never renders a derived bitstring for a word-shaped secret — the reveal does not convert", () => {
+    renderPhraseAsBitstring();
+
+    expect(document.body.textContent ?? "").not.toMatch(/[01]{64,}/);
+  });
+
+  it("gives the same explanation on the other representation tabs", () => {
+    renderPhraseAsBitstring();
+    fireEvent.click(screen.getByText("Base-10"));
+
+    expect(screen.getByText(/24 seed words/)).toBeTruthy();
+    expect(document.body.textContent ?? "").not.toContain("Could not derive base-10.");
+  });
+
+  it("shows no failure sentence at all when the stored secret IS a valid bitstring (regression guard)", () => {
+    render(
+      <DalosSecretReveal plaintext={BITSTRING} originMode="bitString" originCurve="dalos" />,
+    );
+
+    expect(screen.queryByText(/stored secret/)).toBeNull();
+    expect(document.body.textContent ?? "").toContain(BITSTRING);
+  });
+});

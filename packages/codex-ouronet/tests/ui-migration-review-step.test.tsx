@@ -36,7 +36,17 @@ const CURRENT_PAYMENT = "9".repeat(64);
 
 const account = (o: Partial<IOuroAccount> & { id: string }): IOuroAccount => ({
   version: "1.0", isSmart: false, address: `Ѻ.${o.id}`, guard: null,
-  stoaChainLedger: null, publicKey: "pub", secret: `ct-${o.id}`,
+  // CORRECTED (owner-reported bug, found on a real codex): the review
+  // step's "FROM" is the account's OWN registered payment key, and this
+  // fixture used to leave it unset — the test above passed only because
+  // `currentPaymentKeyOf` read position 0 of `seeds[0]` positionally,
+  // which on the owner's real codex names a different seed's key than
+  // the account actually uses (see
+  // `ui-migration-payment-key-identity.test.tsx`). `CURRENT_PAYMENT` IS
+  // what this file's koala seed holds at position 0, so the fixture now
+  // says so, in the `k:` address form `state/store.ts:2680` writes for a
+  // non-stoic seed.
+  stoaChainLedger: `k:${CURRENT_PAYMENT}`, publicKey: "pub", secret: `ct-${o.id}`,
   backup: "ct", originSeedTab: "write-seed", ...o,
 });
 

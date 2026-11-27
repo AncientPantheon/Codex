@@ -257,7 +257,35 @@ export interface IOuroAccount {
   isSmart: boolean;
   address: string;
   guard: IKeyset | null;
+  /** The account's REGISTERED PAYMENT KEY — the StoaChain/Kadena address
+   *  (`k:`-sigilled for every non-stoic seed, bare for a stoic one) that
+   *  funds its on-chain operations. See {@link kadenaLedger} for the legacy
+   *  name the same value is stored under on every pre-v0.2.0 codex, and
+   *  {@link resolveOuroAccountLedger} for the one rule that reconciles them. */
   stoaChainLedger: string | null;
+  /**
+   * LEGACY ALIAS of {@link stoaChainLedger}, read-only — present on data,
+   * never written by this package.
+   *
+   * `dd485a5` ("refactor!: rename Kadena → StoaChain across the Codex
+   * (v0.2.0, breaking)") renamed this field and shipped NO migration, so
+   * every codex written before it stores the account's payment key here and
+   * has no `stoaChainLedger` at all. Confirmed on seven real codices
+   * (`Miscellaneous/_Codices/Foreign/*.json`, exports spanning 2026-10-11 →
+   * 2026-11-26): ALL of them carry `kadenaLedger` and none carries
+   * `stoaChainLedger`. It is the ONLY persisted-field rename in that commit,
+   * and the only field-name drift in this module's entire history.
+   *
+   * DECLARED so the value is typed where it is read and, more importantly,
+   * so it is visibly NOT droppable: the normalizers below copy it forward
+   * into `stoaChainLedger` and leave this field exactly as stored
+   * (skip-not-drop, the discipline `rekey`/`structural-migration` already
+   * follow). Nothing in this package clears it.
+   *
+   * @deprecated Read through {@link resolveOuroAccountLedger} instead — new
+   * code must write {@link stoaChainLedger}.
+   */
+  kadenaLedger?: string | null;
   /** Codex-local public key (the value the UI itself produced — source of
    *  truth for what we minted). Compare to `chainPublicKey` for the live
    *  chain-side value. */
@@ -316,6 +344,91 @@ export interface IOuroAccount {
    *  callers that need a definitive answer must also run the chain-query
    *  fallback. Once `true`, nothing in this package ever clears it. */
   hasEncryptedArweaveUpload?: boolean;
+}
+
+/** The pre-`dd485a5` name of {@link IOuroAccount.stoaChainLedger}. Named as a
+ *  constant so the one string literal that identifies the legacy field has a
+ *  single definition the normalizers and any future audit can both cite. */
+export const LEGACY_OURO_LEDGER_FIELD = "kadenaLedger" as const;
+
+/** A ledger field is "usable" only as a non-empty string. `undefined` (the
+ *  shape every pre-rename codex actually has — the field is absent, not
+ *  null), `null` ("none on record") and `""` all mean the same thing here:
+ *  nothing to read. Mirrors `bareKeyFromAddress`'s own defensiveness in
+ *  `ui/internal/LegacyPrimeMigrationWizard.tsx`, where a missing field once
+ *  took the whole wizard down on `.startsWith` of `undefined`. */
+function usableLedger(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * THE mapping rule for {@link IOuroAccount.kadenaLedger} →
+ * {@link IOuroAccount.stoaChainLedger}, defined exactly once. Both layers of
+ * the fix call this (the `applyMigrations` shape-normalization pass in
+ * `state/migrations.ts`, and `LocalStorageCodexAdapter`'s parse of
+ * `"ouronetWallets"`); no reader should re-derive it.
+ *
+ * TIE-BREAK, when both names are present and DISAGREE: `stoaChainLedger`
+ * wins. It is the only one of the two that current code can write — the
+ * live-chain hydration in `ui/tabs/OuronetAccountsTab.tsx:115` and every
+ * payment-key rotation land there, while `kadenaLedger` can only have been
+ * written by code older than `dd485a5`. The newer writer is therefore the
+ * one that reflects the chain, and the older value is kept (never deleted)
+ * so the decision stays inspectable and reversible.
+ *
+ * Returns `null` when neither name holds a usable value — the resting value
+ * `stoaChainLedger` is typed for, and the "no payment key on record" the
+ * eligibility wizard already renders honestly.
+ */
+export function resolveOuroAccountLedger(
+  account:
+    | Pick<IOuroAccount, "stoaChainLedger" | "kadenaLedger">
+    | null
+    | undefined
+): string | null {
+  return (
+    usableLedger(account?.stoaChainLedger) ?? usableLedger(account?.kadenaLedger)
+  );
+}
+
+/**
+ * Applies {@link resolveOuroAccountLedger} to one account.
+ *
+ * Returns the account BY REFERENCE whenever there is nothing to adopt, which
+ * is what makes this idempotent and churn-free: running it on its own output
+ * takes the "already has a usable `stoaChainLedger`" branch and returns the
+ * same object, so no caller can be tricked into a redundant persist.
+ *
+ * Deliberately does NOT synthesize `stoaChainLedger: null` for an account
+ * that has neither name: the stored shape is then already truthful ("no
+ * payment key"), every reader is documented as defensive about its absence,
+ * and rewriting such an account would churn storage for zero information.
+ */
+export function normalizeLegacyOuroAccount<T extends IOuroAccount>(account: T): T {
+  if (usableLedger(account.stoaChainLedger) !== null) return account;
+  const legacy = usableLedger(account.kadenaLedger);
+  if (legacy === null) return account;
+  // Spread keeps `kadenaLedger` verbatim — skip-not-drop.
+  return { ...account, stoaChainLedger: legacy };
+}
+
+/**
+ * {@link normalizeLegacyOuroAccount} over a slice, reporting whether anything
+ * was adopted so callers can persist the correction exactly once (the
+ * `migratedAny` pattern `LocalStorageCodexAdapter`'s
+ * `loadStoaChainSeedsWithMigration` already uses for the seed-type
+ * migration). Returns the input array by reference when `changed` is false.
+ */
+export function normalizeLegacyOuroAccounts<T extends IOuroAccount>(
+  accounts: T[]
+): { accounts: T[]; changed: boolean } {
+  let changed = false;
+  const next = accounts.map((account) => {
+    const normalized = normalizeLegacyOuroAccount(account);
+    if (normalized !== account) changed = true;
+    return normalized;
+  });
+  return changed ? { accounts: next, changed: true } : { accounts, changed: false };
 }
 
 /** Address-book entry — a labeled recipient address for the address picker.

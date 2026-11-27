@@ -38,6 +38,13 @@
  *      (`getStoaChainAccountGuard`, a live `DALOS.UR_AccountGuard` read)
  *      would be reached by merely rendering a codex that recorded a keyset
  *      update. {@link mount} always passes a synthetic one.
+ *   5. **`readChainState` is injected on every mount, for the same reason.**
+ *      The section takes ONE chain observation on MOUNT — the load-time
+ *      reconciliation of the owner's stale card (2026-11-27) — and its
+ *      production default is the real `readChainState`, three live reads. So
+ *      {@link mount} always passes a synthetic one, whose default
+ *      ({@link UNOBSERVED}) reconciles nothing; each load-time spec states
+ *      its own.
  *
  * Round 2 also adds three exported DECISIONS —
  * `resolveCollectRewards`, `buildDefineKeysetRequest` and
@@ -67,18 +74,25 @@ import { CodexProvider, useCodexStore } from "@ancientpantheon/codex-ouronet/pro
 import { MemoryCodexAdapter, emptySnapshot } from "@ancientpantheon/codex-ouronet/adapters";
 import type {
   ChainStateSnapshot,
+  CodexMasterSeed,
   MigrationChainPlan,
   MigrationProgress,
 } from "@ancientpantheon/codex-core";
 import {
+  MIGRATION_EXECUTOR_ANCHOR_ID,
   PendingKeyChangesSection,
+  reconcileAccountFromChainState,
   createMigrationChainDeps,
   buildDefineKeysetRequest,
+  buildRotateGuardRequest,
   keysetUpdatePreconditionFacts,
   resolveCollectRewards,
+  type ChainObservedAccountKeys,
   type MigrationChainDepsInput,
+  type RotateGuardContext,
 } from "../src/ui/settings/PendingKeyChangesSection.js";
 import type { KeysetUpdateSelection } from "../src/ui/settings/KeysetUpdateGate.js";
+import type { ChainStateQuery } from "../src/zbom/execute/chainState.js";
 import {
   runMigrationChain,
   type DefineKeysetStepRequest,
@@ -86,7 +100,18 @@ import {
   type MigrationChainOutcome,
   type MigrationChainRequest,
   type MigrationPreconditionFacts,
+  type RotateGuardStepRequest,
 } from "../src/zbom/execute/engine.js";
+// The REAL G entry point, run over an INJECTED submitter: the defect of
+// 2026-11-26 lived in the hand-off between this file's factory and this
+// function, so a test that stubbed either half would have asserted a fiction.
+// `liveRotateGuardSubmitter` is never named here.
+import {
+  executeRotateGuard,
+  type RotateGuardSubmitter,
+} from "../src/zbom/execute/rotateOps.js";
+import type { TxVerdictKind } from "../src/zbom/execute/awaitConfirmation.js";
+import { computeOutstandingKeyChanges } from "../src/ui/internal/outstandingKeyChanges.js";
 import type { IOuroAccount, IStoaChainSeed } from "../src/types/entities.js";
 import type { ToastController } from "../src/zbom/toast/toastManager.js";
 
@@ -172,6 +197,27 @@ const SETTLED: ChainStateSnapshot = {
   registeredGuard: { keys: [GUARD_PUB], pred: "keys-all" },
 };
 
+/**
+ * A read that observes NOTHING about the account's keys — `null` for all
+ * three fields, which is what the selector's BAR sentinel, an unactivated
+ * account and an unmodelled guard shape all collapse to
+ * (`chainState.ts:160-167`).
+ *
+ * This is {@link mount}'s DEFAULT load-time read, deliberately: the
+ * reconciliation now fires on mount for every codex with a plan pending, and
+ * a default that reported {@link SETTLED} would silently rewrite the stored
+ * account under every spec in this file that is about the PRESS. `null`
+ * observes nothing, so nothing is written — the one property
+ * `reconcileAccountFromChainState` guarantees for exactly this input — and
+ * each spec below that cares about the load states its own read.
+ */
+const UNOBSERVED: ChainStateSnapshot = {
+  ...SETTLED,
+  registeredPaymentKey: null,
+  registeredGuard: null,
+  registeredKeysetRef: null,
+};
+
 /** {@link SETTLED} for an account whose guard IS a keyset-ref — the only
  *  snapshot shape that plans an EXECUTABLE `define-keyset` step. */
 const KEYSET_REF = "free.ancient-keyset";
@@ -248,12 +294,28 @@ interface MountOptions {
   readonly accounts?: readonly IOuroAccount[];
   readonly deps?: MigrationChainDeps;
   readonly runChain?: typeof runMigrationChain;
+  /** The codex's StoaChain seeds. Overridden only by the specs that need a
+   *  seed of a DIFFERENT `seedType`, which is what decides `k:<pub>` vs bare
+   *  `<pub>` for the new payment key's address. */
+  readonly seeds?: readonly IStoaChainSeed[];
+  /** The codex's settled Codex Master Seed row. Absent on a codex that never
+   *  finalized — the positional fallback every other spec here exercises. */
+  readonly codexMasterSeed?: CodexMasterSeed;
   /** The keyset gate's chain read. MUST be injected by any test that drives
    *  the gate: the production default is the REAL `getStoaChainAccountGuard`,
    *  and the gate's own effect fires the moment a keyset selection is
    *  recorded. The default here resolves to `null`, which the gate reads as
    *  "not a keyset reference" and renders without asking anything further. */
   readonly readAccountGuard?: (address: string) => Promise<unknown>;
+  /**
+   * The LOAD-TIME chain read. MUST be injected by every mount for the same
+   * reason as `readAccountGuard` (header rule 4): the production default is
+   * the real `readChainState`, and the section now takes it on MOUNT rather
+   * than on the press, so merely rendering a codex with a plan pending would
+   * reach a node. The default here is {@link UNOBSERVED} — a legitimate
+   * snapshot that reconciles nothing.
+   */
+  readonly readChainState?: (query: ChainStateQuery) => Promise<ChainStateSnapshot>;
 }
 
 async function mount(opts: MountOptions = {}) {
@@ -261,12 +323,14 @@ async function mount(opts: MountOptions = {}) {
   const createDeps = vi.fn((_input: MigrationChainDepsInput) => deps);
   const runChain = opts.runChain;
   const readAccountGuard = vi.fn(opts.readAccountGuard ?? (async () => null));
+  const readChainState = vi.fn(opts.readChainState ?? (async () => UNOBSERVED));
   const adapter = new MemoryCodexAdapter("dev");
   await adapter.saveAll({
     ...emptySnapshot("dev"), schemaVersion: 1,
     ouroAccounts: [...(opts.accounts ?? [account()])],
-    kadenaSeeds: seeds,
+    kadenaSeeds: [...(opts.seeds ?? seeds)],
     migrationProgress: opts.progress,
+    ...(opts.codexMasterSeed !== undefined ? { codexMasterSeed: opts.codexMasterSeed } : {}),
   });
   store = null;
   render(
@@ -275,12 +339,13 @@ async function mount(opts: MountOptions = {}) {
       <PendingKeyChangesSection
         createDeps={createDeps}
         readAccountGuard={readAccountGuard}
+        readChainState={readChainState}
         {...(runChain !== undefined ? { runChain } : {})}
       />
     </CodexProvider>,
   );
   await waitFor(() => expect(store!.getState().ready).toBe(true));
-  return { deps, createDeps, adapter, readAccountGuard };
+  return { deps, createDeps, adapter, readAccountGuard, readChainState };
 }
 
 /** A recorded run whose guard choice is one of the two kinds that plan a
@@ -380,6 +445,85 @@ describe("when the executor is offered", () => {
     // just as dishonest.
     expect(() => render(<PendingKeyChangesSection />)).not.toThrow();
     expect(screen.queryByTestId("pending-key-changes-execute-all")).toBeNull();
+  });
+});
+
+// ─── (a2) the navigation anchor — the Apply popup's destination ─────────────
+
+/**
+ * `codex-arweave`'s Apply popup (`panel/CodexIdPage.tsx`) is the SEAL surface
+ * and deliberately carries no execute button. Its one control navigates HERE.
+ * That control lives in another package, which cannot import this module (the
+ * `./ui` barrel is a negative export lock — `tests/ui-surface-stability.test.ts`
+ * — and the consumers' vitest aliases resolve subpaths to `src/<dir>/index.ts`
+ * only), so the seam between them is a DOM contract: one documented element
+ * `id`, and "focus it to highlight it".
+ *
+ * Both halves are asserted here, on this side of the boundary, because this
+ * is the side that can break them silently: renaming the id or dropping the
+ * `tabIndex` turns the popup's control into a no-op that reports success,
+ * which is precisely the dead-end this round exists to remove. The same
+ * cross-package-contract discipline the execute button's LABEL is already
+ * held to above.
+ */
+describe("the navigation anchor the Apply popup targets", () => {
+  it("puts the exported DOM id on the box that holds the execute button, resolvable by getElementById", () => {
+    // Pinned literal: the consumer transcribes this string, so a rename must
+    // be a loud, deliberate edit on both sides rather than a silent one here.
+    expect(MIGRATION_EXECUTOR_ANCHOR_ID).toBe("codex-migration-executor");
+  });
+
+  it("resolves that id to the executor box itself — never to some ancestor that merely contains it", async () => {
+    await mount({ progress: recorded() });
+
+    const anchored = document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID);
+    expect(anchored).toBe(screen.getByTestId("pending-key-changes-executor"));
+    // The destination must be the card that can ACT: a user sent to a box
+    // with no button has been sent nowhere.
+    expect(anchored!.contains(screen.getByTestId("pending-key-changes-execute-all"))).toBe(true);
+  });
+
+  it("makes the anchor programmatically focusable WITHOUT entering the tab order", async () => {
+    await mount({ progress: recorded() });
+    const anchored = document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID)!;
+
+    // -1: a caller can `.focus()` it (the jsdom-safe half of "scroll it into
+    // view", and what moves a screen reader's cursor), but it must not become
+    // a keyboard tab stop on a page nobody asked to navigate differently.
+    expect(anchored.tabIndex).toBe(-1);
+    anchored.focus();
+    expect(document.activeElement).toBe(anchored);
+  });
+
+  it("highlights itself while focused and goes back to normal on blur", async () => {
+    // The owner's requirement that the executor be FINDABLE, not merely
+    // scrolled to. Driven by focus so the indication is owned by this
+    // component — the cross-package caller only has to focus the id, and
+    // cannot reach into this component's styling to fake it.
+    await mount({ progress: recorded() });
+    const anchored = document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID)!;
+    const restingBorder = anchored.style.borderColor;
+
+    expect(anchored.style.boxShadow).toBe("");
+
+    act(() => { anchored.focus(); });
+    expect(anchored.style.boxShadow).not.toBe("");
+    expect(anchored.style.borderColor).not.toBe(restingBorder);
+
+    act(() => { anchored.blur(); });
+    expect(anchored.style.boxShadow).toBe("");
+    expect(anchored.style.borderColor).toBe(restingBorder);
+  });
+
+  it("has NO anchor at all when the executor is not offered", async () => {
+    // Requirement 4's trigger. The id marks the EXECUTOR, not the section, so
+    // on a codex with no finalized plan the card still renders and the id
+    // resolves to nothing — which is what lets the popup's control report
+    // honestly instead of scrolling to a card with no button.
+    await mount({ progress: notFinalized() });
+
+    expect(screen.getByTestId("pending-key-changes-card")).toBeTruthy();
+    expect(document.getElementById(MIGRATION_EXECUTOR_ANCHOR_ID)).toBeNull();
   });
 });
 
@@ -636,6 +780,694 @@ describe("a completed chain", () => {
     expect(await resultText()).toMatch(/every remaining transaction|all .*done|completed/i);
     expect((await screen.findByTestId("pending-key-changes-reported")).textContent ?? "")
       .toContain("This step is not executable.");
+  });
+});
+
+// ─── (c3) the rotation the chain REPORTS, cached into the codex ─────────────
+
+/**
+ * The owner's mainnet run, 2026-11-26. He rotated his payment key; the
+ * transaction CONFIRMED on chain (request key `w-sXLOaDhNnhZ…`); nothing wrote
+ * it back into the codex. So `computeOutstandingKeyChanges` — which is pure
+ * and reads the STORED `account.stoaChainLedger` — kept listing
+ * "Payment key FROM e20f26… TO 225eb6d…" as outstanding, while the engine,
+ * which decides every step from a LIVE chain read, correctly skipped it. The
+ * card and the engine disagreed about what was left, and the card was the one
+ * that was wrong.
+ *
+ * The accounts tab hides this because it hydrates `stoaChainLedger` from a
+ * chain read on mount (`OuronetAccountsTab.tsx:115`); this surface does not.
+ *
+ * Chain state stays the authority — these specs never make the stored value a
+ * second source of truth, they assert that a FACT THE CHAIN REPORTED is
+ * cached rather than discarded. Which is why the fixture below is a chain
+ * rather than a constant: what the codex stores is what a read returned, so a
+ * spec that fixed the read's answer for all time could not tell a cache from
+ * an invention.
+ */
+
+/** A finalized plan that rotates ONLY the payment key: the guard choice is
+ *  `keep` and the plan carries no guard keys, so `intent.guard` is null and
+ *  the chain plans exactly one step (F). */
+const rotationPending = (): MigrationProgress => recorded({
+  selection: {
+    account: { kind: "keep-current" },
+    payment: { kind: "stoic-dalos-position-0" },
+    guard: { kind: "keep" },
+  },
+  // What stage 2 DERIVED — the value `computeOutstandingKeyChanges` compares
+  // the stored ledger against, and therefore the value the card's TO line
+  // shows.
+  committed: { seedId: "seed-1", accountId: "a1", paymentPublicKey: NEW_PUB },
+  pending: {
+    finalizedAt: "2026-11-01T09:05:00.000Z",
+    accountId: "a1",
+    seedId: "seed-1",
+    paymentPublicKey: NEW_PUB,
+  },
+});
+
+/**
+ * A fake chain, as the one dep the engine reads state through: it reports the
+ * OLD payment key until a rotation is CONFIRMED, and whatever the rotation
+ * actually submitted after that — which is what a real node does.
+ *
+ * A `pending` verdict registers NOTHING, deliberately: the chain has not said
+ * the transaction landed, so the next read still reports the old key. That is
+ * what keeps "writes nothing on a pending verdict" a property of the CODE
+ * rather than of the fixture.
+ *
+ * Fully synthetic — `syntheticDeps` under the hood, nothing here reaches a
+ * node (hazard rule 1 is untouched).
+ */
+function fakeChainDeps(verdict: TxVerdictKind = "success"): MigrationChainDeps {
+  let registeredPaymentKey: string | null = OLD_LEDGER;
+  let submittedPaymentKey: string | null = null;
+  return syntheticDeps({
+    readChainState: vi.fn(async () => ({ ...SETTLED, registeredPaymentKey })),
+    submitRotatePaymentKey: vi.fn(async (req: { readonly newPaymentKey: string }) => {
+      submittedPaymentKey = req.newPaymentKey;
+      return { requestKey: "rk" };
+    }),
+    confirm: vi.fn(async () => {
+      if (verdict === "success" && submittedPaymentKey !== null) {
+        registeredPaymentKey = submittedPaymentKey;
+      }
+      return { verdict };
+    }),
+  });
+}
+
+/** Mounts the section over {@link fakeChainDeps}. */
+async function mountOverFakeChain(opts: {
+  readonly progress: MigrationProgress;
+  readonly verdict?: TxVerdictKind;
+  readonly seeds?: readonly IStoaChainSeed[];
+  readonly accounts?: readonly IOuroAccount[];
+  readonly codexMasterSeed?: CodexMasterSeed;
+}): Promise<{ readonly deps: MigrationChainDeps }> {
+  const deps = fakeChainDeps(opts.verdict ?? "success");
+  await mount({
+    progress: opts.progress,
+    deps,
+    ...(opts.seeds !== undefined ? { seeds: opts.seeds } : {}),
+    ...(opts.accounts !== undefined ? { accounts: opts.accounts } : {}),
+    ...(opts.codexMasterSeed !== undefined ? { codexMasterSeed: opts.codexMasterSeed } : {}),
+  });
+  return { deps };
+}
+
+/** The account as the CODEX now stores it, by id. */
+const storedAccount = (id = "a1"): IOuroAccount =>
+  store!.getState().ouroAccounts.find((a) => a.id === id)!;
+
+/** The kinds `computeOutstandingKeyChanges` still reports over the codex's own
+ *  current state — the card's data, recomputed from what was persisted. */
+const stillOutstanding = (id = "a1"): string[] =>
+  computeOutstandingKeyChanges(store!.getState().migrationProgress, storedAccount(id))
+    .changes.map((change) => change.kind);
+
+/** The address a rotation was actually submitted with. */
+const submittedPaymentKey = (deps: MigrationChainDeps): string =>
+  ((deps.submitRotatePaymentKey as unknown as ReturnType<typeof vi.fn>)
+    .mock.calls[0]![0] as { newPaymentKey: string }).newPaymentKey;
+
+describe("a payment-key rotation the chain CONFIRMED", () => {
+  it("stops being listed as outstanding, because the codex records what landed", async () => {
+    // THE OWNER'S DEFECT. Without the reconciliation the card lists a rotation
+    // that is already in force on chain for the rest of the codex's life:
+    // nothing else on this surface ever refreshes `stoaChainLedger`.
+    await mountOverFakeChain({ progress: rotationPending() });
+    expect(screen.getByTestId("pending-key-change-payment")).toBeTruthy();
+    pressExecute();
+
+    await waitFor(() => expect(stillOutstanding()).not.toContain("payment"));
+    // ...and the card itself drops the row, which is what the owner sees.
+    await waitFor(() => expect(screen.queryByTestId("pending-key-change-payment")).toBeNull());
+  });
+
+  it("stores EXACTLY the address the chain reports, never a second encoding", async () => {
+    // The hazard the task names: `stoaChainLedger` is an ADDRESS (`k:<pub>`,
+    // or bare for a stoic seed — `state/store.ts:2680`) while the chosen key
+    // is bare hex. Writing the bare key for a `k:` seed would swap a stale
+    // card for a PERMANENTLY WRONG stored address, and the address is what
+    // other surfaces send funds to. So the cached value is pinned to the one
+    // value the chain reports as registered, not to a re-derivation.
+    const { deps } = await mountOverFakeChain({ progress: rotationPending() });
+    pressExecute();
+
+    await waitFor(() => expect(deps.submitRotatePaymentKey).toHaveBeenCalledTimes(1));
+    expect(submittedPaymentKey(deps)).toBe(`k:${NEW_PUB}`);
+    await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(submittedPaymentKey(deps)));
+  });
+
+  it("stores the BARE key for a stoic seed, whose address carries no k: sigil", async () => {
+    // Same rule, the other branch of `paymentKeyAccountString`. A `k:`-sigilled
+    // write here would still READ correctly (the normaliser strips the sigil),
+    // which is exactly why this needs its own spec: the damage would be
+    // invisible on this card and visible only when something spent from the
+    // address.
+    const stoicSeeds: IStoaChainSeed[] = [{ ...seeds[0]!, seedType: "stoic" }];
+    const { deps } = await mountOverFakeChain({
+      progress: rotationPending(), seeds: stoicSeeds,
+    });
+    pressExecute();
+
+    await waitFor(() => expect(deps.submitRotatePaymentKey).toHaveBeenCalledTimes(1));
+    expect(submittedPaymentKey(deps)).toBe(NEW_PUB);
+    await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(NEW_PUB));
+    expect(stillOutstanding()).not.toContain("payment");
+  });
+
+  it("writes NOTHING on a PENDING verdict, whose outcome is genuinely unknown", async () => {
+    // The engine halts on `pending` deliberately: the transaction may still
+    // land, and nothing is known. Caching a key the chain has not reported as
+    // registered would be worse than staleness — it would report a rotation
+    // as done that may never have happened, on the one surface that tells the
+    // owner what is left to do.
+    await mountOverFakeChain({ progress: rotationPending(), verdict: "pending" });
+    pressExecute();
+
+    await waitFor(() => expect(resultText()).resolves.toMatch(/unknown/i));
+    expect(storedAccount().stoaChainLedger).toBe(OLD_LEDGER);
+    expect(stillOutstanding()).toContain("payment");
+    expect(screen.getByTestId("pending-key-change-payment")).toBeTruthy();
+  });
+});
+
+/** A store handle with just the two members
+ *  {@link reconcileAccountFromChainState} touches. Synthetic: no provider, no
+ *  adapter, nothing persisted. */
+function fakeStore(
+  accounts: readonly IOuroAccount[],
+  updateOuroAccount: (next: IOuroAccount) => Promise<void>,
+): Parameters<typeof reconcileAccountFromChainState>[0] {
+  return {
+    getState: () => ({ ouroAccounts: accounts, actions: { updateOuroAccount } }),
+  } as unknown as Parameters<typeof reconcileAccountFromChainState>[0];
+}
+
+/** One chain observation, as the three snapshot fields the writer reads. */
+const observed = (
+  over: Partial<ChainObservedAccountKeys> = {},
+): ChainObservedAccountKeys => ({
+  registeredPaymentKey: null,
+  registeredGuard: null,
+  registeredKeysetRef: null,
+  ...over,
+});
+
+describe("reconcileAccountFromChainState — a cache that may never halt the chain", () => {
+  it("resolves even when the persist REJECTS", async () => {
+    // This now runs INSIDE the engine's chain read, so an escaping rejection
+    // is worse than it was under the per-step write-back: the engine would
+    // report "chain state could not be re-read", halt a migration whose
+    // transactions are fine, and tell the owner to press again. The in-memory
+    // state is correct either way, because `updateOuroAccount` sets before it
+    // persists.
+    const updateOuroAccount = vi.fn(async () => { throw new Error("quota exceeded"); });
+    const store = fakeStore([account()], updateOuroAccount);
+
+    await expect(reconcileAccountFromChainState(
+      store, "a1", observed({ registeredPaymentKey: `k:${NEW_PUB}` }),
+    )).resolves.toBeUndefined();
+    expect(updateOuroAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes nothing when the chain reports exactly what is stored", async () => {
+    // The engine re-reads chain on every press and after every confirmation,
+    // so this runs several times per press. Each pointless write touches
+    // `lastUpdatedAt` and flips `dirty`, which is a sync prompt the owner did
+    // not earn.
+    const updateOuroAccount = vi.fn(async () => {});
+    const store = fakeStore(
+      [account({ stoaChainLedger: `k:${NEW_PUB}`, guard: { keys: [GUARD_PUB], pred: "keys-all" } })],
+      updateOuroAccount,
+    );
+
+    await reconcileAccountFromChainState(store, "a1", observed({
+      registeredPaymentKey: `k:${NEW_PUB}`,
+      registeredGuard: { keys: [GUARD_PUB], pred: "keys-all" },
+    }));
+    expect(updateOuroAccount).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the chain reports the same guard keys in a DIFFERENT order", async () => {
+    // Pact returns a keyset's keys in whatever order the chain holds them, and
+    // key ORDER is not meaning — `outstandingKeyChanges.ts:42` compares them
+    // as a SET for exactly this reason. A structural compare here would
+    // rewrite the account on every single press, forever.
+    const updateOuroAccount = vi.fn(async () => {});
+    const store = fakeStore(
+      [account({ guard: { keys: [GUARD_PUB, OLD_GUARD_PUB], pred: "keys-any" } })],
+      updateOuroAccount,
+    );
+
+    await reconcileAccountFromChainState(store, "a1", observed({
+      registeredGuard: { keys: [OLD_GUARD_PUB, GUARD_PUB], pred: "keys-any" },
+    }));
+    expect(updateOuroAccount).not.toHaveBeenCalled();
+  });
+
+  it("never erases a stored key or guard on the strength of an ABSENT one", async () => {
+    // `null` means NOT OBSERVED — the selector's BAR sentinel for "no payment
+    // key on record", an unactivated account, a guard shape `guardOf` does not
+    // model (`chainState.ts:160-167`). Reading any of those as "cleared" would
+    // destroy the codex's record of the account's keys off a read that said
+    // nothing, and `stoaChainLedger` is the address other surfaces send funds
+    // to.
+    const updateOuroAccount = vi.fn(async () => {});
+    const stored = account({ guard: { keys: [OLD_GUARD_PUB], pred: "keys-any" } });
+    const store = fakeStore([stored], updateOuroAccount);
+
+    await reconcileAccountFromChainState(store, "a1", observed());
+    expect(updateOuroAccount).not.toHaveBeenCalled();
+  });
+
+  it("stores the chain's OWN predicate, never a substituted default", async () => {
+    // The card compares `pred` as well as the keys
+    // (`outstandingKeyChanges.ts:107`), so a hardcoded `keys-all` here would
+    // silently change what it compares: an account genuinely held under
+    // `keys-any` would read as already carrying the chosen keys-all guard, and
+    // a rotation that never happened would vanish from the card.
+    const updateOuroAccount = vi.fn(async (_next: IOuroAccount) => {});
+    const store = fakeStore([account()], updateOuroAccount);
+
+    await reconcileAccountFromChainState(store, "a1", observed({
+      registeredGuard: { keys: [GUARD_PUB, OLD_GUARD_PUB], pred: "keys-2" },
+    }));
+    expect(updateOuroAccount).toHaveBeenCalledTimes(1);
+    expect(updateOuroAccount.mock.calls[0]![0].guard)
+      .toEqual({ keys: [GUARD_PUB, OLD_GUARD_PUB], pred: "keys-2" });
+  });
+
+  it("carries the keyset-ref annotation from the SAME observation", async () => {
+    // `registeredGuard` and `registeredKeysetRef` are two readings of the one
+    // raw `ouronet-account-guard` value (`chainState.ts:269-275`), so the
+    // annotation costs no second read — and dropping it would blank the
+    // keyset-ref affordances that read it back off the stored guard
+    // (`resolveGuardKeys`' `viaRef`, the badge beside it).
+    const updateOuroAccount = vi.fn(async (_next: IOuroAccount) => {});
+    const store = fakeStore([account()], updateOuroAccount);
+
+    await reconcileAccountFromChainState(store, "a1", observed({
+      registeredGuard: { keys: [GUARD_PUB], pred: "keys-all" },
+      registeredKeysetRef: "free.ancient-keyset",
+    }));
+    expect(updateOuroAccount.mock.calls[0]![0].guard)
+      .toEqual({ keys: [GUARD_PUB], pred: "keys-all", keysetRef: "free.ancient-keyset" });
+  });
+
+  it("leaves every OTHER field of the account exactly as stored", async () => {
+    // `updateOuroAccount` merges the whole object by id, so a writer that
+    // rebuilt the row from a render's closure would revert anything written
+    // since — the reason this reads the account FRESH out of the store.
+    const updateOuroAccount = vi.fn(async (_next: IOuroAccount) => {});
+    const stored = account({ name: "Renamed", stoicTag: "ancient" });
+    const store = fakeStore([stored], updateOuroAccount);
+
+    await reconcileAccountFromChainState(store, "a1", observed({
+      registeredPaymentKey: `k:${NEW_PUB}`,
+    }));
+    expect(updateOuroAccount.mock.calls[0]![0])
+      .toEqual({ ...stored, stoaChainLedger: `k:${NEW_PUB}` });
+  });
+
+  it("writes nothing at all for an account id the codex does not hold", async () => {
+    const updateOuroAccount = vi.fn(async () => {});
+    const store = fakeStore([account()], updateOuroAccount);
+
+    await reconcileAccountFromChainState(store, "nope", observed({
+      registeredPaymentKey: `k:${NEW_PUB}`,
+    }));
+    expect(updateOuroAccount).not.toHaveBeenCalled();
+  });
+});
+
+// ─── (c3b) the CHAIN READ reconciles the stored account ─────────────────────
+
+/**
+ * The owner's mainnet run, 2026-11-27 — the state the per-step write-back
+ * above could not reach, and the reason this surface now reconciles from the
+ * READ instead.
+ *
+ * He ran the chain twice. Run 1 rotated the payment key and it CONFIRMED on
+ * chain. Run 2 rotated the guard and it CONFIRMED on chain. Both keys are in
+ * force, the toast said "Every remaining transaction is done" — and the card
+ * still listed BOTH as outstanding, because `computeOutstandingKeyChanges` is
+ * pure and reads the STORED `stoaChainLedger` / `guard`.
+ *
+ * Two holes, both of them hit:
+ *
+ *  1. a SKIPPED step never fires `recordStep` at all. On run 2 the engine
+ *     re-read chain, saw the payment key already in force (run 1 landed it
+ *     before any write-back existed) and planned no F — so nothing wrote it
+ *     back, ever.
+ *  2. the guard had no write-back at all. And it never could have had the
+ *     per-step one: G is LAST in every plan and the engine's re-read is lazy
+ *     (taken at the top of the next iteration), so a confirmed final step is
+ *     followed by no read.
+ *
+ * `readChainState` already returns both registered values on every press.
+ * These specs pin that the observation — not the step record — is what the
+ * codex stores, which is also what makes the card structurally unable to
+ * disagree with the engine: both now read the same read.
+ */
+
+/** The account as the owner's codex had it: BOTH fields pre-migration. */
+const staleAccount = (): IOuroAccount =>
+  account({ stoaChainLedger: OLD_LEDGER, guard: { keys: [OLD_GUARD_PUB], pred: "keys-any" } });
+
+/** A finalized plan that rotates BOTH the payment key and the guard — the
+ *  owner's selection. `recommended-single-key` carries no keys of its own, so
+ *  the card's chosen guard comes from `committed.guardPublicKeys` under
+ *  `keys-all`, exactly as the engine's intent takes it from `pending`. */
+const bothRotated = (): MigrationProgress => recorded({
+  selection: {
+    account: { kind: "keep-current" },
+    payment: { kind: "stoic-dalos-position-0" },
+    guard: { kind: "recommended-single-key" },
+  },
+  committed: {
+    seedId: "seed-1", accountId: "a1",
+    paymentPublicKey: NEW_PUB, guardPublicKeys: [GUARD_PUB],
+  },
+  pending: {
+    finalizedAt: "2026-11-01T09:05:00.000Z",
+    accountId: "a1",
+    seedId: "seed-1",
+    paymentPublicKey: NEW_PUB,
+    guardPublicKeys: [GUARD_PUB],
+    guardPred: "keys-all",
+  },
+});
+
+describe("a codex whose stored keys are BOTH stale", () => {
+  it("drops both rows on a press that submits nothing, because the read is what reconciles", async () => {
+    // THE OWNER'S END STATE. Nothing is owed on chain — `SETTLED` carries the
+    // new payment key and the new guard — and the only thing that happens
+    // this press is a chain READ. If that read does not reconcile, the card
+    // lists two changes that are in force for the rest of the codex's life.
+    const deps = syntheticDeps();
+    await mount({ progress: bothRotated(), accounts: [staleAccount()], deps });
+
+    expect(screen.getByTestId("pending-key-change-payment")).toBeTruthy();
+    expect(screen.getByTestId("pending-key-change-guard")).toBeTruthy();
+    pressExecute();
+
+    await waitFor(() => expect(stillOutstanding()).toEqual([]));
+    await waitFor(() => expect(screen.queryByTestId("pending-key-change-payment")).toBeNull());
+    expect(screen.queryByTestId("pending-key-change-guard")).toBeNull();
+    // What was stored is EXACTLY what the chain reported, in the chain's own
+    // form — never a re-derivation of either field.
+    expect(storedAccount().stoaChainLedger).toBe(`k:${NEW_PUB}`);
+    expect(storedAccount().guard).toEqual({ keys: [GUARD_PUB], pred: "keys-all" });
+    // ...and the chain owed nothing, so nothing was sent to make this true.
+    for (const submit of submitters(deps)) expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("records a payment key the planner SKIPPED and a guard confirmed on the LAST step", async () => {
+    // Run 2, exactly: the payment key is already in force (so F is never
+    // planned and `recordStep` never fires for it) and the guard rotation is
+    // the last — and only — step of the plan. A fake chain, so the second
+    // read reports what the rotation did, as a real node would.
+    let registeredGuard: ChainStateSnapshot["registeredGuard"] =
+      { keys: [OLD_GUARD_PUB], pred: "keys-any" };
+    const deps = syntheticDeps({
+      readChainState: vi.fn(async () => ({ ...SETTLED, registeredGuard })),
+      confirm: vi.fn(async () => {
+        registeredGuard = { keys: [GUARD_PUB], pred: "keys-all" };
+        return { verdict: "success" as const };
+      }),
+    });
+    await mount({ progress: bothRotated(), accounts: [staleAccount()], deps });
+    pressExecute();
+
+    await waitFor(() => expect(deps.submitRotateGuard).toHaveBeenCalledTimes(1));
+    expect(await resultText()).toMatch(/every remaining transaction is done/i);
+    await waitFor(() => expect(stillOutstanding()).toEqual([]));
+    expect(storedAccount().guard).toEqual({ keys: [GUARD_PUB], pred: "keys-all" });
+    // The skipped rotation, cached off the SAME read that decided to skip it.
+    expect(storedAccount().stoaChainLedger).toBe(`k:${NEW_PUB}`);
+    expect(deps.submitRotatePaymentKey).not.toHaveBeenCalled();
+  });
+});
+
+// ─── (c3c) the LOAD, with NO PRESS AT ALL ───────────────────────────────────
+
+/**
+ * The owner, mainnet, 2026-11-27 — the SAME two confirmed rotations as the
+ * block above, seen from a FRESH PAGE LOAD.
+ *
+ * His export after the migration:
+ *
+ *     stoaChainLedger: k:e20f2672…f231                      (the OLD key)
+ *     guard:           { pred: "keys-any", keys: [1a4e15d3…, b29b7242…] }
+ *
+ * Both rotations are in force on chain. The press path reconciles — and only
+ * the press path did, so on load `computeOutstandingKeyChanges` read the stale
+ * stored account, the card listed both rows, and `applyHasOutstandingWork`
+ * kept the Apply popup pointing at the executor instead of offering Seal:
+ *
+ * > *"i cannot apply, because it takes me to the transactions, and both
+ * > transactions are already done … i cannot finalize the migration."*
+ *
+ * He could unstick it by pressing Execute (which submits nothing and
+ * reconciles), but a button that looks like it spends money is not a way to
+ * correct a display. So the reconciliation happens on MOUNT, through the same
+ * read and the same single writer, and these specs press NOTHING.
+ */
+
+/** The owner's ledger, verbatim from his export. */
+const OWNER_OLD_LEDGER =
+  "k:e20f267264634c5bc76e15dd5a9df6703fc3c06726e7674aa6217edeb064f231";
+/**
+ * The two keys of his OLD `keys-any` guard. His report elides the middle of
+ * each (`1a4e15d3…350a5`, `b29b7242…71a144`), so the prefix and the suffix are
+ * verbatim and the unreported middle is filled to a real 64-hex length — the
+ * only two things any of this code reads are the length-ish shape and the fact
+ * that these are NOT the keys the chain now reports.
+ */
+const OWNER_OLD_GUARD_KEYS = [
+  `1a4e15d3${"e".repeat(51)}350a5`,
+  `b29b7242${"f".repeat(50)}71a144`,
+];
+
+/** His account exactly as the codex stored it: BOTH fields pre-migration. */
+const ownerStaleAccount = (): IOuroAccount => account({
+  stoaChainLedger: OWNER_OLD_LEDGER,
+  guard: { keys: [...OWNER_OLD_GUARD_KEYS], pred: "keys-any" },
+});
+
+describe("a stale card on a FRESH LOAD, with no press at all", () => {
+  it("reconciles BOTH of the owner's confirmed rotations on MOUNT, so the card lists nothing", async () => {
+    // The fixture is genuinely the owner's defect BEFORE anything runs: two
+    // rows outstanding, computed from the stored account alone.
+    expect(
+      computeOutstandingKeyChanges(bothRotated(), ownerStaleAccount())
+        .changes.map((change) => change.kind),
+    ).toEqual(["guard", "payment"]);
+
+    const deps = syntheticDeps();
+    await mount({
+      progress: bothRotated(),
+      accounts: [ownerStaleAccount()],
+      deps,
+      // The chain, reporting what is actually in force: the new payment key
+      // and the new guard.
+      readChainState: async () => SETTLED,
+    });
+
+    await waitFor(() => expect(stillOutstanding()).toEqual([]));
+    expect(screen.queryByTestId("pending-key-change-payment")).toBeNull();
+    expect(screen.queryByTestId("pending-key-change-guard")).toBeNull();
+    // Stored EXACTLY as the chain reported it — `registeredPaymentKey` is
+    // already an account string and the `pred` is the chain's own.
+    expect(storedAccount().stoaChainLedger).toBe(`k:${NEW_PUB}`);
+    expect(storedAccount().guard).toEqual({ keys: [GUARD_PUB], pred: "keys-all" });
+    // NOTHING was pressed: the engine never ran, so it took no read of its
+    // own and submitted nothing.
+    expect(deps.readChainState).not.toHaveBeenCalled();
+    for (const submit of submitters(deps)) expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("takes exactly ONE read per mount, across the re-render its own write causes", async () => {
+    // THE LOOP HAZARD. The write updates the store, which re-renders this
+    // component — so an effect that re-fires on that change is an unbounded
+    // read loop against mainnet, issued by merely opening the page.
+    const { readChainState } = await mount({
+      progress: bothRotated(),
+      accounts: [ownerStaleAccount()],
+      readChainState: async () => SETTLED,
+    });
+
+    // The write landed, which is the proof that the re-render this guards
+    // against actually happened.
+    await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(`k:${NEW_PUB}`));
+    await act(async () => { await Promise.resolve(); });
+    expect(readChainState).toHaveBeenCalledTimes(1);
+
+    // ...and an UNRELATED store write — another re-render with the same plan
+    // still pending — buys no further read either.
+    await act(async () => {
+      await store!.getState().actions.updateOuroAccount({
+        ...storedAccount(), name: "Renamed",
+      });
+    });
+    expect(readChainState).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the card EXACTLY as it was when the load-time read throws, and stays usable", async () => {
+    // This runs on page load, so a read that fails — offline, a dead node, a
+    // selector row that is not there — may not take the surface with it. The
+    // owner keeps the stale card he already had, and the press that works
+    // today still works.
+    const deps = syntheticDeps();
+    await mount({
+      progress: bothRotated(),
+      accounts: [ownerStaleAccount()],
+      deps,
+      readChainState: async () => { throw new Error("getaddrinfo ENOTFOUND"); },
+    });
+
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId("pending-key-change-payment")).toBeTruthy();
+    expect(screen.getByTestId("pending-key-change-guard")).toBeTruthy();
+    expect(storedAccount().stoaChainLedger).toBe(OWNER_OLD_LEDGER);
+    expect(storedAccount().guard)
+      .toEqual({ keys: OWNER_OLD_GUARD_KEYS, pred: "keys-any" });
+    // No spinner that never settles, and the one press is still live.
+    expect(executeButton().disabled).toBe(false);
+    // The swallow in the effect is load-bearing beyond these assertions: with
+    // it removed this spec's own injected rejection escapes as an unhandled
+    // promise rejection, which vitest reports as an error and exits non-zero
+    // on (verified by deleting the `catch` — "Unhandled Rejection", exit 1).
+    pressExecute();
+    await waitFor(() => expect(deps.readChainState).toHaveBeenCalledTimes(1));
+  });
+
+  it("erases nothing when the load-time read OBSERVES nothing", async () => {
+    // `null` is NOT OBSERVED — the selector's BAR sentinel, an unactivated
+    // account, a guard shape `guardOf` does not model. Reading it as
+    // "cleared" on page load would destroy the codex's record of the address
+    // other surfaces send funds to, for every codex that loads while a node
+    // is unhealthy.
+    await mount({
+      progress: bothRotated(),
+      accounts: [ownerStaleAccount()],
+      readChainState: async () => UNOBSERVED,
+    });
+
+    await act(async () => { await Promise.resolve(); });
+    expect(storedAccount().stoaChainLedger).toBe(OWNER_OLD_LEDGER);
+    expect(storedAccount().guard)
+      .toEqual({ keys: OWNER_OLD_GUARD_KEYS, pred: "keys-any" });
+    expect(stillOutstanding()).toEqual(["guard", "payment"]);
+  });
+
+  it("reads NOTHING on a codex with no plan pending", async () => {
+    // Gated on `hasMigrationPending` — the condition the executor itself
+    // renders under. Every other codex that merely opens this page must cost
+    // no chain read at all.
+    const { readChainState } = await mount({ progress: notFinalized() });
+
+    expect(screen.getByTestId("pending-key-changes-section")).toBeTruthy();
+    expect(screen.queryByTestId("pending-key-changes-executor")).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    expect(readChainState).not.toHaveBeenCalled();
+  });
+});
+
+// ─── (c4) WHICH account the section calls the master ────────────────────────
+
+/** A second account, at POSITION 0, that is NOT the codex's master and whose
+ *  payment key differs from the master's — so a positional read is visible in
+ *  every assertion rather than coincidentally right. */
+const OTHER_PUB = "d".repeat(64);
+const otherAccount = (): IOuroAccount => account({
+  id: "a0", name: "Spawned", address: "Ѻ.Spawned", stoaChainLedger: `k:${OTHER_PUB}`,
+});
+
+const settledMaster = (): CodexMasterSeed => ({
+  ouroAccountId: "a1",
+  chainwebSeedId: "seed-1",
+  establishedAt: "2026-11-01T09:05:00.000Z",
+});
+
+describe("the master account this section resolves", () => {
+  it("follows the codex's SETTLED master id, not array position", async () => {
+    // The sixth positional-master assumption (`accounts[0] ?? null`), after
+    // the gold/pinning/badge, the account sort, `outstandingKeyChanges`' field
+    // read and `currentPaymentKeyOf`. On a codex whose master is not first —
+    // every codex that migrated onto a different account — the card described
+    // ANOTHER account's keys and the engine was handed another account's
+    // address to rotate.
+    //
+    // SEAL GATING: this codex is UNSEALED (no `appliedAt` — stage 3A is by
+    // definition before the seal), and the settled id must still win here.
+    // `OuronetAccountsTab` gates the golden DESIGNATION on `isMigrationSealed`
+    // because an unapplied finalize must not repaint rows; "which account is
+    // the master" is a different question, which is why
+    // `resolveMasterOuronetAccount` carries no seal gate. Gating it here would
+    // pin this surface to `accounts[0]` for the whole window in which it is
+    // the only surface that matters.
+    let seen: MigrationChainRequest | null = null;
+    const runChain = vi.fn(async (req: MigrationChainRequest): Promise<MigrationChainOutcome> => {
+      seen = req;
+      return { status: "nothing-to-do", plan: { steps: [], nothingToDo: true } };
+    });
+    await mount({
+      progress: rotationPending(),
+      accounts: [otherAccount(), account()],
+      codexMasterSeed: settledMaster(),
+      runChain,
+    });
+
+    // The CARD: the FROM line is the master's live payment key.
+    const card = screen.getByTestId("pending-key-change-payment").textContent ?? "";
+    expect(card).toContain(OLD_PUB);
+    expect(card).not.toContain(OTHER_PUB);
+
+    // The ENGINE: the account it is told to rotate is the master.
+    pressExecute();
+    await waitFor(() => expect(runChain).toHaveBeenCalledTimes(1));
+    expect(seen!.accountAddress).toBe(ACCOUNT);
+    expect(seen!.oldPaymentAddress).toBe(OLD_LEDGER);
+  });
+
+  it("writes the registered key onto the MASTER, never onto whatever is first", async () => {
+    // The two fixes meet here: a reconciliation aimed by position would move
+    // another account's recorded payment key to a key that account does not
+    // hold — a corruption of a row the migration never touched.
+    await mountOverFakeChain({
+      progress: rotationPending(),
+      accounts: [otherAccount(), account()],
+      codexMasterSeed: settledMaster(),
+    });
+    pressExecute();
+
+    await waitFor(() => expect(storedAccount("a1").stoaChainLedger).toBe(`k:${NEW_PUB}`));
+    expect(storedAccount("a0").stoaChainLedger).toBe(`k:${OTHER_PUB}`);
+  });
+
+  it("still answers POSITIONALLY on a codex that never settled a master", async () => {
+    // Backwards compatibility, and the reason `resolveMasterOuronetAccount`
+    // keeps a positional branch at all: a codex with no master row and no
+    // `isPrime` stamp must resolve exactly as it always has.
+    let seen: MigrationChainRequest | null = null;
+    const runChain = vi.fn(async (req: MigrationChainRequest): Promise<MigrationChainOutcome> => {
+      seen = req;
+      return { status: "nothing-to-do", plan: { steps: [], nothingToDo: true } };
+    });
+    await mount({
+      progress: rotationPending(),
+      accounts: [otherAccount(), account()],
+      runChain,
+    });
+    pressExecute();
+
+    await waitFor(() => expect(runChain).toHaveBeenCalledTimes(1));
+    expect(seen!.accountAddress).toBe("Ѻ.Spawned");
   });
 });
 
@@ -1086,6 +1918,203 @@ describe("keysetUpdatePreconditionFacts — the §5 fact the gate supplies", () 
     // ordering holds.
     const report = { ...gateReport(), forfeited: true };
     expect(keysetUpdatePreconditionFacts(report).keysetUpdateSatisfiable).toBe(false);
+  });
+});
+
+// ─── (d0b) G's own request — the INCOMING keyset signs its own adoption ─────
+//
+// THE MAINNET DEFECT THIS BLOCK EXISTS FOR (2026-11-26). Step 0
+// (`rotate-payment-key`) confirmed on chain; step 1 (`rotate-guard`) died at
+// SIMULATION with `Keyset failure ( keys-all ): 22ac91471a…` and signed
+// nothing. Cause: this factory's `submitRotateGuard` closure passed
+// `patronAnalysis` and `accountAnalysis` but NO `newGuardAnalysis`, and
+// `executeRotateGuard` collects `newGuardKeys` only when one is supplied — so
+// the keyset being adopted went out with no signer at all.
+//
+// The chain's refusal is correct and load-bearing: `C_RotateGuard` with
+// `safe: true` makes the INCOMING keyset prove the owner controls what the
+// account is being moved to. Without it a user could lock an account behind a
+// keyset they do not hold. These tests exist to satisfy it, never to bypass it.
+
+/** The owner's chosen guard key, carried here as the incident reported it:
+ *  the 48 hex digits of `22ac91471a5ceebcd60da35d1d2587461bd6ac2064473ccc…`,
+ *  padded to a full 64. A PUBLIC key — nothing secret is pinned — and it is
+ *  spelled out rather than reduced to another `"c".repeat(64)` so the case
+ *  this block reproduces is recognisable as the owner's own. */
+const OWNER_GUARD_PUB = "22ac91471a5ceebcd60da35d1d2587461bd6ac2064473ccc" + "0".repeat(16);
+/** A second key the codex also holds, for the multi-key threshold case. */
+const OWNER_GUARD_PUB_2 = "d".repeat(64);
+/** A key NO codex in these tests holds — the "chosen a guard I cannot sign
+ *  for" case. */
+const UNHELD_GUARD_PUB = "e".repeat(64);
+
+/** The owner's CURRENT account guard: `keys-any` over TWO keys, of which this
+ *  codex holds one. Its threshold is 1 — which is exactly what makes it a
+ *  trap for a new-guard analysis that inherits the old guard's threshold. */
+const CURRENT_ACCOUNT_GUARD = { keys: [OLD_PUB, OLD_GUARD_PUB], pred: "keys-any" };
+
+const OWNER_CODEX_PUBS = new Set([OLD_PUB, OWNER_GUARD_PUB, OWNER_GUARD_PUB_2]);
+
+/** `useGetKeypair()`'s contract: a keypair for a key this codex holds, a falsy
+ *  answer for one it does not (which `collectGuardSigners` SKIPS). */
+const ownerResolver = () =>
+  vi.fn(async (publicKey: string) =>
+    OWNER_CODEX_PUBS.has(publicKey) ? { publicKey, privateKey: `priv-${publicKey}` } : null,
+  );
+
+const currentAnalysis = (): ReturnType<typeof analyzeGuard> =>
+  analyzeGuard(CURRENT_ACCOUNT_GUARD, OWNER_CODEX_PUBS, {});
+
+const guardContext = (over: Partial<RotateGuardContext> = {}): RotateGuardContext => ({
+  patronAddress: ACCOUNT,
+  gasStationKey: { publicKey: OLD_PUB, privateKey: `priv-${OLD_PUB}` },
+  patronAnalysis: currentAnalysis(),
+  accountAnalysis: currentAnalysis(),
+  codexPubs: OWNER_CODEX_PUBS,
+  ...over,
+});
+
+const guardStep = (
+  guard: { readonly keys: readonly string[]; readonly pred: string },
+): RotateGuardStepRequest => ({ accountAddress: ACCOUNT, guard, chainId: "0" });
+
+describe("buildRotateGuardRequest — the guard being ADOPTED must co-sign", () => {
+  it("puts a signer for the NEW key on the submitted transaction — the owner's keys-any → keys-all rotation", async () => {
+    // The live failure, end to end over the REAL `executeRotateGuard` with only
+    // the broadcasting submitter injected: current guard `keys-any` over two
+    // keys, rotating to `keys-all` over the single `22ac9147…` the codex holds.
+    // Before this fix `newGuardKeys` was `[]` and the chain answered
+    // `Keyset failure ( keys-all )`.
+    const submit = vi.fn(async (..._args: Parameters<RotateGuardSubmitter>) => ({
+      requestKey: "req-rotate-guard",
+    }));
+
+    await executeRotateGuard(
+      buildRotateGuardRequest(
+        guardStep({ keys: [OWNER_GUARD_PUB], pred: "keys-all" }),
+        guardContext(),
+      ),
+      { getKeypair: ownerResolver(), submitRotateGuard: submit },
+    );
+
+    const params = submit.mock.calls[0]![0];
+    expect(params.newGuardKeys).toEqual([
+      { publicKey: OWNER_GUARD_PUB, privateKey: `priv-${OWNER_GUARD_PUB}` },
+    ]);
+    // In its OWN slot: folding the incoming key into `accountGuardKeys` would
+    // prove ownership with a key that does not yet own anything, and the
+    // `ks` payload the chain enforces would still have no signature.
+    expect(params.accountGuardKeys.map((k) => k.publicKey)).not.toContain(OWNER_GUARD_PUB);
+    // And the keyset actually posted is still the CHOSEN one, safe forced.
+    expect(params.newKeys).toEqual([OWNER_GUARD_PUB]);
+    expect(params.newPred).toBe("keys-all");
+    expect(params.safe).toBe(true);
+  });
+
+  it("takes the threshold from the NEW predicate, never from the guard being replaced", async () => {
+    // The silent-breakage case. `collectGuardSigners` stops at
+    // `analysis.threshold`; the OLD guard here is `keys-any` (threshold 1) and
+    // the NEW one is `keys-all` over TWO keys (threshold 2). An analysis that
+    // inherited the old threshold would collect ONE key and fail on chain
+    // exactly as the un-fixed code did — with everything looking wired.
+    const submit = vi.fn(async (..._args: Parameters<RotateGuardSubmitter>) => ({
+      requestKey: "req-rotate-guard",
+    }));
+    const req = buildRotateGuardRequest(
+      guardStep({ keys: [OWNER_GUARD_PUB, OWNER_GUARD_PUB_2], pred: "keys-all" }),
+      guardContext(),
+    );
+
+    expect(req.newGuardAnalysis!.threshold).toBe(2);
+    // Demonstrably NOT the old guard's number, which is what was in scope here.
+    expect(currentAnalysis().threshold).toBe(1);
+
+    await executeRotateGuard(req, { getKeypair: ownerResolver(), submitRotateGuard: submit });
+
+    expect(submit.mock.calls[0]![0].newGuardKeys.map((k) => k.publicKey)).toEqual([
+      OWNER_GUARD_PUB,
+      OWNER_GUARD_PUB_2,
+    ]);
+  });
+
+  it("leaves the patron's and the account's own analyses exactly as the factory resolved them", async () => {
+    // The new analysis is an ADDITION. If it displaced either of the other two
+    // the transaction would lose the signatures that authorize the call itself
+    // — the `C_RotateGuard` ownership proof and `DALOS.GAS_PAYER`.
+    const context = guardContext();
+    const req = buildRotateGuardRequest(
+      guardStep({ keys: [OWNER_GUARD_PUB], pred: "keys-all" }),
+      context,
+    );
+
+    expect(req.patronAnalysis).toBe(context.patronAnalysis);
+    expect(req.accountAnalysis).toBe(context.accountAnalysis);
+    expect(req.gasStationKey).toBe(context.gasStationKey);
+    expect(req.patronAddress).toBe(ACCOUNT);
+    expect(req.accountAddress).toBe(ACCOUNT);
+    expect(req.target).toEqual({
+      mode: "define",
+      newKeys: [OWNER_GUARD_PUB],
+      newPred: "keys-all",
+    });
+  });
+
+  it("REFUSES to build one for a chosen guard this codex cannot satisfy, naming the key", async () => {
+    // The owner must learn this from a refusal that names the key, not from
+    // `Keyset failure ( keys-all ): e8f1…` after a confirmed payment-key
+    // rotation. Thrown before any transaction for this step is built, so
+    // nothing is submitted; the chain is resumable, so the halt is recoverable.
+    expect(() =>
+      buildRotateGuardRequest(
+        guardStep({ keys: [OWNER_GUARD_PUB, UNHELD_GUARD_PUB], pred: "keys-all" }),
+        guardContext(),
+      ),
+    ).toThrow(new RegExp(UNHELD_GUARD_PUB));
+    expect(() =>
+      buildRotateGuardRequest(
+        guardStep({ keys: [UNHELD_GUARD_PUB], pred: "keys-all" }),
+        guardContext(),
+      ),
+    ).toThrow(/does not hold/i);
+  });
+
+  it("still builds when a key short of the OLD guard's threshold — only the NEW guard gates it", async () => {
+    // A `keys-any` chosen guard over one held and one unheld key is satisfiable
+    // (threshold 1), and refusing it would block a legitimate rotation. The
+    // refusal above must come from the NEW predicate's arithmetic, not from
+    // "every chosen key must be held".
+    const req = buildRotateGuardRequest(
+      guardStep({ keys: [OWNER_GUARD_PUB, UNHELD_GUARD_PUB], pred: "keys-any" }),
+      guardContext(),
+    );
+
+    expect(req.newGuardAnalysis!.threshold).toBe(1);
+    expect(req.newGuardAnalysis!.codexKeys).toEqual([OWNER_GUARD_PUB]);
+  });
+
+  it("is the function the factory's own G closure routes through", async () => {
+    // The one assertion in this file that has to be made on SOURCE. Header
+    // rule 1 forbids invoking `submitRotateGuard` — its closure names
+    // `liveRotateGuardSubmitter`, a real broadcast — so the wiring that the
+    // 2026-11-26 defect broke cannot be reached by calling it. The defect was
+    // precisely an inline request object in that closure; this fails if one
+    // comes back.
+    const source = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "../src/ui/settings/PendingKeyChangesSection.tsx",
+      ),
+      "utf8",
+    );
+    const closure = source.slice(
+      source.indexOf("submitRotateGuard: async (req)"),
+      source.indexOf("submitDefineKeyset: async (req)"),
+    );
+    expect(closure).not.toBe("");
+    expect(closure).toContain("buildRotateGuardRequest(");
+    // The inline shape the defect shipped: a `target:` literal assembled in
+    // the closure, with no new-guard analysis anywhere near it.
+    expect(closure).not.toMatch(/target:\s*\{\s*mode:/);
   });
 });
 

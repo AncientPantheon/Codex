@@ -388,7 +388,18 @@ describe("<SeedWordsTab>", () => {
     openMenu(card);
     fireEvent.click(screen.getByRole("button", { name: /view seed words/i })); // portaled — see the rename test's comment above
 
-    expect(await screen.findByText("Could not decrypt this seed phrase: Failed to parse V1 envelope")).toBeTruthy();
+    // The exact string MOVED in docs/work/honest-failure-reporting/design.md
+    // §5 (acceptance criterion 7): the raw
+    // "Could not decrypt this seed phrase: Failed to parse V1 envelope" was
+    // stoa-core's own internal wording printed verbatim — the very defect §5
+    // fixes. `CorruptEnvelopeError` is now classified. THIS test's own concern
+    // is unchanged and still asserted: the message describes the REAL failure
+    // (an unparseable envelope) rather than the misleading lock prompt.
+    expect(
+      await screen.findByText(
+        "This seed phrase is not readable as an encrypted envelope — no password will open it.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText(/unlock the codex to view this seed phrase/i)).toBeNull();
   });
 });
@@ -1099,7 +1110,15 @@ describe("<SeedWordsTab> — mobile: 'View Seed Words' failure feedback on a COL
     openMenu(card);
     fireEvent.click(screen.getByRole("button", { name: /view seed words/i })); // portaled — see the rename test's comment above
 
-    expect(await screen.findByText("Could not decrypt this seed phrase: Failed to parse V1 envelope")).toBeTruthy();
+    // Message updated by design.md §5 (acceptance criterion 7) — the raw
+    // stoa-core string is now classified. As this test's own comment above
+    // already says, its concern (does the error surface AT ALL on a collapsed
+    // row) is independent of exactly which message that is.
+    expect(
+      await screen.findByText(
+        "This seed phrase is not readable as an encrypted envelope — no password will open it.",
+      ),
+    ).toBeTruthy();
   });
 });
 
@@ -1392,5 +1411,121 @@ describe("<SeedWordsTab> — Locked medallions (design.md §B2, bugs 1 and 2)", 
     // change `handleDeleteKey` was a bare `void updateSeed(...)`, so the
     // refusal became an unhandled rejection and the owner saw nothing.
     expect(await screen.findByText(/re-running Secure Master Account/)).toBeTruthy();
+  });
+});
+
+// docs/work/honest-failure-reporting/design.md §5 (acceptance criterion 7).
+// `handleView`'s catch printed `err.message` verbatim, so the owner read
+// `AES-GCM auth-tag failure` off his screen and spent a long exchange
+// decoding a crypto primitive's internal string. Every spec here drives the
+// REAL `@stoachain/stoa-core/crypto` path — a real envelope encrypted under a
+// real, different password; a real V1 envelope — so what is asserted is what
+// the library actually throws/produces, not a hand-built lookalike.
+describe("<SeedWordsTab> — classified decrypt failures (design.md §5)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("a seed encrypted under a DIFFERENT password says the password differs and the data is intact — never 'AES-GCM auth-tag failure'", async () => {
+    // The owner's second codex exactly: the codex unlocks (so `ensureUnlocked`
+    // passes and private keys reveal) while this seed's blob was written under
+    // another password, so the auth tag fails. Intact bytes, wrong key.
+    const encryptedUnderAnotherPassword = await smartEncrypt(
+      "alpha bravo charlie delta echo foxtrot",
+      "the-password-this-blob-was-written-with",
+      "2",
+    );
+    await renderTab(
+      [
+        seedFx({ id: "p", name: "Prime" }),
+        seedFx({ id: "s1", name: "Foreign Seed", secret: encryptedUnderAnotherPassword }),
+      ],
+      "the-password-that-unlocked-this-codex",
+    );
+
+    const card = (await screen.findByText("Foreign Seed")).closest("[data-seed-id]") as HTMLElement;
+    openMenu(card);
+    fireEvent.click(screen.getByRole("button", { name: /view seed words/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/different password/i);
+    expect(alert.textContent).toMatch(/data is intact/i);
+    // The defect, locked: the crypto primitive's own string never reaches the
+    // screen — not in the alert, not anywhere else on the page.
+    expect(document.body.textContent).not.toMatch(/AES-GCM|auth-tag/i);
+  });
+
+  it("an unparseable blob says no password will open it — the OPPOSITE user action from a wrong password", async () => {
+    // Rewritten deliberately (design.md §5's call): this is the same case the
+    // bug-2b spec above covers, which asserted the raw
+    // "Could not decrypt this seed phrase: Failed to parse V1 envelope".
+    // The fixture's `secret` ("enc-secret") is not an envelope at all, so
+    // stoa-core throws a real `CorruptEnvelopeError`, and the honest line says
+    // to STOP entering passwords rather than to try another one.
+    await renderTab(
+      [seedFx({ id: "p", name: "Prime" }), seedFx({ id: "s1", name: "Corrupt Seed" })],
+      "hunter2",
+    );
+
+    const card = (await screen.findByText("Corrupt Seed")).closest("[data-seed-id]") as HTMLElement;
+    openMenu(card);
+    fireEvent.click(screen.getByRole("button", { name: /view seed words/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/no password will open it/i);
+    expect(alert.textContent).not.toMatch(/different password/i);
+    expect(document.body.textContent).not.toMatch(/Failed to parse V1 envelope/);
+  });
+
+  it("flags a seed still stored in the LEGACY V1 envelope when its phrase is revealed", async () => {
+    // `smartEncrypt(..., "0")` is the un-upgraded codex path, which really
+    // writes a V1 envelope (PBKDF2-SHA256 / 10k iterations — sub-OWASP). The
+    // owner's codex logs that advisory to the console and nothing in the UI
+    // ever said WHICH entry caused it.
+    const password = "hunter2";
+    const phrase = "alpha bravo charlie delta echo foxtrot";
+    const legacyEnvelope = await smartEncrypt(phrase, password, "0");
+    await renderTab(
+      [
+        seedFx({ id: "p", name: "Prime" }),
+        seedFx({ id: "s1", name: "Old Seed", secret: legacyEnvelope }),
+      ],
+      password,
+    );
+
+    const card = (await screen.findByText("Old Seed")).closest("[data-seed-id]") as HTMLElement;
+    openMenu(card);
+    fireEvent.click(screen.getByRole("button", { name: /view seed words/i }));
+
+    // The reveal still succeeds — a V1 envelope decrypts fine, it is just
+    // weakly derived — and the advisory rides alongside it.
+    expect(await screen.findByText(phrase)).toBeTruthy();
+    const notice = await screen.findByRole("note");
+    expect(notice.textContent).toMatch(/legacy encryption/i);
+    expect(notice.textContent).toMatch(/10k/i);
+  });
+
+  it("does NOT flag a seed already on the current V2 envelope", async () => {
+    // The negative half: without this, a hardcoded badge passes the spec above
+    // and every seed in the codex is libelled as weakly encrypted.
+    const password = "hunter2";
+    const phrase = "alpha bravo charlie delta echo foxtrot";
+    const current = await smartEncrypt(phrase, password, "2");
+    await renderTab(
+      [
+        seedFx({ id: "p", name: "Prime" }),
+        seedFx({ id: "s1", name: "Current Seed", secret: current }),
+      ],
+      password,
+    );
+
+    const card = (await screen.findByText("Current Seed")).closest("[data-seed-id]") as HTMLElement;
+    openMenu(card);
+    fireEvent.click(screen.getByRole("button", { name: /view seed words/i }));
+
+    expect(await screen.findByText(phrase)).toBeTruthy();
+    expect(screen.queryByRole("note")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/legacy encryption/i);
   });
 });
