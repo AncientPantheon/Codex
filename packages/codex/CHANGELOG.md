@@ -2,6 +2,67 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.8.0 — 2026-11-27
+
+**MINOR — the migration transaction engine. One press sends every on-chain
+change a settled plan still owes, in order, without stopping to ask.** Until
+now the Codex could tell you which key changes you owed and refused to seal
+until they were done, but nothing could send them.
+
+### The chain
+
+```
+A(1..9)  consolidate native STOA, chains 1-9 -> chain 0   (9 cross-chain flows)
+C        Collect + Unstake urSTOA, ONE sponsored transaction
+B        drain native STOA, chain 0, old key -> new key
+D        move urSTOA, old -> new
+E        re-stake urSTOA on the new key
+F        rotate payment key   (TS01-C1.DALOS|C_RotateStoa)
+G        rotate guard, LAST   (TS01-C1.DALOS|C_RotateGuard)
+         or, for an update-keyset-* choice, define-keyset instead
+```
+
+The guard goes last because rotating it changes who can sign; everything
+before it is authorised by the guard you have today. The drain precedes the
+payment-key rotation because A-E are signed by the OLD payment key, which F
+re-points away from.
+
+### Resume reads the chain; it does not replay a cursor
+
+Every step is a predicate over live chain state, so the chain is idempotent:
+press again after a crash and it skips whatever already landed. A durable
+cursor fails in exactly the case that matters — a transaction lands and the tab
+dies before the write, and replay re-sends money. `execution.steps` records
+what happened and is authoritative for NOTHING.
+
+### The keyset update is now a real step
+
+`define-keyset` executes when the account's guard is a keyset-ref and the codex
+can satisfy that keyset's current predicate. When it cannot, the chain refuses
+BEFORE starting anything and offers two ways on: supply the missing private
+keys, or forfeit and let the rest run. That resolution happens before the
+press, so the loop still never prompts. It is **self-paid** — the Ouronet gas
+station cannot sponsor a `define-keyset`.
+
+### Found by building, not by review
+
+A guard-only press would have consolidated nine chains and UNSTAKED the vault
+to move funds to a destination that did not exist. `coin.C_URV|Collect` pays
+out native STOA, not urSTOA, so collecting would have stranded it on a key the
+next step was about to orphan — the chain reordered. A Collect with zero
+rewards fails the whole transaction. An empty guard list would have written an
+empty keyset and locked the reference out of its owner's reach permanently.
+
+### Also in this release — failure made legible
+
+Six bugs found by running real legacy codexes. A wizard probe that spun
+forever; a repair that reported success while skipping, and could overwrite the
+only copy of a key; a field renamed (`kadenaLedger` -> `stoaChainLedger`) with
+no migration, invisible on all seven real codexes tested; two more places where
+array position stood in for identity, one of which would have locked the wrong
+payment key; and a crypto library's internal string shown raw where
+"encrypted with a different password — the data is intact" was the truth.
+
 ## 1.7.0 — 2026-11-19
 
 **MINOR — unbreaks browser consumers. `@ardrive/turbo-sdk` is removed
