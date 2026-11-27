@@ -126,8 +126,9 @@ export type {
 // -definition step. Pure — it imports nothing, so no chain read, no React and no
 // `@stoachain` can arrive through it; the engine in codex-ouronet is a loop
 // over `planMigrationChain`'s output. `paymentKeyAccountString` is the
-// bare-key -> account-string conversion `store.ts:2680` encodes and nothing
-// else performs. See codex/migrationChain.ts.
+// bare-key -> account-string conversion (`k:<bare>`, unconditionally — see
+// its own doc for the seed-type branch that shipped a bare account to
+// mainnet). See codex/migrationChain.ts.
 export {
   planMigrationChain,
   checkMigrationPreconditions,

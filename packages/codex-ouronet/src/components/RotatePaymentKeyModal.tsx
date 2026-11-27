@@ -11,8 +11,11 @@
  * to be attached as `ks` and `ks-account` data slots on the transaction
  * — this modal handles that automatically.
  *
- * Form input is a single string — the new payment-key public key (64-char
- * hex). Validation: hex-only, exact length. No password prompt directly —
+ * Form input is a single string — the new payment-key PUBLIC KEY (64-char
+ * hex). Validation: hex-only, exact length. The transaction's third argument
+ * is not that key but the ACCOUNT it controls — `k:<hex>`, via codex-core's
+ * `paymentKeyAccountString`. See {@link ROTATE_STOA_PACT_MEMBER}'s note on the
+ * mainnet defect the bare form caused. No password prompt directly —
  * useSignTransaction handles signing-key resolution via the resolver,
  * which prompts via <PasswordModal> if needed.
  */
@@ -28,6 +31,7 @@ import {
   KADENA_NAMESPACE as STOACHAIN_NAMESPACE,
   STOA_AUTONOMIC_OURONETGASSTATION,
 } from "@ouronet/ouronet-core/constants";
+import { paymentKeyAccountString } from "@ancientpantheon/codex-core";
 import { useSignTransaction } from "../hooks/index.js";
 import { useEnsureCodexUnlocked } from "../zbom/hooks/useEnsureCodexUnlocked.js";
 import { useActiveWallet } from "../hooks/index.js";
@@ -53,6 +57,16 @@ const HEX_64_RX = /^[0-9a-fA-F]{64}$/;
  *
  * Arg count/order was UNCHANGED by the rename: `(patron executor stoa)`, per
  * `src/constants/pactSignatures.generated.ts`'s `"TS01-C1.DALOS|C_RotateStoa"`.
+ *
+ * THE THIRD ARGUMENT IS AN ACCOUNT, NOT A KEY. This component's input is a
+ * bare 64-hex public key and used to be spliced in exactly as typed — the
+ * same defect that reached mainnet through the migration engine
+ * (`C_RotateStoa … "225eb6d1…"` instead of `"k:225eb6d1…"`), and unconditional
+ * here. `<hex>` and `k:<hex>` are DIFFERENT accounts and the chain accepts
+ * both, 64 hex chars being a legal account name, so the rotation SUCCEEDS onto
+ * an account nobody holds the keys to. The conversion is codex-core's single
+ * `paymentKeyAccountString`; the owner's ruling, verbatim: *"in our case we
+ * write from a single key a k: based account."*
  */
 const ROTATE_STOA_PACT_MEMBER = "TS01-C1.DALOS|C_RotateStoa";
 
@@ -136,8 +150,11 @@ export function RotatePaymentKeyModal({
       // Prompt for the codex password if locked; abort on cancel.
       if (!(await ensureCodexUnlocked())) { setLastError("Authentication required"); return; }
 
+      // The ACCOUNT the entered key controls — never the bare key. See
+      // ROTATE_STOA_PACT_MEMBER's note.
+      const newPaymentAccount = paymentKeyAccountString(newPaymentKey.trim());
       const pactCode =
-        `(${STOACHAIN_NAMESPACE}.${ROTATE_STOA_PACT_MEMBER} "${patron.address}" "${account.address}" "${newPaymentKey.trim()}")`;
+        `(${STOACHAIN_NAMESPACE}.${ROTATE_STOA_PACT_MEMBER} "${patron.address}" "${account.address}" "${newPaymentAccount}")`;
 
       const guards = [];
       if (patron.guard) guards.push(patron.guard);

@@ -198,7 +198,7 @@ export interface MigrationGuardTarget {
  *
  * `newPaymentPublicKey` is BARE 64-hex, exactly as
  * `MigrationPendingPlan.paymentPublicKey` carries it; use
- * {@link paymentKeyAccountString} to get the account-string form
+ * {@link paymentKeyAccountString} to get the `k:` account string
  * `C_RotateStoa` wants. `guard` is `pending.guardPublicKeys` +
  * `pending.guardPred`, already resolved (never user-asserted). Both are
  * nullable because "keep" is a real choice and must plan no step.
@@ -474,24 +474,37 @@ function sameKeys(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * The §5 conversion: `pending.paymentPublicKey` is a bare 64-hex key, and
- * `TS01-C1.DALOS|C_RotateStoa` wants the ACCOUNT-STRING form.
+ * The conversion the migration engine performs exactly once:
+ * `pending.paymentPublicKey` is a bare 64-hex key, and
+ * `TS01-C1.DALOS|C_RotateStoa` — along with every transfer of the same press
+ * — wants the ACCOUNT STRING. It is ALWAYS `k:<bare>`, for every seed type
+ * and every caller, and it is idempotent on a key that already carries the
+ * sigil.
  *
- * Source of truth, mirrored exactly:
- * `codex-ouronet/src/state/store.ts:2680` —
- * `main: seedType === "stoic" ? paymentPublicKey : \`k:${paymentPublicKey}\``.
- * Nothing else in the repo performs this conversion.
+ * The owner's ruling, verbatim: *"in our case we write from a single key a k:
+ * based account. That's what the migration engine will do. The user may change
+ * later however it pleases."* The engine derives ONE key and names the
+ * single-key account that key controls; the `c:`/`u:`/`w:`/custom forms are a
+ * user deliberately nominating a DIFFERENT account, which is
+ * `RotatePaymentKeyModal`'s business and never reaches here.
  *
- * `seedType` is taken as a plain string (structurally `SeedType`,
- * `codex-ouronet/src/types/entities.ts:35`) so core keeps no edge to that
- * package. A key that already arrives prefixed is returned unchanged rather
- * than double-prefixed.
+ * ## There is deliberately no `seedType` parameter
+ *
+ * This function used to take one and return the key BARE for
+ * `seedType === "stoic"`, citing `codex-ouronet/src/state/store.ts`'s
+ * `main: seedType === "stoic" ? paymentPublicKey : \`k:${paymentPublicKey}\``
+ * as its source of truth. That line sets the `main` field of a newly created
+ * SEED — a different concept from the payment-key ACCOUNT argument of
+ * `C_RotateStoa`, and not a rule about account strings at all. The result
+ * shipped to mainnet: a stoic-seeded account rotated to the bare
+ * `225eb6d1…`, which the chain accepted (a 64-hex string is a legal account
+ * name) and which nobody holds the keys to.
+ *
+ * So the parameter is gone rather than ignored. A parameter that must never
+ * affect the result is a standing invitation to branch on it, which is
+ * precisely how that defect was written.
  */
-export function paymentKeyAccountString(
-  paymentPublicKey: string,
-  seedType: string | null | undefined,
-): string {
-  if (seedType === "stoic") return paymentPublicKey;
+export function paymentKeyAccountString(paymentPublicKey: string): string {
   return paymentPublicKey.startsWith("k:") ? paymentPublicKey : `k:${paymentPublicKey}`;
 }
 

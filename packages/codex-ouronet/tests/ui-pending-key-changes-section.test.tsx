@@ -543,12 +543,19 @@ describe("the press", () => {
     expect(await resultText()).toMatch(/nothing left to do/i);
   });
 
-  it("hands the engine the RECORDED plan's intent, the LEDGER address and the paired seed's type", async () => {
-    // Three defects live in this one assembly. The old payment address is
-    // `stoaChainLedger` and NOT `chainPublicKey` (design §7 defect 2 — the
-    // account's identity key says nothing about which payment key is in
-    // force); the chosen payment key is the recorded plan's; and `seedType`
-    // decides `k:<pub>` vs bare `<pub>` for the new address (design §5).
+  it("hands the engine the RECORDED plan's intent, the LEDGER address and NO seed type", async () => {
+    // Two defects live in this one assembly, plus the one that shipped. The
+    // old payment address is `stoaChainLedger` and NOT `chainPublicKey`
+    // (design §7 defect 2 — the account's identity key says nothing about
+    // which payment key is in force), and the chosen payment key is the
+    // recorded plan's.
+    //
+    // The `seedType` member this used to assert is GONE, deliberately: it fed
+    // a conversion that returned the key BARE for a stoic seed, rotating the
+    // owner's mainnet account to an account nobody holds the keys to. The
+    // account string is `k:<bare>` for every seed type, so the request carries
+    // no seed type at all — asserted here, because a re-added member would be
+    // that defect's route back in.
     let seen: MigrationChainRequest | null = null;
     const runChain = vi.fn(async (req: MigrationChainRequest): Promise<MigrationChainOutcome> => {
       seen = req;
@@ -560,7 +567,7 @@ describe("the press", () => {
     await waitFor(() => expect(runChain).toHaveBeenCalledTimes(1));
     expect(seen!.oldPaymentAddress).toBe(OLD_LEDGER);
     expect(seen!.accountAddress).toBe(ACCOUNT);
-    expect(seen!.seedType).toBe("koala");
+    expect(Object.keys(seen!)).not.toContain("seedType");
     expect(seen!.intent.newPaymentPublicKey).toBe(NEW_PUB);
     expect(seen!.intent.guard).toEqual({ keys: [GUARD_PUB], pred: "keys-all" });
   });
@@ -921,12 +928,19 @@ describe("a payment-key rotation the chain CONFIRMED", () => {
     await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(submittedPaymentKey(deps)));
   });
 
-  it("stores the BARE key for a stoic seed, whose address carries no k: sigil", async () => {
-    // Same rule, the other branch of `paymentKeyAccountString`. A `k:`-sigilled
-    // write here would still READ correctly (the normaliser strips the sigil),
-    // which is exactly why this needs its own spec: the damage would be
-    // invisible on this card and visible only when something spent from the
-    // address.
+  it("submits and stores the SAME k: account for a stoic seed — the shipped defect", async () => {
+    // DELIBERATELY REWRITTEN. This spec used to require the BARE key here,
+    // pinning `paymentKeyAccountString`'s `seedType === "stoic"` branch — and
+    // that branch is what put `225eb6d1…` (no sigil) into a real
+    // `C_RotateStoa` on mainnet, naming an account nobody holds the keys to.
+    // The chain accepted it: 64 hex chars are a legal account name.
+    //
+    // The owner's ruling, verbatim: *"in our case we write from a single key a
+    // k: based account. That's what the migration engine will do. The user may
+    // change later however it pleases."*
+    //
+    // So a stoic seed must be indistinguishable from any other HERE, at the
+    // top of the press, which is the only place the conversion happens.
     const stoicSeeds: IStoaChainSeed[] = [{ ...seeds[0]!, seedType: "stoic" }];
     const { deps } = await mountOverFakeChain({
       progress: rotationPending(), seeds: stoicSeeds,
@@ -934,8 +948,8 @@ describe("a payment-key rotation the chain CONFIRMED", () => {
     pressExecute();
 
     await waitFor(() => expect(deps.submitRotatePaymentKey).toHaveBeenCalledTimes(1));
-    expect(submittedPaymentKey(deps)).toBe(NEW_PUB);
-    await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(NEW_PUB));
+    expect(submittedPaymentKey(deps)).toBe(`k:${NEW_PUB}`);
+    await waitFor(() => expect(storedAccount().stoaChainLedger).toBe(`k:${NEW_PUB}`));
     expect(stillOutstanding()).not.toContain("payment");
   });
 

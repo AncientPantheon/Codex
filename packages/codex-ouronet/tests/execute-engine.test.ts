@@ -132,7 +132,6 @@ const REQUEST: MigrationChainRequest = {
   intent: INTENT,
   oldPaymentAddress: OLD,
   accountAddress: ACCOUNT,
-  seedType: "koala",
 };
 
 /** A snapshot that owes NOTHING: the migration already landed. */

@@ -570,10 +570,11 @@ export function createMigrationChainDeps(input: MigrationChainDepsInput): Migrat
     return keypair;
   };
 
-  /** A payment ADDRESS is an encoding of its own public key — `k:<pub>` or, for
-   *  a stoic seed, the bare key (`store.ts:2680`). So the key a step must be
-   *  signed with is derivable from the address the engine hands the submitter,
-   *  which is what keeps the NEW key's re-stake (E) signed by the NEW key. */
+  /** A single-key payment ADDRESS is an encoding of its own public key —
+   *  `k:<pub>`, with a bare key tolerated because older codices recorded one.
+   *  So the key a step must be signed with is derivable from the address the
+   *  engine hands the submitter, which is what keeps the NEW key's re-stake
+   *  (E) signed by the NEW key. */
   const signerOf = (address: string): string | null => bareKeyOf(address);
 
   // Resolved at most ONCE per factory — i.e. per press. Two chain reads, and
@@ -1062,38 +1063,31 @@ const headingStyle: React.CSSProperties = {
 // ─── The planned payment key, and the reconciliation of the registered one ──
 
 /**
- * The payment key the recorded plan intends — the BARE key and the seed type
- * that decides its address form, resolved once, together.
+ * The BARE payment key the recorded plan intends, resolved once.
  *
- * Deliberately does NOT carry the account-string form. There is exactly one
- * implementation of design §5's seed-type rule (`paymentKeyAccountString`,
- * `migrationChain.ts:490`, mirroring `state/store.ts:2680`) and exactly one
- * caller that needs it: the ENGINE, which performs the conversion itself
- * because the transaction is what needs the account string. The stored
- * `stoaChainLedger` is no longer derived from the plan at all — it is
- * reconciled from what the chain reports
- * ({@link reconcileAccountFromChainState}), so there is no second
- * derivation left here to drift from the first.
+ * Deliberately NOT the account-string form: there is exactly one
+ * implementation of that conversion (`paymentKeyAccountString`,
+ * `migrationChain.ts`) and exactly one caller that needs it — the ENGINE,
+ * which performs it itself because the transaction is what needs the account
+ * string. The stored `stoaChainLedger` is not derived from the plan at all; it
+ * is reconciled from what the chain reports
+ * ({@link reconcileAccountFromChainState}), so there is no second derivation
+ * left here to drift from the first.
+ *
+ * It used to resolve the paired SEED's `seedType` alongside the key, because
+ * the conversion branched on it. That branch was the mainnet defect
+ * (`paymentKeyAccountString`'s own doc has the evidence): the account string
+ * is `k:<bare>` for every seed type, so there is nothing here for a seed type
+ * to decide.
  *
  * `pending` before `committed`, the same precedence the engine's own intent
  * assembly uses: `pending` is what the last finalize decided Apply would
  * execute, so it is what is about to be sent.
  */
-export interface PlannedPaymentKey {
-  /** Bare hex, as `MigrationPendingPlan.paymentPublicKey` stores it. */
-  readonly publicKey: string | null;
-  /** The paired seed's type, which is what decides the address form. */
-  readonly seedType: string | null;
-}
-
-export function plannedPaymentKey(
+export function plannedPaymentPublicKey(
   run: MigrationProgress | null | undefined,
-  seeds: readonly IStoaChainSeed[],
-): PlannedPaymentKey {
-  const publicKey = run?.pending?.paymentPublicKey ?? run?.committed?.paymentPublicKey ?? null;
-  const seedId = run?.pending?.seedId ?? run?.committed?.seedId;
-  const seedType = seeds.find((seed) => seed.id === seedId)?.seedType ?? null;
-  return { publicKey, seedType };
+): string | null {
+  return run?.pending?.paymentPublicKey ?? run?.committed?.paymentPublicKey ?? null;
 }
 
 /** The non-throwing store handle, structurally — so this writer is callable
@@ -1149,9 +1143,9 @@ function sameKeySet(a: readonly string[], b: readonly string[]): boolean {
  * unactivated account, a guard shape this code does not model — never
  * "cleared". Nothing here erases a stored value on the strength of an absent
  * one, and nothing here invents a value: the ledger is stored in the chain's
- * OWN account-string form (`k:<pub>`, or bare for a stoic seed — the
- * `state.ts:2680` rule `paymentKeyAccountString` owns), never re-derived from
- * the plan, so this surface cannot disagree with what funds are actually
+ * OWN account-string form (`k:<pub>` for anything this engine rotates to, and
+ * whatever a hand-made rotation named otherwise), never re-derived from the
+ * plan, so this surface cannot disagree with what funds are actually
  * registered to.
  *
  * Reads the account FRESH from the store rather than from a render's closure,
@@ -1471,11 +1465,11 @@ function MigrationExecutor({
       const pending = recordedRun.pending;
       const guardKeys = pending?.guardPublicKeys ?? [];
       // The ONE resolution of the planned payment key — see
-      // {@link plannedPaymentKey}. The engine gets the BARE key and the seed
-      // type, and performs the address conversion itself.
-      const planned = plannedPaymentKey(recordedRun, seeds);
+      // {@link plannedPaymentPublicKey}. The engine gets the BARE key and
+      // derives the `k:` account string itself.
+      const plannedPublicKey = plannedPaymentPublicKey(recordedRun);
       const intent: MigrationChainIntent = {
-        newPaymentPublicKey: planned.publicKey,
+        newPaymentPublicKey: plannedPublicKey,
         guard:
           guardKeys.length > 0
             ? { keys: [...guardKeys], pred: pending?.guardPred ?? "keys-all" }
@@ -1525,10 +1519,6 @@ function MigrationExecutor({
           intent,
           oldPaymentAddress: masterAccount.stoaChainLedger ?? "",
           accountAddress: masterAccount.address,
-          // The seed the plan was derived from decides `k:<pub>` vs bare
-          // `<pub>` for the new payment key's address (design §5). The engine
-          // performs that conversion; this only pairs the plan with its seed.
-          seedType: planned.seedType,
         },
         { ...deps, readChainState: observe },
       );
@@ -1566,8 +1556,11 @@ function MigrationExecutor({
       running.current = false;
       setBusy(false);
     }
+    // `seeds` is NOT a dependency any more: the press used to look the paired
+    // seed's `seedType` up out of it, for a conversion that must not depend on
+    // one. `codexPubs` (derived from the same `seeds`) covers what is left.
   }, [
-    recordedRun, masterAccount, seeds, recordStep, reconcileChainState, createDeps, runChain,
+    recordedRun, masterAccount, recordStep, reconcileChainState, createDeps, runChain,
     ensureCodexUnlocked, getKeypair, guardSelectionKind, codexPubs, keysetUpdate,
   ]);
 

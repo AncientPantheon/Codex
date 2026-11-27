@@ -2,6 +2,61 @@
 
 All notable changes to `@ancientpantheon/codex`.
 
+## 1.8.1 — 2026-11-27
+
+**PATCH — critical. The migration engine sent `C_RotateStoa` a BARE public key
+where an account string was required, and the chain accepted it.** Anyone who
+ran the 1.8.0 migration with a `stoic` seed now has an Ouronet account naming
+a payment-key account nobody holds the keys for. Upgrade before running the
+chain again.
+
+### What went wrong
+
+```
+(ouronet-ns.TS01-C1.DALOS|C_RotateStoa "Ѻ.<patron>" "Ѻ.<account>"
+  "225eb6d1b11f637b7f6014d9dd4ad5630d157540ef0fc47ce198bc6407ba8d28")
+                                     ^ should have been k:225eb6d1…
+```
+
+`225eb6d1…` and `k:225eb6d1…` are different accounts. Nothing rejected it: a
+bare 64-hex string is a syntactically legal account name.
+
+`paymentKeyAccountString` branched on `seedType`, citing
+`codex-ouronet/src/state/store.ts:2680` as "the source of truth, mirrored
+exactly". **That line sets the `main` field of a newly created SEED** — not the
+payment-key account argument of `C_RotateStoa`. A rule about one thing was
+copied onto another and documented as researched, which stopped anyone
+re-checking it.
+
+The engine always writes a `k:` account from a single derived key. The
+`seedType` parameter is **removed**, not ignored: a parameter that cannot
+legitimately change the result is exactly how this was written.
+
+### A second instance, also live
+
+`@ancientpantheon/codex/ouronet`'s exported `components/RotatePaymentKeyModal`
+validated its input as 64-hex and spliced it straight into `C_RotateStoa` —
+**not** seed-type conditional, so EVERY rotation through that public component
+put a bare account on chain. Its own spec pinned that as correct. Now converted
+through the one shared function.
+
+### Why only this step
+
+The same address feeds the drain, the urSTOA move and the re-stake. Those were
+saved by accident — each of those builders already refuses a non-`k:` or
+non-existent receiver. `C_RotateStoa` was the only emitter with no
+account-shape check, so one is added at the single place the argument is
+interpolated: it rejects a bare 64-hex key and a blank, and deliberately lets
+`c:`/`u:`/`w:`/named accounts through, because a user nominating an account
+they hold is not the engine's business.
+
+### Recovery
+
+This release cannot un-rotate an account. If you ran 1.8.0's chain with a
+`stoic` seed, check your account's payment key: if it is bare hex, rotate it to
+the `k:`-prefixed form of the same key using the manual Rotate Payment Key
+modal, which accepts the account form directly.
+
 ## 1.8.0 — 2026-11-27
 
 **MINOR — the migration transaction engine. One press sends every on-chain

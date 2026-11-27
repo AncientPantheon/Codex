@@ -171,10 +171,26 @@ Before the first transaction:
   the `coin.*` steps. **Nothing in the repo currently sums gas across N
   transactions** — this is new.
 - the payment key is converted to the account-string form `C_RotateStoa`
-  expects. `pending.paymentPublicKey` is a bare 64-hex key; the rule is
-  seed-type dependent and already encoded at `store.ts:2680`
-  (`seedType === "stoic" ? paymentPublicKey : \`k:${paymentPublicKey}\``).
-  Nothing currently converts it.
+  expects. `pending.paymentPublicKey` is a bare 64-hex key.
+
+  **CORRECTED 2026-11-27 — the rule stated here was WRONG and it shipped a
+  bad value to mainnet.** This originally said the conversion was "seed-type
+  dependent and already encoded at `store.ts:2680`". That line sets the
+  `main` field of a newly created SEED — a different concept from the
+  payment-key account argument of `C_RotateStoa`. Implemented as written, a
+  `stoic` seed took the bare branch and `C_RotateStoa` was sent
+  `225eb6d1…` where `k:225eb6d1…` was meant. Those are different accounts;
+  the chain accepted it because a bare 64-hex string is a legal account
+  name, so the owner's account now names a payment-key account nobody holds.
+
+  The actual rule, from the owner: *"in our case we write from a single key
+  a k: based account. That's what the migration engine will do. The user may
+  change later however it pleases."* So the engine ALWAYS emits `k:<bare>`,
+  unconditionally; `seedType` has no part in it. `paymentKeyAccountString`
+  takes one argument for that reason — a parameter that must never change
+  the result is how this bug was written in the first place. The
+  `c:`/`u:`/`w:`/custom forms belong to a user deliberately nominating an
+  account in the manual modal, never to the engine.
 
 ## 6. Out of scope, and why
 

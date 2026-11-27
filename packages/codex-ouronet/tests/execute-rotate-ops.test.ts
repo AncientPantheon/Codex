@@ -26,6 +26,7 @@ import { resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import type { IKadenaKeypair as IStoaChainKeypair } from "@stoachain/stoa-core/signing";
 
+import { rotateStoaPactCode } from "../src/zbom/rotatePaymentKeyLive.js";
 import {
   collectGuardSigners,
   executeRotatePaymentKey,
@@ -251,11 +252,19 @@ describe("executeRotatePaymentKey — F, headless", () => {
     expect(ops).toMatch(/from\s+"\.\.\/rotatePaymentKeyLive\.js"/);
     expect(ops).not.toMatch(/rotateKadenaPaymentKey|ouroRotateFunctions/);
 
+    // The delegate's own emitted expression, as a VALUE rather than scraped
+    // text: `rotateStoaPactCode` is that module's only `.execution(...)`
+    // argument and is pure, so calling it costs no network (the broadcasting
+    // function around it is never invoked here).
+    const emitted = rotateStoaPactCode(PATRON_ADDR, ACCOUNT_ADDR, `k:${NEW_PAY_KEY}`);
+    expect(emitted).toContain("TS01-C1.DALOS|C_RotateStoa");
+    expect(emitted).not.toContain("C_RotateKadena");
+
     const live = readFileSync(resolve(__dirname, "../src/zbom/rotatePaymentKeyLive.ts"), "utf8");
-    const emitted = [...live.matchAll(/\.execution\(\s*`([^`]*)`/g)].map((m) => m[1]);
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]).toContain("TS01-C1.DALOS|C_RotateStoa");
-    expect(emitted[0]).not.toContain("C_RotateKadena");
+    const executions = [...live.matchAll(/\.execution\(([^)]*)\)/g)].map((m) => m[1]!.trim());
+    expect(executions).toEqual([
+      "rotateStoaPactCode(patronAddress, accountAddress, newPaymentKey",
+    ]);
   });
 });
 

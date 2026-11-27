@@ -27,9 +27,10 @@
  *       step landed must not re-emit that step. Asserted as a property, since
  *       this is the one that prevents moving money twice.
  *   (account-string conversion) `pending.paymentPublicKey` is bare 64-hex and
- *       `C_RotateStoa` wants the account-string form. Nothing in the repo
- *       converted it before; the seed-type rule lives at
- *       `codex-ouronet/src/state/store.ts:2680` and this is its only mirror.
+ *       `C_RotateStoa` wants the ACCOUNT STRING, which is always `k:<bare>`.
+ *       That block was rewritten after the seed-type branch it used to pin
+ *       shipped a BARE account to mainnet; its own comment carries the
+ *       evidence and the owner's ruling.
  *   (preconditions) §5 is checked ONCE, and criterion 7 demands ONE refusal
  *       naming EVERYTHING missing — a verdict that stops at the first failure
  *       makes the user press, read, fix, press again.
@@ -926,21 +927,36 @@ describe("planMigrationChain — the whole chain, in design §2's order as round
   });
 });
 
-describe("paymentKeyAccountString / bareKeyOf — the §5 conversion nothing else performs", () => {
-  it('leaves a "stoic" seed\'s key BARE, mirroring store.ts:2680', () => {
-    expect(paymentKeyAccountString(NEW_KEY, "stoic")).toBe(NEW_KEY);
-  });
+describe("paymentKeyAccountString / bareKeyOf — the conversion nothing else performs", () => {
+  // DELIBERATELY REWRITTEN, not a casualty. The two specs this block used to
+  // open with pinned the SHIPPED DEFECT: they required a bare key back for
+  // `seedType === "stoic"`, citing `store.ts:2680` — which sets a newly
+  // created SEED's own `main` field, a different concept from the payment-key
+  // ACCOUNT argument of `C_RotateStoa`. That branch rotated the owner's
+  // mainnet account to the bare `225eb6d1…`, an account nobody holds the keys
+  // to, and the chain accepted it because 64 hex chars are a legal account
+  // name.
+  //
+  // The owner's ruling, verbatim: *"in our case we write from a single key a
+  // k: based account. That's what the migration engine will do. The user may
+  // change later however it pleases."*
 
-  it('prefixes "k:" for every non-stoic seed type', () => {
-    expect(paymentKeyAccountString(NEW_KEY, "koala")).toBe(`k:${NEW_KEY}`);
-    expect(paymentKeyAccountString(NEW_KEY, "chainweaver")).toBe(`k:${NEW_KEY}`);
-    expect(paymentKeyAccountString(NEW_KEY, "eckowallet")).toBe(`k:${NEW_KEY}`);
-    expect(paymentKeyAccountString(NEW_KEY, undefined)).toBe(`k:${NEW_KEY}`);
-    expect(paymentKeyAccountString(NEW_KEY, null)).toBe(`k:${NEW_KEY}`);
+  it("is k:<bare> for the engine's one and only input shape, a bare 64-hex key", () => {
+    expect(paymentKeyAccountString(NEW_KEY)).toBe(`k:${NEW_KEY}`);
   });
 
   it("never double-prefixes a key that already arrives in account-string form", () => {
-    expect(paymentKeyAccountString(`k:${NEW_KEY}`, "koala")).toBe(`k:${NEW_KEY}`);
+    // The recorded plan stores bare hex by contract, but it has carried
+    // address forms before now. `k:k:…` is a third wrong account.
+    expect(paymentKeyAccountString(`k:${NEW_KEY}`)).toBe(`k:${NEW_KEY}`);
+  });
+
+  it("takes exactly ONE parameter — a seed type cannot be passed back in", () => {
+    // Not a restatement of the body: the arity IS the fix. A second parameter
+    // that must never affect the result is what the defect was written out of,
+    // so its return is a regression this suite has to see. (Arity also pins
+    // the call sites: a stale `f(key, seedType)` stops type-checking.)
+    expect(paymentKeyAccountString.length).toBe(1);
   });
 
   it("strips a leading k: and leaves a bare key untouched", () => {
@@ -950,9 +966,8 @@ describe("paymentKeyAccountString / bareKeyOf — the §5 conversion nothing els
     expect(bareKeyOf("")).toBe(null);
   });
 
-  it("round-trips both forms", () => {
-    expect(bareKeyOf(paymentKeyAccountString(NEW_KEY, "stoic"))).toBe(NEW_KEY);
-    expect(bareKeyOf(paymentKeyAccountString(NEW_KEY, "koala"))).toBe(NEW_KEY);
+  it("round-trips: bareKeyOf undoes the conversion exactly", () => {
+    expect(bareKeyOf(paymentKeyAccountString(NEW_KEY))).toBe(NEW_KEY);
   });
 });
 

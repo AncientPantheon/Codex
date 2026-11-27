@@ -186,9 +186,11 @@ import type { RotateSubmitResult } from "./rotateOps.js";
  *
  * `intent` is codex-core's own type, built from `MigrationPendingPlan`
  * (`paymentPublicKey` + `guardPublicKeys` + `guardPred` + the recorded
- * selection kind). The NEW payment key's ADDRESS is derived here rather than
- * passed, through `paymentKeyAccountString` — design §5's seed-type-dependent
- * conversion, encoded once at `store.ts:2680` and performed by nothing else.
+ * selection kind). The NEW payment key's ACCOUNT STRING is derived here rather
+ * than passed, through `paymentKeyAccountString` — always `k:<bare>`, for
+ * every seed type (see that function's own doc for the mainnet defect the
+ * seed-type branch caused). There is deliberately NO seed-type member on this
+ * request: nothing the engine does depends on one.
  */
 export interface MigrationChainRequest {
   readonly intent: MigrationChainIntent;
@@ -197,9 +199,6 @@ export interface MigrationChainRequest {
   /** The Ouronet account whose registered payment key and guard F and G
    *  change. */
   readonly accountAddress: string;
-  /** `SeedType` (`types/entities.ts:35`), structurally — it decides `k:<pub>`
-   *  vs bare `<pub>` for the new payment key. */
-  readonly seedType?: string | null;
   /** Overrides the toast's title. */
   readonly toastTitle?: string;
 }
@@ -681,12 +680,12 @@ export async function runMigrationChain(
     return { status: "locked", message: LOCKED_MESSAGE };
   }
 
-  // The NEW payment key's address IS its account string — design §5's
-  // seed-type rule, applied once (`store.ts:2680`).
+  // The NEW payment key's ACCOUNT STRING — `k:<bare>`, derived once here and
+  // used for F's third argument AND for every transfer's destination.
   const newPaymentAddress =
     req.intent.newPaymentPublicKey === null
       ? null
-      : paymentKeyAccountString(req.intent.newPaymentPublicKey, req.seedType);
+      : paymentKeyAccountString(req.intent.newPaymentPublicKey);
 
   const query: ChainStateQuery = {
     oldPaymentAddress: req.oldPaymentAddress,

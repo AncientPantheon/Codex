@@ -53,6 +53,10 @@ import { RotatePaymentKeyModal } from "../src/components/RotatePaymentKeyModal";
 const PATRON_GUARD_KEY = "a".repeat(64);
 const ACCOUNT_GUARD_KEY = "b".repeat(64);
 const NEW_PAYMENT_KEY = "c".repeat(64);
+/** What the account the user's 64-hex key controls is actually CALLED. The
+ *  third argument of `C_RotateStoa` is an ACCOUNT, never a key — see the
+ *  account-string specs below. */
+const NEW_PAYMENT_ACCOUNT = `k:${NEW_PAYMENT_KEY}`;
 
 function acct(over: Partial<IOuroAccount> & { address: string }): IOuroAccount {
   return {
@@ -137,8 +141,28 @@ describe("<RotatePaymentKeyModal> (components) — Pact code", () => {
     // `src/constants/pactSignatures.generated.ts:474`'s
     // `"TS01-C1.DALOS|C_RotateStoa": ["patron", "executor", "stoa"]`.
     expect(code).toBe(
-      `(ouronet-ns.TS01-C1.DALOS|C_RotateStoa "${PATRON.address}" "${ACCOUNT.address}" "${NEW_PAYMENT_KEY}")`
+      `(ouronet-ns.TS01-C1.DALOS|C_RotateStoa "${PATRON.address}" "${ACCOUNT.address}" "${NEW_PAYMENT_ACCOUNT}")`
     );
+  });
+
+  it("emits the k: ACCOUNT of the entered key, never the bare key itself", async () => {
+    // THE SAME DEFECT THAT REACHED MAINNET through the migration engine, in a
+    // second, independent place — and unconditional here: this component's
+    // input is validated as bare 64-hex (`HEX_64_RX`) and used to be spliced
+    // into the transaction exactly as typed. `<hex>` and `k:<hex>` are
+    // DIFFERENT accounts on chain, and the chain accepts both (64 hex chars
+    // are a legal account name), so the rotation lands successfully on an
+    // account nobody holds the keys to.
+    //
+    // The owner's ruling, verbatim: *"in our case we write from a single key a
+    // k: based account."*
+    const tx = await submitAndCaptureTx({ account: ACCOUNT, patron: PATRON });
+    const { code } = extractPactCode(tx);
+
+    const args = [...code.matchAll(/"([^"]*)"/g)].map((m) => m[1]!);
+    expect(args[2]).toBe(NEW_PAYMENT_ACCOUNT);
+    // ...and the bare form appears nowhere in the command at all.
+    expect(tx.cmd).not.toContain(`"${NEW_PAYMENT_KEY}"`);
   });
 
   it("never emits the renamed-away C_RotateKadena member anywhere in the command", async () => {
@@ -179,7 +203,7 @@ describe("<RotatePaymentKeyModal> (components) — Pact code", () => {
     const { code, data } = extractPactCode(tx);
 
     expect(code).toBe(
-      `(ouronet-ns.TS01-C1.DALOS|C_RotateStoa "${PATRON.address}" "${PATRON.address}" "${NEW_PAYMENT_KEY}")`
+      `(ouronet-ns.TS01-C1.DALOS|C_RotateStoa "${PATRON.address}" "${PATRON.address}" "${NEW_PAYMENT_ACCOUNT}")`
     );
     expect(data.ks).toEqual({ keys: [PATRON_GUARD_KEY], pred: "keys-all" });
     expect(data["ks-account"]).toBeUndefined();

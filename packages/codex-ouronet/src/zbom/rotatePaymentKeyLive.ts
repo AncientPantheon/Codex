@@ -29,6 +29,12 @@
  * fixed. Delete this file (and re-point `RotatePaymentKeyModal` back to
  * `@ouronet/ouronet-core/interactions/ouroRotateFunctions`) the day that
  * package ships a `C_RotateStoa`-compatible release.
+ *
+ * TWO DELIBERATE DIVERGENCES from that mirror, both from the 2026-11-27
+ * account-string defect (see {@link assertRotatableAccount}): the Pact code is
+ * built by the pure, testable {@link rotateStoaPactCode} instead of inline,
+ * and that builder REFUSES a bare 64-hex account before anything is
+ * simulated. Neither changes the transaction for any legitimate argument.
  */
 
 import { calculateAutoGasLimit, stoaGasMeta } from "@stoachain/stoa-core/gas";
@@ -45,6 +51,69 @@ import type { IKadenaKeypair as RotateKeypair } from "@stoachain/stoa-core/signi
 interface RotateGuardLike {
   keys?: string[];
   pred?: string;
+}
+
+/** A 64-hex string with NO sigil. On Stoa Chain this is a syntactically legal
+ *  account NAME, which is exactly what makes it dangerous: the chain accepts
+ *  it, and it is a DIFFERENT account from the `k:`-sigilled one the same key
+ *  controls. */
+const BARE_PUBLIC_KEY = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * Refuse the two account strings no caller can legitimately mean, BEFORE a
+ * transaction is built — so nothing is simulated, signed or submitted.
+ *
+ * This exists because of a confirmed mainnet defect: `C_RotateStoa` was sent
+ * `"225eb6d1…"` instead of `"k:225eb6d1…"`, repointing an Ouronet account's
+ * payment key at an account nobody holds the keys to. Nothing refused it —
+ * the chain cannot, since 64 hex chars are a legal name — so the client must.
+ *
+ * DELIBERATELY NOT A WHITELIST. `RotatePaymentKeyModal` takes a free string
+ * precisely so a user can nominate an account they already hold: `c:`/`u:`/
+ * `w:` principals, a named vault, anything the chain itself accepts. The
+ * owner's ruling binds the ENGINE ("in our case we write from a single key a
+ * k: based account. That's what the migration engine will do. The user may
+ * change later however it pleases"), not the user's own choice. So only two
+ * shapes are rejected: a bare public key, and a blank name.
+ */
+function assertRotatableAccount(newPaymentKey: string): void {
+  if (newPaymentKey.trim().length === 0) {
+    throw new Error(
+      "Rotate Payment Key refused before submitting: the new payment key account is "
+      + "blank. Nothing was sent.",
+    );
+  }
+  if (BARE_PUBLIC_KEY.test(newPaymentKey)) {
+    throw new Error(
+      `Rotate Payment Key refused before submitting: "${newPaymentKey}" is a bare `
+      + "public key, not an account. The account that key controls is "
+      + `"k:${newPaymentKey}" — the bare form names a DIFFERENT account on chain, one `
+      + "nobody holds the keys to, and the chain would accept it. Pass the k: form, or "
+      + "any other account you actually control. Nothing was sent.",
+    );
+  }
+}
+
+/**
+ * The ONE Pact expression this module emits, as a pure string.
+ *
+ *   `(ouronet-ns.TS01-C1.DALOS|C_RotateStoa <patron> <account> <new-payment-key>)`
+ *
+ * Extracted out of {@link rotateStoaChainPaymentKeyLive}'s builder so the
+ * transaction's exact text can be asserted by a test without reaching
+ * `getFailoverClient` — the module-scope import that makes every call to the
+ * function below a REAL mainnet broadcast. It is the only place the third
+ * argument is interpolated, which is why the guard below lives here: both
+ * callers (the migration engine, via `execute/rotateOps.ts`'s live submitter,
+ * and `modals/RotatePaymentKeyModal.tsx`) go through it.
+ */
+export function rotateStoaPactCode(
+  patronAddress: string,
+  accountAddress: string,
+  newPaymentKey: string,
+): string {
+  assertRotatableAccount(newPaymentKey);
+  return `(${STOACHAIN_NAMESPACE}.TS01-C1.DALOS|C_RotateStoa "${patronAddress}" "${accountAddress}" "${newPaymentKey}")`;
 }
 
 /**
@@ -80,7 +149,7 @@ export async function rotateStoaChainPaymentKeyLive(
 
   const buildTransaction = (gasLimitOverride?: number) => {
     let builder: any = Pact.builder
-      .execution(`(${STOACHAIN_NAMESPACE}.TS01-C1.DALOS|C_RotateStoa "${patronAddress}" "${accountAddress}" "${newPaymentKey}")`);
+      .execution(rotateStoaPactCode(patronAddress, accountAddress, newPaymentKey));
 
     if (patronGuard) {
       builder = builder.addData("ks", { keys: patronGuard.keys, pred: patronGuard.pred });
