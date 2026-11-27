@@ -1726,8 +1726,15 @@ export function PendingKeyChangesSection(
    * surface to `accounts[0]` for the entire window in which it is the only
    * surface that matters, i.e. would not fix the defect at all.
    */
-  const masterAccount = resolveMasterOuronetAccount(accounts, codexMasterSeed?.ouroAccountId)
-    ?? null;
+  // The type argument is EXPLICIT on purpose. `resolveMasterOuronetAccount`
+  // is generic over `<T extends MasterOuronetAccountCandidate>`, and under
+  // the BUILD tsconfig (which resets `paths`, so codex-core resolves to its
+  // emitted .d.ts rather than src) inference falls back to the CONSTRAINT —
+  // yielding a `MasterOuronetAccountCandidate`, which lacks every field
+  // `computeOutstandingKeyChanges` and `MigrationExecutor` need. It compiled
+  // under `npm run typecheck` and broke `npm run build`, i.e. CI only.
+  const masterAccount =
+    resolveMasterOuronetAccount<IOuroAccount>(accounts, codexMasterSeed?.ouroAccountId) ?? null;
   const outstanding = computeOutstandingKeyChanges(recordedRun, masterAccount);
   // The CARD's rule is unchanged: a user with nothing pending in KEY terms is
   // shown no card. The EXECUTOR's is `hasMigrationPending` — see the header.
